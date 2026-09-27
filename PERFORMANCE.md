@@ -1385,3 +1385,38 @@ for every outcome, hashes, peak RSS, load observations and verification, and the
 [code-graph audit](docs/implementation/code-graph-intelligence-audit-2026-09-26.md)
 for scope and native checks. The normal release qualification policy above still
 applies.
+
+## SQL access-regex cache: matching release comparison
+
+The SQL extractor now compiles its fixed access regexes—one read pattern and five
+write patterns—once per process. The patterns, iteration order, captures and alias/CTE handling
+are unchanged. A new native regression checks that every pattern is retained in
+order and repeated calls reuse the same compiled storage. Public commands,
+graph schemas and version 0.3.30 are unchanged.
+
+The registered diagnosis uses the same four complete CloudStack SQL inputs,
+three repetitions per binary, alternating order and fresh outputs. Both binaries
+use matching release settings: one codegen unit, thin LTO, abort-on-panic and
+stripped symbols. An unchanged release rebuild confirmed the frozen baseline
+hash before the cache edit. Build manifests, lockfile, toolchain and repository
+configuration are unchanged. Ordinary OS caches and unrelated host work remain
+limitations; timestamps, load averages and peak RSS are retained.
+
+| SQL bytes | Baseline median | Cached-regex median | Candidate / baseline | Full graph equality |
+| ---: | ---: | ---: | ---: | --- |
+| 938 | 0.596 s | 0.570 s | 0.956 | All six graphs |
+| 1,949 | 0.580 s | 0.594 s | 1.024 | All six graphs |
+| 10,288 | 0.657 s | 0.666 s | 1.014 | All six graphs |
+| 411,080 | 13.121 s | 1.650 s | 0.126 | All six graphs |
+
+All 24 observations succeeded, and the complete graph JSON is equal across all
+six runs of each input, with no excluded fields and preserved array order.
+These are four development files selected during an earlier diagnosis. The
+observed medians do not establish a confidence interval, whole-product release
+qualification, a Graphify speed ranking or independent confirmation. Earlier
+unoptimized observations, small-file regressions and whole-repository timeouts
+remain unchanged.
+
+See [`sql_regex_cache_review.json`](benchmarks/agent_query/sql_regex_cache_review.json)
+for every observation and matching-build provenance. Normal release performance
+qualification remains required; this four-file diagnosis cannot replace it.

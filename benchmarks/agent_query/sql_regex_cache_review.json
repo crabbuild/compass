@@ -1,0 +1,1381 @@
+{
+  "schema": "compass.sql-regex-cache-review/1",
+  "status": "matching release binaries on four development inputs; not whole-product or Graphify qualification",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "productionChange": "Compile fixed SQL read/write access patterns once per process using OnceLock. Preserve pattern and capture order, alias/CTE binding and emitted records.",
+  "productionChangeCommit": "9df5dcf32f9581c1d9eeb299eb2123d807afe60c",
+  "baselineProductionCommit": "1a1f6a6977d42a694df545a08aaa997b5fe05f7a",
+  "registrationSha256": "134ec94d9acf79f2e0b4fe672a4aa6377e180ebcbe969751dd9cefb956ce511d",
+  "baselineRebuildConfirmed": true,
+  "sourceSqlSha256": "c1e9e5ad9452999c4a282a6f92ce15120f9862ad5e17e1e50d26f3d46676552a",
+  "buildSettings": {
+    "profile": "release",
+    "inputs": {
+      "schema": "compass.sql-regex-cache-build-inputs/1",
+      "baselineProductionCommit": "1a1f6a6977d42a694df545a08aaa997b5fe05f7a",
+      "candidateProductionCommit": "9df5dcf32f9581c1d9eeb299eb2123d807afe60c",
+      "configuration": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "fe4c17809055a12229a5bb55ac9c950d0ebe1d465958673390b73e408d71ee20",
+          "unchangedFromBaselineProductionCommit": true
+        },
+        {
+          "path": "Cargo.lock",
+          "sha256": "cc35464cdeafe61a095ef46886eb3bc3943b1abbd9aa25118f07b4140c24978b",
+          "unchangedFromBaselineProductionCommit": true
+        },
+        {
+          "path": ".cargo/config.toml",
+          "sha256": "231d2ddd6ae93691f5a7e599622b89a86365668b37cfcbee3e94c971508ff034",
+          "unchangedFromBaselineProductionCommit": true
+        },
+        {
+          "path": "rust-toolchain.toml",
+          "sha256": "3617e46e3a6e60e653a4ee823df314534ab7d54c83c1b0fd866e008e3fee1bba",
+          "unchangedFromBaselineProductionCommit": true
+        },
+        {
+          "path": "crates/compass-cli/Cargo.toml",
+          "sha256": "858c61af21eb7a702e662410a07956d52ef919d6e00eb520a5076bb744a88925",
+          "unchangedFromBaselineProductionCommit": true
+        },
+        {
+          "path": "crates/compass-languages/Cargo.toml",
+          "sha256": "66c0d60cccfa1baa95b9d83c3802a5eec8bf5ff668ffa4dd1a358eea54d2f533",
+          "unchangedFromBaselineProductionCommit": true
+        }
+      ],
+      "releaseProfile": {
+        "codegenUnits": 1,
+        "lto": "thin",
+        "panic": "abort",
+        "strip": "symbols",
+        "optLevel": "Cargo release default (3)"
+      },
+      "productionDifference": " crates/compass-languages/src/sql.rs | 58 +++++++++++++++++++++++++++++++------\n 1 file changed, 49 insertions(+), 9 deletions(-)\n"
+    },
+    "command": [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "-p",
+      "compass-cli",
+      "--bin",
+      "compass"
+    ],
+    "offlineParsers": true,
+    "sameTargetAndParserBundle": true,
+    "temporaryDirectory": "separate external scratch directories",
+    "inherited": {
+      "RUSTFLAGS": null,
+      "CARGO_ENCODED_RUSTFLAGS": null,
+      "RUSTC_WRAPPER": null,
+      "CARGO_PROFILE_RELEASE_DEBUG": null,
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": null,
+      "CARGO_PROFILE_RELEASE_LTO": null,
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": null,
+      "CARGO_INCREMENTAL": null,
+      "CARGO_BUILD_JOBS": null
+    }
+  },
+  "binaries": {
+    "baseline": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+    "candidate": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4"
+  },
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M2 Max",
+    "memoryBytes": 34359738368,
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+  },
+  "procedure": "Same complete input root for baseline and candidate per file, fresh outputs, three repetitions per binary, alternating old/new order by repetition. Same --code-only --no-viz --store sqlite. Record timestamps, host load, wall time and peak RSS. No overlap with this task\u2019s compilation or other extraction. Ordinary OS caches; no warmups or OS-cache flushing. Compare complete graph JSON with no exclusions, preserve array order and all failures. No ratio if either side lacks all observations or complete equality. Background host work remains a limitation.",
+  "commandTemplate": [
+    "/usr/bin/time",
+    "-l",
+    "<frozen-binary>",
+    "extract",
+    "<same-per-file-input-root>",
+    "--code-only",
+    "--no-viz",
+    "--store",
+    "sqlite",
+    "--out",
+    "<fresh-output>"
+  ],
+  "limits": {
+    "sampleTimeoutSeconds": 180,
+    "streamLimitBytes": 16777216,
+    "graphLimitBytes": 268435456
+  },
+  "externalRun": "sql-regex-cache-01",
+  "artifacts": {
+    "run_samples.py": "5f68faf7f19ebf4f56ba02d955e7694e5a3cd5623f9759cf1c61c8a218bcd979",
+    "samples.json": "ab5a24ef33d193387201637b52dc53b5af9ecf1362e239b58ea5b2993552c497",
+    "verify_samples.py": "05676ecf4923a8f8c57fc2c2cd43093a495f33e9483bfd93a3e74bd4657b1556",
+    "verified-samples.json": "a98fd5b70b36535118eb9336879a8a101e2a0442b63453abadfd0362ce03bb5e",
+    "verified-samples-repeat.json": "a98fd5b70b36535118eb9336879a8a101e2a0442b63453abadfd0362ce03bb5e",
+    "checks.json": "4bd8c9f93427bc1b56e393a189f3a75a0461f68cccec6961a45a2f9ff07e8467",
+    "checks.py": "0841dc2eb6c2281e0b243a4076e0e4aed2d16116767435a84aed71dd19d1054c",
+    "baseline.json": "a8de799dfe812dd4efcc3c6d879129ca60d46e82f8547513cde030d8263ff754",
+    "build-inputs.json": "9785248298ec2141816dfbb64d976d8b798be60459c1675afd966511610e9eee",
+    "baseline-confirmation.json": "9e44097b506b527e4175c9ee3d3c3da418d9508be4d6c210dee9c435cfbe337b",
+    "confirm_baseline.py": "09d32ecd7229ca4353e8d151e9737dc6097a75847e57bd268fafa4fd875d7267",
+    "write_report.py": "7b00f6076b8dad59f31136285012c852a72a1c50a1714c47df03270071f526b8"
+  },
+  "checks": [
+    {
+      "name": "fmt",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 4045,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "sql-unit",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 1405,
+      "stdoutSha256": "20e93f1baf3c0bdef1e55174855b22f9334962bfbbb2ca0ee9d0cd4d91b205ae",
+      "stderrSha256": "4764d3a6eeb15a3d1411d3ed0cbabc10a7a7d5fdd335a7a0b317d1ce2b64f2b9"
+    },
+    {
+      "name": "sql-domain",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 27320,
+      "stdoutSha256": "b374df61f028548340242a265663e634c5d5b16a4930f5b2bfa4f12eaec7afb0",
+      "stderrSha256": "59803888f28c6f5a445a79fc0870e2edbc80a179a9709f7aefc51e2da9a40d44"
+    },
+    {
+      "name": "workspace-clippy",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 74105,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "897b47983c24e273dbecd6f8c55f9ca287e960b70ffccd092f76ed90eefd960b"
+    },
+    {
+      "name": "workspace-tests",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 355102,
+      "stdoutSha256": "673a32b910bb8845c33aa993bbd3a9268eed488f79b6d4e9c703cbece8390bd6",
+      "stderrSha256": "9116869c83a1b6ba71e11a9d8a975b15d48727fd9b35f7a0d230702101381fb4"
+    },
+    {
+      "name": "product",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 135915,
+      "stdoutSha256": "1504422c1441f5e07d65f27331af88b81145dc464923d275c03a85238fce0a69",
+      "stderrSha256": "4c54489f7a4c17643296f53b27d6faf8bd6c0052177f12b70b448531ea82152e"
+    },
+    {
+      "name": "fixtures",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 997331,
+      "stdoutSha256": "227cf79dc922bf5999b8bb4400ffcb99e9733680adb7948b4535c530d83b10d2",
+      "stderrSha256": "6aca92f39ce04da98a9b0d91716e4dbbab53c8a090b1200264de83cdc03f0622"
+    },
+    {
+      "name": "benchmark-tests",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 2214,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "31103128fc62d55080305821ed85b01ac7b59f768d01607ac8b1ffeedac98119"
+    },
+    {
+      "name": "boundary",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 47,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "release-build",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 1087,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e4e969ef7c71972e6fb83df6c98e562aeb279d89756ffefb5fc32e55d26b9bb7"
+    }
+  ],
+  "results": [
+    {
+      "bytes": 938,
+      "candidateToBaselineMedianRatio": 0.9563758389261745,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-224to225-cleanup.sql",
+      "sampleIndex": 0,
+      "sourceSha256": "e3956e631ed1569790c0e715416726ed397e0d9d2e9a60551dcc41dcd29de92f",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+          ],
+          "graphHashes": [
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298"
+          ],
+          "medianSuccessfulWallMs": 596,
+          "peakRssBytes": [
+            25690112,
+            25608192,
+            25460736
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            992,
+            596,
+            520
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+          ],
+          "graphHashes": [
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298"
+          ],
+          "medianSuccessfulWallMs": 570,
+          "peakRssBytes": [
+            25526272,
+            25509888,
+            25559040
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            582,
+            570,
+            557
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 992,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:30.407206+00:00",
+          "loadAverageBefore": [
+            14.130859375,
+            15.87646484375,
+            14.0595703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "1b91e0a1ad29d8c6982b9514633dea2e3821360c42a9e5d25534ff6eac1ace0e",
+          "stderrSha256": "8b4f565560ab54d2518e1fc5944ab4c891ffbb416e3c869f9bfccc12c0d619d0",
+          "peakRssBytes": 25690112,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 582,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:31.401420+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "c282b14e69090183925ab11a0a44399babff5d4228e8ba9c54c2ceb56413ec6f",
+          "stderrSha256": "e2efe5129a0773d170f1be132c7af043629b23d0257a1fa89b499624d7f9d7da",
+          "peakRssBytes": 25526272,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 570,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:31.985447+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "cbe173527f03f6ea4fa85aee5cdb89f718e5a9ab4728d13f5f5bdc9847d61662",
+          "stderrSha256": "ea7329dacf2a1ba8ab5d06f449d648a7fdccf889f9b92f90bac3eedcd6267ce7",
+          "peakRssBytes": 25509888,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 596,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:32.556560+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "2689cafc8afe875fd2eaa2d7084301dcd251425b346db340fa037e53575c1637",
+          "stderrSha256": "6c5094be373e0d73d087cfc7623bb9dc9b1a6053e2cf3a8694b5ad4b0738a75c",
+          "peakRssBytes": 25608192,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 520,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:33.153812+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "4a09aca920104a38a06923b510470c7c1b5893d37de777d6692d4cce561aac03",
+          "stderrSha256": "973d8bcb724543203ffe64c8614e1d115e31c782843e0d462152cea0708ee9cf",
+          "peakRssBytes": 25460736,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 557,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:33.675453+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 0,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "20120a849436c9bcf3a07d0bd5fd32a688d5bf66eb70a4be4b4144c56863cffd",
+          "stderrSha256": "2288654b2e97c0be2ddd4e35d98bdb23c44d1aff574e5f6033c5129d6c9f3af2",
+          "peakRssBytes": 25559040,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        }
+      ]
+    },
+    {
+      "bytes": 1949,
+      "candidateToBaselineMedianRatio": 1.0241379310344827,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "setup/db/postprocess-20to21.sql",
+      "sampleIndex": 1,
+      "sourceSha256": "88784b0df00be6d6939ebe275c6d1aabcf8bac8636c00bf7d6ad08e2caee2aae",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+          ],
+          "graphHashes": [
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a"
+          ],
+          "medianSuccessfulWallMs": 580,
+          "peakRssBytes": [
+            29130752,
+            29442048,
+            29048832
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            642,
+            530,
+            580
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+          ],
+          "graphHashes": [
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a"
+          ],
+          "medianSuccessfulWallMs": 594,
+          "peakRssBytes": [
+            30769152,
+            30638080,
+            30687232
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            652,
+            594,
+            579
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 642,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:34.235294+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 1,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "860728bc37dd324f1ea8042935fb82af2d8c0acf5ef45e6bdd1ae18a6cf54eee",
+          "stderrSha256": "60d070cec9f47e1185c59e059b15207a93bc5c9f8d05be13c08eda6fa9ee8409",
+          "peakRssBytes": 29130752,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 652,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:34.879868+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 1,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "9f245c2504a76782c1a82966b2d5773ff7ef9874a64017f4c89b30a1d941e424",
+          "stderrSha256": "83d047d7e57efcda4319642dc879152fdb58eae818c0df767982def12df840f1",
+          "peakRssBytes": 30769152,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 594,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:35.533631+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "sampleIndex": 1,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "631b780b2b1f8ea935521f671cb0e66470d7580b35c6f0e53b9fb3a21c59877c",
+          "stderrSha256": "cab7a45e9476893fccb9cbd1ce94bd7591ef618be6ff62b6d794e4fbb15ed3ac",
+          "peakRssBytes": 30638080,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 530,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:36.129697+00:00",
+          "loadAverageBefore": [
+            13.4794921875,
+            15.71240234375,
+            14.01220703125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 1,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "7ad370c93bd8c52772f86cff60e4b08ff3cfdff0ad0b5af5785932b8d18ac797",
+          "stderrSha256": "72e5abfabdf9c544ec7f9ef3a2d955e882c768f9edf034e283549c74a5f95156",
+          "peakRssBytes": 29442048,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 580,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:36.661875+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 1,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "238a7fcb629e81acf0a1dfdafcdca7baf9c5912692042a3dd295787a75ecd1bf",
+          "stderrSha256": "143e0872d513cab391eec5e175490006d627e99a320633b72e5359b620e4868e",
+          "peakRssBytes": 29048832,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 579,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:37.243603+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 1,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "249f9cb5479462b1e9cd6957f2df3a35bb1e248dfd4b20d1fac6571b77ac361b",
+          "stderrSha256": "11c9f98b099fe7ff64005b4361b993ee05bac4008cc51169b7395d223c363966",
+          "peakRssBytes": 30687232,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        }
+      ]
+    },
+    {
+      "bytes": 10288,
+      "candidateToBaselineMedianRatio": 1.0136986301369864,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-41120to41200.sql",
+      "sampleIndex": 2,
+      "sourceSha256": "03e7035ff015e9e3eb7f194a32d37f6e418244cee81853ec6d370b47e7589780",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+          ],
+          "graphHashes": [
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad"
+          ],
+          "medianSuccessfulWallMs": 657,
+          "peakRssBytes": [
+            30900224,
+            31145984,
+            31113216
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            657,
+            637,
+            658
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+          ],
+          "graphHashes": [
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad"
+          ],
+          "medianSuccessfulWallMs": 666,
+          "peakRssBytes": [
+            32669696,
+            32374784,
+            32374784
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            643,
+            666,
+            692
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 657,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:37.826282+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "3f1a541d945561b90508d7d9953da9bdc7841b1da4451753c279ea16be09e5eb",
+          "stderrSha256": "4cc1f5acd32941962e8488e39c5b1bd1c4181d0bd9239f8e4dd5b0f844ade4f5",
+          "peakRssBytes": 30900224,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 643,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:38.485124+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "64fe48ff256c9ce4002958127995edd52685e5abcef00b33d627d4b7a5c4c8e3",
+          "stderrSha256": "b5f702e5be50bd8787b7faa8e5172a3fed57a52f8e3a33e4d16dd593cdacb15b",
+          "peakRssBytes": 32669696,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 666,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:39.130746+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "365d4b394c344e971c2b0cf1a4b66bb846174837b43b29d26c069890438dc46c",
+          "stderrSha256": "296047ead6d3f673ed5fae7beb9451957000b192f99dffa035354d33dc28edf3",
+          "peakRssBytes": 32374784,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 637,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:39.800247+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "ebaf02eea757d65ce99ad1344bb9de7e9b681ef1e80c73d599fe9e5231667920",
+          "stderrSha256": "dff783b683f7b65866f952e27bf757fee0172c1dd91ee8cb4b1d04b88799e147",
+          "peakRssBytes": 31145984,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 658,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:40.439618+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "9dbffcb447352fa3778bedaf94df942d12f03640afa2bb6723a0b9afc5665f85",
+          "stderrSha256": "e075dc54ffce3a9c0309d7a0320a1ce8ae3ef1b800d0de462e6242c65db1d466",
+          "peakRssBytes": 31113216,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 692,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:41.100460+00:00",
+          "loadAverageBefore": [
+            12.72021484375,
+            15.517578125,
+            13.953125
+          ],
+          "loadAverageAfter": [
+            12.021484375,
+            15.326171875,
+            13.89453125
+          ],
+          "sampleIndex": 2,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "ec15a06447fece2ce053a9257fd7e855d9100e30384f3062685e2c34a1fcaaae",
+          "stderrSha256": "9c56efbecef393dfe9ecb8d261923e72ae773551374f86c9927c244c0bd86efd",
+          "peakRssBytes": 32374784,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        }
+      ]
+    },
+    {
+      "bytes": 411080,
+      "candidateToBaselineMedianRatio": 0.1257526103193354,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-430to440.sql",
+      "sampleIndex": 3,
+      "sourceSha256": "99cc9ada9dae1119b8757f805211aa714702b81d2446c0f9fa58e9e7f3c62f4f",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+          ],
+          "graphHashes": [
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d"
+          ],
+          "medianSuccessfulWallMs": 13121,
+          "peakRssBytes": [
+            91881472,
+            78774272,
+            86212608
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            12403,
+            13121,
+            20833
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+          ],
+          "graphHashes": [
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d"
+          ],
+          "medianSuccessfulWallMs": 1650,
+          "peakRssBytes": [
+            82493440,
+            82542592,
+            79937536
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            1650,
+            1613,
+            2319
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 12403,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:41.801171+00:00",
+          "loadAverageBefore": [
+            12.021484375,
+            15.326171875,
+            13.89453125
+          ],
+          "loadAverageAfter": [
+            11.02783203125,
+            15.00244140625,
+            13.7958984375
+          ],
+          "sampleIndex": 3,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "29ebb1c7a38d3f15cbd57a75b74905e9195c8ccb0f07593235a70bd241a75478",
+          "stderrSha256": "3002704177e4babf445c95af57dae051b364ad442afee2eed19f32cc0c411d6e",
+          "peakRssBytes": 91881472,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1650,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:54.266784+00:00",
+          "loadAverageBefore": [
+            11.02783203125,
+            15.00244140625,
+            13.7958984375
+          ],
+          "loadAverageAfter": [
+            11.02783203125,
+            15.00244140625,
+            13.7958984375
+          ],
+          "sampleIndex": 3,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "130813d222676d1635cc32687c505aea822f0b1e5db7bdce54afcf28cd5c6cf2",
+          "stderrSha256": "266cd7b7893e3bb7fd846eaa7ad23d857f1590e830535d40669a507cec914093",
+          "peakRssBytes": 82493440,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1613,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:55.995632+00:00",
+          "loadAverageBefore": [
+            11.02783203125,
+            15.00244140625,
+            13.7958984375
+          ],
+          "loadAverageAfter": [
+            10.46484375,
+            14.8193359375,
+            13.73828125
+          ],
+          "sampleIndex": 3,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "2e651999668f6b6bb55336c74a6486fbf590643517a53ded3b1bd5d309ce78f7",
+          "stderrSha256": "fc543409d18028dfcc7621f682c19f636f134abd8053a6f58b4119a76a6e48e7",
+          "peakRssBytes": 82542592,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 13121,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:52:57.674278+00:00",
+          "loadAverageBefore": [
+            10.46484375,
+            14.8193359375,
+            13.73828125
+          ],
+          "loadAverageAfter": [
+            9.95068359375,
+            14.5625,
+            13.6591796875
+          ],
+          "sampleIndex": 3,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "596bfd3c71b12749fe9b1b5ccc41dae62b04a45283547667649c1f18b4068c81",
+          "stderrSha256": "d15577dd65f02ea8ec92b6850709e689115bca2ae80bf3ed19a3e01393d3a8f5",
+          "peakRssBytes": 78774272,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 20833,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:53:10.888162+00:00",
+          "loadAverageBefore": [
+            9.95068359375,
+            14.5625,
+            13.6591796875
+          ],
+          "loadAverageAfter": [
+            14.2373046875,
+            15.16650390625,
+            13.900390625
+          ],
+          "sampleIndex": 3,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "96fb6ce3e62d645bf2f6661865cb664b00a352278247bfb499e2bcbd5a273345",
+          "stderrSha256": "976ee0284f0e79b27d65c774ff416066e3d0d109b8b6b7c23045583678d7351b",
+          "peakRssBytes": 86212608,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 2319,
+          "stdout_bytes": 488,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T18:53:31.786731+00:00",
+          "loadAverageBefore": [
+            14.2373046875,
+            15.16650390625,
+            13.900390625
+          ],
+          "loadAverageAfter": [
+            14.2373046875,
+            15.16650390625,
+            13.900390625
+          ],
+          "sampleIndex": 3,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "a252480352c97c104882d7522b5c1a4406944d18f03de04be85b199e086fbc9a",
+          "stderrSha256": "37b05a740d03304c4b44b305cb424b29e4e5eb66c54ee6d6aee3ea53206208b3",
+          "peakRssBytes": 79937536,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "All four inputs come from the previous CloudStack SQL diagnosis; they are development inputs, not unseen confirmation.",
+    "Matching release builds do not establish whole-product release qualification or cross-language performance.",
+    "Three observations per binary/file; ordinary OS caches, no warmups or OS-cache flushing, no confidence intervals.",
+    "Unrelated host work can affect results; timestamps and load averages are retained.",
+    "Every graph field and array order is compared. No ratio is reported without all six successful equal graphs.",
+    "No Graphify runtime comparison, god-object classification result, or replacement of the two previous whole-repository timeouts follows."
+  ]
+}

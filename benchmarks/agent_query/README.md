@@ -872,5 +872,10 @@ The report preserves the correction of an unfiltered-neighbor auditor defect,
 all 27 raw tool calls, repeated verification and 238 passing benchmark tests.
 It also discloses Graphify's logged omission of all 119 CloudStack SQL files
 because its optional parser dependency was absent. Original graphs and outcomes are unchanged.
-`sql_regex_cache_registration.json` separately freezes the next performance
-diagnosis; it is not a completed optimization result.
+`sql_regex_cache_registration.json` freezes the separate release-build diagnosis.
+`sql_regex_cache_review.json` records all 24 successful observations and full
+graph equality across the six runs of each of the four inputs. Both builds use
+the same release settings; every timing, peak RSS and host-load observation is
+retained. This development panel does not establish whole-product or Graphify
+performance superiority. `sql_regex_cache_whole_registration.json` separately
+registers the complete-source follow-up; its result is pending at this checkpoint.

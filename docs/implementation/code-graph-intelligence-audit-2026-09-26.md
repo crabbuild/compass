@@ -14,7 +14,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
 | Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
-| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. Matched SQL timings are unoptimized development diagnostics; neither study establishes a general efficiency win. |
+| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The shared-path accounting and matched release SQL development timings do not establish a general efficiency win. |
 | Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
 
 Current evidence summaries are in the
@@ -22,8 +22,9 @@ Current evidence summaries are in the
 [larger-artifact follow-up](../../benchmarks/agent_query/mlcq_admission_followup_review.json),
 [Java field census](../../benchmarks/agent_query/java_real_field_review.json),
 [paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
-[shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json)
-and [SQL diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json).
+[shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json),
+[SQL prefix diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json)
+and [release SQL cache diagnosis](../../benchmarks/agent_query/sql_regex_cache_review.json).
 The chronological sections below retain earlier checkpoints; their counts and
 claims apply to the stated binary, graph and protocol rather than the latest
 branch automatically.
@@ -3866,3 +3867,51 @@ prefix with `<user-home>`; hash-bound original logs remain external. The unchang
 release rebuild also confirms the copied regex-comparison baseline byte-for-byte.
 Actual god-object classification, authored explanations, functional communities
 and broader independent confirmation remain unproven. Version remains 0.3.30.
+
+## SQL access-regex cache: matching release comparison
+
+The SQL extractor now compiles its fixed access regexes—one read pattern and five
+write patterns—once per process. The patterns, iteration order, captures and alias/CTE handling
+are unchanged. A new native regression checks that every pattern is retained in
+order and repeated calls reuse the same compiled storage. Public commands,
+graph schemas and version 0.3.30 are unchanged.
+
+The registered diagnosis uses the same four complete CloudStack SQL inputs,
+three repetitions per binary, alternating order and fresh outputs. Both binaries
+use matching release settings: one codegen unit, thin LTO, abort-on-panic and
+stripped symbols. An unchanged release rebuild confirmed the frozen baseline
+hash before the cache edit. Build manifests, lockfile, toolchain and repository
+configuration are unchanged. Ordinary OS caches and unrelated host work remain
+limitations; timestamps, load averages and peak RSS are retained.
+
+| SQL bytes | Baseline median | Cached-regex median | Candidate / baseline | Full graph equality |
+| ---: | ---: | ---: | ---: | --- |
+| 938 | 0.596 s | 0.570 s | 0.956 | All six graphs |
+| 1,949 | 0.580 s | 0.594 s | 1.024 | All six graphs |
+| 10,288 | 0.657 s | 0.666 s | 1.014 | All six graphs |
+| 411,080 | 13.121 s | 1.650 s | 0.126 | All six graphs |
+
+All 24 observations succeeded, and the complete graph JSON is equal across all
+six runs of each input, with no excluded fields and preserved array order.
+These are four development files selected during an earlier diagnosis. The
+observed medians do not establish a confidence interval, whole-product release
+qualification, a Graphify speed ranking or independent confirmation. Earlier
+unoptimized observations, small-file regressions and whole-repository timeouts
+remain unchanged.
+
+Validation passed: formatting, five SQL unit tests, 34 domain-extraction tests,
+workspace Clippy, 1,109 workspace tests (two ignored), nine product tests, the
+complete code-graph fixture gate, all 238 benchmark tests, the product boundary
+and the matching release build. JavaScript source and viewer assets are
+unchanged; standalone npm checks were not rerun.
+
+The separately registered complete-source CloudStack follow-up uses fresh
+outputs, the same frozen release binaries, the original 1,200-second extraction
+limit and the declared 1 GiB admission cap. It must preserve each failure and
+partial-graph warning. Its result is pending at this checkpoint. Recovering
+that graph is a prerequisite for evaluating the unavailable Blob classes; it
+does not itself validate source correctness or god-object classification.
+
+All observations, binary/source digests and repeated verification are recorded in
+[`sql_regex_cache_review.json`](../../benchmarks/agent_query/sql_regex_cache_review.json)
+under external run `sql-regex-cache-01`.
