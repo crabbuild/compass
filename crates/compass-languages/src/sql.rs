@@ -1784,6 +1784,10 @@ fn first_line_end(source: &str, start: usize) -> usize {
 }
 
 fn dollar_quote_delimiter_at(source: &str, start: usize) -> Option<&str> {
+    // Callers probe individual bytes. Reject impossible delimiter syntax before
+    // scanning the preceding source to distinguish a quote from an identifier.
+    // Otherwise ordinary SQL pays repeated prefix scans without any `$` marker.
+    dollar_delimiter_syntax_at(source, start)?;
     let statement_start = statement_start_before(source, start);
     dollar_quote_delimiter_in_statement(source, start, statement_start)
 }
@@ -3034,6 +3038,48 @@ INSERT INTO app.users(id) SELECT id FROM app.accounts;
                     .any(|edge| edge.string("relation") == relation),
                 "missing {relation}"
             );
+        }
+    }
+
+    #[test]
+    fn delimiter_fast_rejection_preserves_statement_sensitive_results() {
+        let sources = [
+            "SELECT id FROM app.items; SELECT $$body$$;",
+            "CREATE PROCEDURE app.run() AS $body$ SELECT 1; $body$ LANGUAGE plpgsql;",
+            "CREATE TABLE $tag$ (id INT); SELECT * FROM app.$tag$;",
+            "WITH $tag$ AS (SELECT 1) SELECT * FROM $tag$;",
+            "SELECT name$tag$, $tag$tail, $1, $unfinished, $_ok_2$body$_ok_2$;",
+            "SELECT \"semi;colon\", `semi;colon`, [semi;colon]; SELECT $tag$body$tag$;",
+            "SELECT \"unterminated; $tag$; SELECT 2;",
+            "SELECT 'single;quote', 名称, $tag$é$tag$;",
+            "",
+        ];
+        for source in sources {
+            for start in 0..=source.len() + 1 {
+                let previous = dollar_quote_delimiter_in_statement(
+                    source,
+                    start,
+                    statement_start_before(source, start),
+                );
+                assert_eq!(
+                    dollar_quote_delimiter_at(source, start),
+                    previous,
+                    "delimiter changed at byte {start} in {source:?}"
+                );
+            }
+        }
+        assert_eq!(dollar_quote_delimiter_at("SELECT $$body$$", 7), Some("$$"));
+        assert_eq!(
+            dollar_quote_delimiter_at("CREATE TABLE $tag$ (id INT)", 13),
+            None
+        );
+    }
+
+    #[test]
+    fn ordinary_sql_byte_probes_reject_delimiters() {
+        let source = "SELECT id FROM app.items;\n".repeat(2_048);
+        for start in 0..=source.len() {
+            assert_eq!(dollar_quote_delimiter_at(&source, start), None);
         }
     }
 
