@@ -13,6 +13,7 @@ mod export_binding;
 mod graph_engine;
 mod index;
 mod intent;
+mod neighbors;
 mod program_join;
 mod ranking;
 mod recall;
@@ -50,6 +51,10 @@ pub use index::{
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
     plan_natural_query,
+};
+pub use neighbors::{
+    MAX_NEIGHBOR_ADJACENCY_ENTRIES, MAX_NEIGHBOR_RECORDS, MAX_NEIGHBOR_RESPONSE_BYTES,
+    NeighborDirection, NeighborError, NeighborGroup, NeighborReport, direct_neighbors,
 };
 pub use program_join::join_program_evidence;
 pub use ranking::QUERY_RANKER_PROFILE_V1;

@@ -318,6 +318,24 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
         "compass.hub-connectivity/1"
     );
     assert!(structured["result"]["nodes"][0]["connectivity"]["edgeRecords"].is_u64());
+    let neighbors = client
+        .call_tool(
+            CallToolRequestParams::new("get_neighbors").with_arguments(args(&[
+                ("label", json!("a")),
+                ("relation_filter", json!("calls")),
+            ])),
+        )
+        .await?;
+    let neighbors = neighbors
+        .structured_content
+        .ok_or("missing neighbor identities")?;
+    assert_eq!(neighbors["result"]["schema"], "compass.query.neighbors/1");
+    assert_eq!(neighbors["result"]["neighbors"][0]["node"]["id"], "b");
+    assert_eq!(
+        neighbors["result"]["neighbors"][0]["edges"][0]["source"],
+        "a"
+    );
+    assert_eq!(neighbors["transportTruncation"]["truncated"], false);
     let path = client
         .call_tool(
             CallToolRequestParams::new("shortest_path")

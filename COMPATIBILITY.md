@@ -182,8 +182,23 @@ retain their case. The tool's input schema and the MCP result envelope are
 unchanged. This corrects unnecessarily ambiguous lookups; no migration is needed.
 Relationship filters apply before repeated neighbors are grouped, so a stored
 call remains visible when a containment/reference edge precedes it. The tool
-continues to return distinct neighbors; typed call-query tools carry occurrence
-and source-site detail.
+continues to display distinct neighbors. Successful results now add the versioned
+`compass.query.neighbors/1` structured result inside the existing MCP transport
+envelope. Each direction/neighbor group carries its exact node record and all
+matching relationship records, including IDs, source sites, provenance and
+parallel occurrences. Missing legacy edge IDs remain absent. Directions describe
+stored endpoints; `graphDirected` preserves the artifact metadata, so an
+undirected artifact does not become proof of a directed call. Text adds escaped
+ID/source/location lines; the displayed relation represents the first canonical
+record in the group. Use structured records for all relations and occurrences.
+
+Neighbor lookup reads one full snapshot to avoid losing fields in the compact
+traversal cache. It is bounded by 1,000,000 examined adjacency entries, 10,000
+matching incident records, a 4,096-byte filter and a 1 MiB structured result.
+Exhaustion is an explicit error, never an empty or silently partial success.
+Groups sort by outgoing/incoming direction then exact ID; records sort by
+canonical JSON. Self loops appear in both directions and count once against
+the incident-record budget. Published graphs and historical artifacts are unchanged.
 
 ### Bounded node trails
 

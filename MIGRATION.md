@@ -7,6 +7,15 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+MCP neighbor responses now include exact destination records in
+`structuredContent.result` with schema `compass.query.neighbors/1`. Consumers
+that need machine identities should read those records instead of parsing text
+labels. The text adds identity/source lines and orders groups deterministically.
+If a large neighbor request exceeds the new adjacency, record or 1 MiB semantic
+response limit, it fails explicitly; narrow `relation_filter` or use the bounded
+typed caller/callee queries. An empty successful result means no matching
+records. No graph rebuild is required for this output change.
+
 Rebuild Java graphs to receive corrected varargs signatures, array argument
 types, and overload targets. Spread parameters now retain their declared array
 type; calls may gain targets or select a different, source-supported overload.

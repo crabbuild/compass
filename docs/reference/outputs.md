@@ -919,10 +919,33 @@ legacy prefix/substring lookup remains available.
 Multiple exact candidates produce an ambiguity list instead of neighbors.
 Candidates are sorted by exact ID, with at most 20 displayed and an explicit
 omission count. Retry using an exact ID to choose a declaration. Multiple fuzzy
-candidates are also ambiguous. The text result and input schema are unchanged.
-A successful result reports distinct incoming/outgoing neighbors after applying
-`relation_filter`; use typed call-query results for individual occurrences and
-source sites. Displayed neighbor labels alone may still be ambiguous.
+candidates are also ambiguous. Input arguments are unchanged.
+A successful result keeps the compact incoming/outgoing neighbor text and adds
+escaped identity/source lines. Machine consumers use the additive structured
+result `compass.query.neighbors/1` in `compass.mcp.tool-result/1`:
+
+- `seed`: the full node record for the resolved identity;
+- `neighbors`: groups ordered by direction (`outgoing`, then `incoming`) and
+  node ID; each group has `direction`, the full `node` record and all matching
+  `edges`, ordered by canonical JSON;
+- `directionBasis: "stored-endpoints"` and `graphDirected`: distinguish stored
+  endpoint orientation from the artifact's directed/undirected interpretation;
+- `relationFilter`: the case-folded substring filter; `truncated: false` means
+  the complete filtered adjacency fit all bounds.
+
+Node records retain their graph source fields; relationship records retain IDs,
+occurrence anchors, provenance and unknown attributes. Legacy absent IDs or
+anchors are not invented. Parallel records survive; a self loop is represented
+in both directions. The text line uses the first canonical edge for its relation
+and confidence; consult `edges` for every record. An exact destination ID can be
+used as the next `get_neighbors.label` without resolving a display name.
+
+Hard bounds are 1,000,000 examined adjacency entries, 10,000 matching incident
+records (self loops counted once), a 4,096-byte filter and a 1 MiB structured
+result. Limit exhaustion returns an error with no partial adjacency. A successful
+empty `neighbors` array means no matching records, not a limit failure. Graph
+loading and the outer MCP transport retain their existing bounds. This projection
+uses one full snapshot rather than the compact traversal cache.
 
 ### Agent Query View
 

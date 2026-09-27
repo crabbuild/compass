@@ -5,7 +5,7 @@ mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio, serve_stdio_configured};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read as _, Write as _};
@@ -44,8 +44,8 @@ use compass_prs::{
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
-    HopPathResult, TraversalMode, find_exact_nodes, find_node, query_graph_text, sanitize_label,
-    shortest_hop_path,
+    HopPathResult, NeighborDirection, TraversalMode, direct_neighbors, find_exact_nodes, find_node,
+    query_graph_text, sanitize_label, shortest_hop_path,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
@@ -372,7 +372,7 @@ impl CompassMcp {
         self.invoke_result(name, &mut arguments)
             .map(|result| {
                 // Keep this legacy text helper stable; MCP carries both projections.
-                if matches!(name, "god_nodes" | "shortest_path") {
+                if matches!(name, "god_nodes" | "shortest_path" | "get_neighbors") {
                     return result.text;
                 }
                 result
@@ -586,6 +586,9 @@ impl CompassMcp {
         }
         if typed_query {
             return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
+        }
+        if name == "get_neighbors" {
+            return invoke_neighbor_tool(arguments, &context);
         }
         if name == "god_nodes" {
             return invoke_hub_tool(arguments, &context);
@@ -1362,7 +1365,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "get_neighbors",
-            "Get all direct neighbors of a node with edge details.",
+            "Get bounded direct neighbors with exact destination IDs, definition anchors and all matching relationship records. Directions describe stored endpoints; limit exhaustion fails explicitly.",
             json!({"type":"object","properties":{"label":{"type":"string"},"relation_filter":{"type":"string","description":"Optional: filter by relation type"}},"required":["label"]}),
         ),
         tool(
@@ -2221,24 +2224,43 @@ fn tool_get_neighbors(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    invoke_neighbor_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_neighbor_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
+    // The compact traversal cache omits identities, occurrence anchors and
+    // provenance. Resolve and project against one full snapshot instead.
+    let mut document = context.document()?;
+    // Retain every persisted record even for legacy non-multigraph metadata.
+    document.multigraph = true;
+    let graph = Graph::from_traversal_document(document)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
     let query = string_argument(arguments, "label")?;
     let filter = optional_string(arguments, "relation_filter")
         .unwrap_or_default()
         .to_lowercase();
-    let exact = find_exact_nodes(&context.graph, query);
+    let exact = find_exact_nodes(&graph, query);
     let matches = if exact.is_empty() {
-        find_node(&context.graph, query)
+        find_node(&graph, query)
     } else {
         exact
     };
     let Some(&index) = matches.first() else {
-        return Ok(format!("No node matching '{query}' found."));
+        return Ok(ToolInvocation {
+            text: format!("No node matching '{}' found.", sanitize_label(query)),
+            structured_content: None,
+        });
     };
     if matches.len() > 1 {
         const MAX_CANDIDATES: usize = 20;
         let mut candidates = matches
             .iter()
-            .map(|index| context.graph.node(*index))
+            .map(|index| graph.node(*index))
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| left.id.cmp(&right.id));
         let mut lines = vec![format!(
@@ -2260,53 +2282,47 @@ fn tool_get_neighbors(
                 candidates.len() - MAX_CANDIDATES
             ));
         }
-        return Ok(lines.join("\n"));
+        return Ok(ToolInvocation {
+            text: lines.join("\n"),
+            structured_content: None,
+        });
     }
+    let report = direct_neighbors(&graph, index, &filter)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
     let mut lines = vec![format!(
         "Neighbors of {}:",
-        sanitize_label(context.graph.node(index).label())
+        sanitize_label(report.seed.label())
     )];
-    let mut outgoing = HashSet::new();
-    for edge_index in context.graph.outgoing_edges(index) {
-        let edge = context.graph.edge(edge_index);
-        let Some(neighbor) = context.graph.node_index(&edge.target) else {
+    lines.push(format!("  seed id: {}", json!(report.seed.id)));
+    for group in &report.neighbors {
+        let Some(edge) = group.edges.first() else {
             continue;
         };
-        let relation = edge.string("relation");
-        if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
-            continue;
-        }
-        if !outgoing.insert(neighbor) {
-            continue;
-        }
-        lines.push(format!(
-            "  --> {} [{}] [{}]",
-            sanitize_label(context.graph.node(neighbor).label()),
-            sanitize_label(&relation),
-            sanitize_label(&edge.string("confidence"))
-        ));
-    }
-    let mut incoming = HashSet::new();
-    for edge_index in context.graph.incoming_edges(index) {
-        let edge = context.graph.edge(edge_index);
-        let Some(neighbor) = context.graph.node_index(&edge.source) else {
-            continue;
+        let arrow = match group.direction {
+            NeighborDirection::Outgoing => "-->",
+            NeighborDirection::Incoming => "<--",
         };
-        let relation = edge.string("relation");
-        if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
-            continue;
-        }
-        if !incoming.insert(neighbor) {
-            continue;
-        }
         lines.push(format!(
-            "  <-- {} [{}] [{}]",
-            sanitize_label(context.graph.node(neighbor).label()),
-            sanitize_label(&relation),
+            "  {arrow} {} [{}] [{}]",
+            sanitize_label(group.node.label()),
+            sanitize_label(&edge.string("relation")),
             sanitize_label(&edge.string("confidence"))
         ));
+        lines.push(format!(
+            "    id: {} | source: {} | location: {} | records: {}",
+            json!(group.node.id),
+            json!(group.node.source_file()),
+            json!(group.node.string("source_location")),
+            group.edges.len()
+        ));
     }
-    Ok(lines.join("\n"))
+    let mut value = serde_json::to_value(&report)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    value.sort_all_objects();
+    Ok(ToolInvocation {
+        text: lines.join("\n"),
+        structured_content: Some(transport_envelope(value)?),
+    })
 }
 
 fn tool_get_community(
@@ -3174,6 +3190,87 @@ mod tests {
             );
             assert!(neighbors.starts_with("Neighbors of "), "{neighbors}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_expose_exact_destinations_and_full_relationship_records()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("neighbors.json");
+        let unusual_id = "close\n\"second\"";
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true, "multigraph":false,
+                "nodes":[
+                    {"id":"seed","label":"run()"},
+                    {"id":"first","label":"close()","source":{"file":"a.rs","startLine":10}},
+                    {"id":unusual_id,"label":"close()","source_file":"b.rs","source_location":"L20"}
+                ],
+                "links":[
+                    {"id":"call-1","source":"seed","target":"first","relation":"calls","relationshipSite":{"file":"caller.rs","startLine":3},"evidence":[{"origin":"ast","rule":"fixture"}]},
+                    {"id":"call-2","source":"seed","target":"first","relation":"calls","relationshipSite":{"file":"caller.rs","startLine":4}},
+                    {"source":"seed","target":unusual_id,"relation":"calls"},
+                    {"source":"seed","target":"first","relation":"contains"}
+                ]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        let result = server
+            .invoke_result(
+                "get_neighbors",
+                &mut json!({"label":"seed","relation_filter":"calls"})
+                    .as_object()
+                    .ok_or("args")?
+                    .clone(),
+            )
+            .map_err(|e| e.to_string())?;
+        assert!(result.text.starts_with("Neighbors of run():\n"));
+        assert_eq!(result.text.matches("--> close() [calls]").count(), 2);
+        assert!(result.text.contains(&format!("id: {}", json!(unusual_id))));
+        assert!(!result.text.contains(unusual_id));
+        let body = result.structured_content.ok_or("missing identity")?["result"].clone();
+        assert_eq!(body["schema"], "compass.query.neighbors/1");
+        assert_eq!(body["seed"]["id"], "seed");
+        assert_eq!(body["truncated"], false);
+        let rows = body["neighbors"].as_array().ok_or("neighbors")?;
+        assert_eq!(rows.len(), 2);
+        let first = rows
+            .iter()
+            .find(|r| r["node"]["id"] == "first")
+            .ok_or("first")?;
+        assert_eq!(first["direction"], "outgoing");
+        assert_eq!(first["node"]["source"]["startLine"], 10);
+        assert_eq!(first["edges"].as_array().ok_or("edges")?.len(), 2);
+        assert_eq!(first["edges"][0]["evidence"][0]["rule"], "fixture");
+        assert_eq!(first["edges"][1]["relationshipSite"]["startLine"], 4);
+        let other = rows
+            .iter()
+            .find(|r| r["node"]["id"] == unusual_id)
+            .ok_or("other")?;
+        assert!(other["edges"][0].get("id").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbor_limit_is_an_error_not_empty_success() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("bounded.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(
+                &json!({"nodes":[{"id":"a","label":"Alpha","extra":"x".repeat(compass_query::MAX_NEIGHBOR_RESPONSE_BYTES)}],"links":[]}),
+            )?,
+        )?;
+        let result = CompassMcp::new(&path).invoke_result(
+            "get_neighbors",
+            &mut json!({"label":"a"}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(
+            matches!(result,Err(InvocationError::InvalidParams(message)) if message.contains("byte limit"))
+        );
         Ok(())
     }
 

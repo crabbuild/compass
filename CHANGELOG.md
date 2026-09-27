@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add exact destination identities and full relationship records to MCP neighbor
+  results, preserving source anchors, provenance, direction and parallel calls.
+  Bound adjacency work and response size; report exhaustion explicitly.
+
 - Resolve Rust method receivers reached through source-proven scalar indexes
   into standard vectors, arrays, and slices, retaining field declaration scope
   and each call occurrence. Preserve intermediate modules in qualified Rust
