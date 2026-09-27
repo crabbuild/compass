@@ -313,6 +313,11 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
     let structured = hubs.structured_content.ok_or("missing structured hubs")?;
     assert_eq!(structured["result"]["schema"], "compass.mcp.hubs/1");
     assert!(structured["result"]["nodes"].as_array().is_some());
+    assert_eq!(
+        structured["result"]["nodes"][0]["connectivity"]["schema"],
+        "compass.hub-connectivity/1"
+    );
+    assert!(structured["result"]["nodes"][0]["connectivity"]["edgeRecords"].is_u64());
     let path = client
         .call_tool(
             CallToolRequestParams::new("shortest_path")

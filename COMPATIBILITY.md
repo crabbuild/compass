@@ -117,6 +117,17 @@ through the non-transport `invoke` helper. Graph schemas are unchanged.
 
 ### MCP hub identities
 
+Each hub now also carries an additive `connectivity` object with schema
+`compass.hub-connectivity/1`, and text includes its node kind and relation
+breakdown. Hub eligibility, degree, and ranking are unchanged. Incident record
+counts retain parallel records; they are not distinct-neighbor degree or
+independently verified source occurrences. At most 16 relation categories are
+shown, ordered by record count then name, with explicit omission totals.
+Undirected artifacts do not acquire inferred directions in this summary.
+Their `ranking` metadata now correctly says
+`distinct-undirected-endpoint-degree`; directed artifacts retain
+`distinct-directed-endpoint-degree`.
+
 MCP `god_nodes` adds `structuredContent` using the existing
 `compass.mcp.tool-result/1` envelope and the result schema
 `compass.mcp.hubs/1`. The ranked records preserve exact IDs, kinds, degrees,

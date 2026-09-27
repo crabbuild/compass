@@ -600,3 +600,79 @@ fn diff_and_cycle_analysis_cover_add_remove_direction_deferred_and_rotation() {
     assert!(find_import_cycles(&cycle_graph, 2, 10).is_empty());
     assert!(find_import_cycles(&document(Vec::new(), Vec::new(), true), 5, 10).is_empty());
 }
+
+#[test]
+fn hub_evidence_preserves_parallel_records_directions_and_self_loops() {
+    for directed in [true, false] {
+        let mut graph = document_with_multigraph(
+            vec![
+                node("hub", "Hub", "src/hub.rs"),
+                node("peer", "Peer", "src/peer.rs"),
+            ],
+            vec![
+                edge("hub", "peer", "calls", "EXTRACTED"),
+                edge("hub", "peer", "calls", "EXTRACTED"),
+                edge("peer", "hub", "references", "EXTRACTED"),
+                edge("hub", "hub", "calls", "EXTRACTED"),
+                edge("hub", "missing", "calls", "EXTRACTED"),
+            ],
+            directed,
+            true,
+        );
+        let evidence = compass_graph::god_nodes_with_evidence(&graph, 10);
+        assert_eq!(
+            evidence.iter().map(|e| &e.hub).collect::<Vec<_>>(),
+            god_nodes(&graph, 10).iter().collect::<Vec<_>>()
+        );
+        let hub = &evidence[0];
+        assert_eq!(hub.hub.id, "hub");
+        assert_eq!(hub.hub.degree, if directed { 4 } else { 3 });
+        let c = &hub.connectivity;
+        assert_eq!(c.edge_records, 4);
+        assert_eq!(c.self_loop_records, 1);
+        assert_eq!(c.omitted_relation_records, 0);
+        assert_eq!(c.relations[0].relation, "calls");
+        assert_eq!(c.relations[0].edge_records, 3);
+        assert_eq!(c.relations[0].incoming_records, usize::from(directed));
+        assert_eq!(
+            c.relations[0].outgoing_records,
+            if directed { 3 } else { 0 }
+        );
+        assert_eq!(
+            c.relations[0].undirected_records,
+            if directed { 0 } else { 3 }
+        );
+        graph.links.reverse();
+        graph.nodes.reverse();
+        assert_eq!(evidence, compass_graph::god_nodes_with_evidence(&graph, 10));
+        assert!(compass_graph::god_nodes_with_evidence(&graph, 0).is_empty());
+    }
+}
+
+#[test]
+fn hub_evidence_bounds_relation_rows_without_hiding_omitted_records() {
+    let mut graph = document_with_multigraph(
+        vec![
+            node("hub", "Hub", "src/hub.rs"),
+            node("peer", "Peer", "src/peer.rs"),
+        ],
+        (0..20)
+            .map(|i| edge("hub", "peer", &format!("r{i:02}"), "EXTRACTED"))
+            .collect(),
+        true,
+        true,
+    );
+    graph.links.push(graph.links[19].clone());
+    let evidence = compass_graph::god_nodes_with_evidence(&graph, 1);
+    let c = &evidence[0].connectivity;
+    assert_eq!(c.edge_records, 21);
+    assert_eq!(c.relations.len(), compass_graph::MAX_HUB_RELATIONS);
+    assert_eq!(c.relations[0].relation, "r19");
+    assert_eq!(c.relations[1].relation, "r00");
+    assert_eq!(c.omitted_relation_kinds, 4);
+    assert_eq!(c.omitted_relation_records, 4);
+    assert_eq!(
+        c.relations.iter().map(|r| r.edge_records).sum::<usize>() + c.omitted_relation_records,
+        c.edge_records
+    );
+}

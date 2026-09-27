@@ -12,8 +12,9 @@ mod v1;
 pub use analyze::{
     BlindSpotEdge, BlindSpotLimits, BlindSpotNode, BlindSpotOmissions, BlindSpotReport,
     CommunityGap, DiffEdge, DiffNode, DisconnectedComponent, GRAPH_INSIGHTS_SCHEMA, GodNode,
-    GraphDiff, GraphInsights, ImportCycle, SuggestedQuestion, SurpriseConnection,
-    blind_spot_report, find_import_cycles, god_nodes, graph_diff, graph_insights,
+    GraphDiff, GraphInsights, HUB_CONNECTIVITY_SCHEMA, HubConnectivity, HubEvidence, HubRelation,
+    ImportCycle, MAX_HUB_RELATIONS, SuggestedQuestion, SurpriseConnection, blind_spot_report,
+    find_import_cycles, god_nodes, god_nodes_with_evidence, graph_diff, graph_insights,
     graph_insights_with_blind_spots, suggest_questions, surprising_connections,
 };
 pub use cluster::{

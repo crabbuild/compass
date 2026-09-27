@@ -21,7 +21,8 @@ use compass_agent_graph::{
 };
 use compass_core::{AgentGraphContext, LoadedGraph};
 use compass_graph::{
-    Communities, blind_spot_report, god_nodes, suggest_questions, surprising_connections,
+    Communities, blind_spot_report, god_nodes_with_evidence, suggest_questions,
+    surprising_connections,
 };
 use compass_model::code_graph::GraphDocument as CodeGraphDocument;
 use compass_model::query_contract::{
@@ -1371,7 +1372,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "god_nodes",
-            "Return connected hub candidates with exact IDs, source anchors, and degree. Connectivity is a topology observation, not proof of excessive responsibility.",
+            "Return connected hub candidates with exact IDs, source anchors, degree, node kind, and bounded incoming/outgoing relation-record counts. Connectivity is a topology observation, not proof of excessive responsibility.",
             json!({"type":"object","properties":{"top_n":{"type":"integer","default":10}}}),
         ),
         tool(
@@ -2354,7 +2355,7 @@ fn invoke_hub_tool(
     let top_n =
         usize::try_from(integer_argument(arguments, "top_n", 10).max(0)).unwrap_or_default();
     let document = context.document()?;
-    let nodes = god_nodes(&document, top_n);
+    let nodes = god_nodes_with_evidence(&document, top_n);
     let records = document
         .nodes
         .iter()
@@ -2362,7 +2363,9 @@ fn invoke_hub_tool(
         .collect::<BTreeMap<_, _>>();
     let mut lines = vec!["God nodes (most connected):".to_owned()];
     let mut identities = Vec::with_capacity(nodes.len());
-    for (index, node) in nodes.iter().enumerate() {
+    for (index, evidence) in nodes.iter().enumerate() {
+        let node = &evidence.hub;
+        let connectivity = &evidence.connectivity;
         let record = records.get(node.id.as_str()).ok_or_else(|| {
             InvocationError::Internal("hub identity is absent from the selected graph".to_owned())
         })?;
@@ -2380,15 +2383,45 @@ fn invoke_hub_tool(
             json!(record.source_file()),
             json!(source_location)
         ));
+        let kind = record.kind_name();
+        lines.push(format!(
+            "    kind: {} | incident records: {} | self-loops: {}",
+            if kind.is_empty() {
+                "unknown".to_owned()
+            } else {
+                sanitize_label(kind)
+            },
+            connectivity.edge_records,
+            connectivity.self_loop_records
+        ));
+        for relation in &connectivity.relations {
+            lines.push(format!(
+                "    relation {}: incoming {}, outgoing {}, undirected {}",
+                json!(relation.relation),
+                relation.incoming_records,
+                relation.outgoing_records,
+                relation.undirected_records
+            ));
+        }
+        if connectivity.omitted_relation_kinds > 0 {
+            lines.push(format!(
+                "    {} additional relation kinds ({} records) omitted",
+                connectivity.omitted_relation_kinds, connectivity.omitted_relation_records
+            ));
+        }
         identities.push(json!({
             "rank":index + 1, "id":node.id, "label":node.label, "degree":node.degree,
             "kind":record.kind_name(), "sourceFile":record.source_file(),
             "sourceLocation":source_location, "startLine":record.unsigned("line_start"),
-            "endLine":record.unsigned("line_end")
+            "endLine":record.unsigned("line_end"), "connectivity": connectivity
         }));
     }
     let structured = transport_envelope(json!({
-        "schema":"compass.mcp.hubs/1", "ranking":"distinct-directed-endpoint-degree",
+        "schema":"compass.mcp.hubs/1", "ranking":if document.directed {
+            "distinct-directed-endpoint-degree"
+        } else {
+            "distinct-undirected-endpoint-degree"
+        },
         "interpretation":"topology-candidates", "requested":top_n, "nodes":identities
     }))?;
     Ok(ToolInvocation {
@@ -3036,6 +3069,33 @@ mod tests {
     }
 
     #[test]
+    fn hub_evidence_does_not_invent_direction_for_undirected_graphs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({"directed":false,
+            "nodes":[{"id":"a","label":"A","source_file":"a.rs"},
+                {"id":"b","label":"B","source_file":"b.rs"}],
+            "links":[{"source":"a","target":"b","relation":"calls"}]}))?,
+        )?;
+        let result = CompassMcp::new(path)
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = result.structured_content.ok_or("missing hubs")?;
+        assert_eq!(
+            content["result"]["ranking"],
+            "distinct-undirected-endpoint-degree"
+        );
+        let row = &content["result"]["nodes"][0]["connectivity"]["relations"][0];
+        assert_eq!(row["incomingRecords"], 0);
+        assert_eq!(row["outgoingRecords"], 0);
+        assert_eq!(row["undirectedRecords"], 1);
+        Ok(())
+    }
+
+    #[test]
     fn hub_results_preserve_exact_identity_and_source_anchors()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
@@ -3073,6 +3133,19 @@ mod tests {
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[0]["id"], "b");
         assert_eq!(nodes[0]["degree"], 2);
+        assert_eq!(
+            nodes[0]["connectivity"]["schema"],
+            "compass.hub-connectivity/1"
+        );
+        assert_eq!(nodes[0]["connectivity"]["edgeRecords"], 2);
+        assert_eq!(
+            nodes[0]["connectivity"]["relations"][0]["incomingRecords"],
+            2
+        );
+        assert_eq!(
+            nodes[0]["connectivity"]["relations"][0]["outgoingRecords"],
+            0
+        );
         let unusual = nodes
             .iter()
             .find(|node| node["id"] == unusual_id)
@@ -3541,12 +3614,12 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n  2. Path - 1 edges\n    id: \"z\" | source: \"src/path.rs\" | location: null"
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 1, outgoing 0, undirected 0\n  2. Path - 1 edges\n    id: \"z\" | source: \"src/path.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 0, outgoing 1, undirected 0"
         );
         let arguments = Map::from_iter([("top_n".to_owned(), json!(1))]);
         assert_eq!(
             server.invoke("god_nodes", arguments),
-            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null"
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 1, outgoing 0, undirected 0"
         );
         Ok(())
     }
@@ -3572,7 +3645,7 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. .dispatch() - 1 edges\n    id: \"method\" | source: \"src/service.rs\" | location: \"L5\""
+            "God nodes (most connected):\n  1. .dispatch() - 1 edges\n    id: \"method\" | source: \"src/service.rs\" | location: \"L5\"\n    kind: method | incident records: 1 | self-loops: 0\n    relation \"contains\": incoming 1, outgoing 0, undirected 0"
         );
         Ok(())
     }
@@ -3598,7 +3671,7 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. helper() - 1 edges\n    id: \"helper\" | source: \"src/support.sh\" | location: \"L1\"\n  2. prepare() - 1 edges\n    id: \"prepare\" | source: \"bin/launch\" | location: \"L2\""
+            "God nodes (most connected):\n  1. helper() - 1 edges\n    id: \"helper\" | source: \"src/support.sh\" | location: \"L1\"\n    kind: function | incident records: 1 | self-loops: 0\n    relation \"calls\": incoming 1, outgoing 0, undirected 0\n  2. prepare() - 1 edges\n    id: \"prepare\" | source: \"bin/launch\" | location: \"L2\"\n    kind: function | incident records: 1 | self-loops: 0\n    relation \"calls\": incoming 0, outgoing 1, undirected 0"
         );
         Ok(())
     }

@@ -60,6 +60,39 @@ pub struct GodNode {
     pub degree: usize,
 }
 
+/// Stored incident records, separate from the distinct-pair hub ranking.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubRelation {
+    pub relation: String,
+    pub edge_records: usize,
+    pub incoming_records: usize,
+    pub outgoing_records: usize,
+    pub undirected_records: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubConnectivity {
+    pub schema: &'static str,
+    pub directed: bool,
+    pub edge_records: usize,
+    pub self_loop_records: usize,
+    pub relations: Vec<HubRelation>,
+    pub omitted_relation_kinds: usize,
+    pub omitted_relation_records: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubEvidence {
+    pub hub: GodNode,
+    pub connectivity: HubConnectivity,
+}
+
+pub const MAX_HUB_RELATIONS: usize = 16;
+pub const HUB_CONNECTIVITY_SCHEMA: &str = "compass.hub-connectivity/1";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SurpriseConnection {
     pub source: String,
@@ -216,6 +249,96 @@ pub struct ImportCycle {
 pub fn god_nodes(document: &GraphDocument, top_n: usize) -> Vec<GodNode> {
     let graph = AnalysisGraph::new(document);
     god_nodes_in(&graph, top_n)
+}
+
+/// Explain the unchanged hub ranking using all valid incident edge records.
+///
+/// Parallel records are retained. A directed self-loop contributes once to
+/// `edge_records` and once to each direction; undirected records have no
+/// inferred direction. Relation rows are bounded, with explicit omissions.
+/// These graph observations do not establish source precision or design defects.
+pub fn god_nodes_with_evidence(document: &GraphDocument, top_n: usize) -> Vec<HubEvidence> {
+    let graph = AnalysisGraph::new(document);
+    let ranked = god_nodes_in(&graph, top_n);
+    let selected = ranked
+        .iter()
+        .enumerate()
+        .map(|(index, hub)| (hub.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut relations = vec![BTreeMap::<String, HubRelation>::new(); ranked.len()];
+    let mut loops = vec![0; ranked.len()];
+    for edge in &graph.relation_edges {
+        let record = edge.record;
+        for (endpoint, id) in [&record.source, &record.target].into_iter().enumerate() {
+            // Each self-loop is one incident record, not two records.
+            if endpoint == 1 && record.source == record.target {
+                continue;
+            }
+            if let Some(&index) = selected.get(id.as_str()) {
+                add_hub_relation(&mut relations[index], record, id, document.directed);
+                loops[index] += usize::from(record.source == record.target);
+            }
+        }
+    }
+    ranked
+        .into_iter()
+        .zip(relations)
+        .zip(loops)
+        .map(|((hub, relations), self_loop_records)| {
+            let mut relations = relations.into_values().collect::<Vec<_>>();
+            relations.sort_by(|left, right| {
+                right
+                    .edge_records
+                    .cmp(&left.edge_records)
+                    .then_with(|| left.relation.cmp(&right.relation))
+            });
+            let edge_records = relations.iter().map(|row| row.edge_records).sum();
+            let omitted_relation_kinds = relations.len().saturating_sub(MAX_HUB_RELATIONS);
+            let omitted_relation_records = relations
+                .iter()
+                .skip(MAX_HUB_RELATIONS)
+                .map(|row| row.edge_records)
+                .sum();
+            relations.truncate(MAX_HUB_RELATIONS);
+            HubEvidence {
+                hub,
+                connectivity: HubConnectivity {
+                    schema: HUB_CONNECTIVITY_SCHEMA,
+                    directed: document.directed,
+                    edge_records,
+                    self_loop_records,
+                    relations,
+                    omitted_relation_kinds,
+                    omitted_relation_records,
+                },
+            }
+        })
+        .collect()
+}
+
+fn add_hub_relation(
+    relations: &mut BTreeMap<String, HubRelation>,
+    record: &EdgeRecord,
+    id: &str,
+    directed: bool,
+) {
+    let relation = record.string("relation");
+    let row = relations
+        .entry(relation.clone())
+        .or_insert_with(|| HubRelation {
+            relation,
+            edge_records: 0,
+            incoming_records: 0,
+            outgoing_records: 0,
+            undirected_records: 0,
+        });
+    row.edge_records += 1;
+    if directed {
+        row.incoming_records += usize::from(record.target == id);
+        row.outgoing_records += usize::from(record.source == id);
+    } else {
+        row.undirected_records += 1;
+    }
 }
 
 fn god_nodes_in(graph: &AnalysisGraph<'_>, top_n: usize) -> Vec<GodNode> {

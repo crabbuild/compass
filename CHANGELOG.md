@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Explain MCP hub candidates with node kind and bounded relation/direction
+  counts, preserving parallel records and distinguishing incident records from
+  ranking degree. Report omitted relation categories explicitly.
+
 - Require unique exact endpoints for MCP paths and return ambiguity candidates
   instead of choosing by score. Explore within the requested hop bound using
   shared work limits, prefer structural relations among equal-hop paths, and

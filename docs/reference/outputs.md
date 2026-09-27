@@ -850,6 +850,26 @@ it does not establish directed call flow or execution feasibility.
 
 ### MCP hub results
 
+Each node's additive `connectivity` object uses `compass.hub-connectivity/1`:
+
+- `directed` reports the stored graph's direction mode.
+- `edgeRecords` counts all valid incident records once each, retaining parallel
+  records. It can differ from the distinct-pair ranking degree. This includes
+  valid document containment records excluded from topology weighting.
+- `selfLoopRecords` counts incident records whose endpoints are the hub itself.
+- `relations` contains at most 16 rows, ordered by descending `edgeRecords`
+  then lexical `relation`. Each row carries `edgeRecords`, `incomingRecords`,
+  `outgoingRecords`, and `undirectedRecords`. Directed self-loops count once
+  in each direction but once in the total. An undirected graph contributes
+  only undirected counts. An absent relation remains an empty string.
+- `omittedRelationKinds` and `omittedRelationRecords` account for excluded
+  relation rows; displayed record counts plus omitted records equal the total.
+
+Text includes the stored node kind and this breakdown. These observations help
+distinguish containment, incoming use, and outgoing dependencies. They do not
+infer responsibility count, source correctness, or a god-object design defect.
+No test/production role is inferred automatically from a path or label.
+
 MCP `god_nodes` returns human-readable text and a structured projection in
 `structuredContent.result`, inside `compass.mcp.tool-result/1`:
 

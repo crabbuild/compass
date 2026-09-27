@@ -872,15 +872,140 @@ warnings. Full extraction fixture qualification remains the earlier receiver
 checkpoint: this correction changes query/MCP behavior on retained graphs,
 not extraction. Concurrent debug replays are not timing evidence.
 
+## Hub explanations and source-role census
+
+The next development diagnostic inspects the original 100 MCP hub entries,
+50 per tool. `benchmarks/agent_query/hub_role_reviews.json` records manual
+source-role judgments, exact graph IDs when recoverable from the response,
+pinned source-file hashes, anchors, and excerpts. It deliberately follows
+output inspection. It is neither preregistered design-quality evaluation nor a
+representative precision sample. Different returned sets prevent a shared
+accuracy score.
+
+The independent `hub_evidence_audit.py` verifies the original capture and source
+provenance. It checks 87 reviewed identities against the pinned source; the 13
+ambiguous Graphify labels remain unknown. This verifies where the judgments
+came from, not that a source hash can prove a semantic role or design judgment.
+The original report is `hub-source-role-audit-01.json`.
+
+| Reviewed role among returned hubs | Compass | Graphify |
+| --- | ---: | ---: |
+| Production type declaration | 21 | 19 |
+| Production callable | 12 | 4 |
+| Test helper callable | 6 | 5 |
+| Test suite type | 0 | 3 |
+| Whole production source module | 6 | 0 |
+| Whole test module | 4 | 0 |
+| Example callable | 1 | 1 |
+| Benchmark callable | 0 | 1 |
+| Generic implementation target | 0 | 2 |
+| Trait implementation block | 0 | 2 |
+| Unidentified from returned label | 0 | 13 |
+
+Types include classes, structs, aliases, interfaces, and public testing API
+types. “Production” distinguishes the source declaration from repository test
+helpers, not its release stability or architectural importance. All ten
+Compass Zod results are whole-file module nodes, four spanning test files.
+These can be useful file navigation hubs, but do not identify ten god objects.
+Graphify's Axum `S` and `T` entries are generic implementation subjects, and
+`Router<S>` and `Bytes` refer to trait implementation blocks rather than new
+type declarations. Earlier source diagnostics establish two wrong references
+to `S`; this census does not extrapolate their frequency.
+
+### Exposing why a hub is connected
+
+Both original MCP hub responses primarily state degree. Compass now adds
+stored node kind and a bounded relation/direction breakdown, in text and
+`connectivity` with schema `compass.hub-connectivity/1`. Analysis lives in
+`compass-graph`; MCP projects it. Eligibility, degree, and ranking stay the
+same. Undirected ranking metadata is corrected to name its existing policy.
+The summary counts all valid incident records, including parallel records,
+separately from distinct-pair degree. Directed self-loops count once in the
+incident total and once per direction. Undirected records receive no invented
+arrow. Sixteen relation categories are shown by descending record count then
+name, with omitted category and record totals.
+
+Concrete observations from the retained Compass graphs illustrate why this
+matters:
+
+- Cobra `Command`: 525 incident records, including 346 incoming references and
+  154 outgoing containment records. Its degree is 443, a different quantity.
+- Flask `Flask`: 110 records include 38 outgoing containment and 34 incoming
+  references; several other relation kinds contribute too.
+- Gson `JsonReader`: 530 records include 240 incoming instantiations and 97
+  outgoing containment records.
+- Zod `to-json-schema.test`: 1,156 records include 789 containment, 321
+  references, and 46 calls, all outgoing. It is a whole test module.
+- Axum `.route()`: 584 records include 306 incoming calls, one outgoing call,
+  and 272 incoming `tests` records. A high degree does not mean this method
+  makes hundreds of outgoing calls.
+
+These counts are observations about the stored graph, not independently
+verified counts of source occurrences or evidence of excessive responsibility.
+The previous neighbor interface groups by neighbor and can omit parallel
+relations; a summary should not be reconstructed from that grouped view.
+The native implementation uses complete stored records. No automatic
+production/test role classifier or god-object judgment is introduced.
+
+The summary auditor separately checks numeric types, direction, self-loops,
+parallel records, ordering, omission accounting, and each hub's text block.
+Original Compass and Graphify responses have no such summary. That absence is
+reported as unavailable, not as a wrong answer or lack of another workflow.
+Graphify's neighbor and CLI interfaces remain available; this diagnostic does
+not measure their multi-step explanation cost or quality.
+
+### Hub explanation replay and verification
+
+`mcp-hub-evidence-01` completes all 58 original shared MCP questions on the
+same graphs. All original graph-consistency judgments and all returned hub
+identity/degree/rank records remain unchanged. The independently verified
+`hub-evidence-audit-01.json` checks **50/50 Compass connectivity summaries and
+50/50 matching text blocks**. Graphify's direct hub responses offer no such
+summary; this is recorded as unavailable, not 50 incorrect explanations.
+The latest source-role check (`hub-source-role-audit-02.json`) also verifies
+each hub RPC's raw request and response. Graphify's stored graphs are
+undirected, so their oracle record counts remain undirected; the summary does
+not infer semantic directions from their serialized endpoints.
+
+For the same five Compass top-ten hub responses, text grows from 9,136 to
+26,620 bytes and captured response-wire bytes grow from 24,146 to 75,299.
+Graphify remains at 1,489 text / 1,989 wire bytes. This is additional evidence
+with a payload cost, not an efficiency win or a controlled multi-step workflow
+comparison. Initialization traffic is retained separately. Ranking sets differ
+between products, and these runs do not establish comparative design quality.
+
+The frozen executable in `hub-evidence-provenance` has SHA256
+`5382b51b86ab76032173a17e638a3ad525600ec1726364d3244edddb7abd2c19`;
+the collector records the same executable digest. Base commit, source patch,
+and changed-source hashes are retained. Native verification passes **1,162
+tests, zero failed, two ignored**, covering the full workspace library/binary
+baseline plus `analyze_coverage`, `coverage_paths`, and `compass_product`.
+This is a different integration selection from the prior path checkpoint,
+whose larger count also included CLI/output path suites. New regressions
+cover parallel edges, self-loops, missing endpoints, directed/undirected
+records, permutation stability, top-zero, relation omission totals, text
+projection, and actual MCP transport. Workspace and selected integration
+Clippy pass with warnings denied. All **93 Python tests**, formatting, diff
+checks, and product boundary pass. Logs: `hub-evidence-native-04.log`,
+`hub-evidence-clippy-03.log`, and `hub-evidence-python-03.log`.
+
+Earlier development logs preserve a test fixture type mismatch and an expected
+legacy-kind mismatch (`symbol`, not `unknown`); both were corrected before the
+final checks. Existing core `unused_mut` and macOS linker unwind warnings remain
+in test builds. The full extraction fixture gate remains the prior receiver
+checkpoint: no extractor, publication, or viewer format changes are made here.
+God-object detection, community cohesion, source-edge precision, and explanation
+usefulness on held-out tasks remain open.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
-2. Expand the now-identifiable hubs into source-reviewed role and design
-   judgments, including containment-dominated modules and generic reference
-   targets. Evaluate cluster responsibilities and cross-community connections
-   separately from graph consistency.
+2. Use the source-role census and connectivity breakdowns to review actual
+   responsibilities and source-edge correctness, including containment-heavy
+   modules and generic reference targets. Evaluate cluster responsibilities
+   and cross-community connections separately from graph consistency.
 3. Extend the development navigation-path judgments to directed call paths,
    longer walks, parallel source occurrences, broader ambiguity/unreachable
    cases, and real-repository work exhaustion. A negative or limit outcome
