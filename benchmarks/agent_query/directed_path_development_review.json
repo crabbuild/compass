@@ -1,0 +1,743 @@
+{
+  "schema": "compass.directed-path-development-review/1",
+  "scope": "Source-reviewed directed two-to-four-call paths across five existing development repositories. Registered before executing these new endpoint pairs. Prior graphs/outputs and fixes have been observed; not held-out evaluation or population precision.",
+  "registrationCommit": "bc4374a7c8161fc342cf12a6d1508bc7fb1f2994",
+  "registrationSha256": "749eaca9649b1975f099445b4eab7a17259b4578a01747aaa7182a622d0282e6",
+  "runSha256": "319e4cf5dbed87efa4b4119c7238fa77c610a2d52d9530782751f11969260b83",
+  "collectorSha256": "c9504a93daa4e18b4cab590ca8a35f6e5499bb15e4fa3b0fe5345a10dca79605",
+  "auditorSha256": "643f7dc1eee7329c8ebf54e6e71fcc60266392eb713179fb4336076a1a9a1d74",
+  "summary": {
+    "compass": {
+      "sourceSupportedCallPaths": 2,
+      "literalFrozenOccurrenceSites": 1,
+      "positiveRequests": 5
+    },
+    "graphify": {
+      "sourceSupportedCallPaths": 2,
+      "literalFrozenOccurrenceSites": 2,
+      "positiveRequests": 5
+    }
+  },
+  "results": [
+    {
+      "question": "chi-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"MethodFunc\" matched 2 nodes",
+          "nodeId": null,
+          "path": null
+        }
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "route length differs from reviewed witness",
+        "Returned route mixes references and method membership; it is not a directed call chain."
+      ],
+      "nodes": [],
+      "steps": []
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [],
+      "nodes": [
+        {
+          "id": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "source": {
+            "file": "src/click/utils.py",
+            "startByte": 11486,
+            "endByte": 13132,
+            "startLine": 381,
+            "startColumn": 0,
+            "endLine": 427,
+            "endColumn": 12
+          },
+          "name": "open_file()"
+        },
+        {
+          "id": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 11423,
+            "endByte": 14244,
+            "startLine": 374,
+            "startColumn": 0,
+            "endLine": 452,
+            "endColumn": 40
+          },
+          "name": "open_stream()"
+        },
+        {
+          "id": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 9593,
+            "endByte": 9800,
+            "startLine": 319,
+            "startColumn": 0,
+            "endLine": 323,
+            "endColumn": 17
+          },
+          "name": "get_binary_stdin()"
+        },
+        {
+          "id": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4815,
+            "endByte": 5484,
+            "startLine": 176,
+            "startColumn": 0,
+            "endLine": 191,
+            "endColumn": 15
+          },
+          "name": "_find_binary_reader()"
+        },
+        {
+          "id": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4230,
+            "endByte": 4529,
+            "startLine": 154,
+            "startColumn": 0,
+            "endLine": 160,
+            "endColumn": 55
+          },
+          "name": "_is_binary_reader()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:b4f41add3eb26a6b6699864bed02e49dd24595a669501b1f2fbd44140601556e",
+          "source": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "target": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/utils.py",
+            "startByte": 12980,
+            "endByte": 12991,
+            "startLine": 422,
+            "startColumn": 22,
+            "endLine": 422,
+            "endColumn": 33
+          },
+          "sourceBytes": "open_stream",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:b3d1f4a591b7a358eb841388e97117bbd4a2377817aa4014c2b9f5fed9759bc5",
+          "source": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "target": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 12085,
+            "endByte": 12101,
+            "startLine": 392,
+            "startColumn": 19,
+            "endLine": 392,
+            "endColumn": 35
+          },
+          "sourceBytes": "get_binary_stdin",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:ab477fcd547ac3d833934602fc1d5871a98378031c63dc125aeaebbf5e84cb34",
+          "source": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "target": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 9644,
+            "endByte": 9663,
+            "startLine": 320,
+            "startColumn": 13,
+            "endLine": 320,
+            "endColumn": 32
+          },
+          "sourceBytes": "_find_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:0ed10b05deb50320b392d13c0e611c3732abfc5d77e1267e3bb744afc3596349",
+          "source": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "target": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 5399,
+            "endByte": 5416,
+            "startLine": 188,
+            "startColumn": 27,
+            "endLine": 188,
+            "endColumn": 44
+          },
+          "sourceBytes": "_is_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": false,
+          "acceptedAlternateOccurrences": [
+            {
+              "file": "src/click/_compat.py",
+              "line": 188,
+              "text": "if buf is not None and _is_binary_reader(buf, True):",
+              "reason": "Same reviewed caller and callee, second direct call occurrence. Source window was read before execution; selected alternate explicitly adjudicated after output. Frozen site at line 181 remains unchanged."
+            }
+          ]
+        }
+      ],
+      "responseDiagnostics": []
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "diagnostics": [],
+      "nodes": [
+        "src_click_utils_open_file",
+        "src_click_compat_open_stream",
+        "src_click_compat_get_binary_stdin",
+        "src_click_compat_find_binary_reader",
+        "src_click_compat_is_binary_reader"
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)",
+            "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 392,
+            "text": "return get_binary_stdin(), False",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 320,
+            "text": "reader = _find_binary_reader(sys.stdin)",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 181,
+            "text": "if _is_binary_reader(stream, False):",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        }
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"isValid\" matched 2 nodes",
+          "nodeId": null,
+          "path": null
+        },
+        {
+          "code": "incomplete_coverage",
+          "message": "Published graph coverage is incomplete: partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap",
+          "nodeId": null,
+          "path": null
+        }
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "expected exactly one rendered path header"
+      ],
+      "nodes": [],
+      "steps": []
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"kindOf\" matched 5 nodes",
+          "nodeId": null,
+          "path": null
+        },
+        {
+          "code": "incomplete_coverage",
+          "message": "Published graph coverage is incomplete: partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap",
+          "nodeId": null,
+          "path": null
+        }
+      ]
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "diagnostics": [],
+      "nodes": [
+        "src_utils_kindof_kindof",
+        "src_utils_kindof_minikindof",
+        "src_utils_kindof_ctorname"
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 66,
+            "text": "typeOfVal = miniKindOf(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        }
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "diagnostics": [],
+      "nodes": [
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 29143,
+            "endByte": 30869,
+            "startLine": 840,
+            "startColumn": 4,
+            "endLine": 882,
+            "endColumn": 5
+          },
+          "name": ".handle_entry()"
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34443,
+            "endByte": 34874,
+            "startLine": 961,
+            "startColumn": 4,
+            "endLine": 971,
+            "endColumn": 5
+          },
+          "name": ".follow()"
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34880,
+            "endByte": 35480,
+            "startLine": 973,
+            "startColumn": 4,
+            "endLine": 989,
+            "endColumn": 5
+          },
+          "name": ".check_loop()"
+        },
+        {
+          "id": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "source": {
+            "file": "src/error.rs",
+            "startByte": 6769,
+            "endByte": 7076,
+            "startLine": 184,
+            "startColumn": 4,
+            "endLine": 196,
+            "endColumn": 5
+          },
+          "name": ".from_loop()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:db51772e6e2a0f689b69f1447740b96e340679a37df7c50bfc727ffe85a06cf4",
+          "source": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "target": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 29337,
+            "endByte": 29348,
+            "startLine": 845,
+            "startColumn": 25,
+            "endLine": 845,
+            "endColumn": 36
+          },
+          "sourceBytes": "self.follow",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:9d2cbc7e60565250bba8045728a1451893838b7f1b8d26084a542957c88557c3",
+          "source": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "target": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 34811,
+            "endByte": 34826,
+            "startLine": 968,
+            "startColumn": 12,
+            "endLine": 968,
+            "endColumn": 27
+          },
+          "sourceBytes": "self.check_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:32f0ce77ab676891029891f1d836f95f3e4c8458dcee2b5d51f7128b8ad32bcf",
+          "source": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "target": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 35294,
+            "endByte": 35310,
+            "startLine": 981,
+            "startColumn": 27,
+            "endLine": 981,
+            "endColumn": 43
+          },
+          "sourceBytes": "Error::from_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        }
+      ],
+      "responseDiagnostics": []
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "diagnostics": [
+        "route length differs from reviewed witness",
+        "Returned route mixes references and method membership; it is not a directed call chain."
+      ],
+      "nodes": [],
+      "steps": []
+    }
+  ],
+  "reverseProbes": {
+    "compass": {
+      "ambiguous": 3,
+      "boundedDirectionMismatch": 2,
+      "pathsReturned": 0
+    },
+    "graphify": {
+      "noDirectedPathReported": 5,
+      "pathsReturned": 0
+    },
+    "judgment": "No global unreachability/absence credit. Source witnesses support forward chains only; incomplete graph coverage and bounds remain."
+  },
+  "limits": [
+    "Selected short-name development requests, not held-out or representative precision.",
+    "One Compass Click path selects the second source-supported call at line 188 rather than the frozen site at 181; preserve both literal-site agreement and explicit alternate-occurrence adjudication.",
+    "Compass ambiguity refusals are safe but remain failures to complete these positive path requests.",
+    "Graphify Chi and WalkDir return mixed-relation graph routes rather than requested call chains. This does not by itself prove those structural relationships false.",
+    "Graphify jsoup returns no route; no success inferred from process exit 0.",
+    "Queries reused hash-verified graphs and overlapped fixture qualification; no extraction or timing ranking.",
+    "God-object responsibilities, community quality, broad precision and overall superiority remain unproven."
+  ],
+  "artifactBase": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/directed-path-development",
+  "tools": [
+    {
+      "binary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/export-binding-resolution/compass",
+      "binarySha256": "04eab05bd5bbc94f3f0f86580bdd3de9950599bc9e548b8f8ba95791b8baa0c9",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30"
+    },
+    {
+      "binary": "/Users/haipingfu/.local/bin/graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67"
+    }
+  ],
+  "graphs": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/chi/compass/compass-out/snapshots/snapshot-1790482768478384000-36008-0/graph.json",
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/chi/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/click/compass/compass-out/snapshots/snapshot-1790482790210688000-36710-0/graph.json",
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/click/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/jsoup/compass/compass-out/snapshots/snapshot-1790482841846079000-37569-0/graph.json",
+      "compassGraphSha256": "d69152cc8900afc3f11756b8ce841adbed98ae6663fee4ebc64957974c8f860c",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/jsoup/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/redux/compass/compass-out/snapshots/snapshot-1790482928474073000-39900-0/graph.json",
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/redux/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/walkdir/compass/compass-out/snapshots/snapshot-1790482954351623000-40155-0/graph.json",
+      "compassGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/walkdir/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "artifactSha256": {
+    "audit.py": "643f7dc1eee7329c8ebf54e6e71fcc60266392eb713179fb4336076a1a9a1d74",
+    "auditor-correction.txt": "e961f81bc87f3c90c6aa09198f995edbc7e768f7fa71ad672bee1e1e0c4f237f",
+    "collect.log": "0dde3a629ee81c6f08e2236b7dd501101df56420709d8d803ef1659af3859077",
+    "collect.py": "c9504a93daa4e18b4cab590ca8a35f6e5499bb15e4fa3b0fe5345a10dca79605",
+    "raw/chi-directed-chain.forward.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/chi-directed-chain.forward.compass.stdout": "59ef2c10741f173a87455c8965b1776927f63f5580a27c7158600bcf7b7125a1",
+    "raw/chi-directed-chain.forward.graphify.stderr": "b9679c2a8cf75d4cc437463b970b844578b9bc39856f27321544066d264b8547",
+    "raw/chi-directed-chain.forward.graphify.stdout": "8edef8069e12a02a1030474a8c30010ca21b329e68b1b1473b9d6188fd4e01c8",
+    "raw/chi-directed-chain.reverse.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/chi-directed-chain.reverse.compass.stdout": "59ef2c10741f173a87455c8965b1776927f63f5580a27c7158600bcf7b7125a1",
+    "raw/chi-directed-chain.reverse.graphify.stderr": "54480bb6ec43a2bd3bf6cd010d2581331d3571cb475b8a1459a52a54e19d921c",
+    "raw/chi-directed-chain.reverse.graphify.stdout": "bf55b319e6afcbb676ac9162af11f385f2de0dbdee03a41ffbb0603deb839273",
+    "raw/click-directed-chain.forward.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/click-directed-chain.forward.compass.stdout": "dda553f1f6b9def88d52525abd02700e133855379236f516c945d95e2083c9f7",
+    "raw/click-directed-chain.forward.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/click-directed-chain.forward.graphify.stdout": "09dbe2d14d81374e08ee0dfa17a74bea50af43d82a178c03707932a6d3cc23ac",
+    "raw/click-directed-chain.reverse.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/click-directed-chain.reverse.compass.stdout": "ff7a885fde7acd12e5d98961662a6cc5cbbaed790b6ed0722559f81393b067d1",
+    "raw/click-directed-chain.reverse.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/click-directed-chain.reverse.graphify.stdout": "50841c22539e5ae7ffcfca37dbdb33e42f4f35cd6de99078661a70aefa6c746a",
+    "raw/jsoup-directed-chain.forward.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/jsoup-directed-chain.forward.compass.stdout": "081a1fcf19bc562c2adfd6d204ac91c6548e1d41aa7f966d88f4cfde5fc6feab",
+    "raw/jsoup-directed-chain.forward.graphify.stderr": "ad8b759ce936bd906bee37c4c7bf7f8c8bb7edd4473f01eaff2c5e71df608d9b",
+    "raw/jsoup-directed-chain.forward.graphify.stdout": "f196019e0433e931b43c8c17c497546df25309a5c0152cbef16e758bc28ffad8",
+    "raw/jsoup-directed-chain.reverse.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/jsoup-directed-chain.reverse.compass.stdout": "081a1fcf19bc562c2adfd6d204ac91c6548e1d41aa7f966d88f4cfde5fc6feab",
+    "raw/jsoup-directed-chain.reverse.graphify.stderr": "92f295833bb3dba142423fd2108b1e6b8dc244633f1de2b829818dd37ee9ca94",
+    "raw/jsoup-directed-chain.reverse.graphify.stdout": "0751dfab571e5ea79afb8511314fd1aab75bc07edc663306de6df401fef38f43",
+    "raw/redux-directed-chain.forward.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/redux-directed-chain.forward.compass.stdout": "fc4eaeb2e995696265d896adbdcc842836b63eadd7c6ce90d1d57791095192a8",
+    "raw/redux-directed-chain.forward.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/redux-directed-chain.forward.graphify.stdout": "64ed32a81d99e21609574da269fa2c7251bd772cc1ab42a5bf03f5041434d10d",
+    "raw/redux-directed-chain.reverse.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/redux-directed-chain.reverse.compass.stdout": "fc4eaeb2e995696265d896adbdcc842836b63eadd7c6ce90d1d57791095192a8",
+    "raw/redux-directed-chain.reverse.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/redux-directed-chain.reverse.graphify.stdout": "1b38644d467dabd82e3d08b865a373dfcb7fe718bcd7508cb24edab638a2d38f",
+    "raw/walkdir-directed-chain.forward.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/walkdir-directed-chain.forward.compass.stdout": "26dbb696599bb3b5f0e320a57166cc484c041eaabeece8083296f6468c89d38c",
+    "raw/walkdir-directed-chain.forward.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/walkdir-directed-chain.forward.graphify.stdout": "ff10254f943d3c2674a31b46397ebe8129a167ad45fad18ba713e948db5dff95",
+    "raw/walkdir-directed-chain.reverse.compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/walkdir-directed-chain.reverse.compass.stdout": "0e2a5a7d8694d862c3c06c5b8dda8a61218376583b3a476d1a0ec40e6894d401",
+    "raw/walkdir-directed-chain.reverse.graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "raw/walkdir-directed-chain.reverse.graphify.stdout": "9fa47e30f54e7b6fec501b25cca5cfdec2a28ad832fac0c3033616dd7c4eea73",
+    "registration.json": "749eaca9649b1975f099445b4eab7a17259b4578a01747aaa7182a622d0282e6",
+    "run.json": "319e4cf5dbed87efa4b4119c7238fa77c610a2d52d9530782751f11969260b83"
+  },
+  "execution": {
+    "requests": 20,
+    "nonzeroExits": 0,
+    "timeouts": 0,
+    "outputLimits": 0
+  },
+  "reverseObservations": [
+    {
+      "question": "chi-directed-chain",
+      "tool": "compass",
+      "diagnostics": [
+        "ambiguous_match"
+      ],
+      "truncated": false,
+      "paths": 0
+    },
+    {
+      "question": "chi-directed-chain",
+      "tool": "graphify",
+      "message": "No directed path found between 'longestPrefix' and 'MethodFunc'. Re-run with --undirected to search ignoring edge direction.",
+      "paths": 0
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "compass",
+      "diagnostics": [
+        "direction_mismatch"
+      ],
+      "truncated": false,
+      "paths": 0
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "graphify",
+      "message": "No directed path found between '_is_binary_reader' and 'open_file'. Re-run with --undirected to search ignoring edge direction.",
+      "paths": 0
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "compass",
+      "diagnostics": [
+        "ambiguous_match",
+        "incomplete_coverage"
+      ],
+      "truncated": false,
+      "paths": 0
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "graphify",
+      "message": "No directed path found between 'copySafeNodes' and 'isValid'. Re-run with --undirected to search ignoring edge direction.",
+      "paths": 0
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "compass",
+      "diagnostics": [
+        "ambiguous_match",
+        "incomplete_coverage"
+      ],
+      "truncated": false,
+      "paths": 0
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "graphify",
+      "message": "No directed path found between 'ctorName' and 'kindOf'. Re-run with --undirected to search ignoring edge direction.",
+      "paths": 0
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "compass",
+      "diagnostics": [
+        "direction_mismatch"
+      ],
+      "truncated": false,
+      "paths": 0
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "graphify",
+      "message": "No directed path found between 'from_loop' and 'handle_entry'. Re-run with --undirected to search ignoring edge direction.",
+      "paths": 0
+    }
+  ]
+}

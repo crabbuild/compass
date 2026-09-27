@@ -12,7 +12,7 @@ finding. A focused text-recall score cannot establish all of those properties.
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Source-first fd pair/occurrence audit added; receiver-shadowing correction has native regressions; fd loop recall remains open |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-repository development suites plus a separately selected source-first fd sample; neither establishes representative accuracy |
 | Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Fresh paired fd answers expose a Compass callees miss and a Graphify wrong-owner edge hidden by the text oracle |
-| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Existing path tests/suites are useful but do not prove real-repository path precision |
+| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Five registered real-source directed call chains yield 2/5 source-supported answers per tool; ambiguity, relationship restrictions and broader path quality remain open |
 | Fair efficiency comparison | Same successful questions, repeated timings, token methodology and complete environment provenance | Paired token aggregation exists; bytes/4 remains an estimate |
 
 “God mode” is interpreted here as the existing `god_nodes` hub analysis.
@@ -1620,6 +1620,55 @@ qualification is running; the previous Java pass does not qualify this change.
 No MCP rerun, full-answer precision, community cohesion, god-object quality,
 directed/long-path, latency, or general superiority claim follows. This reused
 panel remains development evidence.
+
+#### Directed call-path development comparison
+
+[Five source-reviewed chains](../../benchmarks/agent_query/directed_path_development_registration.json)
+were committed as `bc4374a7` before their first execution: Chi registration to
+radix-prefix matching (four calls), Click file opening to binary-reader testing
+(four), jsoup validation to safe-node copying (two), Redux kind detection to
+constructor-name inspection (two), and WalkDir entry handling to loop-error
+creation (three). Both tools receive identical short endpoint names and the
+same verified stored graphs. Compass uses `node` with depth eight and one path;
+Graphify uses `path --directed`. Each command has the same external 60-second
+deadline and 16 MiB capture ceiling. Their internal work limits differ.
+
+All 20 requests completed: five positive requests and five reverse-direction
+probes per tool. Positive **source-supported directed call chains score 2/5
+for each tool**, with different failures:
+
+| Repository | Compass | Graphify |
+| --- | --- | --- |
+| Chi | Refuses interface/implementation name ambiguity | Returns a five-hop mixed-reference/method route, not a call chain |
+| Click | Returns the four-call source chain | Returns the four-call source chain |
+| jsoup | Refuses two genuine `isValid` declarations | Reports no directed route |
+| Redux | Refuses function/import/module name ambiguity | Returns the two-call source chain |
+| WalkDir | Returns the three-call source chain | Returns a seven-hop mixed-reference/method route, not a call chain |
+
+The Compass Click path selects the second `_is_binary_reader` occurrence at
+line 188, while the frozen witness names line 181. Both occurrences were visible
+in the source window reviewed before execution. The alternate is explicitly
+adjudicated after output; the original witness is unchanged. Literal frozen
+occurrence-site agreement is **Compass 1/5, Graphify 2/5**. The separate 2/5
+source-supported figure accepts this valid occurrence under the registered
+policy and does not claim complete occurrence recall.
+
+Compass's ambiguity refusals are safe but do not complete the requested positive
+paths. Graphify's mixed routes do not satisfy a call-chain request; this alone
+does not establish that every structural relationship in those routes is false.
+Neither tool returns a reverse path. Compass reports three ambiguities and two
+bounded direction mismatches; Graphify reports five missing directed paths.
+These receive **no global unreachability credit**. Forward source witnesses
+cannot prove global reverse absence.
+
+The [review](../../benchmarks/agent_query/directed_path_development_review.json)
+retains the executable/graph/registration hashes, raw outputs, identities,
+source spans, alternate-occurrence adjudication, and all failures. Its first
+audit attempt stopped because it assumed Rust occurrences covered only the
+terminal method name; the corrected check requires the exact qualified source
+expressions. No graph, request, or witness changed. This is selected development
+evidence on reused graphs, with concurrent fixture qualification and no speed
+claim. It establishes no directed-navigation lead.
 
 ## Next evidence to collect
 
