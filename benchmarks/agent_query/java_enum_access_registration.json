@@ -1,0 +1,65 @@
+{
+  "schema": "compass.java-enum-access-registration/1",
+  "scope": "Complete frozen compiler-backed jsoup census after enum-reference corrections. Known development repository and already inspected misses; not held-out, independent human review, whole-graph precision or god-object classification.",
+  "baselineBranchCommit": "f86969df",
+  "source": {
+    "repository": "jhy/jsoup",
+    "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+    "sourceRoot": "src/main/java",
+    "files": 88,
+    "sourceRegistrationSha256": "6088df9f4cf420437a71ca06324bbe80817ed73142eb61c5686d8d3da36180af"
+  },
+  "oracle": {
+    "path": "jsoup-java-field-oracle-02/capture-final/bindings.stdout",
+    "sha256": "4596b24d67fab7f728bc5dfe54e9b381fc42d411b9cb9042646cffbed420e95c",
+    "manifestSha256": "6b9532e36846aa7c2df0ac799c1c9f01dbf8c5061dd3adfa5a0fbc8e8bb64d3a",
+    "auditorSha256": "2ced23208ab1171d33ec00a6385fce34367a87c67d2cadef249650a1b8264e9b",
+    "release": "8",
+    "internalOrdinaryFieldReferences": 3785,
+    "internalEnumReferences": 529,
+    "nonSourceCategories": "Retain external fields, array lengths and class literals separately, as in the unchanged oracle."
+  },
+  "baselineBinary": {
+    "path": "sql-regex-cache-01/compass-candidate-release",
+    "sha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+    "productionCommit": "9df5dcf32f9581c1d9eeb299eb2123d807afe60c"
+  },
+  "candidate": "Build and freeze a release candidate after native regression/gates. Record exact production sources, commit, manifests, build settings and binary hash before extraction. No package version bump.",
+  "comparison": {
+    "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+    "originalCompassGraphSha256": "2a9216926b1c5dfc82e4f88df0cce24a7a14ac67aa2a350158eff39018145314",
+    "originalReviewSha256": "db2e7b95b95b7a156f0f8fe5ea614d4c92b6acf1123cfd4c9b904b1e0b087195",
+    "commandTemplate": [
+      "<frozen-compass-binary>",
+      "extract",
+      "<complete-pinned-jsoup-source>",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<fresh-output>"
+    ],
+    "order": [
+      "baseline",
+      "candidate"
+    ],
+    "graphBoundBytes": 268435456,
+    "streamBoundBytes": 16777216,
+    "timeoutSeconds": 1200,
+    "sourcePolicy": "Read-only pinned clean repository; entire original extraction scope, fresh outputs for each frozen release binary. The source oracle only scores its registered 88-file Java 8 cohort; retain other graph records separately. Preserve all failures and graph omission warnings. Timing is operational only; no performance conclusion from these two observations."
+  },
+  "scoring": [
+    "Use the unchanged compiler capture, UTF-16 to UTF-8 conversion, exact target declaration and source owner joins. Retain the complete 3785 ordinary plus 529 enum-reference denominator.",
+    "Inventory every returned field/enum contact in the registered source files, including extra, wrong, ambiguous, unanchored and unmapped contacts. Any unsupported new contact requires source review and a correction before claiming precision.",
+    "Run the fresh pre-enum baseline against the same frozen oracle; compare its whole graph to the original preserved Compass graph and disclose differences instead of assuming equality. Preserve all original results.",
+    "Report declaration joins, exact target-plus-owner occurrence recall, every miss and all precision failures separately for ordinary fields and enum constants; Graphify keeps its frozen environment and graph.",
+    "Compare whole graph additions/removals, identities, edge direction/multiplicity/provenance and omission warnings; do not infer functional community quality from graph changes.",
+    "Repeat complete verification and compare report bytes. Repeated verifier agreement is consistency evidence, not an independent source oracle."
+  ],
+  "limitations": [
+    "This is one known Java configuration; general cross-language superiority remains unproven.",
+    "The change was motivated by observed missed enum constants. All scores are development results, even though this follow-up protocol precedes candidate extraction.",
+    "No authored explanation, runtime feasibility, functional community or god-object classification claim follows."
+  ]
+}
