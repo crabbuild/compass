@@ -2847,5 +2847,13 @@
     "scorerSha256": "efecb4fe026e464addb385c312766b5f58fbf8b4cb8b47eb3d43409602511202",
     "verifiedToolCalls": 18,
     "verifierSha256": "1a561ceede49bc03b5de7d8dc240814afbb3f95f085aeb70e652ae93f6f29190"
+  },
+  "coverageDisclosure": {
+    "graphifyCloudStackSkippedSqlFiles": 119,
+    "missingOptionalDependency": "tree_sitter_sql",
+    "otherFilesWithSyntaxErrors": 3,
+    "sourceLog": "mlcq-god-audit-01/graphs/apache-cloudstack/graphify.stderr",
+    "sourceLogSha256": "5cc985f15fbdf37e6b6af1b427f317f0c8efba81984873e626ce209c149e73dc",
+    "interpretation": "The frozen Graphify installation reported skipping all SQL files and partially extracting other files with syntax errors. Whole-repository request scope did not yield equal emitted language coverage. No environment, graph, admission outcome or query score is changed by this disclosure."
   }
 }

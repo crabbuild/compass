@@ -55,9 +55,12 @@ def audit_direct(call, graph, tool, seed, target, *, relation_filter="calls"):
             or envelope.get('transportTruncation', {}).get('truncated') is not False):
         return result
     body = envelope.get('result')
+    # The native typed response uses a string even when the request omits
+    # relation_filter; an empty string selects every relation.
+    expected_filter = '' if relation_filter is None else relation_filter
     if (not isinstance(body, dict) or body.get('schema') != 'compass.query.neighbors/1'
             or body.get('truncated') is not False or body.get('directionBasis') != 'stored-endpoints'
-            or body.get('relationFilter') != relation_filter):
+            or body.get('relationFilter') != expected_filter):
         return result
     nodes = {n['id']: n for n in graph['nodes']}
     if body.get('seed') != nodes.get(seed) or body.get('graphDirected') is not graph.get('directed', False):

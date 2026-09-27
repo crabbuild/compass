@@ -838,7 +838,8 @@ established god-object classifier. The original extraction and artifact limits
 remain part of the outcome, including failures.
 
 `mlcq_god_audit_review.json` preserves the first bounded run: the frozen
-unoptimized Compass development binary timed out on CloudStack and exceeded the registered graph-artifact limit on Eclipse.
+unoptimized Compass development binary timed out on CloudStack and exceeded
+the registered graph-artifact limit on Eclipse.
 Graphify admitted both graphs but retrieved none of the four positive or four
 `none` classes in its top 100. All eight existed at their exact source anchors
 and resolved through public queries. Eighteen raw tool request/response pairs were verified;
@@ -857,3 +858,19 @@ small-file timing regressions and the distinction between complete old/new graph
 equality and candidate-only repeatability. No release or Graphify speed claim
 follows. Full scope and validation are in the
 [code-graph audit](../../docs/implementation/code-graph-intelligence-audit-2026-09-26.md).
+
+
+## Declared larger-artifact Blob diagnostic
+
+`mlcq_admission_followup_review.json` reports the same eight reviewed classes
+under the separately registered 1 GiB graph cap. Compass CloudStack still times
+out; Eclipse is admitted with its 62-edge omission warning. Neither tool returns
+either Eclipse positive class in the top 100. Keep unavailable classes distinct
+from nonreturned classes and classifier decisions.
+
+The report preserves the correction of an unfiltered-neighbor auditor defect,
+all 27 raw tool calls, repeated verification and 238 passing benchmark tests.
+It also discloses Graphify's logged omission of all 119 CloudStack SQL files
+because its optional parser dependency was absent. Original graphs and outcomes are unchanged.
+`sql_regex_cache_registration.json` separately freezes the next performance
+diagnosis; it is not a completed optimization result.

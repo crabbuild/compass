@@ -8,7 +8,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. Eight externally rated Java Blob classes are source-reviewed; original Compass ranking captures are unavailable under registered limits, and Graphify retrieves 0/4 positives. Larger-artifact follow-up is pending; classifier quality remains unproven. |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. In the declared larger-artifact Blob follow-up, Compass retrieves neither of two admitted positive classes, with two positives still unavailable; Graphify retrieves 0/4. The original failures remain unchanged. Classifier quality remains unproven. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The compiler-backed jsoup census verifies 3,047/3,785 ordinary field occurrences for Compass versus 0 for Graphify; both miss all 529 enum-constant occurrences. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
@@ -18,7 +18,8 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
 
 Current evidence summaries are in the
-[Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
+[original Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
+[larger-artifact follow-up](../../benchmarks/agent_query/mlcq_admission_followup_review.json),
 [Java field census](../../benchmarks/agent_query/java_real_field_review.json),
 [paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
 [shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json)
@@ -3668,6 +3669,12 @@ files for CloudStack and 6,162 for Eclipse; its admitted graphs contain
 93,793/70,420 nodes and 340,129/258,146 edges, respectively. These counts are
 coverage diagnostics, not correctness scores.
 
+The retained Graphify CloudStack stderr also discloses that **all 119 SQL files
+were skipped because `tree_sitter_sql` was not installed**, and three other files
+had syntax errors. The frozen installation and graph remain unchanged. The
+whole-repository request did not yield equal emitted language coverage, so its
+operational timing cannot isolate comparable extraction work.
+
 ### Native ranking and separate source-assisted diagnosis
 
 The registered request is `god_nodes(top_n=100)`. At each cutoff 10, 50 and 100:
@@ -3781,3 +3788,81 @@ whole-repository timeout and artifact-admission failures remain unchanged. The
 registered whole-CloudStack follow-up and separately declared 1 GiB Blob query
 diagnostic are additional work; sample timing and graph repeatability cannot
 stand in for their outcomes or for superiority over Graphify.
+
+## Larger-artifact Blob follow-up: ranking misses remain
+
+The separately registered follow-up raises the graph-artifact limit to 1 GiB
+for both tools. It preserves the eight source-reviewed classes, native
+`god_nodes(top_n=100)` request, cutoffs 10/50/100, 120-second MCP request limit,
+16 MiB response limit and 64 MiB session cap. The larger limit was declared after
+observing the original failures and Graphify outputs; this is development
+evidence. It does not replace the original 256 MiB protocol.
+
+The SQL-prefix candidate's whole CloudStack extraction also timed out, at
+**1,200.448 seconds**, exit -9, with no admitted graph. Its wall time includes
+a recorded two-second process sample. The frozen unoptimized binary therefore
+remains unavailable for CloudStack. The sample shows repeated fixed SQL regex
+compilation in `add_access_matches`; source inspection confirms the patterns
+are compiled per statement. A separate release comparison is registered before
+any cache implementation or measurement. Neither this profile nor the completed
+SQL samples prove that the full-repository bottleneck is solved.
+
+The 477,211,091-byte Compass Eclipse graph is now admitted under the declared
+larger bound. Its **62 omitted edges and partial-graph warning remain explicit**.
+Both frozen Graphify graphs are reused. Its CloudStack SQL dependency omission
+and three files with syntax errors remain coverage limitations; its package and
+graphs are unchanged.
+
+At every registered cutoff:
+
+| Tool | Positive classes | `none` classes |
+| --- | --- | --- |
+| Compass | 0/2 admitted; 2 unavailable | 0/2 admitted; 2 unavailable |
+| Graphify | 0/4 | 0/4 |
+
+Both tools resolve all four Eclipse classes at the exact reviewed source
+coordinates. Their absence from the ranking is distinct from extraction absence
+or a negative classification. The following unfiltered neighbor observations
+also show why connectivity alone does not establish a responsibility defect:
+
+| Eclipse class | External Blob rating | Compass record appearances | Graphify displayed rows |
+| --- | --- | ---: | ---: |
+| `BindingModel` | Positive | 36 | 22 |
+| `SimpleValueProperty` | `none` | 54 | 52 |
+| `CSSValueListImpl` | `none` | 11 | 11 |
+| `DeprecatedUIWizardsAuto` | Positive | 21 | 19 |
+
+The `none`-rated property abstraction has more neighbor records than either
+positive class under both tools. These counts include structural relations;
+they are not complexity, cohesion, population precision or evidence that any
+particular class needs refactoring. The positive wizard class is a test class,
+as retained in the source review.
+
+All 100 Compass hub identities, stored degrees and stored source anchors match
+its graph; all 100 connectivity summaries and their text rows match stored
+records. Graphify again has 163 uniquely resolved labels with matching degrees
+across 200 rows, with 37 ambiguous labels retained. All four Compass unfiltered
+neighbor projections match 122 full records, and all eight Graphify projections
+match 234 displayed direction/label/relation rows. These are graph-consistency
+checks, with different identity exposure, not source-edge precision or an
+efficiency comparison.
+
+The first neighbor audit incorrectly expected `null` for an unfiltered request;
+the native typed response uses `relationFilter: ""`. Its mock test repeated the
+same mistake, so four successful responses were marked invalid. Two regressions
+fail before the auditor fix and pass afterward. The corrected auditor requires
+the native string field and rejects missing/null/wrong filters. Raw captures,
+the initial invalid verification and its verifier are preserved; no requests or
+ranking cutoffs changed. Both corrected verification runs are byte-identical
+(`a659988abe0c9e64449b8265f06e066425fb6963e340176ccfde8f0a1e258d3d`).
+All 27 tool calls are checked against raw requests/responses. All 238 benchmark
+tests and the product-boundary gate pass. This checkpoint changes evaluation
+code and documentation; native production code remains the tested prefix guard,
+so Rust/JavaScript/platform/packaging gates were not rerun here.
+
+`mlcq_admission_followup_review.json` retains the results, diagnostic warnings,
+auditor correction and artifact digests. Diagnostic text replaces the local home
+prefix with `<user-home>`; hash-bound original logs remain external. The unchanged
+release rebuild also confirms the copied regex-comparison baseline byte-for-byte.
+Actual god-object classification, authored explanations, functional communities
+and broader independent confirmation remain unproven. Version remains 0.3.30.
