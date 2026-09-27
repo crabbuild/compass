@@ -2616,6 +2616,96 @@ artifacts are under `member-source-02`. The next explanation work needs better
 source context and selection, actual responsibility synthesis, and fresh
 confirmation. This result does not establish overall superiority.
 
+## Exact source-constrained lookup and the remaining retrieval gap
+
+Registration `2ef40e95` keeps the same five repositories, graph/source pins and
+20 facts, and adds explicit identity constraints: symbol, source file, declaration
+start line and stored kind. These are supplied task inputs in a new development
+arm; they do not retroactively rescue the old unscoped Redux result. Prior
+sources and outputs were known when this arm was designed.
+
+Implementation `9cc6ba9e` adds `search --exact` and MCP `search_symbols` with
+`exact: true`, plus optional file, start-line and kind filters. Exact IDs take
+precedence; otherwise the existing normalized name index is read within the
+unchanged candidate cap. All matching records survive unless an explicit filter
+excludes them. No lexical fallback, inferred ownership, export-binding collapse,
+or arbitrary winner is introduced. Filtering happens after the bounded index
+read: a truncated singleton or empty result proves neither uniqueness nor
+absence. Exact text requests keep the supplied bounds without automatic widening.
+
+The paired identity control uses the same supplied constraints. Compass receives
+its supported fields directly; Graphify receives its existing `file::symbol`
+lookup, and its returned source identity and declaration kind are checked against
+the constraints afterward. Graphify is not claimed to accept a native kind
+filter. Each tool receives one scored lookup, followed by one neighbor request
+and the unchanged registered 8,000-byte source-window policy. Diagnostic replays
+and negative controls are kept separate from those scored calls.
+
+Both tools resolve **5/5 subjects**. Compass now reaches the `createStore`
+function at `src/createStore.ts:86`. Omitting the explicit `function` kind returns
+both its declaration and its coincident export record; neither is silently
+removed. Asking for declaration line 87 returns no match with complete lookup.
+The original ten unscoped resolver response payloads are unchanged, including
+Compass's old candidate-limit failure. All nine previously available neighbor
+responses and source-window payloads are also unchanged.
+
+| Subject | Compass constrained lookup + windows | Graphify constrained lookup + windows |
+| --- | ---: | ---: |
+| Chi / Go | 3/4 | 3/4 |
+| Click / Python | 4/4 | 4/4 |
+| jsoup / Java | 3/4 | 4/4 |
+| Redux / TypeScript | 3/4 | 2/4 |
+| WalkDir / Rust | 1/4 | 2/4 |
+| **Complete facts supported by source** | **14/20** | **15/20** |
+
+The three newly supported Compass facts concern Redux enhancer behavior,
+dispatch state/reentrancy, and listener snapshots/unsubscription. Its returned
+parameter anchors start early enough to include the enhancer body; Graphify's
+first returned member anchor is later. Compass's final window reaches part of
+line 312, and the observable/store-API fact remains unavailable. Graphify still
+supplies one additional Java fact and one additional Rust fact. Thus the overall
+lead in this workflow remains Graphify's, despite Compass's Redux advantage.
+
+Strict literal witness counts are 13/20 and 14/20. Both semantic scores retain
+the prior Click allowance: the missing class-header line is supplied by the
+independently verified owner identity, and the initialization, decorator and
+getter code are all present. Every other credited fact has complete literal
+witnesses. Neither tool authors the mechanism answers; these are source-evidence
+scores, not synthesized explanations or god-object judgments. The earlier
+11/20 versus 15/20 unscoped-window result and 13/20 native member-mode result
+remain separate.
+
+Both tools now return 35,673 source bytes across the five subjects. Compass's
+neighbor responses contain 33,061 text bytes and 372,829 full MCP response bytes;
+Graphify's contain 6,980 and 7,534. Scored resolver responses add 3,039 text /
+21,983 wire bytes for Compass and 619 / 1,094 for Graphify. This is not equal
+compute, latency or response-size superiority. The verifier checks all 32 saved
+public calls, pinned inputs, source windows and unchanged earlier payloads.
+The additional 23 Redux membership anchors were source-reviewed, bringing the
+reviewed membership-site total to 153; other relationship precision is unproven.
+
+Native checks exposed and corrected two response defects during development:
+new exact-mode node limits initially retained excess search hits, and an empty
+truncated search failed Agent View validation by claiming `no_match` without a
+no-match diagnostic. Exact mode now bounds nodes and hits together; the view
+preserves unknown match with partial execution. Search display also uses the
+query engine's existing name normalization. Failed fixture construction and
+overly strict test assertions are retained separately from these product defects.
+
+Final validation passed formatting, 37 targeted query/backend/binding tests,
+20 output-contract tests, 41 CLI tests, 61 MCP tests, workspace Clippy,
+1,106 workspace tests (2 ignored), 9 product tests, the product boundary and
+CLI build. Validated source hashes match `9cc6ba9e`; evaluated and final binaries
+match. JavaScript/viewer and extraction/publication gates were not rerun because
+those surfaces are unchanged. Version stays 0.3.30. The separate same-agent
+artifact verifier passes; this is not independent human adjudication.
+
+Per-fact judgments, command logs, failed attempts and artifact hashes are recorded
+in `benchmarks/agent_query/exact_symbol_development_review.json`, with external
+artifacts under `exact-symbol-01` through `exact-symbol-08`. Source selection,
+responsibility synthesis, actual god-object defect evidence, broader edge
+precision, longer walks and fresh confirmation remain unfinished.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

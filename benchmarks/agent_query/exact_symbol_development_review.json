@@ -1,0 +1,3064 @@
+{
+  "schema": "compass.exact-symbol-development-review/1",
+  "registration": "benchmarks/agent_query/exact_symbol_development_registration.json",
+  "registrationSha256": "78781c22e1357515e9cd4e1093ecabe0fc1263262fae3a4fee1b0bf02a8086f2",
+  "productCommit": "9cc6ba9e2b83c8bf3a573cf8dec755092f9c93e9",
+  "evaluatedBinarySha256": "2cc997ff293da1900a1c5e43175930862c19e83c44bf0ef4a160b1ea3927dab9",
+  "scope": "Known five-language development subjects. Prior source and outputs have been inspected. Test explicit exact name/ID search with optional source file, declaration line and node-kind filters; no hidden selector substitutions or held-out claim.",
+  "summary": {
+    "compass": {
+      "subjects": 5,
+      "resolvedSubjects": 5,
+      "facts": 20,
+      "sourceEvidenceFacts": 14,
+      "literalWitnessFacts": 13,
+      "explicitNativeFacts": 0,
+      "sourceBytes": 35673,
+      "neighborTextBytes": 33061,
+      "neighborWireBytes": 372829,
+      "resolverTextBytes": 3039,
+      "resolverWireBytes": 21983
+    },
+    "graphify": {
+      "subjects": 5,
+      "resolvedSubjects": 5,
+      "facts": 20,
+      "sourceEvidenceFacts": 15,
+      "literalWitnessFacts": 14,
+      "explicitNativeFacts": 0,
+      "sourceBytes": 35673,
+      "neighborTextBytes": 6980,
+      "neighborWireBytes": 7534,
+      "resolverTextBytes": 619,
+      "resolverWireBytes": 1094
+    }
+  },
+  "results": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 476,
+              "expected": "\tmethod, ok := methodMap[rctx.RouteMethod]",
+              "returned": null
+            },
+            {
+              "line": 477,
+              "expected": "\tif !ok {",
+              "returned": null
+            },
+            {
+              "line": 478,
+              "expected": "\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 479,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 480,
+              "expected": "\t}",
+              "returned": null
+            },
+            {
+              "line": 481,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 482,
+              "expected": "\t// Find the route",
+              "returned": null
+            },
+            {
+              "line": 483,
+              "expected": "\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {",
+              "returned": null
+            },
+            {
+              "line": 484,
+              "expected": "\t\t// Set http.Request path values from our request context",
+              "returned": null
+            },
+            {
+              "line": 485,
+              "expected": "\t\tfor i, key := range rctx.URLParams.Keys {",
+              "returned": null
+            },
+            {
+              "line": 486,
+              "expected": "\t\t\tvalue := rctx.URLParams.Values[i]",
+              "returned": null
+            },
+            {
+              "line": 487,
+              "expected": "\t\t\tr.SetPathValue(key, value)",
+              "returned": null
+            },
+            {
+              "line": 488,
+              "expected": "\t\t}",
+              "returned": null
+            },
+            {
+              "line": 489,
+              "expected": "\t\tr.Pattern = rctx.RoutePattern()",
+              "returned": null
+            },
+            {
+              "line": 490,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 491,
+              "expected": "\t\th.ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 492,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 493,
+              "expected": "\t}",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 13154,
+      "neighborWireBytes": 147275,
+      "returnedMembershipRows": 33,
+      "windows": [
+        {
+          "file": "mux.go",
+          "startLine": 63,
+          "lastReturnedLine": 99,
+          "sourceBytes": 1373,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 100,
+          "lastReturnedLine": 108,
+          "sourceBytes": 333,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 109,
+          "lastReturnedLine": 120,
+          "sourceBytes": 386,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 121,
+          "lastReturnedLine": 126,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 127,
+          "lastReturnedLine": 136,
+          "sourceBytes": 356,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 137,
+          "lastReturnedLine": 142,
+          "sourceBytes": 241,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 143,
+          "lastReturnedLine": 148,
+          "sourceBytes": 230,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 149,
+          "lastReturnedLine": 154,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 155,
+          "lastReturnedLine": 160,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 161,
+          "lastReturnedLine": 166,
+          "sourceBytes": 227,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 167,
+          "lastReturnedLine": 172,
+          "sourceBytes": 228,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 173,
+          "lastReturnedLine": 178,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 179,
+          "lastReturnedLine": 184,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 185,
+          "lastReturnedLine": 190,
+          "sourceBytes": 220,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 191,
+          "lastReturnedLine": 196,
+          "sourceBytes": 224,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 197,
+          "lastReturnedLine": 202,
+          "sourceBytes": 242,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 203,
+          "lastReturnedLine": 222,
+          "sourceBytes": 579,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 223,
+          "lastReturnedLine": 241,
+          "sourceBytes": 526,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 242,
+          "lastReturnedLine": 267,
+          "sourceBytes": 880,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 268,
+          "lastReturnedLine": 277,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 278,
+          "lastReturnedLine": 293,
+          "sourceBytes": 605,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 12,
+      "sourceEvidenceFacts": 3,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 476,
+              "expected": "\tmethod, ok := methodMap[rctx.RouteMethod]",
+              "returned": null
+            },
+            {
+              "line": 477,
+              "expected": "\tif !ok {",
+              "returned": null
+            },
+            {
+              "line": 478,
+              "expected": "\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 479,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 480,
+              "expected": "\t}",
+              "returned": null
+            },
+            {
+              "line": 481,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 482,
+              "expected": "\t// Find the route",
+              "returned": null
+            },
+            {
+              "line": 483,
+              "expected": "\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {",
+              "returned": null
+            },
+            {
+              "line": 484,
+              "expected": "\t\t// Set http.Request path values from our request context",
+              "returned": null
+            },
+            {
+              "line": 485,
+              "expected": "\t\tfor i, key := range rctx.URLParams.Keys {",
+              "returned": null
+            },
+            {
+              "line": 486,
+              "expected": "\t\t\tvalue := rctx.URLParams.Values[i]",
+              "returned": null
+            },
+            {
+              "line": 487,
+              "expected": "\t\t\tr.SetPathValue(key, value)",
+              "returned": null
+            },
+            {
+              "line": 488,
+              "expected": "\t\t}",
+              "returned": null
+            },
+            {
+              "line": 489,
+              "expected": "\t\tr.Pattern = rctx.RoutePattern()",
+              "returned": null
+            },
+            {
+              "line": 490,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 491,
+              "expected": "\t\th.ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 492,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 493,
+              "expected": "\t}",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 2189,
+      "neighborWireBytes": 2319,
+      "returnedMembershipRows": 33,
+      "windows": [
+        {
+          "file": "mux.go",
+          "startLine": 63,
+          "lastReturnedLine": 99,
+          "sourceBytes": 1373,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 100,
+          "lastReturnedLine": 108,
+          "sourceBytes": 333,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 109,
+          "lastReturnedLine": 120,
+          "sourceBytes": 386,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 121,
+          "lastReturnedLine": 126,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 127,
+          "lastReturnedLine": 136,
+          "sourceBytes": 356,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 137,
+          "lastReturnedLine": 142,
+          "sourceBytes": 241,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 143,
+          "lastReturnedLine": 148,
+          "sourceBytes": 230,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 149,
+          "lastReturnedLine": 154,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 155,
+          "lastReturnedLine": 160,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 161,
+          "lastReturnedLine": 166,
+          "sourceBytes": 227,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 167,
+          "lastReturnedLine": 172,
+          "sourceBytes": 228,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 173,
+          "lastReturnedLine": 178,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 179,
+          "lastReturnedLine": 184,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 185,
+          "lastReturnedLine": 190,
+          "sourceBytes": 220,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 191,
+          "lastReturnedLine": 196,
+          "sourceBytes": 224,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 197,
+          "lastReturnedLine": 202,
+          "sourceBytes": 242,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 203,
+          "lastReturnedLine": 222,
+          "sourceBytes": 579,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 223,
+          "lastReturnedLine": 241,
+          "sourceBytes": 526,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 242,
+          "lastReturnedLine": 267,
+          "sourceBytes": 880,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 268,
+          "lastReturnedLine": 277,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 278,
+          "lastReturnedLine": 293,
+          "sourceBytes": 605,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 12,
+      "sourceEvidenceFacts": 3,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 455,
+              "expected": "class _AtomicFile:",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Only the class header is absent; the exact owner identity is verified independently. All initialization, @property and getter code is returned. Same semantic allowance as the prior registered window control."
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        }
+      ],
+      "sourceBytes": 3673,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 2092,
+      "neighborWireBytes": 23086,
+      "returnedMembershipRows": 7,
+      "windows": [
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 456,
+          "lastReturnedLine": 462,
+          "sourceBytes": 236,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 463,
+          "lastReturnedLine": 465,
+          "sourceBytes": 63,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 466,
+          "lastReturnedLine": 472,
+          "sourceBytes": 206,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 473,
+          "lastReturnedLine": 475,
+          "sourceBytes": 86,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 476,
+          "lastReturnedLine": 478,
+          "sourceBytes": 61,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 479,
+          "lastReturnedLine": 486,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 487,
+          "lastReturnedLine": 590,
+          "sourceBytes": 2804,
+          "partial": false
+        }
+      ],
+      "omittedGroups": 0,
+      "sourceEvidenceFacts": 4,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 455,
+              "expected": "class _AtomicFile:",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Only the class header is absent; the exact owner identity is verified independently. All initialization, @property and getter code is returned. Same semantic allowance as the prior registered window control."
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        }
+      ],
+      "sourceBytes": 3673,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 636,
+      "neighborWireBytes": 735,
+      "returnedMembershipRows": 7,
+      "windows": [
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 456,
+          "lastReturnedLine": 462,
+          "sourceBytes": 236,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 463,
+          "lastReturnedLine": 465,
+          "sourceBytes": 63,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 466,
+          "lastReturnedLine": 472,
+          "sourceBytes": 206,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 473,
+          "lastReturnedLine": 475,
+          "sourceBytes": 86,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 476,
+          "lastReturnedLine": 478,
+          "sourceBytes": 61,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 479,
+          "lastReturnedLine": 486,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 487,
+          "lastReturnedLine": 590,
+          "sourceBytes": 2804,
+          "partial": false
+        }
+      ],
+      "omittedGroups": 0,
+      "sourceEvidenceFacts": 4,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 206,
+              "expected": "                Range.AttributeRange range = sourceAttrs.sourceRange(key);",
+              "returned": "                Range.AttributeRange r"
+            },
+            {
+              "line": 207,
+              "expected": "                destAttrs.put(key, value);",
+              "returned": null
+            },
+            {
+              "line": 208,
+              "expected": "                NodeInternals.attributeRange(destAttrs, key, range);",
+              "returned": null
+            },
+            {
+              "line": 209,
+              "expected": "            } else",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 7014,
+      "neighborWireBytes": 66437,
+      "returnedMembershipRows": 9,
+      "windows": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 44,
+          "lastReturnedLine": 49,
+          "sourceBytes": 180,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 50,
+          "lastReturnedLine": 61,
+          "sourceBytes": 541,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 62,
+          "lastReturnedLine": 93,
+          "sourceBytes": 1549,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 94,
+          "lastReturnedLine": 123,
+          "sourceBytes": 1625,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 124,
+          "lastReturnedLine": 137,
+          "sourceBytes": 748,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 138,
+          "lastReturnedLine": 181,
+          "sourceBytes": 2032,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 182,
+          "lastReturnedLine": 187,
+          "sourceBytes": 233,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 188,
+          "lastReturnedLine": 206,
+          "sourceBytes": 1092,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 1,
+      "sourceEvidenceFacts": 3,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1034,
+      "neighborWireBytes": 1135,
+      "returnedMembershipRows": 8,
+      "windows": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 50,
+          "lastReturnedLine": 61,
+          "sourceBytes": 541,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 62,
+          "lastReturnedLine": 93,
+          "sourceBytes": 1549,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 94,
+          "lastReturnedLine": 123,
+          "sourceBytes": 1625,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 124,
+          "lastReturnedLine": 137,
+          "sourceBytes": 748,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 138,
+          "lastReturnedLine": 181,
+          "sourceBytes": 2032,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 182,
+          "lastReturnedLine": 187,
+          "sourceBytes": 233,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 188,
+          "lastReturnedLine": 210,
+          "sourceBytes": 1272,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 1,
+      "sourceEvidenceFacts": 4,
+      "literalWitnessFacts": 4,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 344,
+              "expected": "  function observable() {",
+              "returned": null
+            },
+            {
+              "line": 345,
+              "expected": "    const outerSubscribe = subscribe",
+              "returned": null
+            },
+            {
+              "line": 346,
+              "expected": "    return {",
+              "returned": null
+            },
+            {
+              "line": 347,
+              "expected": "      /**",
+              "returned": null
+            },
+            {
+              "line": 348,
+              "expected": "       * The minimal observable subscription method.",
+              "returned": null
+            },
+            {
+              "line": 349,
+              "expected": "       * @param observer Any object that can be used as an observer.",
+              "returned": null
+            },
+            {
+              "line": 350,
+              "expected": "       * The observer object should have a `next` method.",
+              "returned": null
+            },
+            {
+              "line": 351,
+              "expected": "       * @returns An object with an `unsubscribe` method that can",
+              "returned": null
+            },
+            {
+              "line": 352,
+              "expected": "       * be used to unsubscribe the observable from the store, and prevent further",
+              "returned": null
+            },
+            {
+              "line": 353,
+              "expected": "       * emission of values from the observable.",
+              "returned": null
+            },
+            {
+              "line": 354,
+              "expected": "       */",
+              "returned": null
+            },
+            {
+              "line": 355,
+              "expected": "      subscribe(observer: unknown) {",
+              "returned": null
+            },
+            {
+              "line": 356,
+              "expected": "        if (typeof observer !== 'object' || observer === null) {",
+              "returned": null
+            },
+            {
+              "line": 357,
+              "expected": "          throw new TypeError(",
+              "returned": null
+            },
+            {
+              "line": 358,
+              "expected": "            `Expected the observer to be an object. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 359,
+              "expected": "              observer",
+              "returned": null
+            },
+            {
+              "line": 360,
+              "expected": "            )}'`",
+              "returned": null
+            },
+            {
+              "line": 361,
+              "expected": "          )",
+              "returned": null
+            },
+            {
+              "line": 362,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 363,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 364,
+              "expected": "        function observeState() {",
+              "returned": null
+            },
+            {
+              "line": 365,
+              "expected": "          const observerAsObserver = observer as Observer<S>",
+              "returned": null
+            },
+            {
+              "line": 366,
+              "expected": "          if (observerAsObserver.next) {",
+              "returned": null
+            },
+            {
+              "line": 367,
+              "expected": "            observerAsObserver.next(getState())",
+              "returned": null
+            },
+            {
+              "line": 368,
+              "expected": "          }",
+              "returned": null
+            },
+            {
+              "line": 369,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 370,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 371,
+              "expected": "        observeState()",
+              "returned": null
+            },
+            {
+              "line": 372,
+              "expected": "        const unsubscribe = outerSubscribe(observeState)",
+              "returned": null
+            },
+            {
+              "line": 373,
+              "expected": "        return { unsubscribe }",
+              "returned": null
+            },
+            {
+              "line": 374,
+              "expected": "      },",
+              "returned": null
+            },
+            {
+              "line": 375,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 376,
+              "expected": "      [$$observable]() {",
+              "returned": null
+            },
+            {
+              "line": 377,
+              "expected": "        return this",
+              "returned": null
+            },
+            {
+              "line": 378,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 379,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 380,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 381,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 382,
+              "expected": "  // When a store is created, an \"INIT\" action is dispatched so that every",
+              "returned": null
+            },
+            {
+              "line": 383,
+              "expected": "  // reducer returns their initial state. This effectively populates",
+              "returned": null
+            },
+            {
+              "line": 384,
+              "expected": "  // the initial state tree.",
+              "returned": null
+            },
+            {
+              "line": 385,
+              "expected": "  dispatch({ type: ActionTypes.INIT } as A)",
+              "returned": null
+            },
+            {
+              "line": 386,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 387,
+              "expected": "  const store = {",
+              "returned": null
+            },
+            {
+              "line": 388,
+              "expected": "    dispatch: dispatch as Dispatch<A>,",
+              "returned": null
+            },
+            {
+              "line": 389,
+              "expected": "    subscribe,",
+              "returned": null
+            },
+            {
+              "line": 390,
+              "expected": "    getState,",
+              "returned": null
+            },
+            {
+              "line": 391,
+              "expected": "    replaceReducer,",
+              "returned": null
+            },
+            {
+              "line": 392,
+              "expected": "    [$$observable]: observable",
+              "returned": null
+            },
+            {
+              "line": 393,
+              "expected": "  } as unknown as Store<S, A, StateExt> & Ext",
+              "returned": null
+            },
+            {
+              "line": 394,
+              "expected": "  return store",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 6564,
+      "neighborWireBytes": 91587,
+      "returnedMembershipRows": 23,
+      "windows": [
+        {
+          "file": "src/createStore.ts",
+          "startLine": 87,
+          "lastReturnedLine": 87,
+          "sourceBytes": 5,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 88,
+          "lastReturnedLine": 88,
+          "sourceBytes": 20,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 89,
+          "lastReturnedLine": 89,
+          "sourceBytes": 23,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 90,
+          "lastReturnedLine": 90,
+          "sourceBytes": 28,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 91,
+          "lastReturnedLine": 94,
+          "sourceBytes": 144,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 95,
+          "lastReturnedLine": 135,
+          "sourceBytes": 1298,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 136,
+          "lastReturnedLine": 136,
+          "sourceBytes": 31,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 137,
+          "lastReturnedLine": 139,
+          "sourceBytes": 108,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 140,
+          "lastReturnedLine": 140,
+          "sourceBytes": 73,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 141,
+          "lastReturnedLine": 141,
+          "sourceBytes": 39,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 142,
+          "lastReturnedLine": 142,
+          "sourceBytes": 28,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 143,
+          "lastReturnedLine": 151,
+          "sourceBytes": 278,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 152,
+          "lastReturnedLine": 165,
+          "sourceBytes": 358,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 166,
+          "lastReturnedLine": 200,
+          "sourceBytes": 1555,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 201,
+          "lastReturnedLine": 269,
+          "sourceBytes": 2608,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 270,
+          "lastReturnedLine": 312,
+          "sourceBytes": 1404,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 7,
+      "sourceEvidenceFacts": 3,
+      "literalWitnessFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 121,
+              "expected": "  if (typeof enhancer !== 'undefined') {",
+              "returned": null
+            },
+            {
+              "line": 122,
+              "expected": "    if (typeof enhancer !== 'function') {",
+              "returned": null
+            },
+            {
+              "line": 123,
+              "expected": "      throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 124,
+              "expected": "        `Expected the enhancer to be a function. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 125,
+              "expected": "          enhancer",
+              "returned": null
+            },
+            {
+              "line": 126,
+              "expected": "        )}'`",
+              "returned": null
+            },
+            {
+              "line": 127,
+              "expected": "      )",
+              "returned": null
+            },
+            {
+              "line": 128,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 129,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 130,
+              "expected": "    return enhancer(createStore)(",
+              "returned": null
+            },
+            {
+              "line": 131,
+              "expected": "      reducer,",
+              "returned": null
+            },
+            {
+              "line": 132,
+              "expected": "      preloadedState as PreloadedState | undefined",
+              "returned": null
+            },
+            {
+              "line": 133,
+              "expected": "    )",
+              "returned": null
+            },
+            {
+              "line": 134,
+              "expected": "  }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 365,
+              "expected": "          const observerAsObserver = observer as Observer<S>",
+              "returned": "          const observerAsObserver = observer a"
+            },
+            {
+              "line": 366,
+              "expected": "          if (observerAsObserver.next) {",
+              "returned": null
+            },
+            {
+              "line": 367,
+              "expected": "            observerAsObserver.next(getState())",
+              "returned": null
+            },
+            {
+              "line": 368,
+              "expected": "          }",
+              "returned": null
+            },
+            {
+              "line": 369,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 370,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 371,
+              "expected": "        observeState()",
+              "returned": null
+            },
+            {
+              "line": 372,
+              "expected": "        const unsubscribe = outerSubscribe(observeState)",
+              "returned": null
+            },
+            {
+              "line": 373,
+              "expected": "        return { unsubscribe }",
+              "returned": null
+            },
+            {
+              "line": 374,
+              "expected": "      },",
+              "returned": null
+            },
+            {
+              "line": 375,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 376,
+              "expected": "      [$$observable]() {",
+              "returned": null
+            },
+            {
+              "line": 377,
+              "expected": "        return this",
+              "returned": null
+            },
+            {
+              "line": 378,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 379,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 380,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 381,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 382,
+              "expected": "  // When a store is created, an \"INIT\" action is dispatched so that every",
+              "returned": null
+            },
+            {
+              "line": 383,
+              "expected": "  // reducer returns their initial state. This effectively populates",
+              "returned": null
+            },
+            {
+              "line": 384,
+              "expected": "  // the initial state tree.",
+              "returned": null
+            },
+            {
+              "line": 385,
+              "expected": "  dispatch({ type: ActionTypes.INIT } as A)",
+              "returned": null
+            },
+            {
+              "line": 386,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 387,
+              "expected": "  const store = {",
+              "returned": null
+            },
+            {
+              "line": 388,
+              "expected": "    dispatch: dispatch as Dispatch<A>,",
+              "returned": null
+            },
+            {
+              "line": 389,
+              "expected": "    subscribe,",
+              "returned": null
+            },
+            {
+              "line": 390,
+              "expected": "    getState,",
+              "returned": null
+            },
+            {
+              "line": 391,
+              "expected": "    replaceReducer,",
+              "returned": null
+            },
+            {
+              "line": 392,
+              "expected": "    [$$observable]: observable",
+              "returned": null
+            },
+            {
+              "line": 393,
+              "expected": "  } as unknown as Store<S, A, StateExt> & Ext",
+              "returned": null
+            },
+            {
+              "line": 394,
+              "expected": "  return store",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1785,
+      "neighborWireBytes": 1897,
+      "returnedMembershipRows": 2,
+      "windows": [
+        {
+          "file": "src/createStore.ts",
+          "startLine": 152,
+          "lastReturnedLine": 269,
+          "sourceBytes": 4521,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 270,
+          "lastReturnedLine": 365,
+          "sourceBytes": 3479,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 0,
+      "sourceEvidenceFacts": 2,
+      "literalWitnessFacts": 2,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 901,
+              "expected": "    fn push(&mut self, dent: &DirEntry) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 902,
+              "expected": "        // Make room for another open file descriptor if we've hit the max.",
+              "returned": null
+            },
+            {
+              "line": 903,
+              "expected": "        let free =",
+              "returned": null
+            },
+            {
+              "line": 904,
+              "expected": "            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();",
+              "returned": null
+            },
+            {
+              "line": 905,
+              "expected": "        if free == self.opts.max_open {",
+              "returned": null
+            },
+            {
+              "line": 906,
+              "expected": "            self.stack_list[self.oldest_opened].close();",
+              "returned": null
+            },
+            {
+              "line": 907,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 908,
+              "expected": "        // Open a handle to reading the directory's entries.",
+              "returned": null
+            },
+            {
+              "line": 909,
+              "expected": "        let rd = fs::read_dir(dent.path()).map_err(|err| {",
+              "returned": null
+            },
+            {
+              "line": 910,
+              "expected": "            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))",
+              "returned": null
+            },
+            {
+              "line": 911,
+              "expected": "        });",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 961,
+              "expected": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 962,
+              "expected": "        dent =",
+              "returned": null
+            },
+            {
+              "line": 963,
+              "expected": "            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;",
+              "returned": null
+            },
+            {
+              "line": 964,
+              "expected": "        // The only way a symlink can cause a loop is if it points",
+              "returned": null
+            },
+            {
+              "line": 965,
+              "expected": "        // to a directory. Otherwise, it always points to a leaf",
+              "returned": null
+            },
+            {
+              "line": 966,
+              "expected": "        // and we can omit any loop checks.",
+              "returned": null
+            },
+            {
+              "line": 967,
+              "expected": "        if dent.is_dir() {",
+              "returned": null
+            },
+            {
+              "line": 968,
+              "expected": "            self.check_loop(dent.path())?;",
+              "returned": null
+            },
+            {
+              "line": 969,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 970,
+              "expected": "        Ok(dent)",
+              "returned": null
+            },
+            {
+              "line": 971,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 972,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 973,
+              "expected": "    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 974,
+              "expected": "        let hchild = Handle::from_path(&child)",
+              "returned": null
+            },
+            {
+              "line": 975,
+              "expected": "            .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 976,
+              "expected": "        for ancestor in self.stack_path.iter().rev() {",
+              "returned": null
+            },
+            {
+              "line": 977,
+              "expected": "            let is_same = ancestor",
+              "returned": null
+            },
+            {
+              "line": 978,
+              "expected": "                .is_same(&hchild)",
+              "returned": null
+            },
+            {
+              "line": 979,
+              "expected": "                .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 980,
+              "expected": "            if is_same {",
+              "returned": null
+            },
+            {
+              "line": 981,
+              "expected": "                return Err(Error::from_loop(",
+              "returned": null
+            },
+            {
+              "line": 982,
+              "expected": "                    self.depth,",
+              "returned": null
+            },
+            {
+              "line": 983,
+              "expected": "                    &ancestor.path,",
+              "returned": null
+            },
+            {
+              "line": 984,
+              "expected": "                    child.as_ref(),",
+              "returned": null
+            },
+            {
+              "line": 985,
+              "expected": "                ));",
+              "returned": null
+            },
+            {
+              "line": 986,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 987,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 988,
+              "expected": "        Ok(())",
+              "returned": null
+            },
+            {
+              "line": 989,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 873,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 874,
+              "expected": "        if is_normal_dir && self.opts.contents_first {",
+              "returned": null
+            },
+            {
+              "line": 875,
+              "expected": "            self.deferred_dirs.push(dent);",
+              "returned": null
+            },
+            {
+              "line": 876,
+              "expected": "            None",
+              "returned": null
+            },
+            {
+              "line": 877,
+              "expected": "        } else if self.skippable() {",
+              "returned": null
+            },
+            {
+              "line": 878,
+              "expected": "            None",
+              "returned": null
+            },
+            {
+              "line": 879,
+              "expected": "        } else {",
+              "returned": null
+            },
+            {
+              "line": 880,
+              "expected": "            Some(Ok(dent))",
+              "returned": null
+            },
+            {
+              "line": 881,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 882,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 883,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 884,
+              "expected": "    fn get_deferred_dir(&mut self) -> Option<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 885,
+              "expected": "        if self.opts.contents_first {",
+              "returned": null
+            },
+            {
+              "line": 886,
+              "expected": "            if self.depth < self.deferred_dirs.len() {",
+              "returned": null
+            },
+            {
+              "line": 887,
+              "expected": "                // Unwrap is safe here because we've guaranteed that",
+              "returned": null
+            },
+            {
+              "line": 888,
+              "expected": "                // `self.deferred_dirs.len()` can never be less than 1",
+              "returned": null
+            },
+            {
+              "line": 889,
+              "expected": "                let deferred: DirEntry = self",
+              "returned": null
+            },
+            {
+              "line": 890,
+              "expected": "                    .deferred_dirs",
+              "returned": null
+            },
+            {
+              "line": 891,
+              "expected": "                    .pop()",
+              "returned": null
+            },
+            {
+              "line": 892,
+              "expected": "                    .expect(\"BUG: deferred_dirs should be non-empty\");",
+              "returned": null
+            },
+            {
+              "line": 893,
+              "expected": "                if !self.skippable() {",
+              "returned": null
+            },
+            {
+              "line": 894,
+              "expected": "                    return Some(deferred);",
+              "returned": null
+            },
+            {
+              "line": 895,
+              "expected": "                }",
+              "returned": null
+            },
+            {
+              "line": 896,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 897,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 898,
+              "expected": "        None",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 4237,
+      "neighborWireBytes": 44444,
+      "returnedMembershipRows": 20,
+      "windows": [
+        {
+          "file": "src/lib.rs",
+          "startLine": 568,
+          "lastReturnedLine": 572,
+          "sourceBytes": 167,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 573,
+          "lastReturnedLine": 578,
+          "sourceBytes": 348,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 579,
+          "lastReturnedLine": 585,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 586,
+          "lastReturnedLine": 590,
+          "sourceBytes": 283,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 591,
+          "lastReturnedLine": 593,
+          "sourceBytes": 135,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 594,
+          "lastReturnedLine": 597,
+          "sourceBytes": 207,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 598,
+          "lastReturnedLine": 604,
+          "sourceBytes": 318,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 605,
+          "lastReturnedLine": 679,
+          "sourceBytes": 2788,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 680,
+          "lastReturnedLine": 686,
+          "sourceBytes": 273,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 687,
+          "lastReturnedLine": 776,
+          "sourceBytes": 3228,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 10,
+      "sourceEvidenceFacts": 1,
+      "literalWitnessFacts": 1,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 902,
+              "expected": "        // Make room for another open file descriptor if we've hit the max.",
+              "returned": "        // Make room for another open file descriptor if we"
+            },
+            {
+              "line": 903,
+              "expected": "        let free =",
+              "returned": null
+            },
+            {
+              "line": 904,
+              "expected": "            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();",
+              "returned": null
+            },
+            {
+              "line": 905,
+              "expected": "        if free == self.opts.max_open {",
+              "returned": null
+            },
+            {
+              "line": 906,
+              "expected": "            self.stack_list[self.oldest_opened].close();",
+              "returned": null
+            },
+            {
+              "line": 907,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 908,
+              "expected": "        // Open a handle to reading the directory's entries.",
+              "returned": null
+            },
+            {
+              "line": 909,
+              "expected": "        let rd = fs::read_dir(dent.path()).map_err(|err| {",
+              "returned": null
+            },
+            {
+              "line": 910,
+              "expected": "            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))",
+              "returned": null
+            },
+            {
+              "line": 911,
+              "expected": "        });",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 961,
+              "expected": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 962,
+              "expected": "        dent =",
+              "returned": null
+            },
+            {
+              "line": 963,
+              "expected": "            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;",
+              "returned": null
+            },
+            {
+              "line": 964,
+              "expected": "        // The only way a symlink can cause a loop is if it points",
+              "returned": null
+            },
+            {
+              "line": 965,
+              "expected": "        // to a directory. Otherwise, it always points to a leaf",
+              "returned": null
+            },
+            {
+              "line": 966,
+              "expected": "        // and we can omit any loop checks.",
+              "returned": null
+            },
+            {
+              "line": 967,
+              "expected": "        if dent.is_dir() {",
+              "returned": null
+            },
+            {
+              "line": 968,
+              "expected": "            self.check_loop(dent.path())?;",
+              "returned": null
+            },
+            {
+              "line": 969,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 970,
+              "expected": "        Ok(dent)",
+              "returned": null
+            },
+            {
+              "line": 971,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 972,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 973,
+              "expected": "    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 974,
+              "expected": "        let hchild = Handle::from_path(&child)",
+              "returned": null
+            },
+            {
+              "line": 975,
+              "expected": "            .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 976,
+              "expected": "        for ancestor in self.stack_path.iter().rev() {",
+              "returned": null
+            },
+            {
+              "line": 977,
+              "expected": "            let is_same = ancestor",
+              "returned": null
+            },
+            {
+              "line": 978,
+              "expected": "                .is_same(&hchild)",
+              "returned": null
+            },
+            {
+              "line": 979,
+              "expected": "                .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 980,
+              "expected": "            if is_same {",
+              "returned": null
+            },
+            {
+              "line": 981,
+              "expected": "                return Err(Error::from_loop(",
+              "returned": null
+            },
+            {
+              "line": 982,
+              "expected": "                    self.depth,",
+              "returned": null
+            },
+            {
+              "line": 983,
+              "expected": "                    &ancestor.path,",
+              "returned": null
+            },
+            {
+              "line": 984,
+              "expected": "                    child.as_ref(),",
+              "returned": null
+            },
+            {
+              "line": 985,
+              "expected": "                ));",
+              "returned": null
+            },
+            {
+              "line": 986,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 987,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 988,
+              "expected": "        Ok(())",
+              "returned": null
+            },
+            {
+              "line": 989,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Every literal source witness is returned."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1336,
+      "neighborWireBytes": 1448,
+      "returnedMembershipRows": 11,
+      "windows": [
+        {
+          "file": "src/lib.rs",
+          "startLine": 687,
+          "lastReturnedLine": 780,
+          "sourceBytes": 3391,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 781,
+          "lastReturnedLine": 832,
+          "sourceBytes": 1974,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 833,
+          "lastReturnedLine": 839,
+          "sourceBytes": 175,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 840,
+          "lastReturnedLine": 883,
+          "sourceBytes": 1732,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 884,
+          "lastReturnedLine": 900,
+          "sourceBytes": 613,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 901,
+          "lastReturnedLine": 902,
+          "sourceBytes": 115,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 5,
+      "sourceEvidenceFacts": 2,
+      "literalWitnessFacts": 2,
+      "explicitNativeFacts": 0
+    }
+  ],
+  "identityChecks": {
+    "defaultResolverResponsesUnchanged": 10,
+    "unchangedPriorNeighborAndWindowControls": [
+      {
+        "repository": "chi",
+        "tool": "compass"
+      },
+      {
+        "repository": "chi",
+        "tool": "graphify"
+      },
+      {
+        "repository": "click",
+        "tool": "compass"
+      },
+      {
+        "repository": "click",
+        "tool": "graphify"
+      },
+      {
+        "repository": "jsoup",
+        "tool": "compass"
+      },
+      {
+        "repository": "jsoup",
+        "tool": "graphify"
+      },
+      {
+        "repository": "redux",
+        "tool": "graphify"
+      },
+      {
+        "repository": "walkdir",
+        "tool": "compass"
+      },
+      {
+        "repository": "walkdir",
+        "tool": "graphify"
+      }
+    ],
+    "newReduxEndpoint": {
+      "id": "sha256:ceae4b39dd8902b6888096a1827ee67422d04d3c19d527d674ec740c3e903785",
+      "kind": "function",
+      "file": "src/createStore.ts",
+      "line": 86,
+      "sourceDeclaration": "export function createStore<"
+    },
+    "negativeControls": "Without the explicit function kind, exact Redux lookup returns both the declaration and its coincident export record. A nonexistent declaration line returns no match with complete execution. No binding is silently discarded.",
+    "sourceKinds": "Pinned source declaration lines were checked for Mux struct, _AtomicFile class, Cleaner class, createStore function and IntoIter struct. Graphify get_node does not accept the kind filter; its returned identity is checked against the same supplied constraints after capture.",
+    "publicCallsVerified": 32,
+    "sourceWindowPolicyFunctionHashes": {
+      "anchors": "b49ff9fc521d4eecfae2987fd3706b461c09a0dbb5161693afa67aa32ab3424a",
+      "windows": "b39fbb5cf512a35b2ea4385fcc857f29118506057c728a529b869ae4b70abeb5"
+    }
+  },
+  "comparison": {
+    "priorUnscopedWindowControl": {
+      "compass": 11,
+      "graphify": 15,
+      "facts": 20
+    },
+    "newConstrainedWindowControl": {
+      "compass": 14,
+      "graphify": 15,
+      "facts": 20
+    },
+    "delta": "Three newly supported Redux facts: enhancer behavior, dispatch state/reentrancy, and listener snapshot/unsubscribe semantics. Earlier parameter anchors also expose the enhancer body. Observable/store API code remains beyond the source budget.",
+    "remainingGap": "Compass trails Graphify by one total fact: Graphify gains jsoup attribute-copy and WalkDir deferred-directory evidence; Compass gains Redux enhancer evidence. Both miss other facts.",
+    "noAggregation": "Explicit file, declaration line and kind are supplied task constraints in this new arm. Do not retroactively replace the old unresolved result or combine this score with native source-member/declaration arms."
+  },
+  "validation": {
+    "baseCommit": "2ef40e95ca45972f92696cc5d427c8e9808476dd",
+    "sourceSha256": {
+      "crates/compass-output/src/agent_query.rs": "8fc6f67d56f17c3298a4752a0ab7b7f5fca2eea3ca4868536c2f13f5d2edb300",
+      "crates/compass-output/tests/agent_query.rs": "19ddf5eb5f5fc4c06257b3219317789c77bb9d042aed2e986845be93e23d2562",
+      "crates/compass-query/src/code_query.rs": "9af2f720b1b5d6962482073d29547c049ec8480500049c9c74ae565a85921800",
+      "crates/compass-query/src/lib.rs": "982a3bd5c8213556d04454b8bd08f2c7a2c61f516ea0639bc3f92b4279ee08e6",
+      "crates/compass-query/tests/code_search.rs": "f14342daacc57ada5d496f4b4baf565bff8c5f232a93324d5b0782accf1a2796",
+      "crates/compass-cli/src/code_query_commands.rs": "a0820b81ea78212cdc0dca0d88f66c3ee8be89fe7afd168526323194b8a8c0d6",
+      "crates/compass-cli/src/help.rs": "a4ba97efbbaa3d6d8a6a4c2883f9d07615ba7324602fd56040ded958cacd3edc",
+      "crates/compass-cli/tests/code_query_cli.rs": "1690034e88dbdcbd024f755d360f1eebba17d3db87dd688f62b69077ec544fb8",
+      "crates/compass-mcp/src/code_query.rs": "24e676846d0d8a6a158a0417fe3248bfa76dc1fde7f166deb4bfd2373f011d6d",
+      "crates/compass-mcp/src/lib.rs": "837fcc126e236be64611bf58ac08b82fd683fd7d667aa5b5ef1df2f98614f6bb",
+      "crates/compass-mcp/tests/code_query_tools.rs": "74f1a9d4e14468761e0b08395e37e36ff323e00bc35bfb50f659211c5fff259b"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 3.81
+      },
+      {
+        "name": "query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--test",
+          "code_search",
+          "--test",
+          "store_engine",
+          "--test",
+          "export_binding_resolution",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 18.39
+      },
+      {
+        "name": "output-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-output",
+          "--test",
+          "agent_query",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 0.65
+      },
+      {
+        "name": "cli-query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "code_query_cli",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 2.85
+      },
+      {
+        "name": "mcp-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 26.07
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 43.66
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 98.44
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 14.83
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.04
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exitCode": 0,
+        "seconds": 0.39
+      }
+    ]
+  },
+  "testCounts": {
+    "product-tests-final.log": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    "workspace-tests-final.log": {
+      "passed": 1106,
+      "failed": 0,
+      "ignored": 2
+    },
+    "mcp-tests-final.log": {
+      "passed": 61,
+      "failed": 0,
+      "ignored": 0
+    },
+    "cli-query-tests-final.log": {
+      "passed": 41,
+      "failed": 0,
+      "ignored": 0
+    },
+    "output-tests-final.log": {
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0
+    },
+    "query-tests-final.log": {
+      "passed": 37,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "validationScope": "Formatting, targeted query/backend/export-binding suites, output contract suite, CLI suite, full MCP suite, workspace Clippy and lib/bin tests, product tests, product boundary, and CLI build passed. JS/viewer and extraction/publication qualification not rerun: these surfaces are unchanged. Shared Python benchmark modules unchanged; external collector/verifier completed.",
+  "reproductions": [
+    "Attempt 01 failed to compile a new test fixture using edges instead of links; corrected.",
+    "Attempt 02 rejected the new fixture because its other.rs file record was missing; corrected.",
+    "Attempt 03 exposed a new exact-mode response bug: node bounds left excess hits. Candidate truncation now happens before projecting both nodes and hits.",
+    "Attempt 04 CLI test incorrectly expected raw diagnostic prose in the compact text formatter; changed assertion to its documented bounded_truncation status.",
+    "Attempts 05/06 exposed an Agent View failure on empty truncated search: it attempted no_match without evidence of absence. It now preserves unknown match/partial execution and passes regression coverage. The legacy MCP error assertion also needed its documented Error prefix.",
+    "Attempt 07 focused output/query/CLI/MCP checks pass; attempt 08 records the final unchanged-source validation and repository capture."
+  ],
+  "artifacts": {
+    "exact-symbol-01/focused.py": "ae34625de3762e955494d54d97933bc1caf7f4a0f6b7af64212f2606c4591d70",
+    "exact-symbol-01/query.log": "cf3347ab792464520b0c6c3860af2195788b8ca216be1ddaa3a0904079396602",
+    "exact-symbol-02/focused.py": "ae34625de3762e955494d54d97933bc1caf7f4a0f6b7af64212f2606c4591d70",
+    "exact-symbol-02/query.log": "4a791e31e736be06d8f5b4456202935eab61f85ccdb7be3f8b4582306a7ff3a2",
+    "exact-symbol-03/focused.py": "ae34625de3762e955494d54d97933bc1caf7f4a0f6b7af64212f2606c4591d70",
+    "exact-symbol-03/query.log": "70df33567d79460f86fb38428f9dd1501022d4333a643d845b7564c73138cf4c",
+    "exact-symbol-04/cli.log": "17085d17fd7b5b8ec2fadf5e028ad6ceb223c885490e831b296dc270038a1f92",
+    "exact-symbol-04/focused.py": "ae34625de3762e955494d54d97933bc1caf7f4a0f6b7af64212f2606c4591d70",
+    "exact-symbol-04/query.log": "9b9182b7f2b77f876380fa4b1ff85489e4fb0179c307f537603fc58980143b79",
+    "exact-symbol-05/cli.log": "580a27c6fdb11e8732eae5c5a7aa6031a8133bda72e290289d5aa847d78b7a4d",
+    "exact-symbol-05/collect.py": "44fc18ff82318dd82b3de106d4a8c8bc55f2d882eb8badf5e1699c43493fb8bd",
+    "exact-symbol-05/focused.py": "ae34625de3762e955494d54d97933bc1caf7f4a0f6b7af64212f2606c4591d70",
+    "exact-symbol-05/mcp.log": "93b3fa40d7aeaddb6fe40eff1ffd607d5da5dee5c3240a148bd16496fff82f37",
+    "exact-symbol-05/query.log": "a9ea5a790ac1e192a5da9333a6e93a5461703aaf29ee6147d28502b919401d15",
+    "exact-symbol-05/validate.py": "f054b50fedf61cab3e5600318486c8dc82a0d09f96815b8ba65d69a124a42020",
+    "exact-symbol-05/verify_capture.py": "ee23ac7674d87dec92a01b3e8e244ac6957f6e3473dc718832c51d9394182168",
+    "exact-symbol-05/window_policy.py": "b81cd0a57472dfe74a41eff8ee70dd8492fcf627f255f9c5dc88877628d94b94",
+    "exact-symbol-06/focused.py": "1e9010ccd6a59666c9694c60c945ae653b189bb2c2b06019565387823ab76530",
+    "exact-symbol-06/mcp.log": "f9a4f08a714331df18a3503c2aba60833de8ff1de6d00b9e0759433b62433067",
+    "exact-symbol-07/cli.log": "6a2111eba9eaea4083ef90a0089c039aabdbcfed119e49d5688e7f6d6bd2f994",
+    "exact-symbol-07/focused.py": "06df8a5d7969a49bbcac09f3e71feac96d836305b8c2009b69ccbbbb31c16b54",
+    "exact-symbol-07/mcp.log": "eabd86c386033baa83387b6470948adb99e65b0e242d0ce4319ed877fb4ca0b2",
+    "exact-symbol-07/output.log": "f35fa7bc346afa0677067d4fb9b9cc443dbc586367074811026ef0f963b5f61a",
+    "exact-symbol-07/query.log": "b4861ddcd537e02b5c63dfccdeaaff3b621337373b7f447df0c13efd073c291a",
+    "exact-symbol-08/build-final.log": "9e016f5f155581ff3875df43030558b9deaf182b9be48c4c84b52b9bf783046b",
+    "exact-symbol-08/capture/capture.json": "4263f8d01ace8a5d7caa3595642115875bdd91c63e5b3a3d03bd12c3abd3c91a",
+    "exact-symbol-08/capture/collect.py": "44fc18ff82318dd82b3de106d4a8c8bc55f2d882eb8badf5e1699c43493fb8bd",
+    "exact-symbol-08/capture/community_identity.py": "5bc3d1c574211aa3180a2334fe6c758043f384651948b7077aba3ea879de4503",
+    "exact-symbol-08/capture/community_navigation.py": "808df1c7b15c8c2afc86ac1ed09dc4f339c98a77d7a7b14eb4866e3da1c8c0f8",
+    "exact-symbol-08/capture/community_tasks.py": "77f599ff7ee7eebfe4b590fee6c771ecfb3ed475d1944e37bcabc110634d3660",
+    "exact-symbol-08/capture/exact_symbol_development_registration.json": "78781c22e1357515e9cd4e1093ecabe0fc1263262fae3a4fee1b0bf02a8086f2",
+    "exact-symbol-08/capture/graphify-mcp-environment.json": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+    "exact-symbol-08/capture/mcp_compare.py": "d23f093a1300fcf825457f917694097f0f8b8dc8ee8d671946032f5e4e89a5dc",
+    "exact-symbol-08/capture/mcp_transport.py": "daaad69c554f824a1df94f0ef93cb9d4c6e9b4f4b712d1611323d524e10d44ee",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/03.response.jsonl": "9dee655ad44513e766155ad52de42e306ff48b3965dc25726bdc84796a4dbfc2",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/04.request.json": "b825c94e647e210dbf316cbbd7220d9e0fd22ffb58190d125770ee341c9eeb4c",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/04.response.jsonl": "9592fe0f5e3501858b96e73f166bfb9abfa98fc0cfeaeff911ff5b9deb383871",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/05.request.json": "e71b68a06dc19edf7714aa8da45ecc4f622709859ed76f8abde1a264eac6cab0",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/05.response.jsonl": "34457c5e5dde851a97ba147dcf47065d3bf30d45af44898c0360d9568c79eb7a",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/06.request.json": "d554a89dd893efe9555f85df9574d29a28a43a1e3281df8d114c81883d7a8412",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/06.response.jsonl": "ffeb9c96e595a85c958c528bce6f050c7734aedcbbc771cb147daae1705bf713",
+    "exact-symbol-08/capture/raw/chi/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/chi/compass/windows/000.source": "9eb2d52dd04b27bb3b9db2723a9510feade0e1a02233f894b869ea87dbe3660e",
+    "exact-symbol-08/capture/raw/chi/compass/windows/001.source": "b62f2613be37ad6011c1399c13810dc40d7a7d31672ea7b4b845e7388a076652",
+    "exact-symbol-08/capture/raw/chi/compass/windows/002.source": "a9a0519cc2a6c3a65e7439b10e243ac41e96d1e0b84309ee74cc2ec221ad67e4",
+    "exact-symbol-08/capture/raw/chi/compass/windows/003.source": "6c7ee9d15cf8b902474cb2a889af3e6ce8d930ce6b2549c9370bf917300afb7f",
+    "exact-symbol-08/capture/raw/chi/compass/windows/004.source": "14e3766158a070b4d2458b2d12c46dfed9135e5eb7d92e75cc2ddd267a79df48",
+    "exact-symbol-08/capture/raw/chi/compass/windows/005.source": "41e6f1b96477603fc758b76907ab2b58c89f5b2a19977a9ae02a977219d043c8",
+    "exact-symbol-08/capture/raw/chi/compass/windows/006.source": "6e98f4a2cfb379527398e03898a69adcaaf22578436847e3e8e97a2c308b1ee4",
+    "exact-symbol-08/capture/raw/chi/compass/windows/007.source": "d3229d590c609f7973a948e38c2b535897de1b1a0c4c8155c53b51c200fdd05f",
+    "exact-symbol-08/capture/raw/chi/compass/windows/008.source": "7baa3aa1ed3dfed62e1f78abedbcf849b2fe24c2d5d98c691f798c299b386cc9",
+    "exact-symbol-08/capture/raw/chi/compass/windows/009.source": "1ab1ac9656f4ba94ee77a2eadfc583448b7dc9e56810b342d15c4223a49e293a",
+    "exact-symbol-08/capture/raw/chi/compass/windows/010.source": "1b96890f53d5a7135b7ee8dbd2aa833d315351c53c412ed5f17c04b3717799c1",
+    "exact-symbol-08/capture/raw/chi/compass/windows/011.source": "4964102336465ac8fda4b73892e06e76450b04c7a6e911bc3923a9ba35bb182e",
+    "exact-symbol-08/capture/raw/chi/compass/windows/012.source": "6e9579c6e34320ab72c2eb6b62fd2e97b753caffc5fe2fde72d8ee87285bf834",
+    "exact-symbol-08/capture/raw/chi/compass/windows/013.source": "4f8642971aca332f7c9211a74565ecfd72df1840647e7e697f0a7301f047bb03",
+    "exact-symbol-08/capture/raw/chi/compass/windows/014.source": "af566e9b84a61be0e5cb7f650727d90d31d354496e61e6f0860b02cd80d2ba15",
+    "exact-symbol-08/capture/raw/chi/compass/windows/015.source": "f73834c009a6738ec43bdf1f733fac56afcdbf9dbd6bdd6fceacaa6567b6c41c",
+    "exact-symbol-08/capture/raw/chi/compass/windows/016.source": "30f6edf9f7358667d354a02d8133c3d0b9250877faf97696a64eba0ce9936214",
+    "exact-symbol-08/capture/raw/chi/compass/windows/017.source": "7b7346b3001bf77da22e762643d47cd5187073ba41ee4eef160d007c5a445b82",
+    "exact-symbol-08/capture/raw/chi/compass/windows/018.source": "fe91417f99bad942628bf086fc17692a8cc2062fc0a021dc9d75cfdb98864480",
+    "exact-symbol-08/capture/raw/chi/compass/windows/019.source": "9bc7883443efbda77ee326ec80ec195fc5bc00589d09aedf444dbdd4cde0c118",
+    "exact-symbol-08/capture/raw/chi/compass/windows/020.source": "4612f1c12f2566386a31823750264c222924baf490d7ad33ef5305792bc6e3b3",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/04.request.json": "5212851af235eed2bd62a674fa14313ea9a38591a8d706897051badabc911735",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/04.response.jsonl": "d4d8b29632b3aae99cc57178a3b6ccb52935ae78e6848569b08c64f60b5a75a8",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/05.request.json": "ddcfc95089d296baa8b47c0889d687bd1504bf40ec9477fdd8089bfac9ff8020",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/05.response.jsonl": "03e89d1f3c49018cfa685aa8798dd92581aca4364a0fe9c4cb5d3a3e96ec252f",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/06.request.json": "f023f938c3a203f59cebf58bab070f7f55b28a6101c05335f1352481ab3516fb",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/06.response.jsonl": "f9beb5c0e11adba184464dd20e27d9f5d2cc2d1a080feac6b021de0c8790402f",
+    "exact-symbol-08/capture/raw/chi/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/000.source": "9eb2d52dd04b27bb3b9db2723a9510feade0e1a02233f894b869ea87dbe3660e",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/001.source": "b62f2613be37ad6011c1399c13810dc40d7a7d31672ea7b4b845e7388a076652",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/002.source": "a9a0519cc2a6c3a65e7439b10e243ac41e96d1e0b84309ee74cc2ec221ad67e4",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/003.source": "6c7ee9d15cf8b902474cb2a889af3e6ce8d930ce6b2549c9370bf917300afb7f",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/004.source": "14e3766158a070b4d2458b2d12c46dfed9135e5eb7d92e75cc2ddd267a79df48",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/005.source": "41e6f1b96477603fc758b76907ab2b58c89f5b2a19977a9ae02a977219d043c8",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/006.source": "6e98f4a2cfb379527398e03898a69adcaaf22578436847e3e8e97a2c308b1ee4",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/007.source": "d3229d590c609f7973a948e38c2b535897de1b1a0c4c8155c53b51c200fdd05f",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/008.source": "7baa3aa1ed3dfed62e1f78abedbcf849b2fe24c2d5d98c691f798c299b386cc9",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/009.source": "1ab1ac9656f4ba94ee77a2eadfc583448b7dc9e56810b342d15c4223a49e293a",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/010.source": "1b96890f53d5a7135b7ee8dbd2aa833d315351c53c412ed5f17c04b3717799c1",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/011.source": "4964102336465ac8fda4b73892e06e76450b04c7a6e911bc3923a9ba35bb182e",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/012.source": "6e9579c6e34320ab72c2eb6b62fd2e97b753caffc5fe2fde72d8ee87285bf834",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/013.source": "4f8642971aca332f7c9211a74565ecfd72df1840647e7e697f0a7301f047bb03",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/014.source": "af566e9b84a61be0e5cb7f650727d90d31d354496e61e6f0860b02cd80d2ba15",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/015.source": "f73834c009a6738ec43bdf1f733fac56afcdbf9dbd6bdd6fceacaa6567b6c41c",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/016.source": "30f6edf9f7358667d354a02d8133c3d0b9250877faf97696a64eba0ce9936214",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/017.source": "7b7346b3001bf77da22e762643d47cd5187073ba41ee4eef160d007c5a445b82",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/018.source": "fe91417f99bad942628bf086fc17692a8cc2062fc0a021dc9d75cfdb98864480",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/019.source": "9bc7883443efbda77ee326ec80ec195fc5bc00589d09aedf444dbdd4cde0c118",
+    "exact-symbol-08/capture/raw/chi/graphify/windows/020.source": "4612f1c12f2566386a31823750264c222924baf490d7ad33ef5305792bc6e3b3",
+    "exact-symbol-08/capture/raw/click/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/click/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "exact-symbol-08/capture/raw/click/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/click/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/click/compass/mcp/03.response.jsonl": "9dee655ad44513e766155ad52de42e306ff48b3965dc25726bdc84796a4dbfc2",
+    "exact-symbol-08/capture/raw/click/compass/mcp/04.request.json": "60e1587fdef73541c850a02da90047bc38daaaa290ff434dc49c9c764060ff8d",
+    "exact-symbol-08/capture/raw/click/compass/mcp/04.response.jsonl": "cadf5337b5ecc3d0f07dee4ac5ae685c5ae3d79c38a12ec418083df565fc2016",
+    "exact-symbol-08/capture/raw/click/compass/mcp/05.request.json": "a5981f00d010433776e9462d29265dd8c1e3f1ddc72acb13bca73b28101f54a8",
+    "exact-symbol-08/capture/raw/click/compass/mcp/05.response.jsonl": "9288557f654e4e06fa41497700b814650aaa5d059796f455bf083d37c43ce627",
+    "exact-symbol-08/capture/raw/click/compass/mcp/06.request.json": "6389615d7c92f8d1fff4aa1102e7a6830a879d8861610c9d3b538badd499d48d",
+    "exact-symbol-08/capture/raw/click/compass/mcp/06.response.jsonl": "13cd279203e5684b0748fffe6e8d3ca66e6fbae34d0ef4a0305408d733b5bbfb",
+    "exact-symbol-08/capture/raw/click/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/click/compass/windows/000.source": "75e95b9bbc3c0e0eb155a8832aece6c91ad55fc665f3e75f975f7f56a4f714c4",
+    "exact-symbol-08/capture/raw/click/compass/windows/001.source": "d60bde99d994e7a7514909d64528e29bca38a4a8ab83539fd5255f78b55e8e9b",
+    "exact-symbol-08/capture/raw/click/compass/windows/002.source": "ccddee379cb2066c45d953575817cc4039d73deab55149c3378717de58b76632",
+    "exact-symbol-08/capture/raw/click/compass/windows/003.source": "6c48735e9c2665c3f370a0dc40392d32c969bca52d33e3e4dc6d42dad7c1e48a",
+    "exact-symbol-08/capture/raw/click/compass/windows/004.source": "093b12bc46f9d5036f4b4dbaa6d3a0846aa191ba19b826d415077363a304c3fa",
+    "exact-symbol-08/capture/raw/click/compass/windows/005.source": "6069237b3debc11dd51020c834ad9e5816bbeab1000466034710d575faf439d1",
+    "exact-symbol-08/capture/raw/click/compass/windows/006.source": "29d44ac5a6a9f8ded9079cf6c8315259bf1d21a487df8993d48d575bd5dc92b8",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/04.request.json": "4aad9fe4bfc910ea3b74fa2a6bb4335c66ede5da3d24cf48609142507b61a000",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/04.response.jsonl": "d22730f840576483c14ecb89c933817acf713e534c6a2b8b8a69ecc7e98714a2",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/05.request.json": "f9283949d9100177a2d60e99bce661f8e92dbe8efc14cb4d3ab3f76c9326b59d",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/05.response.jsonl": "fd6c5e880f241cf7eaccbadbfe53caaed3e77ef8388bb623c0dc5ec20f54d6a9",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/06.request.json": "55a8fc30790c83303e0e809c7eb566223055122e5a26c5885071a26ed9850062",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/06.response.jsonl": "fbc4566d865d13f935a1ce0c1dd6672f04f9387e43c594e05c5e1af88ad2e59d",
+    "exact-symbol-08/capture/raw/click/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/click/graphify/windows/000.source": "75e95b9bbc3c0e0eb155a8832aece6c91ad55fc665f3e75f975f7f56a4f714c4",
+    "exact-symbol-08/capture/raw/click/graphify/windows/001.source": "d60bde99d994e7a7514909d64528e29bca38a4a8ab83539fd5255f78b55e8e9b",
+    "exact-symbol-08/capture/raw/click/graphify/windows/002.source": "ccddee379cb2066c45d953575817cc4039d73deab55149c3378717de58b76632",
+    "exact-symbol-08/capture/raw/click/graphify/windows/003.source": "6c48735e9c2665c3f370a0dc40392d32c969bca52d33e3e4dc6d42dad7c1e48a",
+    "exact-symbol-08/capture/raw/click/graphify/windows/004.source": "093b12bc46f9d5036f4b4dbaa6d3a0846aa191ba19b826d415077363a304c3fa",
+    "exact-symbol-08/capture/raw/click/graphify/windows/005.source": "6069237b3debc11dd51020c834ad9e5816bbeab1000466034710d575faf439d1",
+    "exact-symbol-08/capture/raw/click/graphify/windows/006.source": "29d44ac5a6a9f8ded9079cf6c8315259bf1d21a487df8993d48d575bd5dc92b8",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/03.response.jsonl": "9dee655ad44513e766155ad52de42e306ff48b3965dc25726bdc84796a4dbfc2",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/04.request.json": "03209bfedf1902849eed749b636a24bfdf30174b0165a2186c5347a9e86c1ae5",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/04.response.jsonl": "9ccfeea5efe0917876f249b287ed70127e0d87f88ee2021e5c6dc606a8d69bbd",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/05.request.json": "678e71f511deadca622e16348bf9b0037f38612114f2bc92624fcb53b66676e0",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/05.response.jsonl": "116864610383d2d3070dd9dd7bb8eb91a1178ede5f14b90a326175247c3cb70e",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/06.request.json": "f02cf7ee1913dd1d549058f1a4e3200a1cb3753d2dcc2cc9e784020d87d3c831",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/06.response.jsonl": "c365ad586bf53567f59e2451f9505a8e5b8b3deb1ea2f91b8f95e33bab5c8bd1",
+    "exact-symbol-08/capture/raw/jsoup/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/000.source": "f1137f4d17d7bc9a18934c4387a08fd79118e7f98548d4e9ac73a3edd6cd237c",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/001.source": "b577f811b284f994dc62cfd95d6c60d63e5d5b70cac13cb5cb3da8ba175b8e71",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/002.source": "39bd7723e9a79009a4a2aeb394f195913bf9f10ef0dc062a4c2f7af545134689",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/003.source": "4b46b8429cab31bbc393bf838692c23b5bce68cf1809a07982380fcfac468a11",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/004.source": "5fca2e4eae89593e8bfba5cd9b0d10f8269493abd2a6f08c49940c0cce1f49a7",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/005.source": "618a9b93563047fcf224a5c27946d83af48606455a610d785c9675ab93527589",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/006.source": "eb5ce17dd624ef1c4474e74a29cf9013c9cae2eff77a75e8560ba06c6b085a28",
+    "exact-symbol-08/capture/raw/jsoup/compass/windows/007.source": "c80f32af2fa6b5b37f6a6b6aed035cc318e7d4e6bda0580a428bff234b2ac17a",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/04.request.json": "883da0706262e806f7254d1763f680dbebb7917ab916867d30c4f43b2ae6b8b9",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/04.response.jsonl": "7ac5d473f020a3eef7e5f7aeb277fa5b33784b888f2d83cdb791ee569b66ec11",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/05.request.json": "33b44290f58b057bb67d81ec9e47bca5a6429c9d2d3f4a3cdf19052109786d5a",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/05.response.jsonl": "03ba969917582be251f52502cd8877f5fd9d3efc4206dea7660b64ea5958f4b0",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/06.request.json": "ec9c984810cec2fdfd8633a8ba906c052d12aeef1ba5f16dbed27c511704bcc2",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/06.response.jsonl": "809aa7cb8af3974d0dfbf64410832d5a09f0b729832295984a8565afd46afd83",
+    "exact-symbol-08/capture/raw/jsoup/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/000.source": "b577f811b284f994dc62cfd95d6c60d63e5d5b70cac13cb5cb3da8ba175b8e71",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/001.source": "39bd7723e9a79009a4a2aeb394f195913bf9f10ef0dc062a4c2f7af545134689",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/002.source": "4b46b8429cab31bbc393bf838692c23b5bce68cf1809a07982380fcfac468a11",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/003.source": "5fca2e4eae89593e8bfba5cd9b0d10f8269493abd2a6f08c49940c0cce1f49a7",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/004.source": "618a9b93563047fcf224a5c27946d83af48606455a610d785c9675ab93527589",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/005.source": "eb5ce17dd624ef1c4474e74a29cf9013c9cae2eff77a75e8560ba06c6b085a28",
+    "exact-symbol-08/capture/raw/jsoup/graphify/windows/006.source": "655f66ae9b5a39084ace665e8c4bc2908062931d8d7a8d4370ae0af6e4792230",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/03.response.jsonl": "9dee655ad44513e766155ad52de42e306ff48b3965dc25726bdc84796a4dbfc2",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/04.request.json": "5de4d816d7e1214748c0029181a97e54e90745c28cdb0dedff21b317636597f6",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/04.response.jsonl": "b5e13c9bc3a4f5766bd24b5972e5d5803158869444a5c8c4f27afc481a6e3874",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/05.request.json": "699af445a5be27d04e0061a3a9ec02af4594111a68f2fcd21cbf3ad824a46740",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/05.response.jsonl": "78b7f2af44f37d40d9c7728bd88fdf1442f0dd59a80427d99afd624fa43ac9dd",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/06.request.json": "dd5627f790fe07b2458afbac59ef35159101a16e731f958c5a1b5a7dbdf5da78",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/06.response.jsonl": "0dc3a0e74b4a35ce129be9a1896cc5c00740caaa1e4e89aa7c05ea7f56338b11",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/07.request.json": "7f325ed609e0b5566f68fc1afa4d56ee6ea4b17b9cf637aa35f2ad87437f4afe",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/07.response.jsonl": "484d9b3a10f0e3a9a3bef7f38db457640e12463a642efe44a8b063bedf5c20ff",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/08.request.json": "964bed0361814bdeee4c195a4dbd5636944a020232a5c3228845d7b70b834cb2",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/08.response.jsonl": "feb194ebac4bb6527224048e08e29446df490d750712dcb097b1e6803649ee95",
+    "exact-symbol-08/capture/raw/redux/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/redux/compass/windows/000.source": "fefd5fb81a7b23445d2f150789cf0f05109f23106acdb2f980624e739e01bac2",
+    "exact-symbol-08/capture/raw/redux/compass/windows/001.source": "1c7fe407a6684530c4e4d4f4f1c306bfa03a3cdcfd928a788fbf90b7eb8c9196",
+    "exact-symbol-08/capture/raw/redux/compass/windows/002.source": "ff066db901fe9a115af900172fa4195da1031fca12ed2e4f7fe00e426f6a2943",
+    "exact-symbol-08/capture/raw/redux/compass/windows/003.source": "bcf54065989a31c0d240046050b2f438c5d6f4da6e8e240c13d996f463b6c888",
+    "exact-symbol-08/capture/raw/redux/compass/windows/004.source": "bcc7dbea05f05d97162aa993cc72a73bea8ce4a97c7b1fb65a5964a14bf670f2",
+    "exact-symbol-08/capture/raw/redux/compass/windows/005.source": "c126acce74d43261c4d8f6aabcf8edc0b962c09ce4f75f36cf18f96214e23e47",
+    "exact-symbol-08/capture/raw/redux/compass/windows/006.source": "ff2309baa17a76ad34adfe7c0c62241739a35ef30bfbe8bcc6f44725c5f5ed84",
+    "exact-symbol-08/capture/raw/redux/compass/windows/007.source": "2f01b1f5e664017b7dbfe07eec58a8a44e699fba4defd0f976c543ca622785b8",
+    "exact-symbol-08/capture/raw/redux/compass/windows/008.source": "07389aee59f45563b27f911b823055ee3132b091d6d4bdb04f7f2fb8b3d88206",
+    "exact-symbol-08/capture/raw/redux/compass/windows/009.source": "ea600cae25f2f26c93cec0be4b3956d94f1e3795befdf89b0148d60498e51ca2",
+    "exact-symbol-08/capture/raw/redux/compass/windows/010.source": "09eb4afe0fee0721cbe28d517e7a376aaf5de502d8c1a95300adc7253af7d8f2",
+    "exact-symbol-08/capture/raw/redux/compass/windows/011.source": "74bc223cde432e77b8936141da3a79860da4c238b719bdee2fd1de08ce3108a7",
+    "exact-symbol-08/capture/raw/redux/compass/windows/012.source": "6ede28da15d093f8beced8ee23d475fc3e7b6fbe465228108ca0aff4d50a7d7e",
+    "exact-symbol-08/capture/raw/redux/compass/windows/013.source": "0e16e43c7405bb30498120b98523fbf3fb06d7f4389131f3b3f8ec392f6945ef",
+    "exact-symbol-08/capture/raw/redux/compass/windows/014.source": "7421a463ba9ee7d106d36ab2812719069881eaeb4aa38820e4b15f3d771d450f",
+    "exact-symbol-08/capture/raw/redux/compass/windows/015.source": "2fa50459f3adaa2c60d3d328d13ddb749207e27feb3c92fe43812e9f2edc01c6",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/04.request.json": "c32cfb2450c017920145bae06b04af6f131c02499e30d987f76daf8e53f1a5e9",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/04.response.jsonl": "cba36e66dcc88f9313662b40b072d5c24cf9fbf25310ac3b1c2f4eaebc8e02c6",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/05.request.json": "d09ec5f892edc9b5060a5c26c87e8f17c71cbfde6c12d4d531c783009a1571e1",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/05.response.jsonl": "1e48f4a2d7cd27755a2d0d75cfde9d97c6556e720ac2e341ad33db57a1529b65",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/06.request.json": "cc1a38cf606bc4c2aebb49742322ce284f708e44a3d49246b05d4ecddbb9fd5c",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/06.response.jsonl": "121e650b10614f3521ee06ed0a7caff654bf7640d1fba6d6d583de997a08f881",
+    "exact-symbol-08/capture/raw/redux/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/redux/graphify/windows/000.source": "02f3df4750372f7d2806a2932dcb7a287ac405470fdbaf58c96adb8903f7223c",
+    "exact-symbol-08/capture/raw/redux/graphify/windows/001.source": "104842ff0af72b77928d0a849bc5aa5e5bf080e95aeca8f8bc0baacd3dd90aa1",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/03.response.jsonl": "9dee655ad44513e766155ad52de42e306ff48b3965dc25726bdc84796a4dbfc2",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/04.request.json": "6731b10af0227cd2c72027c483067f2f6c66e5132cc795e94c526b2621dce8b4",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/04.response.jsonl": "059aeda7dc5b8db56e899c21607f48a9a155d27af5ad9de59a847b4389947eb3",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/05.request.json": "c529b2d84f61070e4b8e529556ae15058513f80f2e5f95ecaa9d6ba21c7bb2c5",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/05.response.jsonl": "799db45137a079944ca35821d15c2080d77a3933041bec763188dc7960dfee47",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/06.request.json": "351ffaebecafa6ec3d3b75f67301f651bd8235ec0931203df270a33b35c57bcb",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/06.response.jsonl": "8b25fa3d0fc64cadfc4699a6fadbc54a1c780c7e27d8c03dc784faf4f333d016",
+    "exact-symbol-08/capture/raw/walkdir/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/000.source": "ff45ca1c29db9f3173b1f545ef952fb6b79c3fe1bc0bd48c6948fbbf216fd72a",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/001.source": "386a59fc2a5e4ae1f44959b2be8feeb2ac6dde5822d24f36c4165bfdfeb417ac",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/002.source": "2e584390c911c511c659505ad05cf56eb6f2124bd3d365715d47b80b352f4f99",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/003.source": "81998d6b94d50a7e4bbe3bfa2df65cb1a331098c70eb327ac33c8fd66974b0fb",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/004.source": "cfa77a0ba1f9e61f2c03f2754f13a698331b406e0b76623484aaac2b96db4831",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/005.source": "2b1252e1e1bcb53d4f0a66e59ced59dbb29926ae626b78cea2ecaeaa39d5a276",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/006.source": "cc91b2d0560786f75b77509e46eb2b04a0fa4242464c1705e05b91f11a7d9e64",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/007.source": "e40e140647193c41d7635036b1dec0786efe1cbc5863edaf76db8096fe8d4ddf",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/008.source": "be7342201ed171b2aa6ef80130e3b3d8ec259442a137c0fa9a3f5182ee79401e",
+    "exact-symbol-08/capture/raw/walkdir/compass/windows/009.source": "907ef6bd190a9985da364ec084579cacae6b06067d5a3bdfa8d98a2c3256eb9b",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/04.request.json": "ac9506fc18f6f6cf468a46a9e781188b01156b4b7c6ab64ad601ab06640a8c25",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/04.response.jsonl": "2190ecdb65f6a8ba2da85c820eccc0fdd4f5c647cedd341f1d624e1368c0977e",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/05.request.json": "65c2b9b1c1a27b16b80c79f218792a08426c4816c596679d0d57190ece2f87e5",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/05.response.jsonl": "8b3d0bf2593d26ad5f4914c6ca5a2da3d546495d6ad44b659fae6db89f914d98",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/06.request.json": "e0c2889dd22e5bf4dcb7bfbd1988c411c468102dcd3171bccc1839bef002c67b",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/06.response.jsonl": "4414636125991fe30a997d1431d766c61638dd0aacd3de29c97cc6fa11c08d3b",
+    "exact-symbol-08/capture/raw/walkdir/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/000.source": "47cab2eca2cc07d78d319f7a9acc39c45d31992cc01788c804c2f9b53ff3600b",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/001.source": "c08a2af053b0f567c208bc02679f7d0442c7d867050104de90edb223a2cab75b",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/002.source": "64f8be64c7277d8447281854e37989c0b4d002448950982be85d036fdb8a1a7d",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/003.source": "c1e268fb5bde75384cb45c0375ade42dda153da149dfa7645f53d67854c7672e",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/004.source": "2923912d8a93208e4633fd4efd61514a7449defd6519f815c445be6318c10f32",
+    "exact-symbol-08/capture/raw/walkdir/graphify/windows/005.source": "b0c0b5e23f7d4cf98d355ff7f08101ea772f51b09b278f51ab7bb66ad2aaf4a6",
+    "exact-symbol-08/capture/runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "exact-symbol-08/capture/window_policy.py": "b81cd0a57472dfe74a41eff8ee70dd8492fcf627f255f9c5dc88877628d94b94",
+    "exact-symbol-08/capture.log": "7942afdcda3ed01a7a1d851b7ebb495fcc52bbd2eb3caa938a3c989e7740137c",
+    "exact-symbol-08/cli-query-tests-final.log": "ced998b6596679b097d1d01b7e617b7d28a5d5acabbe005057d62bed90f82733",
+    "exact-symbol-08/clippy-final.log": "49ffaeaceeba3d02bf3df5eedbc0408b69a356da5e924d56fba5519fd66a30af",
+    "exact-symbol-08/collect.py": "44fc18ff82318dd82b3de106d4a8c8bc55f2d882eb8badf5e1699c43493fb8bd",
+    "exact-symbol-08/fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/mcp-tests-final.log": "97a746b70c66d0335eb132fed03db34c164ecd51efb4adb61bef13e11fc19d7b",
+    "exact-symbol-08/output-tests-final.log": "5b9f76bf7c3ff9dbf360218e8ea3a64e9c4402249c6a4494ee28f335cbc5c4b1",
+    "exact-symbol-08/product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exact-symbol-08/product-tests-final.log": "97cfb0fd95e80663cc5a9fb2a98ae5aab534ebc898be1447fe39f75b0b47794f",
+    "exact-symbol-08/query-tests-final.log": "7bf34bbd052c4f89e78f888ac8df99433ec6072b4d6871c55a7874bfdba9f75b",
+    "exact-symbol-08/validate.py": "0136921ad1abff40d4049185c31a3709fc09fca560f297829ba603bae308594b",
+    "exact-symbol-08/validation.json": "e6f433eecccde7fc0e27873fc2fb63d7ecb9479a4c986c1ad09b097fd172b1b7",
+    "exact-symbol-08/verification.log": "e8c0969f1e23ab63fc159ad1687f368e6ea3064674062e0334a5e15ea8c24e99",
+    "exact-symbol-08/verified-summary.json": "491b33b8387939ca82d44b6baa32683333689cbdc327183a7894119168f2dee7",
+    "exact-symbol-08/verify_capture.py": "fe01411d464f9a216e010a44b66706fe85bc0e1de3cf44ec29154186d43a014e",
+    "exact-symbol-08/window_policy.py": "b81cd0a57472dfe74a41eff8ee70dd8492fcf627f255f9c5dc88877628d94b94",
+    "exact-symbol-08/workspace-tests-final.log": "14362090d14b3654e0e2efee13379b1337ca0db98fecb6e52bea3eb2006c8bba",
+    "exact-symbol-08/write_review.py": "8c5c4ea53179bd519fd0eb32128448cce741adebeec3e4e0964e551a056d578f"
+  },
+  "limitations": [
+    "Known five-subject development panel; no held-out confirmation or representative precision claim.",
+    "Same-agent source review with a separate verifier, not independent human adjudication.",
+    "All 153 returned membership anchors were checked as declaration, binding or property sites; this is not a review of every returned non-membership edge.",
+    "The shared source policy can include code between anchors, and the tools expose different anchor sets. It is not a best-possible workflow or equal-compute comparison.",
+    "Exact lookup filters after the bounded name-index read. Names exceeding the candidate limit remain incomplete even if a specific file filter would eventually be unique.",
+    "No authored responsibility explanations, god-object defect judgments, broad caller/callee precision, longer-walk superiority or universal dominance is established."
+  ]
+}
