@@ -1,0 +1,2971 @@
+{
+  "schema": "compass.explanation-focus-review/1",
+  "registration": "benchmarks/agent_query/explanation_focus_registration.json",
+  "registrationSha256": "8287faea7015f865cbea8b5088ef20ca04d10ee1f367724327ac02ce3fa80cc6",
+  "registrationCommit": "1c80747a",
+  "productCommit": "293582c38085a195b9a8272c8828196bc3724aaf",
+  "evaluatedBinarySha256": "e33934b94d1e254ba59906fddece098d8433bf7e31af746e46aac3dfc6744f97",
+  "scope": "Known development questions; additive opt-in member-name focus, not a held-out experiment or a new paired superiority score.",
+  "summary": {
+    "baseline": {
+      "facts": 20,
+      "literalWitnessFacts": 5,
+      "sourceEvidenceFacts": 14,
+      "sourceBytes": 28129,
+      "stdoutBytes": 58506,
+      "verificationBytesCharged": 28636,
+      "unverifiedSourceExcerpts": 6
+    },
+    "unfocused": {
+      "facts": 20,
+      "literalWitnessFacts": 5,
+      "sourceEvidenceFacts": 14,
+      "sourceBytes": 28129,
+      "stdoutBytes": 58506,
+      "verificationBytesCharged": 28636,
+      "unverifiedSourceExcerpts": 6
+    },
+    "focused": {
+      "facts": 20,
+      "literalWitnessFacts": 6,
+      "sourceEvidenceFacts": 15,
+      "sourceBytes": 28129,
+      "stdoutBytes": 60942,
+      "verificationBytesCharged": 29287,
+      "unverifiedSourceExcerpts": 6
+    }
+  },
+  "results": [
+    {
+      "repository": "chi",
+      "arm": "baseline",
+      "focusTerms": [],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8102,
+      "stdoutBytes": 18858,
+      "omittedMembers": 5,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "members": [
+        {
+          "id": "sha256:0b03f729c4b4c93626eb48b705704c97e8d051ebb76354fdb1028644c0c003f3",
+          "name": ".ServeHTTP()",
+          "matchedTerms": [],
+          "startLine": 63,
+          "endLine": 92,
+          "sourceBytes": 1039,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "name": ".Use()",
+          "matchedTerms": [],
+          "startLine": 100,
+          "endLine": 105,
+          "sourceBytes": 225,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b6f4933c875274b7724a57dc037f278cef17603b5a17c0123f74f09c4859ade3",
+          "name": ".Handle()",
+          "matchedTerms": [],
+          "startLine": 109,
+          "endLine": 117,
+          "sourceBytes": 268,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:00488c58ae8e3d2aea91ae763f174cddbcbfa1edb9fda7a9650119778dac1272",
+          "name": ".HandleFunc()",
+          "matchedTerms": [],
+          "startLine": 121,
+          "endLine": 123,
+          "sourceBytes": 104,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "name": ".Method()",
+          "matchedTerms": [],
+          "startLine": 127,
+          "endLine": 133,
+          "sourceBytes": 233,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "name": ".MethodFunc()",
+          "matchedTerms": [],
+          "startLine": 137,
+          "endLine": 139,
+          "sourceBytes": 120,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c68a79f08a92785f7b855336a541459e9fdc62201d4430b22c5a267720fe0e2e",
+          "name": ".Connect()",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 145,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7eaf9ccc10f79e519444ce15ca5e733334b9706658f775085bcd446e28339098",
+          "name": ".Delete()",
+          "matchedTerms": [],
+          "startLine": 149,
+          "endLine": 151,
+          "sourceBytes": 109,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:cc338ab0fc91b15feee67ab6ef6b5cb5f32500ccb4011e5a672be9f91a09e728",
+          "name": ".Get()",
+          "matchedTerms": [],
+          "startLine": 155,
+          "endLine": 157,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f6e8a7560084fdf9a66af0e486fd6ceed76e6607c6ede28fdb1bf8c314ed4a19",
+          "name": ".Head()",
+          "matchedTerms": [],
+          "startLine": 161,
+          "endLine": 163,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:86384a3e1b4355bef88f940fa46a5af66a9ba09309b1555884da609ceabad4b5",
+          "name": ".Options()",
+          "matchedTerms": [],
+          "startLine": 167,
+          "endLine": 169,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:940225f9f7c63134e90084b0f543639b43293824ada2130d5aa1c37c6e3de01f",
+          "name": ".Patch()",
+          "matchedTerms": [],
+          "startLine": 173,
+          "endLine": 175,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:4dc5dca620fc82d5378b46e6646c03877017e141daa1474dab9ce69c1d4cfc56",
+          "name": ".Post()",
+          "matchedTerms": [],
+          "startLine": 179,
+          "endLine": 181,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:af7652f3b85f23544717c7555bffe88a5b3ee1fc645491c1dd5d6fd3e5367bbe",
+          "name": ".Put()",
+          "matchedTerms": [],
+          "startLine": 185,
+          "endLine": 187,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e2015cff9c7be8cb29614b5a597580ec714c51b3a9bb8622c8a0c15674b79ade",
+          "name": ".Query()",
+          "matchedTerms": [],
+          "startLine": 191,
+          "endLine": 193,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8fb9d62ca6fa95670412c09930734152e8175fa59cb9ba6e74c30eba422ed530",
+          "name": ".Trace()",
+          "matchedTerms": [],
+          "startLine": 197,
+          "endLine": 199,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:eb197ef3e44ebc05271156e9e59ec93db988e2df4ca08efea5788baa91401518",
+          "name": ".NotFound()",
+          "matchedTerms": [],
+          "startLine": 203,
+          "endLine": 219,
+          "sourceBytes": 419,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1ac18c4f1a692f25a73fdc98b240ed310b2c4a6cf5065ffde2524dd41b7a1f78",
+          "name": ".MethodNotAllowed()",
+          "matchedTerms": [],
+          "startLine": 223,
+          "endLine": 239,
+          "sourceBytes": 467,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "name": ".With()",
+          "matchedTerms": [],
+          "startLine": 242,
+          "endLine": 263,
+          "sourceBytes": 682,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0ac374940442cf9a4d0a0d3270546ca4b87d036fd9ec4aa8f8e48ca2d49e4407",
+          "name": ".Group()",
+          "matchedTerms": [],
+          "startLine": 268,
+          "endLine": 274,
+          "sourceBytes": 106,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:395cabe22892d311ed21d29bf7a01cb9d9d2eb1681c634bfd76121bdcf20b34f",
+          "name": ".Route()",
+          "matchedTerms": [],
+          "startLine": 278,
+          "endLine": 286,
+          "sourceBytes": 258,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:29cd93db4ec894393cf257f027b8988a07ee77181191167f3eb2037f2cfdf5be",
+          "name": ".Mount()",
+          "matchedTerms": [],
+          "startLine": 295,
+          "endLine": 354,
+          "sourceBytes": 1986,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0fa43499c8e3e06b415a5fd6585b87c3fd541d6c883379d774c9247edeb94951",
+          "name": ".Routes()",
+          "matchedTerms": [],
+          "startLine": 358,
+          "endLine": 360,
+          "sourceBytes": 60,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:2e266536f77bb3848784eb117cb5935bce2575bba587e1653ce1e6f9c056ebef",
+          "name": ".Middlewares()",
+          "matchedTerms": [],
+          "startLine": 363,
+          "endLine": 365,
+          "sourceBytes": 67,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f0a27beb5e2a6ff88e563c8dbed4dc6b6a697c1895287734f456edcb78d3ada3",
+          "name": ".Match()",
+          "matchedTerms": [],
+          "startLine": 373,
+          "endLine": 375,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b84d22d8b0ff377822bcdc4cb0d4aaf092970f4a85c5e1107b4d09b1592c015d",
+          "name": ".Find()",
+          "matchedTerms": [],
+          "startLine": 382,
+          "endLine": 408,
+          "sourceBytes": 537,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1580e9037451fb2ed515953396059772522a762628fd281119ff95ef6389357a",
+          "name": ".NotFoundHandler()",
+          "matchedTerms": [],
+          "startLine": 412,
+          "endLine": 417,
+          "sourceBytes": 138,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6d0c29b15fa70de4383c9685161ae0dea68e92fdbb120770c4a7315e8a2fc10b",
+          "name": ".MethodNotAllowedHandler()",
+          "matchedTerms": [],
+          "startLine": 421,
+          "endLine": 426,
+          "sourceBytes": 116,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            476,
+            477,
+            478,
+            479,
+            480,
+            481,
+            482,
+            483,
+            484,
+            485,
+            486,
+            487,
+            488,
+            489,
+            490,
+            491,
+            492,
+            493
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "chi",
+      "arm": "unfocused",
+      "focusTerms": [],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8102,
+      "stdoutBytes": 18858,
+      "omittedMembers": 5,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "members": [
+        {
+          "id": "sha256:0b03f729c4b4c93626eb48b705704c97e8d051ebb76354fdb1028644c0c003f3",
+          "name": ".ServeHTTP()",
+          "matchedTerms": [],
+          "startLine": 63,
+          "endLine": 92,
+          "sourceBytes": 1039,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "name": ".Use()",
+          "matchedTerms": [],
+          "startLine": 100,
+          "endLine": 105,
+          "sourceBytes": 225,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b6f4933c875274b7724a57dc037f278cef17603b5a17c0123f74f09c4859ade3",
+          "name": ".Handle()",
+          "matchedTerms": [],
+          "startLine": 109,
+          "endLine": 117,
+          "sourceBytes": 268,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:00488c58ae8e3d2aea91ae763f174cddbcbfa1edb9fda7a9650119778dac1272",
+          "name": ".HandleFunc()",
+          "matchedTerms": [],
+          "startLine": 121,
+          "endLine": 123,
+          "sourceBytes": 104,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "name": ".Method()",
+          "matchedTerms": [],
+          "startLine": 127,
+          "endLine": 133,
+          "sourceBytes": 233,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "name": ".MethodFunc()",
+          "matchedTerms": [],
+          "startLine": 137,
+          "endLine": 139,
+          "sourceBytes": 120,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c68a79f08a92785f7b855336a541459e9fdc62201d4430b22c5a267720fe0e2e",
+          "name": ".Connect()",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 145,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7eaf9ccc10f79e519444ce15ca5e733334b9706658f775085bcd446e28339098",
+          "name": ".Delete()",
+          "matchedTerms": [],
+          "startLine": 149,
+          "endLine": 151,
+          "sourceBytes": 109,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:cc338ab0fc91b15feee67ab6ef6b5cb5f32500ccb4011e5a672be9f91a09e728",
+          "name": ".Get()",
+          "matchedTerms": [],
+          "startLine": 155,
+          "endLine": 157,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f6e8a7560084fdf9a66af0e486fd6ceed76e6607c6ede28fdb1bf8c314ed4a19",
+          "name": ".Head()",
+          "matchedTerms": [],
+          "startLine": 161,
+          "endLine": 163,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:86384a3e1b4355bef88f940fa46a5af66a9ba09309b1555884da609ceabad4b5",
+          "name": ".Options()",
+          "matchedTerms": [],
+          "startLine": 167,
+          "endLine": 169,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:940225f9f7c63134e90084b0f543639b43293824ada2130d5aa1c37c6e3de01f",
+          "name": ".Patch()",
+          "matchedTerms": [],
+          "startLine": 173,
+          "endLine": 175,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:4dc5dca620fc82d5378b46e6646c03877017e141daa1474dab9ce69c1d4cfc56",
+          "name": ".Post()",
+          "matchedTerms": [],
+          "startLine": 179,
+          "endLine": 181,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:af7652f3b85f23544717c7555bffe88a5b3ee1fc645491c1dd5d6fd3e5367bbe",
+          "name": ".Put()",
+          "matchedTerms": [],
+          "startLine": 185,
+          "endLine": 187,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e2015cff9c7be8cb29614b5a597580ec714c51b3a9bb8622c8a0c15674b79ade",
+          "name": ".Query()",
+          "matchedTerms": [],
+          "startLine": 191,
+          "endLine": 193,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8fb9d62ca6fa95670412c09930734152e8175fa59cb9ba6e74c30eba422ed530",
+          "name": ".Trace()",
+          "matchedTerms": [],
+          "startLine": 197,
+          "endLine": 199,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:eb197ef3e44ebc05271156e9e59ec93db988e2df4ca08efea5788baa91401518",
+          "name": ".NotFound()",
+          "matchedTerms": [],
+          "startLine": 203,
+          "endLine": 219,
+          "sourceBytes": 419,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1ac18c4f1a692f25a73fdc98b240ed310b2c4a6cf5065ffde2524dd41b7a1f78",
+          "name": ".MethodNotAllowed()",
+          "matchedTerms": [],
+          "startLine": 223,
+          "endLine": 239,
+          "sourceBytes": 467,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "name": ".With()",
+          "matchedTerms": [],
+          "startLine": 242,
+          "endLine": 263,
+          "sourceBytes": 682,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0ac374940442cf9a4d0a0d3270546ca4b87d036fd9ec4aa8f8e48ca2d49e4407",
+          "name": ".Group()",
+          "matchedTerms": [],
+          "startLine": 268,
+          "endLine": 274,
+          "sourceBytes": 106,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:395cabe22892d311ed21d29bf7a01cb9d9d2eb1681c634bfd76121bdcf20b34f",
+          "name": ".Route()",
+          "matchedTerms": [],
+          "startLine": 278,
+          "endLine": 286,
+          "sourceBytes": 258,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:29cd93db4ec894393cf257f027b8988a07ee77181191167f3eb2037f2cfdf5be",
+          "name": ".Mount()",
+          "matchedTerms": [],
+          "startLine": 295,
+          "endLine": 354,
+          "sourceBytes": 1986,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0fa43499c8e3e06b415a5fd6585b87c3fd541d6c883379d774c9247edeb94951",
+          "name": ".Routes()",
+          "matchedTerms": [],
+          "startLine": 358,
+          "endLine": 360,
+          "sourceBytes": 60,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:2e266536f77bb3848784eb117cb5935bce2575bba587e1653ce1e6f9c056ebef",
+          "name": ".Middlewares()",
+          "matchedTerms": [],
+          "startLine": 363,
+          "endLine": 365,
+          "sourceBytes": 67,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f0a27beb5e2a6ff88e563c8dbed4dc6b6a697c1895287734f456edcb78d3ada3",
+          "name": ".Match()",
+          "matchedTerms": [],
+          "startLine": 373,
+          "endLine": 375,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b84d22d8b0ff377822bcdc4cb0d4aaf092970f4a85c5e1107b4d09b1592c015d",
+          "name": ".Find()",
+          "matchedTerms": [],
+          "startLine": 382,
+          "endLine": 408,
+          "sourceBytes": 537,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1580e9037451fb2ed515953396059772522a762628fd281119ff95ef6389357a",
+          "name": ".NotFoundHandler()",
+          "matchedTerms": [],
+          "startLine": 412,
+          "endLine": 417,
+          "sourceBytes": 138,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6d0c29b15fa70de4383c9685161ae0dea68e92fdbb120770c4a7315e8a2fc10b",
+          "name": ".MethodNotAllowedHandler()",
+          "matchedTerms": [],
+          "startLine": 421,
+          "endLine": 426,
+          "sourceBytes": 116,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            476,
+            477,
+            478,
+            479,
+            480,
+            481,
+            482,
+            483,
+            484,
+            485,
+            486,
+            487,
+            488,
+            489,
+            490,
+            491,
+            492,
+            493
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "chi",
+      "arm": "focused",
+      "focusTerms": [
+        "coordinate",
+        "explain",
+        "middleware",
+        "mux",
+        "route",
+        "shar",
+        "state",
+        "subrouter"
+      ],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8753,
+      "stdoutBytes": 19718,
+      "omittedMembers": 5,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 4,
+      "sourceEvidenceFacts": 4,
+      "members": [
+        {
+          "id": "sha256:395cabe22892d311ed21d29bf7a01cb9d9d2eb1681c634bfd76121bdcf20b34f",
+          "name": ".Route()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 278,
+          "endLine": 286,
+          "sourceBytes": 258,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0fa43499c8e3e06b415a5fd6585b87c3fd541d6c883379d774c9247edeb94951",
+          "name": ".Routes()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 358,
+          "endLine": 360,
+          "sourceBytes": 60,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:2e266536f77bb3848784eb117cb5935bce2575bba587e1653ce1e6f9c056ebef",
+          "name": ".Middlewares()",
+          "matchedTerms": [
+            "middleware"
+          ],
+          "startLine": 363,
+          "endLine": 365,
+          "sourceBytes": 67,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f71b5f8096d259bcc0b17183b18ac62c1c5c4c0927a574f2f2d258824782917f",
+          "name": ".routeHTTP()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 455,
+          "endLine": 499,
+          "sourceBytes": 1075,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c84499b6acb377e9014fa77ee2eddee3dc058a6c36da3e0b4c219cb84435ba47",
+          "name": ".nextRoutePath()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 501,
+          "endLine": 508,
+          "sourceBytes": 297,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:fd923e9ae2c3dec208ca0ee6d8b2033b3d0b175532ec383cfeef661d3f378ea9",
+          "name": ".updateSubRoutes()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 511,
+          "endLine": 519,
+          "sourceBytes": 172,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8527a45e38e92b6d4e24c5284bec8a457fec3c27674c35d8a68d099d885b0807",
+          "name": ".updateRouteHandler()",
+          "matchedTerms": [
+            "route"
+          ],
+          "startLine": 525,
+          "endLine": 527,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0b03f729c4b4c93626eb48b705704c97e8d051ebb76354fdb1028644c0c003f3",
+          "name": ".ServeHTTP()",
+          "matchedTerms": [],
+          "startLine": 63,
+          "endLine": 92,
+          "sourceBytes": 1039,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "name": ".Use()",
+          "matchedTerms": [],
+          "startLine": 100,
+          "endLine": 105,
+          "sourceBytes": 225,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b6f4933c875274b7724a57dc037f278cef17603b5a17c0123f74f09c4859ade3",
+          "name": ".Handle()",
+          "matchedTerms": [],
+          "startLine": 109,
+          "endLine": 117,
+          "sourceBytes": 268,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:00488c58ae8e3d2aea91ae763f174cddbcbfa1edb9fda7a9650119778dac1272",
+          "name": ".HandleFunc()",
+          "matchedTerms": [],
+          "startLine": 121,
+          "endLine": 123,
+          "sourceBytes": 104,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "name": ".Method()",
+          "matchedTerms": [],
+          "startLine": 127,
+          "endLine": 133,
+          "sourceBytes": 233,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "name": ".MethodFunc()",
+          "matchedTerms": [],
+          "startLine": 137,
+          "endLine": 139,
+          "sourceBytes": 120,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c68a79f08a92785f7b855336a541459e9fdc62201d4430b22c5a267720fe0e2e",
+          "name": ".Connect()",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 145,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7eaf9ccc10f79e519444ce15ca5e733334b9706658f775085bcd446e28339098",
+          "name": ".Delete()",
+          "matchedTerms": [],
+          "startLine": 149,
+          "endLine": 151,
+          "sourceBytes": 109,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:cc338ab0fc91b15feee67ab6ef6b5cb5f32500ccb4011e5a672be9f91a09e728",
+          "name": ".Get()",
+          "matchedTerms": [],
+          "startLine": 155,
+          "endLine": 157,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f6e8a7560084fdf9a66af0e486fd6ceed76e6607c6ede28fdb1bf8c314ed4a19",
+          "name": ".Head()",
+          "matchedTerms": [],
+          "startLine": 161,
+          "endLine": 163,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:86384a3e1b4355bef88f940fa46a5af66a9ba09309b1555884da609ceabad4b5",
+          "name": ".Options()",
+          "matchedTerms": [],
+          "startLine": 167,
+          "endLine": 169,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:940225f9f7c63134e90084b0f543639b43293824ada2130d5aa1c37c6e3de01f",
+          "name": ".Patch()",
+          "matchedTerms": [],
+          "startLine": 173,
+          "endLine": 175,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:4dc5dca620fc82d5378b46e6646c03877017e141daa1474dab9ce69c1d4cfc56",
+          "name": ".Post()",
+          "matchedTerms": [],
+          "startLine": 179,
+          "endLine": 181,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:af7652f3b85f23544717c7555bffe88a5b3ee1fc645491c1dd5d6fd3e5367bbe",
+          "name": ".Put()",
+          "matchedTerms": [],
+          "startLine": 185,
+          "endLine": 187,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e2015cff9c7be8cb29614b5a597580ec714c51b3a9bb8622c8a0c15674b79ade",
+          "name": ".Query()",
+          "matchedTerms": [],
+          "startLine": 191,
+          "endLine": 193,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8fb9d62ca6fa95670412c09930734152e8175fa59cb9ba6e74c30eba422ed530",
+          "name": ".Trace()",
+          "matchedTerms": [],
+          "startLine": 197,
+          "endLine": 199,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:eb197ef3e44ebc05271156e9e59ec93db988e2df4ca08efea5788baa91401518",
+          "name": ".NotFound()",
+          "matchedTerms": [],
+          "startLine": 203,
+          "endLine": 219,
+          "sourceBytes": 419,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1ac18c4f1a692f25a73fdc98b240ed310b2c4a6cf5065ffde2524dd41b7a1f78",
+          "name": ".MethodNotAllowed()",
+          "matchedTerms": [],
+          "startLine": 223,
+          "endLine": 239,
+          "sourceBytes": 467,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "name": ".With()",
+          "matchedTerms": [],
+          "startLine": 242,
+          "endLine": 263,
+          "sourceBytes": 682,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0ac374940442cf9a4d0a0d3270546ca4b87d036fd9ec4aa8f8e48ca2d49e4407",
+          "name": ".Group()",
+          "matchedTerms": [],
+          "startLine": 268,
+          "endLine": 274,
+          "sourceBytes": 106,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:29cd93db4ec894393cf257f027b8988a07ee77181191167f3eb2037f2cfdf5be",
+          "name": ".Mount()",
+          "matchedTerms": [],
+          "startLine": 295,
+          "endLine": 354,
+          "sourceBytes": 1233,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "arm": "baseline",
+      "focusTerms": [],
+      "sourceBytes": 874,
+      "verificationBytesCharged": 874,
+      "stdoutBytes": 3408,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "members": [
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "name": ".__init__()",
+          "matchedTerms": [],
+          "startLine": 456,
+          "endLine": 460,
+          "sourceBytes": 216,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e878c6438bdce958c03a089d80b07294ed83ae9ee2f0f0a633df5fbf50ae9e52",
+          "name": ".name()",
+          "matchedTerms": [],
+          "startLine": 463,
+          "endLine": 464,
+          "sourceBytes": 57,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3",
+          "name": ".close()",
+          "matchedTerms": [],
+          "startLine": 466,
+          "endLine": 471,
+          "sourceBytes": 200,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5bb38e0f070dd04a772efc8c9ee16003caa1e687bc2c12cc19b86bef7e08349e",
+          "name": ".__getattr__()",
+          "matchedTerms": [],
+          "startLine": 473,
+          "endLine": 474,
+          "sourceBytes": 80,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bc6d909e3fad7e2cbc5726cdd962e543d80d2c22e04f4748a0c4a6a6df90301b",
+          "name": ".__enter__()",
+          "matchedTerms": [],
+          "startLine": 476,
+          "endLine": 477,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7bf788bd87c967bb2c80b682108ca265ce1ea9c213b3c8d55931a267d73c15b4",
+          "name": ".__exit__()",
+          "matchedTerms": [],
+          "startLine": 479,
+          "endLine": 485,
+          "sourceBytes": 211,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1b6882765c798cf51eff1c70453ffc9687e893d38733a758d193bd1e6c7845f1",
+          "name": ".__repr__()",
+          "matchedTerms": [],
+          "startLine": 487,
+          "endLine": 488,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            455,
+            461,
+            462
+          ]
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "arm": "unfocused",
+      "focusTerms": [],
+      "sourceBytes": 874,
+      "verificationBytesCharged": 874,
+      "stdoutBytes": 3408,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "members": [
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "name": ".__init__()",
+          "matchedTerms": [],
+          "startLine": 456,
+          "endLine": 460,
+          "sourceBytes": 216,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e878c6438bdce958c03a089d80b07294ed83ae9ee2f0f0a633df5fbf50ae9e52",
+          "name": ".name()",
+          "matchedTerms": [],
+          "startLine": 463,
+          "endLine": 464,
+          "sourceBytes": 57,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3",
+          "name": ".close()",
+          "matchedTerms": [],
+          "startLine": 466,
+          "endLine": 471,
+          "sourceBytes": 200,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5bb38e0f070dd04a772efc8c9ee16003caa1e687bc2c12cc19b86bef7e08349e",
+          "name": ".__getattr__()",
+          "matchedTerms": [],
+          "startLine": 473,
+          "endLine": 474,
+          "sourceBytes": 80,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bc6d909e3fad7e2cbc5726cdd962e543d80d2c22e04f4748a0c4a6a6df90301b",
+          "name": ".__enter__()",
+          "matchedTerms": [],
+          "startLine": 476,
+          "endLine": 477,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7bf788bd87c967bb2c80b682108ca265ce1ea9c213b3c8d55931a267d73c15b4",
+          "name": ".__exit__()",
+          "matchedTerms": [],
+          "startLine": 479,
+          "endLine": 485,
+          "sourceBytes": 211,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1b6882765c798cf51eff1c70453ffc9687e893d38733a758d193bd1e6c7845f1",
+          "name": ".__repr__()",
+          "matchedTerms": [],
+          "startLine": 487,
+          "endLine": 488,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            455,
+            461,
+            462
+          ]
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "arm": "focused",
+      "focusTerms": [
+        "_atomic",
+        "behavior",
+        "cleanup",
+        "close",
+        "context",
+        "exception",
+        "explain",
+        "file",
+        "manager",
+        "ownership"
+      ],
+      "sourceBytes": 874,
+      "verificationBytesCharged": 874,
+      "stdoutBytes": 3771,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "members": [
+        {
+          "id": "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3",
+          "name": ".close()",
+          "matchedTerms": [
+            "close"
+          ],
+          "startLine": 466,
+          "endLine": 471,
+          "sourceBytes": 200,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "name": ".__init__()",
+          "matchedTerms": [],
+          "startLine": 456,
+          "endLine": 460,
+          "sourceBytes": 216,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e878c6438bdce958c03a089d80b07294ed83ae9ee2f0f0a633df5fbf50ae9e52",
+          "name": ".name()",
+          "matchedTerms": [],
+          "startLine": 463,
+          "endLine": 464,
+          "sourceBytes": 57,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5bb38e0f070dd04a772efc8c9ee16003caa1e687bc2c12cc19b86bef7e08349e",
+          "name": ".__getattr__()",
+          "matchedTerms": [],
+          "startLine": 473,
+          "endLine": 474,
+          "sourceBytes": 80,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bc6d909e3fad7e2cbc5726cdd962e543d80d2c22e04f4748a0c4a6a6df90301b",
+          "name": ".__enter__()",
+          "matchedTerms": [],
+          "startLine": 476,
+          "endLine": 477,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7bf788bd87c967bb2c80b682108ca265ce1ea9c213b3c8d55931a267d73c15b4",
+          "name": ".__exit__()",
+          "matchedTerms": [],
+          "startLine": 479,
+          "endLine": 485,
+          "sourceBytes": 211,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1b6882765c798cf51eff1c70453ffc9687e893d38733a758d193bd1e6c7845f1",
+          "name": ".__repr__()",
+          "matchedTerms": [],
+          "startLine": 487,
+          "endLine": 488,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            455,
+            461,
+            462
+          ]
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "arm": "baseline",
+      "focusTerms": [],
+      "sourceBytes": 6208,
+      "verificationBytesCharged": 6208,
+      "stdoutBytes": 12866,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "members": [
+        {
+          "id": "sha256:66aaadb3479119cae227c0e51b5674eae36cb9b29e80428e2697aa7cb45518f0",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 50,
+          "endLine": 53,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034",
+          "name": ".clean()",
+          "matchedTerms": [],
+          "startLine": 62,
+          "endLine": 70,
+          "sourceBytes": 319,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:817144c6469132780623c859650f3dbb59eef49b75108e12e8fd2efe7763b330",
+          "name": ".isValid()",
+          "matchedTerms": [],
+          "startLine": 94,
+          "endLine": 101,
+          "sourceBytes": 441,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "name": ".isValidBodyHtml()",
+          "matchedTerms": [],
+          "startLine": 124,
+          "endLine": 133,
+          "sourceBytes": 630,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d82578355e71b0d55f68499706f70276db9cf44a16bf283bba6360df410deec5",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 146,
+          "sourceBytes": 144,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:65912eb3660f15092355589775d874a7a702efcf0336e9865cf93b4fb56aaa29",
+          "name": ".head()",
+          "matchedTerms": [],
+          "startLine": 148,
+          "endLine": 173,
+          "sourceBytes": 1371,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:fb8588d79c5d9dcbd1a0c6a8e2f901d5c54be3050e7626a3b8f59a8c55bd025c",
+          "name": ".tail()",
+          "matchedTerms": [],
+          "startLine": 175,
+          "endLine": 179,
+          "sourceBytes": 266,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "name": ".copySafeNodes()",
+          "matchedTerms": [],
+          "startLine": 182,
+          "endLine": 186,
+          "sourceBytes": 227,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7ce3db44fb899d894dd900ab8808bd0fdc411323a6276f4164fede39e46f8157",
+          "name": ".createSafeElement()",
+          "matchedTerms": [],
+          "startLine": 188,
+          "endLine": 235,
+          "sourceBytes": 2553,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bd66755ef9e0f349f3e772c8d9b23a0441194bd6300a6431d51bc2f11650e890",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 241,
+          "endLine": 244,
+          "sourceBytes": 146,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "arm": "unfocused",
+      "focusTerms": [],
+      "sourceBytes": 6208,
+      "verificationBytesCharged": 6208,
+      "stdoutBytes": 12866,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "members": [
+        {
+          "id": "sha256:66aaadb3479119cae227c0e51b5674eae36cb9b29e80428e2697aa7cb45518f0",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 50,
+          "endLine": 53,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034",
+          "name": ".clean()",
+          "matchedTerms": [],
+          "startLine": 62,
+          "endLine": 70,
+          "sourceBytes": 319,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:817144c6469132780623c859650f3dbb59eef49b75108e12e8fd2efe7763b330",
+          "name": ".isValid()",
+          "matchedTerms": [],
+          "startLine": 94,
+          "endLine": 101,
+          "sourceBytes": 441,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "name": ".isValidBodyHtml()",
+          "matchedTerms": [],
+          "startLine": 124,
+          "endLine": 133,
+          "sourceBytes": 630,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d82578355e71b0d55f68499706f70276db9cf44a16bf283bba6360df410deec5",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 146,
+          "sourceBytes": 144,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:65912eb3660f15092355589775d874a7a702efcf0336e9865cf93b4fb56aaa29",
+          "name": ".head()",
+          "matchedTerms": [],
+          "startLine": 148,
+          "endLine": 173,
+          "sourceBytes": 1371,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:fb8588d79c5d9dcbd1a0c6a8e2f901d5c54be3050e7626a3b8f59a8c55bd025c",
+          "name": ".tail()",
+          "matchedTerms": [],
+          "startLine": 175,
+          "endLine": 179,
+          "sourceBytes": 266,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "name": ".copySafeNodes()",
+          "matchedTerms": [],
+          "startLine": 182,
+          "endLine": 186,
+          "sourceBytes": 227,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7ce3db44fb899d894dd900ab8808bd0fdc411323a6276f4164fede39e46f8157",
+          "name": ".createSafeElement()",
+          "matchedTerms": [],
+          "startLine": 188,
+          "endLine": 235,
+          "sourceBytes": 2553,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bd66755ef9e0f349f3e772c8d9b23a0441194bd6300a6431d51bc2f11650e890",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 241,
+          "endLine": 244,
+          "sourceBytes": 146,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "arm": "focused",
+      "focusTerms": [
+        "clean",
+        "cleaner",
+        "document",
+        "explain",
+        "input",
+        "mutate",
+        "responsibility",
+        "safelist",
+        "supply",
+        "us",
+        "whether"
+      ],
+      "sourceBytes": 6208,
+      "verificationBytesCharged": 6208,
+      "stdoutBytes": 13309,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "members": [
+        {
+          "id": "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034",
+          "name": ".clean()",
+          "matchedTerms": [
+            "clean"
+          ],
+          "startLine": 62,
+          "endLine": 70,
+          "sourceBytes": 319,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:66aaadb3479119cae227c0e51b5674eae36cb9b29e80428e2697aa7cb45518f0",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 50,
+          "endLine": 53,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:817144c6469132780623c859650f3dbb59eef49b75108e12e8fd2efe7763b330",
+          "name": ".isValid()",
+          "matchedTerms": [],
+          "startLine": 94,
+          "endLine": 101,
+          "sourceBytes": 441,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "name": ".isValidBodyHtml()",
+          "matchedTerms": [],
+          "startLine": 124,
+          "endLine": 133,
+          "sourceBytes": 630,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d82578355e71b0d55f68499706f70276db9cf44a16bf283bba6360df410deec5",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 143,
+          "endLine": 146,
+          "sourceBytes": 144,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:65912eb3660f15092355589775d874a7a702efcf0336e9865cf93b4fb56aaa29",
+          "name": ".head()",
+          "matchedTerms": [],
+          "startLine": 148,
+          "endLine": 173,
+          "sourceBytes": 1371,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:fb8588d79c5d9dcbd1a0c6a8e2f901d5c54be3050e7626a3b8f59a8c55bd025c",
+          "name": ".tail()",
+          "matchedTerms": [],
+          "startLine": 175,
+          "endLine": 179,
+          "sourceBytes": 266,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "name": ".copySafeNodes()",
+          "matchedTerms": [],
+          "startLine": 182,
+          "endLine": 186,
+          "sourceBytes": 227,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7ce3db44fb899d894dd900ab8808bd0fdc411323a6276f4164fede39e46f8157",
+          "name": ".createSafeElement()",
+          "matchedTerms": [],
+          "startLine": 188,
+          "endLine": 235,
+          "sourceBytes": 2553,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bd66755ef9e0f349f3e772c8d9b23a0441194bd6300a6431d51bc2f11650e890",
+          "name": "<init>",
+          "matchedTerms": [],
+          "startLine": 241,
+          "endLine": 244,
+          "sourceBytes": 146,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "arm": "baseline",
+      "focusTerms": [],
+      "sourceBytes": 5047,
+      "verificationBytesCharged": 5047,
+      "stdoutBytes": 10329,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:692fe8cbc7b8e5a03bcb79c20531aefdbfa31098ea43bbe9b0301d61cd869f27",
+          "name": "ensureCanMutateNextListeners()",
+          "matchedTerms": [],
+          "startLine": 152,
+          "endLine": 159,
+          "sourceBytes": 231,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:ac32c352aac7217b9b481c36ebdbd1304d84593968416c35058a0445860f30e2",
+          "name": "getState()",
+          "matchedTerms": [],
+          "startLine": 166,
+          "endLine": 176,
+          "sourceBytes": 357,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:f27566baebab97a78ea7b6d143149ecdff76b39167fb12b42612a3e69fba5a5d",
+          "name": "subscribe()",
+          "matchedTerms": [],
+          "startLine": 201,
+          "endLine": 243,
+          "sourceBytes": 1287,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:ee27944e9b61e75b17b685fb67d51cccd459621e8ed9db30b18f5c7b02094612",
+          "name": "dispatch()",
+          "matchedTerms": [],
+          "startLine": 270,
+          "endLine": 309,
+          "sourceBytes": 1378,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:32f1ead88c324d96b4c7dd1db2d0692f3c7fb04a33e23d485f4b2ad5ea62b6a4",
+          "name": "replaceReducer()",
+          "matchedTerms": [],
+          "startLine": 320,
+          "endLine": 336,
+          "sourceBytes": 654,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:5afb3e08978d3232121b2cf67a14f748a5e6039c4a5256a2cf64a30473551eea",
+          "name": "observable()",
+          "matchedTerms": [],
+          "startLine": 344,
+          "endLine": 380,
+          "sourceBytes": 1140,
+          "truncated": false,
+          "digestVerified": false
+        }
+      ],
+      "facts": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134
+          ]
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            381,
+            382,
+            383,
+            384,
+            385,
+            386,
+            387,
+            388,
+            389,
+            390,
+            391,
+            392,
+            393,
+            394
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "arm": "unfocused",
+      "focusTerms": [],
+      "sourceBytes": 5047,
+      "verificationBytesCharged": 5047,
+      "stdoutBytes": 10329,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:692fe8cbc7b8e5a03bcb79c20531aefdbfa31098ea43bbe9b0301d61cd869f27",
+          "name": "ensureCanMutateNextListeners()",
+          "matchedTerms": [],
+          "startLine": 152,
+          "endLine": 159,
+          "sourceBytes": 231,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:ac32c352aac7217b9b481c36ebdbd1304d84593968416c35058a0445860f30e2",
+          "name": "getState()",
+          "matchedTerms": [],
+          "startLine": 166,
+          "endLine": 176,
+          "sourceBytes": 357,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:f27566baebab97a78ea7b6d143149ecdff76b39167fb12b42612a3e69fba5a5d",
+          "name": "subscribe()",
+          "matchedTerms": [],
+          "startLine": 201,
+          "endLine": 243,
+          "sourceBytes": 1287,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:ee27944e9b61e75b17b685fb67d51cccd459621e8ed9db30b18f5c7b02094612",
+          "name": "dispatch()",
+          "matchedTerms": [],
+          "startLine": 270,
+          "endLine": 309,
+          "sourceBytes": 1378,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:32f1ead88c324d96b4c7dd1db2d0692f3c7fb04a33e23d485f4b2ad5ea62b6a4",
+          "name": "replaceReducer()",
+          "matchedTerms": [],
+          "startLine": 320,
+          "endLine": 336,
+          "sourceBytes": 654,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:5afb3e08978d3232121b2cf67a14f748a5e6039c4a5256a2cf64a30473551eea",
+          "name": "observable()",
+          "matchedTerms": [],
+          "startLine": 344,
+          "endLine": 380,
+          "sourceBytes": 1140,
+          "truncated": false,
+          "digestVerified": false
+        }
+      ],
+      "facts": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134
+          ]
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            381,
+            382,
+            383,
+            384,
+            385,
+            386,
+            387,
+            388,
+            389,
+            390,
+            391,
+            392,
+            393,
+            394
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "arm": "focused",
+      "focusTerms": [
+        "create",
+        "dispatch",
+        "explain",
+        "responsibility",
+        "safely",
+        "share",
+        "state",
+        "store",
+        "subscription"
+      ],
+      "sourceBytes": 5047,
+      "verificationBytesCharged": 5047,
+      "stdoutBytes": 10673,
+      "omittedMembers": 0,
+      "unavailableMembers": 0,
+      "truncated": false,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:ac32c352aac7217b9b481c36ebdbd1304d84593968416c35058a0445860f30e2",
+          "name": "getState()",
+          "matchedTerms": [
+            "state"
+          ],
+          "startLine": 166,
+          "endLine": 176,
+          "sourceBytes": 357,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:ee27944e9b61e75b17b685fb67d51cccd459621e8ed9db30b18f5c7b02094612",
+          "name": "dispatch()",
+          "matchedTerms": [
+            "dispatch"
+          ],
+          "startLine": 270,
+          "endLine": 309,
+          "sourceBytes": 1378,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:692fe8cbc7b8e5a03bcb79c20531aefdbfa31098ea43bbe9b0301d61cd869f27",
+          "name": "ensureCanMutateNextListeners()",
+          "matchedTerms": [],
+          "startLine": 152,
+          "endLine": 159,
+          "sourceBytes": 231,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:f27566baebab97a78ea7b6d143149ecdff76b39167fb12b42612a3e69fba5a5d",
+          "name": "subscribe()",
+          "matchedTerms": [],
+          "startLine": 201,
+          "endLine": 243,
+          "sourceBytes": 1287,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:32f1ead88c324d96b4c7dd1db2d0692f3c7fb04a33e23d485f4b2ad5ea62b6a4",
+          "name": "replaceReducer()",
+          "matchedTerms": [],
+          "startLine": 320,
+          "endLine": 336,
+          "sourceBytes": 654,
+          "truncated": false,
+          "digestVerified": false
+        },
+        {
+          "id": "sha256:5afb3e08978d3232121b2cf67a14f748a5e6039c4a5256a2cf64a30473551eea",
+          "name": "observable()",
+          "matchedTerms": [],
+          "startLine": 344,
+          "endLine": 380,
+          "sourceBytes": 1140,
+          "truncated": false,
+          "digestVerified": false
+        }
+      ],
+      "facts": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134
+          ]
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            381,
+            382,
+            383,
+            384,
+            385,
+            386,
+            387,
+            388,
+            389,
+            390,
+            391,
+            392,
+            393,
+            394
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "arm": "baseline",
+      "focusTerms": [],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8405,
+      "stdoutBytes": 13045,
+      "omittedMembers": 2,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:5c1a2f2ab2725e97f0e936e554e3381bc72abac584341846089152518b8314b1",
+          "name": ".next()",
+          "matchedTerms": [],
+          "startLine": 687,
+          "endLine": 734,
+          "sourceBytes": 1812,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c3fe8fc9e9d0038d0c1191e7cf0d4ee7783cebd55c755a07c627023b60a3d188",
+          "name": ".skip_current_dir()",
+          "matchedTerms": [],
+          "startLine": 781,
+          "endLine": 785,
+          "sourceBytes": 117,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5704b7023e55533acf5164ddd3ae50467aea1abf4c19866f3e143ae7bf09d370",
+          "name": ".filter_entry()",
+          "matchedTerms": [],
+          "startLine": 833,
+          "endLine": 838,
+          "sourceBytes": 169,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "name": ".handle_entry()",
+          "matchedTerms": [],
+          "startLine": 840,
+          "endLine": 882,
+          "sourceBytes": 1726,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867",
+          "name": ".get_deferred_dir()",
+          "matchedTerms": [],
+          "startLine": 884,
+          "endLine": 899,
+          "sourceBytes": 607,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45",
+          "name": ".push()",
+          "matchedTerms": [],
+          "startLine": 901,
+          "endLine": 948,
+          "sourceBytes": 2459,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3d843599c82e0cf88d7512278cc2b4f2ffc87c5797785e0c9caad89ab4af8f98",
+          "name": ".pop()",
+          "matchedTerms": [],
+          "startLine": 950,
+          "endLine": 959,
+          "sourceBytes": 484,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "name": ".follow()",
+          "matchedTerms": [],
+          "startLine": 961,
+          "endLine": 971,
+          "sourceBytes": 431,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "name": ".check_loop()",
+          "matchedTerms": [],
+          "startLine": 973,
+          "endLine": 989,
+          "sourceBytes": 195,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            972,
+            976,
+            977,
+            978,
+            979,
+            980,
+            981,
+            982,
+            983,
+            984,
+            985,
+            986,
+            987,
+            988,
+            989
+          ]
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            883
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "arm": "unfocused",
+      "focusTerms": [],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8405,
+      "stdoutBytes": 13045,
+      "omittedMembers": 2,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:5c1a2f2ab2725e97f0e936e554e3381bc72abac584341846089152518b8314b1",
+          "name": ".next()",
+          "matchedTerms": [],
+          "startLine": 687,
+          "endLine": 734,
+          "sourceBytes": 1812,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c3fe8fc9e9d0038d0c1191e7cf0d4ee7783cebd55c755a07c627023b60a3d188",
+          "name": ".skip_current_dir()",
+          "matchedTerms": [],
+          "startLine": 781,
+          "endLine": 785,
+          "sourceBytes": 117,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5704b7023e55533acf5164ddd3ae50467aea1abf4c19866f3e143ae7bf09d370",
+          "name": ".filter_entry()",
+          "matchedTerms": [],
+          "startLine": 833,
+          "endLine": 838,
+          "sourceBytes": 169,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "name": ".handle_entry()",
+          "matchedTerms": [],
+          "startLine": 840,
+          "endLine": 882,
+          "sourceBytes": 1726,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867",
+          "name": ".get_deferred_dir()",
+          "matchedTerms": [],
+          "startLine": 884,
+          "endLine": 899,
+          "sourceBytes": 607,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45",
+          "name": ".push()",
+          "matchedTerms": [],
+          "startLine": 901,
+          "endLine": 948,
+          "sourceBytes": 2459,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3d843599c82e0cf88d7512278cc2b4f2ffc87c5797785e0c9caad89ab4af8f98",
+          "name": ".pop()",
+          "matchedTerms": [],
+          "startLine": 950,
+          "endLine": 959,
+          "sourceBytes": 484,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "name": ".follow()",
+          "matchedTerms": [],
+          "startLine": 961,
+          "endLine": 971,
+          "sourceBytes": 431,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "name": ".check_loop()",
+          "matchedTerms": [],
+          "startLine": 973,
+          "endLine": 989,
+          "sourceBytes": 195,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            972,
+            976,
+            977,
+            978,
+            979,
+            980,
+            981,
+            982,
+            983,
+            984,
+            985,
+            986,
+            987,
+            988,
+            989
+          ]
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            883
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "arm": "focused",
+      "focusTerms": [
+        "detect",
+        "directory",
+        "explain",
+        "iter",
+        "limit",
+        "loop",
+        "open",
+        "responsibility",
+        "symlink"
+      ],
+      "sourceBytes": 8000,
+      "verificationBytesCharged": 8405,
+      "stdoutBytes": 13471,
+      "omittedMembers": 2,
+      "unavailableMembers": 0,
+      "truncated": true,
+      "literalFacts": 1,
+      "sourceEvidenceFacts": 2,
+      "members": [
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "name": ".check_loop()",
+          "matchedTerms": [
+            "loop"
+          ],
+          "startLine": 973,
+          "endLine": 989,
+          "sourceBytes": 600,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5c1a2f2ab2725e97f0e936e554e3381bc72abac584341846089152518b8314b1",
+          "name": ".next()",
+          "matchedTerms": [],
+          "startLine": 687,
+          "endLine": 734,
+          "sourceBytes": 1812,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c3fe8fc9e9d0038d0c1191e7cf0d4ee7783cebd55c755a07c627023b60a3d188",
+          "name": ".skip_current_dir()",
+          "matchedTerms": [],
+          "startLine": 781,
+          "endLine": 785,
+          "sourceBytes": 117,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5704b7023e55533acf5164ddd3ae50467aea1abf4c19866f3e143ae7bf09d370",
+          "name": ".filter_entry()",
+          "matchedTerms": [],
+          "startLine": 833,
+          "endLine": 838,
+          "sourceBytes": 169,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "name": ".handle_entry()",
+          "matchedTerms": [],
+          "startLine": 840,
+          "endLine": 882,
+          "sourceBytes": 1726,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867",
+          "name": ".get_deferred_dir()",
+          "matchedTerms": [],
+          "startLine": 884,
+          "endLine": 899,
+          "sourceBytes": 607,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45",
+          "name": ".push()",
+          "matchedTerms": [],
+          "startLine": 901,
+          "endLine": 948,
+          "sourceBytes": 2459,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3d843599c82e0cf88d7512278cc2b4f2ffc87c5797785e0c9caad89ab4af8f98",
+          "name": ".pop()",
+          "matchedTerms": [],
+          "startLine": 950,
+          "endLine": 959,
+          "sourceBytes": 484,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "name": ".follow()",
+          "matchedTerms": [],
+          "startLine": 961,
+          "endLine": 971,
+          "sourceBytes": 26,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "facts": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": true,
+          "missingLines": []
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            961,
+            962,
+            963,
+            964,
+            965,
+            966,
+            967,
+            968,
+            969,
+            970,
+            971,
+            972
+          ]
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "sourceEvidence": false,
+          "missingLines": [
+            883
+          ]
+        }
+      ]
+    }
+  ],
+  "comparison": "Compass native member-source before/after only. The separate paired public-neighbor 8000-byte control remains Compass 14/20 versus Graphify 15/20. Do not equate it with the native-member totals or claim a Graphify focus comparison.",
+  "changes": {
+    "gainedFacts": [
+      "chi-4"
+    ],
+    "lostFacts": [],
+    "unchangedUnfocusedStdoutAndStderr": 5,
+    "unchangedSourceBytes": true,
+    "extraStdoutBytes": 2436,
+    "extraVerificationBytesCharged": 651
+  },
+  "remaining": [
+    "Click ownership/name fact lacks the class header and @property decorator outside recorded callable spans. No class-header allowance is applied.",
+    "Redux enhancer delegation and complete store/observable API are not fully within callable member evidence. Six returned Redux source excerpts have no recorded digest in both arms; output correctly labels them unverified. The external audit checks current pinned source without upgrading native provenance.",
+    "WalkDir still lacks complete symlink-loop and contents-first witnesses. Prioritizing check_loop does not by itself retrieve all its surrounding call-path evidence.",
+    "Name focus is a lexical heuristic, not semantic entailment or a completeness guarantee for natural-language questions. Broader or held-out questions can regress."
+  ],
+  "validation": {
+    "complete": true,
+    "sourceSha256": {
+      "CHANGELOG.md": "9dc1d9ab982aec9dc8fe18a0a097d25f6556d695bbdbe0542d1c1ce0997f3c5e",
+      "COMPATIBILITY.md": "20a82fa52684237608e320173141573b1649da5f30006b86b5f720d4d4a6420c",
+      "crates/compass-cli/src/help.rs": "2fde352a44872278408173f11ffeb9a693453724f0e268f453e73b9657cf200f",
+      "crates/compass-cli/src/lib.rs": "ca2d616acc7536df7569783ae40cde86a0940412ae3a9edd5a8100585ad7a7d3",
+      "crates/compass-cli/tests/code_query_cli.rs": "b8f0c339dcb1db197fa5f5589763c9279d02f025108a684ba7bf9955ec399e63",
+      "crates/compass-query/src/explanation_members.rs": "ce7dedd242f7b44c724ba11f914aed58a4cfdffdbbcdb91cf158c3e2c19b9927",
+      "crates/compass-query/src/lib.rs": "f0c59af96732ab0c35f577043c3941c57c138ed0e13efe96f0b8d039d5cc6f8d",
+      "crates/compass-query/tests/explanation_members.rs": "a2897b9a609be0c023830ee8c5f45f88e2695d91f18684075216040a902b0d06",
+      "docs/reference/outputs.md": "4f4612efdb08d5e28f2f628084b908df652660e2149c0575340356bc16e26a13"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 3.6076712920330465
+      },
+      {
+        "name": "query",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--test",
+          "explanation_members",
+          "--test",
+          "explanation_source",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 23.21706162497867
+      },
+      {
+        "name": "cli",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "code_query_cli",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 125.1199858749751
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 45.434337500017136
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 125.17055554199032
+      },
+      {
+        "name": "product",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 15.18113749998156
+      },
+      {
+        "name": "boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.04564858297817409
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 3.6144565829308704
+      }
+    ],
+    "binarySha256": "e33934b94d1e254ba59906fddece098d8433bf7e31af746e46aac3dfc6744f97"
+  },
+  "testCounts": {
+    "query": {
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0
+    },
+    "cli": {
+      "passed": 42,
+      "failed": 0,
+      "ignored": 0
+    },
+    "workspace-tests": {
+      "passed": 1106,
+      "failed": 0,
+      "ignored": 2
+    },
+    "product": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "benchmarkTests": 187,
+  "replay": {
+    "exitCode": 0,
+    "byteIdentical": true,
+    "verifiedSummarySha256": "cc397fe9a825189f9678e8a7b0167ff544fc250a1294af649d4327b297d578ae"
+  },
+  "attempts": [
+    "Round 01 failed to compile because the graph runtime NodeRecord exposes attributes rather than a public name field. Corrected to its existing string accessor.",
+    "Inspection also required the existing lexical index convention of retaining snake-case identifiers and adding their components, since identifier_tokens itself preserves underscores. No experiment scores informed this correction.",
+    "The initial real-source verifier assumed every member had a digest. Redux exposes six correctly labeled unverified members; the verifier now checks both statuses and retains the six missing-digest cases. Original verifier and failure log are preserved."
+  ],
+  "limitations": [
+    "Previously inspected five-language development subjects and source witnesses, not held-out evidence.",
+    "Separate same-agent verifier independently checks ordering, literal source, provenance and scoring; no independent human semantic adjudication.",
+    "Indentation normalization permits source evidence when the recorded span starts at a declaration token; literal totals remain separate.",
+    "Graphify has no recorded equivalent native flag. No new paired superiority claim is made.",
+    "This adds an optional lexical ordering; it does not synthesize explanations, prove god-object defects, improve extraction or establish path/community quality.",
+    "JavaScript, browser, full platform, packaging and extraction fixture qualification were not rerun because these production surfaces are unchanged."
+  ],
+  "artifacts": {
+    "member-focus-01/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-01/query.log": "3adccd3daa7a924f3dacf82161db3e064c28aaa3260ed1d61f8cc8cdb6cd66af",
+    "member-focus-01/validate.py": "f53d716f5193cf59ace12193efa0b79cbe6dc3e49efb233396cfe0a3425bf616",
+    "member-focus-01/validation.json": "4fb1ecaba056176fbca23f66add3b158b23772284bb492ab3e9c588d7661f07e",
+    "member-focus-01/validation.log": "e0c517a18d1dde4c86693ba272c3363e30348cae387d839b3134c002c63c3ec6",
+    "member-focus-02/benchmark-tests.log": "f350f703f21eac7462f3f181aeb1ff015d2adc50583af1604011b84f4039da8f",
+    "member-focus-02/boundary.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/build.log": "77a964cd95b5d11d0c62ba003bf7c011ec878fb3d764793073654e9706249374",
+    "member-focus-02/capture/capture.json": "9429bc124b14c2d697e9990ca79899de5f9b044e0cb0967b8a961139f510ec48",
+    "member-focus-02/capture/capture.py": "881c5438d17db97bcf77c349267daca5ddcffaa9574bad8f90592a2437ec2905",
+    "member-focus-02/capture/explanation_focus_registration.json": "8287faea7015f865cbea8b5088ef20ca04d10ee1f367724327ac02ce3fa80cc6",
+    "member-focus-02/capture/explanation_members.rs": "ce7dedd242f7b44c724ba11f914aed58a4cfdffdbbcdb91cf158c3e2c19b9927",
+    "member-focus-02/capture/lexical.rs": "145f751ba0755c29adbb6498d206fbf729aa62a9559ad58d256a05b3e43f50ee",
+    "member-focus-02/capture/raw/chi/baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/chi/baseline.stdout": "a827aea6e1c28e363d972da58943349455dd43154d162d5adecfffaaf2bcd41f",
+    "member-focus-02/capture/raw/chi/focused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/chi/focused.stdout": "97377fc95987e0e976d369cfb8a77d75bdd15d6c131fdffc1c7460c1250c793b",
+    "member-focus-02/capture/raw/chi/unfocused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/chi/unfocused.stdout": "a827aea6e1c28e363d972da58943349455dd43154d162d5adecfffaaf2bcd41f",
+    "member-focus-02/capture/raw/click/baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/click/baseline.stdout": "c12fa7fd7a03bcdf46578c982de39a5d539d41846e69dd3a93bd5a8b59bfcba2",
+    "member-focus-02/capture/raw/click/focused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/click/focused.stdout": "b104435f28a6569dc47ef30aa624f46dec11d93309d15d7c06857f25db11f5fb",
+    "member-focus-02/capture/raw/click/unfocused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/click/unfocused.stdout": "c12fa7fd7a03bcdf46578c982de39a5d539d41846e69dd3a93bd5a8b59bfcba2",
+    "member-focus-02/capture/raw/jsoup/baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/jsoup/baseline.stdout": "d0fa6a20d92ec2792e13ba6e7560c2bf0b8056a783238b095156fefb75dff88c",
+    "member-focus-02/capture/raw/jsoup/focused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/jsoup/focused.stdout": "07c72538d2cb1144da311e8e396a48d4cf62fd5bbe4c9470fec8fbe3e15a9a25",
+    "member-focus-02/capture/raw/jsoup/unfocused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/jsoup/unfocused.stdout": "d0fa6a20d92ec2792e13ba6e7560c2bf0b8056a783238b095156fefb75dff88c",
+    "member-focus-02/capture/raw/redux/baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/redux/baseline.stdout": "09cae94ec07ddd8ae7e792231f0d16573651bae7698a307a454064d48b2db35b",
+    "member-focus-02/capture/raw/redux/focused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/redux/focused.stdout": "727e9a271cdee034c631b5faa71892da159dfe3bbd611024a9fa8bb5db22fd63",
+    "member-focus-02/capture/raw/redux/unfocused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/redux/unfocused.stdout": "09cae94ec07ddd8ae7e792231f0d16573651bae7698a307a454064d48b2db35b",
+    "member-focus-02/capture/raw/walkdir/baseline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/walkdir/baseline.stdout": "9457c5572e2d628f72669b37702d9c25ad9368e5431cb54bfcb7d2ce1a4f9459",
+    "member-focus-02/capture/raw/walkdir/focused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/walkdir/focused.stdout": "564d5ec339b8cce15de47828f1b0f001818e17d69c05678daff4921317f68925",
+    "member-focus-02/capture/raw/walkdir/unfocused.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/capture/raw/walkdir/unfocused.stdout": "9457c5572e2d628f72669b37702d9c25ad9368e5431cb54bfcb7d2ce1a4f9459",
+    "member-focus-02/capture/runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "member-focus-02/capture/text.rs": "4df8680d3af04cc8be70c6f4279fda6a928b83c1a732d3d0f43132c7cf05e177",
+    "member-focus-02/capture.log": "b466a4a18114007fefe8bb8dd35d87d3daf0bb8606dac897c1b110fd8b063e9d",
+    "member-focus-02/capture.py": "881c5438d17db97bcf77c349267daca5ddcffaa9574bad8f90592a2437ec2905",
+    "member-focus-02/cli.log": "a0cd18279e48a3ff75e62d26fdae71d05e105664de0aef8754d49e9239728049",
+    "member-focus-02/clippy.log": "3702ebc838cdc4b12c75dd08bd3e94438ca071747259f0f9d35279093531c083",
+    "member-focus-02/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-focus-02/product.log": "e610f15bfe18551483b5a9558502fcda1b66c3ed3d11db340bd7319f29804931",
+    "member-focus-02/query.log": "f3615b2a40ca586da9789e51e6c5a5130bf4917d228f98e85bb0b6c83ac36029",
+    "member-focus-02/repeat-verification.log": "5bffc34b4de117f0c44e4da27e27e1a4df873534e4c4cd2532290438e333f9ad",
+    "member-focus-02/replay.json": "237c3b095a5f92f54fda4e7f2337cb4439762971bdd9773b192dd3ff87ea0ead",
+    "member-focus-02/validate.py": "f53d716f5193cf59ace12193efa0b79cbe6dc3e49efb233396cfe0a3425bf616",
+    "member-focus-02/validation.json": "a6ccd56bb1d0fae365623e21d5a0eb69ed13b868ce0bf3ac73b149bc7ea551d9",
+    "member-focus-02/validation.log": "f15fb96a5c9b73738583adfaab96077850ac08ce3db9ba0a297770526f5d52c8",
+    "member-focus-02/verification-attempt-01.log": "fae002c6186bb6c9c4bb993a213acbb53155683392bce278313874f7c970f615",
+    "member-focus-02/verification.log": "5bffc34b4de117f0c44e4da27e27e1a4df873534e4c4cd2532290438e333f9ad",
+    "member-focus-02/verified-summary.json": "cc397fe9a825189f9678e8a7b0167ff544fc250a1294af649d4327b297d578ae",
+    "member-focus-02/verify-attempt-01.py": "016fa550ec325a23e55601b7ad43a0022b0ab9b3180a8090c78fe6b46ae57239",
+    "member-focus-02/verify.py": "a3ddabd6c2d354012aa8ab99fffd5130199b4abda0d54910311c5bd155ca4bc3",
+    "member-focus-02/workspace-tests.log": "f96af4283a25ab2adadf1b80b460e938a97950bed8f7c875d6dddbff3e2b859f",
+    "member-focus-02/write_review.py": "3b58fea9f1ac1e189b79e3c529789172cb3657facdfdadf23590f47d9b15da79"
+  }
+}

@@ -3218,6 +3218,89 @@ then evaluate authored answers under a separately registered common workflow.
 God-object defect judgments, longer-walk quality, functional community quality
 and held-out confirmation remain open.
 
+## Optional member-name focus: bounded native explanation improvement
+
+Registration `1c80747a` fixes the existing five questions, source pins, exact
+root identities, graphs and 8,000-byte source quota before this experiment.
+Production commit `293582c3` adds `explain --source-members --member-focus TEXT`.
+It uses normalized query terms to count distinct matches in recorded callable
+names, prioritizes higher counts, and uses the existing source order for ties.
+Snake-case names retain their whole token and components, following the existing
+lexical index. No source text is read to rank. Unmatched members remain eligible;
+focus neither selects an ambiguous owner nor changes membership or source bounds.
+The output discloses normalized terms and the matches behind each retained member.
+
+The query library owns ranking and validation; the CLI parses and presents it.
+Focus accepts at most 4,096 bytes and 32 distinct searchable terms. Empty or
+unsearchable input, repeated options and focus without member mode fail explicitly.
+All existing discovery, metadata, nesting, source-verification and retained-byte
+limits remain in force. Missing digests and failed source reads keep their
+individual statuses. Without focus, all five captured stdout and stderr streams
+are byte-identical to the frozen baseline executable.
+
+The experiment passes each **full original question** as focus, without manually
+choosing helpful method names or tuning individual questions after capture.
+
+| Native member evidence, 8,000-byte quota | Without focus | Full-question focus |
+| --- | ---: | ---: |
+| Chi | 3/4 | 4/4 |
+| Click | 3/4 | 3/4 |
+| jsoup | 4/4 | 4/4 |
+| Redux | 2/4 | 2/4 |
+| WalkDir | 2/4 | 2/4 |
+| Total | 14/20 | 15/20 |
+
+There is one gain, `chi-4`, and no lost facts on this panel. Name matches bring
+`routeHTTP` and related routing methods ahead of earlier methods without matching names,
+so the routing witness fits. Literal coverage, before indentation normalization,
+is 5/20 versus 6/20. Recorded callable spans can start at a declaration token
+rather than its leading indentation; the independent verifier checks each
+returned span against pinned source before normalized evidence scoring.
+No missing-class-header allowance is applied to this native arm.
+
+Both arms retain 28,129 total source bytes. Focus increases stdout from 58,506
+to 60,942 bytes and charged full-span verification work from 28,636 to 29,287
+bytes. Name matches are a heuristic, not behavioral evidence or a general quality
+guarantee. Broad or held-out questions may regress even though this panel did not.
+
+Remaining misses are substantive. Click's class header and `@property` decorator
+lie outside callable spans. Redux's enhancer and complete store/observable API
+are not fully represented by member excerpts. Six returned Redux callables lack
+recorded source digests in both arms; native output correctly marks those
+excerpts unverified. The external audit checks current pinned source without
+upgrading the native provenance claim. WalkDir still lacks complete symlink-loop
+and contents-first witnesses. Moving `check_loop` earlier does not also retrieve
+all surrounding evidence required by the loop fact.
+
+**This is a Compass before/after experiment.** Graphify has no equivalent native
+member-source/focus flag in the recorded interface. The separately registered
+paired public-neighbor control remains Compass 14/20 versus Graphify 15/20 at
+8,000 bytes. Its numbers must not be equated with or replaced by this native arm.
+A common focused workflow must be evaluated on both tools before claiming a new
+paired improvement. These are source-evidence results, not authored answers.
+
+Validation passes formatting, workspace Clippy, 19 focused/source integration
+tests, all 42 CLI code-query tests, 1,106 workspace library/binary tests (two
+existing ignores), nine CLI product tests, the product boundary, the CLI build,
+and all 187 benchmark tests. Native tests cover late-member retrieval with the
+same quota, duplicate terms, camel/snake case, Unicode, ties and shuffled input,
+zero-match/default behavior, stale sources, ambiguous roots, invalid bounds and
+CLI output formats. The initial compile failure from a wrong runtime-node
+accessor is retained in round 01. The final source hashes match the production
+commit and frozen evaluated binary. Existing unused-mut test warnings remain
+visible. No JavaScript, browser, platform, packaging or extraction-fixture gate
+was rerun because those production surfaces are unchanged.
+
+External `member-focus-02` retains all 15 CLI calls, source/binary hashes,
+independent ordering/span/digest-status verification and identical repeated
+replay. Its first verifier incorrectly assumed every source had a digest; that
+failure is preserved, and the corrected verifier explicitly validates the six
+unverified Redux excerpts. `explanation_focus_review.json` retains every fact,
+member order, limit/provenance status, cost and artifact hash. Package version
+remains 0.3.30; no graph schema, extraction, cache or history changes occur.
+Authored answers, fair common-workflow focus comparison, longer walks, god-object
+judgments, functional communities and held-out confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

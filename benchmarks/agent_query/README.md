@@ -683,3 +683,27 @@ External `explanation-budget-01` contains the collector, independent verifier,
 8,000-byte source controls reproduce the old bytes and outcomes. The audit
 explains source-order starvation, Graphify's two Redux interval gaps, and the
 much larger Compass graph payloads. No production code changes in this arm.
+
+### Native member-name focus
+
+`explanation_focus_registration.json` fixes a Compass before/after experiment
+using each full original question and the same 8,000-byte source quota. Product
+commit `293582c3` adds optional `--source-members --member-focus TEXT`: rank
+recorded callable names by distinct normalized term matches, then source order.
+No source is read to rank; unmatched members and all existing limits remain.
+
+`explanation_focus_review.json` records a gain from 14/20 to 15/20 supported
+facts, with no losses on this known development panel. Chi gains routing
+implementation evidence. Literal coverage is 5/20 versus 6/20 before indentation
+normalization. Actual retained source stays 28,129 bytes; stdout and charged
+verification work increase. Six Redux excerpts remain explicitly unverified
+because their graph nodes lack stored source digests.
+
+All 15 native invocations, ordering decisions, source intervals and provenance
+statuses replay under external `member-focus-02`; round 01 retains the initial
+compile failure. The corrected verifier retains its failed assumption about
+Redux digests. Native and benchmark checks are listed in the main audit.
+
+This is not a paired Graphify result or authored-answer score. The separate
+symmetric 8,000-byte neighbor-window control remains 14/20 versus 15/20. Remaining
+WalkDir loop evidence shows why lexical name matching alone is insufficient.
