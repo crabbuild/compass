@@ -799,7 +799,8 @@
     "semantic-route-parent-benchmark-tests-01.log": "c8bd418cb4120ed7a029b186d3ff1501dd56ff23ac1a065dfd27082b44903e4a",
     "semantic-route-parent-boundary-01.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "semantic-route-parent-frontend-debug/result-02.json": "5333e65df4f3282f715aeb1e9dd0ff21c8013497e20e988eb84f7a5131f75c68",
-    "semantic-route-parent-qualification-01.log": "c7d420bc8df5baecb5f9e0898d9833621c8cd80e05493221a157c39f2ea0b54b"
+    "semantic-route-parent-qualification-01.log": "c7d420bc8df5baecb5f9e0898d9833621c8cd80e05493221a157c39f2ea0b54b",
+    "semantic-route-parent-qualification-02.log": "648dbf055cc6f5bdf73c8a92a7c7d1795b5c5479e98a94fb77ea5089912f39e9"
   },
   "verification": {
     "native": {
@@ -812,7 +813,7 @@
     "sourceOracleCases": 15,
     "benchmarkTests": 97,
     "frontendDebugCheck": "Passed source-oracle and explicit layout-pair checks on positive/negative fixtures; no repeat-build or release equivalence claimed by this standalone check.",
-    "fullQualification": "First attempt stopped at missing default parser bundle. Second attempt is live session 64446 with explicit existing per-worktree bundle; log semantic-route-parent-qualification-02.log. No full pass claimed.",
+    "fullQualification": "Passed: semantic-route-parent-qualification-02.log, session 64446 exit 0. Includes native scale, deterministic lifecycle, source semantic/topology/Markdown assertions and release frontend matrix/positive/negative/repeat-build checks. Qualifies production commit c20db15b, before the Java constructor-receiver change.",
     "pinnedHierarchy": "Three historical hierarchy scorecards invalidated; independent source re-review remains required."
   }
 }

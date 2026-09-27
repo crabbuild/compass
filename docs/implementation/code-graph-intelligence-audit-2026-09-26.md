@@ -1501,8 +1501,10 @@ All **88 script tests**, **15 JavaScript oracle cases**, and **97 benchmark
 tests** pass, as do formatting and the product-boundary check. The first full
 fixture invocation stopped because its default parser-source path was absent.
 A second invocation uses the existing parser bundle in this worktree's target
-directory; its complete result remains pending. No full qualification pass is
-claimed at this checkpoint.
+directory and completed with exit 0. It passed the scale, semantic, topology,
+Markdown, lifecycle determinism, and release frontend qualification stages.
+This full pass qualifies production commit `c20db15b`; the pinned hierarchy
+scorecards remain invalidated and require separate source review.
 
 #### Java constructor receiver diagnostic
 
@@ -1520,8 +1522,7 @@ The native evidence and corrected graph inspection agree on the missing calls.
 
 ## Next evidence to collect
 
-1. Finish the full qualification run for framework-specific route parents and
-   re-review the invalidated pinned hierarchy scorecards from their sources.
+1. Re-review the invalidated pinned hierarchy scorecards from their sources.
    The corrected fixture and selected real-source evidence above do not replace
    those broader checks.
 2. Extend source-proven constructor, loop/result/iterator inference to recover

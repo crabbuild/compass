@@ -56,7 +56,8 @@ set by the frontend fixture gate. The
 [follow-up review](../../benchmarks/agent_query/semantic_route_parent_fixture_review.json)
 records both identical-input comparisons and the fixture-only delta, along with
 mutation checks and topology bound adjustments preserving their prior margins.
-These focused checks pass; the complete fixture gate is pending. Historical
+The complete fixture gate passed for commit `c20db15b`, including the release
+frontend checks. Historical
 pinned frontend hierarchy scorecards are invalidated until their sources are
 re-reviewed, so their prior counts cannot establish current qualification.
 
