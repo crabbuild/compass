@@ -1,0 +1,396 @@
+{
+  "schema": "compass.agent-path-witnesses/1",
+  "scope": "Pre-execution source-reviewed one-hop forward/reverse witnesses for held-out panel A. Checks exact rendered identities, direction, relation, and at least one correct occurrence; not runtime execution or whole-graph precision.",
+  "witnesses": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "question": "chi-holdout-path-forward",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "chi.go",
+          "line": 62,
+          "text": "func NewRouter() *Mux {",
+          "labels": [
+            "NewRouter()",
+            ".NewRouter()"
+          ]
+        },
+        {
+          "file": "mux.go",
+          "line": 52,
+          "text": "func NewMux() *Mux {",
+          "labels": [
+            "NewMux()",
+            ".NewMux()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "chi.go",
+            "line": 63,
+            "text": "return NewMux()"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "question": "chi-holdout-path-reverse",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "mux.go",
+          "line": 52,
+          "text": "func NewMux() *Mux {",
+          "labels": [
+            "NewMux()",
+            ".NewMux()"
+          ]
+        },
+        {
+          "file": "chi.go",
+          "line": 62,
+          "text": "func NewRouter() *Mux {",
+          "labels": [
+            "NewRouter()",
+            ".NewRouter()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "reverse",
+          "site": {
+            "file": "chi.go",
+            "line": 63,
+            "text": "return NewMux()"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "question": "click-holdout-path-forward",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/click/utils.py",
+          "line": 381,
+          "text": "def open_file(",
+          "labels": [
+            "open_file()",
+            ".open_file()"
+          ]
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 374,
+          "text": "def open_stream(",
+          "labels": [
+            "open_stream()",
+            ".open_stream()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "question": "click-holdout-path-reverse",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/click/_compat.py",
+          "line": 374,
+          "text": "def open_stream(",
+          "labels": [
+            "open_stream()",
+            ".open_stream()"
+          ]
+        },
+        {
+          "file": "src/click/utils.py",
+          "line": 381,
+          "text": "def open_file(",
+          "labels": [
+            "open_file()",
+            ".open_file()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "reverse",
+          "site": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "question": "jsoup-holdout-path-forward",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 124,
+          "text": "public boolean isValidBodyHtml(String bodyHtml) {",
+          "labels": [
+            "isValidBodyHtml()",
+            ".isValidBodyHtml()"
+          ]
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 182,
+          "text": "private int copySafeNodes(Element source, Element dest) {",
+          "labels": [
+            "copySafeNodes()",
+            ".copySafeNodes()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 131,
+            "text": "int numDiscarded = copySafeNodes(dirty.body(), clean.body());"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "question": "jsoup-holdout-path-reverse",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 182,
+          "text": "private int copySafeNodes(Element source, Element dest) {",
+          "labels": [
+            "copySafeNodes()",
+            ".copySafeNodes()"
+          ]
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 124,
+          "text": "public boolean isValidBodyHtml(String bodyHtml) {",
+          "labels": [
+            "isValidBodyHtml()",
+            ".isValidBodyHtml()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "reverse",
+          "site": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 131,
+            "text": "int numDiscarded = copySafeNodes(dirty.body(), clean.body());"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "question": "redux-holdout-path-forward",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 2,
+          "text": "export function miniKindOf(val: any): string {",
+          "labels": [
+            "miniKindOf()",
+            ".miniKindOf()"
+          ]
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 40,
+          "text": "function ctorName(val: any): string | null {",
+          "labels": [
+            "ctorName()",
+            ".ctorName()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "question": "redux-holdout-path-reverse",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 40,
+          "text": "function ctorName(val: any): string | null {",
+          "labels": [
+            "ctorName()",
+            ".ctorName()"
+          ]
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 2,
+          "text": "export function miniKindOf(val: any): string {",
+          "labels": [
+            "miniKindOf()",
+            ".miniKindOf()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "reverse",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "question": "walkdir-holdout-path-forward",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/lib.rs",
+          "line": 456,
+          "text": "pub fn sort_by_file_name(self) -> Self {",
+          "labels": [
+            "sort_by_file_name()",
+            ".sort_by_file_name()"
+          ]
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 417,
+          "text": "pub fn sort_by<F>(mut self, cmp: F) -> Self",
+          "labels": [
+            "sort_by()",
+            ".sort_by()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 457,
+            "text": "self.sort_by(|a, b| a.file_name().cmp(b.file_name()))"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "question": "walkdir-holdout-path-reverse",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/lib.rs",
+          "line": 417,
+          "text": "pub fn sort_by<F>(mut self, cmp: F) -> Self",
+          "labels": [
+            "sort_by()",
+            ".sort_by()"
+          ]
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 456,
+          "text": "pub fn sort_by_file_name(self) -> Self {",
+          "labels": [
+            "sort_by_file_name()",
+            ".sort_by_file_name()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "reverse",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 457,
+            "text": "self.sort_by(|a, b| a.file_name().cmp(b.file_name()))"
+          }
+        }
+      ]
+    }
+  ]
+}

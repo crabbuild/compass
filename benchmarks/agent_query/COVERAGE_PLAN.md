@@ -13,6 +13,27 @@ are recorded in `suite_v2.toml`, `suite_fd.toml`, and each captured run.
 Use additional independently selected repositories for confirmation after
 improving on these development cases. Do not relabel used questions as held out.
 
+### Confirmation panel A
+
+`suite_heldout_a.toml` selects Chi, Click, jsoup, Redux, and WalkDir as additional
+small-library repositories across the same five languages. Selection is
+purposive, not random or representative. Commits and reviewed-file hashes are
+recorded in `heldout_panel_a.json`; the Compass binary is frozen at the prior
+hub-evidence checkpoint. No output on these repositories is used to select
+questions. Commit all 55 questions, 21 edge-pair witnesses (18 positive call
+occurrences plus five direct-edge negatives), and ten forward/reverse path
+witnesses before extracting or querying either product.
+
+Each repository covers two declaration lookups, callers, callees, forward and
+reverse navigation, file connectivity, ambiguity, missing symbols, bounded
+natural query, and an incoming-call `ask` task. The CLI runner reports text
+recall proxies. Independent source/graph audits must check identity, relation,
+direction, and occurrence multiplicity separately. A negative edge needs both
+endpoints resolved; missing extraction cannot pass as absence. Source roles,
+MCP/community workflows, directed paths, and broader design judgments remain
+separate work. Preserve first-run results; after tuning on this panel, treat it
+as development and select another holdout for confirmation.
+
 ## Question and evidence matrix
 
 Each new question must record its exact source witness, expected outcome,

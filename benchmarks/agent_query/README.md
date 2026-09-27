@@ -228,6 +228,21 @@ cap terminates the process group and fails the observation; truncated text is
 never scored as a successful response. An invalid Compass snapshot pointer
 fails preparation instead of selecting an arbitrary unpublished snapshot.
 
+## Held-out confirmation panel A
+
+`suite_heldout_a.toml` contains 55 source-reviewed CLI questions on five new
+pinned repositories. `heldout_panel_a.json` records selection scope, source
+hashes, and the frozen Compass build. Run with the normal `runner run --suite`
+interface and explicit `--source NAME=PATH` for Chi, Click, jsoup, Redux, and
+WalkDir; keep all generated artifacts outside the source checkouts.
+
+Run `edge_audit` separately with each `edge_witnesses_heldout_NAME.json`, and
+`path_audit --witnesses benchmarks/agent_query/path_witnesses_heldout_a.json` on
+the captured run. These witnesses are registered before either tool executes
+the panel. The question score remains a text-recall proxy; report independent
+identity/direction/occurrence checks and all failures separately. Repository
+selection is purposive, so this does not estimate population accuracy.
+
 ## Shared MCP comparison
 
 `suite_mcp.json` preregisters 29 questions per tool across the same five-language

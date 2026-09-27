@@ -1,0 +1,117 @@
+{
+  "schema": "compass.heldout-panel/1",
+  "scope": "Purposive confirmation panel, not a representative population sample. No outputs from either tool on these repositories informed question selection. After results are inspected, any tuning on this panel is development and needs another holdout.",
+  "repositories": [
+    {
+      "name": "chi",
+      "language": "Go",
+      "url": "https://github.com/go-chi/chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "reviewedFiles": [
+        {
+          "file": "chi.go",
+          "sha256": "47c70ececcbb9d71f973eda3cbadad0a46c8cc2261b285f7049b5261f337d678"
+        },
+        {
+          "file": "context.go",
+          "sha256": "b19edcca252e2fe74e82802c4c7ce1a1c0855728f9ede1288f0224283dfc7e53"
+        },
+        {
+          "file": "mux.go",
+          "sha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        }
+      ]
+    },
+    {
+      "name": "click",
+      "language": "Python",
+      "url": "https://github.com/pallets/click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "reviewedFiles": [
+        {
+          "file": "src/click/_compat.py",
+          "sha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        },
+        {
+          "file": "src/click/utils.py",
+          "sha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+        }
+      ]
+    },
+    {
+      "name": "jsoup",
+      "language": "Java",
+      "url": "https://github.com/jhy/jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "reviewedFiles": [
+        {
+          "file": "src/main/java/org/jsoup/Jsoup.java",
+          "sha256": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7"
+        },
+        {
+          "file": "src/main/java/org/jsoup/nodes/Document.java",
+          "sha256": "cad397b7c5c767c294f27edf7971932c0d531ae8a368827e6ec34e1267a17502"
+        },
+        {
+          "file": "src/main/java/org/jsoup/parser/Parser.java",
+          "sha256": "2b8baa95140fbf12fad9c874b42d8d31e24b186fd7c665c1708395e6d852ba98"
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "sha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+        }
+      ]
+    },
+    {
+      "name": "redux",
+      "language": "TypeScript",
+      "url": "https://github.com/reduxjs/redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "reviewedFiles": [
+        {
+          "file": "src/createStore.ts",
+          "sha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695"
+        },
+        {
+          "file": "src/utils/isAction.ts",
+          "sha256": "2cf7a3b535cb14b9bb2ac7648b5f103f2a80427d96c7eb391fd11f617944a8a2"
+        },
+        {
+          "file": "src/utils/isPlainObject.ts",
+          "sha256": "30153dae9fd245b8574f96cf9c08cf33e7d12881b0ad4e4e458646bef5b32793"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "sha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        }
+      ]
+    },
+    {
+      "name": "walkdir",
+      "language": "Rust",
+      "url": "https://github.com/BurntSushi/walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "reviewedFiles": [
+        {
+          "file": "src/dent.rs",
+          "sha256": "ca573f4533370a09851579f5940f7cd9bd121b2f30ec51d29a40afdce984683b"
+        },
+        {
+          "file": "src/error.rs",
+          "sha256": "ba58bf6f59d196567435d4b66699a928cc237fc7c8df01dc37ab822509905b7c"
+        },
+        {
+          "file": "src/lib.rs",
+          "sha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        }
+      ]
+    }
+  ],
+  "productBinarySha256": "5382b51b86ab76032173a17e638a3ad525600ec1726364d3244edddb7abd2c19",
+  "productSourceCommit": "30a55707ef651e2018cda159bc47669fa3c3896f",
+  "surfacesPending": [
+    "Held-out MCP hubs and community workflows",
+    "Directed path and long-walk tasks",
+    "Independent functional cohesion and god-object judgments"
+  ]
+}
