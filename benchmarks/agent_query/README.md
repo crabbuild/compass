@@ -899,3 +899,30 @@ byte-identical repeated verification. Both tools resolve all eight classes, but
 neither returns any of the four consensus-positive classes in its top 100.
 These ranking misses do not establish classifier decisions or population
 precision. Source-assisted neighbors remain a separate stored-graph diagnostic.
+
+
+## Java enum-reference correction and preservation controls
+
+`java_enum_access_registration.json` fixes the unchanged compiler-backed jsoup
+census before candidate extraction; `java_enum_control_registration.json` fixes
+all four other known language repositories before their paired control runs.
+`java_enum_access_review.json` records the qualified source/binary, every native
+check, complete graph deltas and repeated verification.
+
+The candidate verifies 355/529 enum references (previously zero) and 3,106/3,785
+ordinary field references (previously 3,047). All 3,461 returned in-cohort contacts
+agree with the compiler; all previously verified occurrences remain. Graphify
+retains zero such contacts and no positive-contact precision denominator. The
+679 ordinary and 174 enum misses remain in the fixed denominator.
+
+Of 670 added graph references, 256 are in test files outside the compiler cohort;
+source-token/provenance checks do not establish their semantic binding precision.
+Both jsoup graphs retain two omitted edges. All eight Go/Python/TypeScript/Rust
+control extractions succeed with complete graph equality to their paired baseline
+and preserved original. These known development results are not held-out evidence.
+
+jsoup changes from 42 to 40 communities; all 75 unchanged source task-pair
+outcomes remain identical in a post-change replay. No functional community,
+god-object, authored explanation or overall superiority claim follows. The audit
+retains the initial native failures, corrected initializer/import cases and the
+scope-test correction followed by all 533 resolver tests and focused Clippy.

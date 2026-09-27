@@ -9,7 +9,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. Exact source-assisted resolution succeeds for all eight per tool. Earlier failures remain unchanged; classifier quality is unproven. |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The compiler-backed jsoup census verifies 3,047/3,785 ordinary field occurrences for Compass versus 0 for Graphify; both miss all 529 enum-constant occurrences. This one-configuration result does not establish whole-graph or cross-language precision. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,106/3,785 ordinary field occurrences and 355/529 enum occurrences for Compass versus 0 for Graphify. All 3,461 returned in-cohort contacts agree with the compiler; 256 added test-source references remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
@@ -21,7 +21,8 @@ Current evidence summaries are in the
 [original Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
 [larger-artifact follow-up](../../benchmarks/agent_query/mlcq_admission_followup_review.json),
 [release-server Blob follow-up](../../benchmarks/agent_query/mlcq_release_followup_review.json),
-[Java field census](../../benchmarks/agent_query/java_real_field_review.json),
+[original Java field census](../../benchmarks/agent_query/java_real_field_review.json),
+[Java enum follow-up](../../benchmarks/agent_query/java_enum_access_review.json),
 [paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
 [shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json),
 [SQL prefix diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json)
@@ -4013,3 +4014,101 @@ The repository was already used for development; this is neither independent
 confirmation nor a Graphify speed comparison. Prior timeouts and the original
 256 MiB admission failures remain unchanged. No new production code was needed
 for this repeat; the candidate remains the previously validated SQL regex cache.
+
+
+## Java enum references: qualified production and full-census follow-up
+
+Production commit `a8b4a490` adds enum constants to the bounded Java lexical
+value index, preserving static value types, parameter/local/type-parameter
+shadowing and exact member tokens. Registered constant-specific bodies retain
+their method and field owners. Their fields shadow enclosing enum values;
+access to a body-specific field requires lexical ownership of that exact enum
+member, within the resolver budget. Enum values keep their enclosing enum type.
+
+Bare enum switch labels derive their target from the selector type. Unknown
+selectors remain unresolved, including when a same-named enclosing field exists.
+Qualified receiver lookup supports same-package types and preserves source-type
+precedence over imports. Unregistered local/anonymous owners, general hierarchy
+and cross-file value/type chains remain incomplete. AST cache semantics advance
+from 9 to 10; rebuild graphs for the new evidence. Graph/evidence schemas and
+package version 0.3.30 remain unchanged; historical realizations are immutable.
+
+### Compiler census: unchanged source and denominator
+
+The registered release follow-up uses the complete clean pinned jsoup tree,
+the unchanged 88-file Java 8 compiler capture, the frozen pre-enum release binary
+and Graphify graph. The candidate executable is bound to its qualified
+production/build inputs and corrected test digests. Its SHA-256 is
+`28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889`.
+The executable was frozen before the production commit was recorded; the
+recorded inputs match that commit.
+
+| Source-reference kind | Pre-enum Compass | Candidate Compass | Frozen Graphify |
+| --- | ---: | ---: | ---: |
+| Ordinary fields | 3,047 / 3,785 | 3,106 / 3,785 | 0 / 3,785 |
+| Enum constants | 0 / 529 | 355 / 529 | 0 / 529 |
+
+All 3,047 previously verified references are retained; 414 references become
+newly verified. All 3,461 returned contacts in the registered cohort agree with
+the compiler on target declaration, source owner and UTF-8 occurrence span.
+Graphify has no positive-contact precision denominator. The candidate still
+misses **679 ordinary and 174 enum references**. Declaration coverage remains
+614/616 ordinary fields and 131/131 enum constants. No source or miss was removed
+from the denominator. Both independent verifier executions produce identical
+reports; they replay the same compiler oracle, not independent human judgments.
+
+The fresh baseline graph is byte-identical to the preserved original. Both
+jsoup graphs retain a two-edge omission warning. The candidate keeps all 6,116
+node identities and all 25,006 original edge records, adding 670 `references`.
+Of those additions, 414 are in the compiler cohort and **256 are in test sources
+outside it**. All 670 pass source-token, line, provenance and applicable callable
+containment checks; these checks do not establish binding correctness for the
+256 unscored test references. Full per-contact reviews, misses and source hashes
+remain available in the retained artifacts.
+
+### Other languages and community effects
+
+Before control extraction, a separate protocol fixed all four other existing
+cohort repositories: Chi/Go, Click/Python, Redux/TypeScript and WalkDir/Rust.
+All eight fresh-output observations succeed. Each candidate graph equals both
+its paired baseline and preserved original byte-for-byte, including metadata
+and array order. Warnings remain explicit, including Redux's two omitted edges.
+Repeated complete verification reports are identical. These are preservation
+controls on known development inputs; they add no new quality or timing score.
+All 227 frozen Graphify package files and 58 package versions verify unchanged.
+
+Only `community` attributes change on 4,111 jsoup nodes. The community count moves
+from 42 to 40. A post-change replay of all 75 unchanged source-defined task-pair
+outcomes across the five repositories yields identical outcomes, and repeats
+byte-identically. This small diagnostic does not establish functional cohesion,
+ideal responsibility boundaries or improved communities.
+
+### Native checks and retained corrections
+
+Formatting, 38 Java language integration tests, all 533 resolver tests, 33 cache
+contracts, focused and workspace Clippy, 1,109 workspace tests (two existing
+ignored), nine product tests, complete graph-fixture qualification, 238 benchmark
+tests, product boundary and the release build pass. The fixture gate includes
+the independent Markdown and React checks. These suites overlap and must not be
+summed into a unique-test count. No standalone browser/platform/packaging matrix
+was rerun locally.
+
+The unchanged production baseline first fails seven of eight language tests
+and three of six resolver tests. Retained follow-up failures caught constant-body
+initializer ownership and an implementation regression in source-type/import
+precedence. An initially invalid enum-static initializer fixture was replaced
+with a valid own-field initializer that also failed before the ownership fix;
+six positive fixture sources compile under javac 17 with `--release 8`.
+
+The first resolver scope negative looked for a nonexistent `file` scope and
+therefore tested a missing scope. It now checks an existing `module` scope
+separately, requiring that scope to exist, and retains missing-scope and depth
+cases. The full resolver suite and focused Clippy pass after this correction;
+the production binary is unchanged by the test-only correction.
+
+The [complete report](../../benchmarks/agent_query/java_enum_access_review.json)
+retains both registrations, native logs and source/binary digests, all original
+outcomes, full graph deltas, control results and repeated verification. This is
+one previously inspected Java build configuration. Authored answer quality,
+query usability, longer walks, functional communities, actual god-object
+classification and final independent superiority confirmation remain open.
