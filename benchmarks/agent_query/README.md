@@ -570,3 +570,33 @@ baseline into
 `--output benchmarks/agent_query/java_state_scope_baseline.json --verify`. Compilation/disassembly outputs, compiler identities, source,
 registration, class files and graph hashes are retained. Historical exploratory
 reports remain in the external artifact directory.
+
+### Java field-access correction
+
+`java_state_access_development_registration.json` retains all 20 real-source
+sites and all 44 compiler cases; `java_state_access_public_registration.json`
+registers four known-ID public neighbor requests. The corrected review is
+`java_state_access_development_review.json`, with source, binary, graph,
+registration and verification hashes. Complete captures and replay scripts are
+under external `java-state-access-02`; `java-state-access-01` is explicitly
+superseded after compiler and native counterexamples exposed wrong type
+precedence and duplicate-receiver selection.
+
+Compass recovers 8/20 real-source sites (four Java and four Rust), versus
+Graphify's unchanged 0/20. The Java fixture recovers 39/45 occurrences versus
+0/45, retaining six misses and all eight negative controls. A separate
+post-capture check verifies the supported compiler field/enclosing-method pairs
+and source ranges; the original target/line inventory still does not score
+caller ownership. This is a fixture-specific consistency check, not a general
+compiler oracle or blinded precision result.
+
+All five repositories are rebuilt; four graphs are byte-identical to the Rust
+baseline. jsoup retains previous records and adds 3,896 field references. All
+added records pass endpoint/occurrence checks, including independent AST
+ownership ranges for 26 field initializers. Four public requests retrieve the
+selected field identities and anchors for Compass, versus none for Graphify;
+Compass's complete response payload is substantially larger. The unchanged
+75 task-pair community outcomes show no measured improvement. These results do
+not establish authored explanations, cohesion, god-object defects, exhaustive
+edge precision or overall superiority. See the audit document for remaining
+misses, payload costs, partition changes, warnings and exact verification.

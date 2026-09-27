@@ -2954,6 +2954,114 @@ precedes compiler and graph observations. The graph inventory explicitly reports
 unscored caller ownership rather than treating a matching target/line as a full
 semantic-edge judgment.
 
+## Java field contacts: correction and unchanged development comparisons
+
+Registration `5c10c9d4` fixes the same 20 real-repository access sites and all
+44 compiler scope cases before production work. Public registration `5548a864`
+fixes four known-ID neighbor requests after implementation but before rebuilt
+real graphs or responses were inspected. These are development controls, not
+held-out questions. Production commits `09ca58e6` and `f2cacfeb` add bounded Java
+field evidence and correct two reproduced type-selection defects.
+
+The extractor now distinguishes lexical values from source-declared fields,
+retains block/loop/lambda/catch/resource lifetimes, and records exact field-token
+occurrences. Declared nominal receivers, arrays, casts, direct constructors,
+source-local field chains and single generic bounds can establish an owner.
+Simple flow patterns are supported; unsupported flow masks possibly shadowed
+bindings. Unknown receivers, inherited fields, unregistered local/anonymous
+owners and exhausted inference do not acquire convenient same-named targets.
+The generic graph projection remains `references`, with member-access provenance;
+it does not classify reads/writes or establish runtime alias identity.
+
+Two counterexamples invalidated the initial production capture. An imported
+`remote.Cell` incorrectly beat a visible member `Box.Cell`; compiler bytecode
+confirms the member type's field. Two files declaring the same receiver type
+also allowed field availability to choose one declaration. Failing regressions
+are retained. The correction gives visible source types precedence over imports
+and package prefixes, and checks nominal receiver ambiguity before field lookup.
+Parser-free decisions cover absent/unique/duplicate types, lookup limits and
+exact-source precedence. The compiler counterexample now publishes the correct
+`p.Box::Cell::value` target. `java-state-access-01` remains superseded evidence;
+its interrupted fixture qualification is not counted as passed.
+
+### Fixed real-source and compiler results
+
+| Registered evidence | Compass before Java correction | Compass corrected | Graphify |
+| --- | ---: | ---: | ---: |
+| Five-repository field contacts with selected-line anchors | 4/20 | 8/20 | 0/20 |
+| Compiler fixture occurrence targets | 0/45 | 39/45 | 0/45 |
+| Compiler fixture field declarations | 12/14 | 12/14 | 0/14 |
+| Negative compiler cases with field contacts | 0/8 | 0/8 | 0/8 |
+
+All four selected jsoup sites now connect the exact callable to `safelist` or
+`destination` with selected-line anchors. The four Rust successes remain.
+Go/Python lack eight registered state-site declarations; TypeScript has four
+state sites without contacts. The original denominator and source hashes are
+unchanged. Synthetic misses remain explicit: `super` and inherited fields,
+one qualified static-field use, anonymous-class accesses and a local-class
+access (six occurrences across five cases). No unexpected registered target was
+observed. A separate post-capture check matches all 39 supported contacts to
+compiler field/enclosing-method pairs and source ranges; compiler lambda names
+map to enclosing source methods. This check assumes the fixture's unambiguous
+method names and is not a general overload adapter or blinded precision score.
+
+Fresh Compass builds use all five pinned read-only repositories; unchanged
+Graphify 0.9.67 native graphs are reused. No build-speed comparison is made.
+The Chi, Click, Redux and WalkDir graphs are byte-identical to the qualified
+Rust-field baseline. jsoup retains all 6,116 nodes and 21,110 previous edges,
+adding 3,896 field references for 25,006 edges total. Every added record passes
+field-target, exact-identifier, provenance and source-owner checks; 26 initializer
+owners require an independent source AST range because the graph's field source
+range anchors its declaration token. These are consistency checks, not
+compiler-grade target precision across jsoup. The final type correction adds
+28 contacts beyond the superseded capture; their receiver declarations and
+source expressions were inspected. Existing jsoup/Redux warnings each report
+two omitted edges and remain visible.
+
+### Public retrieval and community impact
+
+Each tool receives its own exact callable ID and one unfiltered native-default
+`get_neighbors` request per Java case, with no retries or source follow-ups.
+All eight requests succeed. Compass returns field identity and selected-line
+anchors in **4/4**; Graphify returns neither in **0/4**, consistent with its
+missing field nodes. Compass's complete nodes and parallel edge records match
+the stored graph with no truncation. Aggregate response text is 9,883 versus
+3,313 bytes; wire payload is 108,999 versus 3,708 bytes. This is a known-ID
+retrieval control, not identity discovery, authored-answer accuracy or an
+efficiency win. All 227 Graphify package files verify unchanged.
+
+jsoup communities change from 41 to 42. Co-member pairs change from 1,110,372
+to 1,077,153: 796,307 retained, 314,065 separated and 280,846 joined. This ignores
+numeric community renaming but measures only partition change. Replaying the
+unchanged 75 source-selected task pairs gives identical outcomes: within-task
+co-location remains Compass 13/15 versus Graphify 12/15; cross-task co-location
+remains 18/60 versus 12/60. Cross-task co-location is not automatically wrong.
+There is no new community-quality or god-object classification result.
+
+### Verification and retained evidence
+
+The final `f2cacfeb` source passes formatting; 27 Java language integration tests;
+244 resolver integration tests; 33 cache contracts; workspace and focused-test
+Clippy; 1,106 workspace library/binary tests (two ignored); nine CLI product
+tests; the product boundary; full production fixture qualification, including
+Markdown and the independent React release-binary checks; and all 162 benchmark
+tests. The evaluated and qualifying debug binaries match exactly. All validated
+production source hashes match the commit. The full fixture gate took 666
+seconds, including a seven-minute release build. Existing fixture omission,
+linker and unused-mut warnings remain visible. Hosted CI, full platform,
+packaging and browser suites are not claimed.
+
+AST cache semantics advance from 8 to 9; users rebuild graphs to obtain the
+facts. Package version remains 0.3.30; graph/evidence schemas and producer
+capabilities are unchanged. Published history is immutable. The committed
+`java_state_access_development_review.json` contains result summaries, source
+and capture hashes, missing cases and verification commands. External
+`java-state-access-02` retains complete graphs, raw public responses, compiler
+consistency proofs, failed attempts, deltas and replay scripts. The original
+registrations and baseline reports are preserved. Broader target precision,
+authored explanations, longer walks, actual god-object judgments and held-out
+confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

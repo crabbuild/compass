@@ -1,0 +1,952 @@
+{
+  "schema": "compass.java-state-access-development-review/1",
+  "scope": "Known development sources and fixed access sites. Full graph inventory, compiler fixture and separate known-ID-assisted public retrieval control. Not held-out, representative god-object classification, exhaustive edge precision, authored explanations, read/write effects, or overall superiority.",
+  "productCommit": "f2cacfebba15d69a738e7c14694d51320e4e07ba",
+  "registrationCommits": [
+    "5c10c9d4",
+    "5548a864"
+  ],
+  "registrationSha256": "fd2de77260e0fdfcbf5f6f47f30d96037c183a87491d3b5468b3ba309d16e773",
+  "sourceRegistrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "scopeRegistrationSha256": "3a12b108736b5341ed09f0f9c66aa874e2612ef8d8e26afc542692fe0bdf445a",
+  "publicRegistrationSha256": "b20a8aabce091f8a3c57d25878cc97cdebd25bdfaa7e3a76074e75fc4476228a",
+  "artifactDirectory": "java-state-access-02",
+  "sourceSha256": {
+    "crates/compass-resolve/src/evidence/languages/java.rs": "949d444ed0eee178a2b11a46738ceb0fdad6ca0dbf52963960bc41b6f4b08861",
+    "crates/compass-resolve/src/evidence/languages/policy.rs": "d8dc456079c763d21c2a7cd8d3fc71d625f8087c24b87ca225321ac6d35fc2e0",
+    "crates/compass-languages/src/evidence/build/java_fields.rs": "22aeb543e345846fc72b22fca8bef3a1c5bd399d1048b5b6fabefb7a84dc73e9",
+    "crates/compass-languages/src/evidence/build.rs": "5c5efdcf5d3b738e9aa6b6382f59738c75cd8f21aa462c7e5a3b155197860898",
+    "crates/compass-files/src/cache.rs": "5c207692609e4c1da2285ec804eaedccce19229b9ee1a3971020ec15a1c40d77",
+    "crates/compass-files/tests/contracts.rs": "3a34cf1c6784d738bfede178a08e209d376c5b956a903a6614fd8db7e1a27fed",
+    "crates/compass-languages/tests/java_field_access.rs": "3196df595bd2af0a39e5b62db0f3e40c3210e60a911b530f3cf02acdcd519be9",
+    "crates/compass-resolve/tests/java_field_access.rs": "2658e695530f3b7b10d71094761370dbda9a82127a292edc3ff8565118c3effe"
+  },
+  "compassBinarySha256": "5f6ff5f9b7b13866fdc7435e7a05888d3a95a0b23636be89cf45bc3478660139",
+  "graphResults": {
+    "compass": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 6,
+      "contactSupported": 8,
+      "selectedLineSupported": 8,
+      "status": {
+        "contact_edge": 8,
+        "missing_state": 8,
+        "no_contact_edge": 4
+      }
+    },
+    "graphify": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 0,
+      "contactSupported": 0,
+      "selectedLineSupported": 0,
+      "status": {
+        "missing_state": 20
+      }
+    }
+  },
+  "graphDeltas": [
+    {
+      "repository": "chi",
+      "oldGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "newGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "nodesBefore": 729,
+      "nodesAfter": 729,
+      "edgesBefore": 1914,
+      "edgesAfter": 1914,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "click",
+      "oldGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "newGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "nodesBefore": 4264,
+      "nodesAfter": 4264,
+      "edgesBefore": 6387,
+      "edgesAfter": 6387,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "jsoup",
+      "oldGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "newGraphSha256": "2a9216926b1c5dfc82e4f88df0cce24a7a14ac67aa2a350158eff39018145314",
+      "nodesBefore": 6116,
+      "nodesAfter": 6116,
+      "edgesBefore": 21110,
+      "edgesAfter": 25006,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 5567,
+      "addedEdges": 3896,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "redux",
+      "oldGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "newGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "nodesBefore": 3503,
+      "nodesAfter": 3503,
+      "edgesBefore": 5653,
+      "edgesAfter": 5653,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "walkdir",
+      "oldGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+      "newGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+      "nodesBefore": 288,
+      "nodesAfter": 288,
+      "edgesBefore": 1380,
+      "edgesAfter": 1380,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    }
+  ],
+  "scopeResults": {
+    "compass": {
+      "fieldDeclarations": 14,
+      "uniqueFields": 12,
+      "missingFields": 2,
+      "ambiguousFields": 0,
+      "fieldContactRecords": 39,
+      "registeredFieldOccurrences": 45,
+      "occurrenceTargetsMatched": 39,
+      "negativeCases": 8,
+      "negativeCasesWithContact": 0,
+      "callerOwnershipScored": false,
+      "edgePrecision": null
+    },
+    "graphify": {
+      "fieldDeclarations": 14,
+      "uniqueFields": 0,
+      "missingFields": 14,
+      "ambiguousFields": 0,
+      "fieldContactRecords": 0,
+      "registeredFieldOccurrences": 45,
+      "occurrenceTargetsMatched": 0,
+      "negativeCases": 8,
+      "negativeCasesWithContact": 0,
+      "callerOwnershipScored": false,
+      "edgePrecision": null
+    }
+  },
+  "scopeMissingOrUnexpected": {
+    "compass": [
+      {
+        "id": "super_field",
+        "expected": [
+          "base_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "static_fields",
+        "expected": [
+          "scope_static",
+          "scope_static"
+        ],
+        "matched": 1,
+        "unexpected": []
+      },
+      {
+        "id": "inherited_beats_outer",
+        "expected": [
+          "base_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "anonymous_this",
+        "expected": [
+          "anonymous_value",
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "local_class_this",
+        "expected": [
+          "local_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      }
+    ],
+    "graphify": [
+      {
+        "id": "constructor",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "explicit_this",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "implicit_this",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "repeated",
+        "expected": [
+          "scope_value",
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "block_before",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "block_after",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "before_local",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "for_after",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "enhanced_iterable",
+        "expected": [
+          "scope_items"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "enhanced_binding",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "enhanced_after",
+        "expected": [
+          "scope_slot",
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "lambda_this",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "lambda_implicit",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "catch_after",
+        "expected": [
+          "scope_failure"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "resource_binding",
+        "expected": [
+          "token_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "resource_catch",
+        "expected": [
+          "scope_resource",
+          "token_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "resource_after",
+        "expected": [
+          "scope_resource",
+          "token_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "pattern_true",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "pattern_after",
+        "expected": [
+          "scope_slot",
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "pattern_input",
+        "expected": [
+          "scope_pattern"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "pattern_flow",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "typed_parameter",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "cast_receiver",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "field_chain",
+        "expected": [
+          "scope_slot",
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "array_receiver",
+        "expected": [
+          "scope_items",
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "super_field",
+        "expected": [
+          "base_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "declared_receiver",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "hiding_receiver",
+        "expected": [
+          "shadow_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "generic_bound",
+        "expected": [
+          "cell_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "static_fields",
+        "expected": [
+          "scope_static",
+          "scope_static"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "declarator_order",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "inner_own",
+        "expected": [
+          "inner_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "qualified_this",
+        "expected": [
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "inherited_beats_outer",
+        "expected": [
+          "base_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "anonymous_this",
+        "expected": [
+          "anonymous_value",
+          "scope_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      },
+      {
+        "id": "local_class_this",
+        "expected": [
+          "local_value"
+        ],
+        "matched": 0,
+        "unexpected": []
+      }
+    ]
+  },
+  "scopeCallerConsistency": {
+    "schema": "compass.java-scope-caller-consistency/1",
+    "scope": "Post-capture compiler/graph consistency check on the registered synthetic fixture; not a newly blinded score. Original target/line inventory remains unchanged. Compiler lambda body names map to the enclosing source method, whose source extent must contain the access. All fixture callable names are unambiguous; no general overload identity adapter is claimed.",
+    "oracleSha256": "38fb8d38bccbc395cd06e5ec42fa7edcd7735f9ef4839e9a727d4a2af851a1e7",
+    "graphSha256": "9ba95283221028543ba431e6fb8ce6f3e0b33e46f7558aa71147488d2c94ad61",
+    "verifiedOccurrences": 39,
+    "missingOccurrences": 6
+  },
+  "addedOccurrenceConsistency": 3896,
+  "fieldInitializerOwnership": 26,
+  "publicResults": {
+    "compass": {
+      "tasks": 4,
+      "fieldNeighborIdentity": 4,
+      "selectedLineAnchored": 4,
+      "textBytes": 9883,
+      "wireBytes": 108999
+    },
+    "graphify": {
+      "tasks": 4,
+      "fieldNeighborIdentity": 0,
+      "selectedLineAnchored": 0,
+      "textBytes": 3313,
+      "wireBytes": 3708
+    }
+  },
+  "communityImpact": {
+    "scope": "Co-membership stability diagnostic, not responsibility quality or god-object classification.",
+    "beforeGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+    "afterGraphSha256": "2a9216926b1c5dfc82e4f88df0cce24a7a14ac67aa2a350158eff39018145314",
+    "nodes": 6116,
+    "communitiesBefore": 41,
+    "communitiesAfter": 42,
+    "unassignedBefore": 0,
+    "unassignedAfter": 0,
+    "pairsBefore": 1110372,
+    "pairsAfter": 1077153,
+    "retained": 796307,
+    "separated": 314065,
+    "joined": 280846
+  },
+  "communityTasks": {
+    "before": {
+      "compass": {
+        "cross_task": {
+          "same_community": 18,
+          "different_community": 42,
+          "unresolved": 0
+        },
+        "cross_task/cross_file": {
+          "same_community": 6,
+          "different_community": 38,
+          "unresolved": 0
+        },
+        "cross_task/same_file": {
+          "same_community": 12,
+          "different_community": 4,
+          "unresolved": 0
+        },
+        "within_task": {
+          "same_community": 13,
+          "different_community": 2,
+          "unresolved": 0
+        },
+        "within_task/cross_file": {
+          "same_community": 2,
+          "different_community": 0,
+          "unresolved": 0
+        },
+        "within_task/same_file": {
+          "same_community": 11,
+          "different_community": 2,
+          "unresolved": 0
+        }
+      },
+      "graphify": {
+        "cross_task": {
+          "same_community": 12,
+          "different_community": 48,
+          "unresolved": 0
+        },
+        "cross_task/cross_file": {
+          "same_community": 0,
+          "different_community": 44,
+          "unresolved": 0
+        },
+        "cross_task/same_file": {
+          "same_community": 12,
+          "different_community": 4,
+          "unresolved": 0
+        },
+        "within_task": {
+          "same_community": 12,
+          "different_community": 3,
+          "unresolved": 0
+        },
+        "within_task/cross_file": {
+          "same_community": 2,
+          "different_community": 0,
+          "unresolved": 0
+        },
+        "within_task/same_file": {
+          "same_community": 10,
+          "different_community": 3,
+          "unresolved": 0
+        }
+      }
+    },
+    "after": {
+      "compass": {
+        "cross_task": {
+          "same_community": 18,
+          "different_community": 42,
+          "unresolved": 0
+        },
+        "cross_task/cross_file": {
+          "same_community": 6,
+          "different_community": 38,
+          "unresolved": 0
+        },
+        "cross_task/same_file": {
+          "same_community": 12,
+          "different_community": 4,
+          "unresolved": 0
+        },
+        "within_task": {
+          "same_community": 13,
+          "different_community": 2,
+          "unresolved": 0
+        },
+        "within_task/cross_file": {
+          "same_community": 2,
+          "different_community": 0,
+          "unresolved": 0
+        },
+        "within_task/same_file": {
+          "same_community": 11,
+          "different_community": 2,
+          "unresolved": 0
+        }
+      },
+      "graphify": {
+        "cross_task": {
+          "same_community": 12,
+          "different_community": 48,
+          "unresolved": 0
+        },
+        "cross_task/cross_file": {
+          "same_community": 0,
+          "different_community": 44,
+          "unresolved": 0
+        },
+        "cross_task/same_file": {
+          "same_community": 12,
+          "different_community": 4,
+          "unresolved": 0
+        },
+        "within_task": {
+          "same_community": 12,
+          "different_community": 3,
+          "unresolved": 0
+        },
+        "within_task/cross_file": {
+          "same_community": 2,
+          "different_community": 0,
+          "unresolved": 0
+        },
+        "within_task/same_file": {
+          "same_community": 10,
+          "different_community": 3,
+          "unresolved": 0
+        }
+      }
+    },
+    "changedPairs": []
+  },
+  "superseded": {
+    "directory": "java-state-access-01",
+    "reason": "Interim product 09ca58e6 selected an imported type over a member type; compiler proof and two failing native cases retained. Duplicate nominal receiver types also selected by field availability in a separate failing regression. Both fixed before final rerun. Interrupted qualification was not counted as passed."
+  },
+  "checks": {
+    "preflight-clippy": {
+      "argv": [
+        "cargo",
+        "clippy",
+        "-p",
+        "compass-languages",
+        "-p",
+        "compass-resolve",
+        "--test",
+        "java_field_access",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exitCode": 0,
+      "seconds": 0.31,
+      "reportSha256": "cdb84eaedadb049bd41ba65fc24565fc8ae8587b642abc9bb96432990f7f4895",
+      "logSha256": "9ae36bb22d8f0f810a77044760863f70b81405396a32cce477ec08eecd4e6d59"
+    },
+    "fmt": {
+      "argv": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 3.51,
+      "reportSha256": "4d4bdcbd582b918f68b4371c94cda442736723f41f71a440c7d0e2bc8b339fbe",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "build": {
+      "argv": [
+        "cargo",
+        "build",
+        "-p",
+        "compass-cli",
+        "--bin",
+        "compass",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 40.96,
+      "reportSha256": "74dda0666605c13b90e3563e194ce541ee8a3304190c7d724d9a372a6f15e839",
+      "logSha256": "84b2cf417c28401956d22a63c60f5f78e4a03a88db1b4f3ba1499cd74ab1babf"
+    },
+    "language-tests": {
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-languages",
+        "--test",
+        "java_field_access",
+        "--test",
+        "java_varargs",
+        "--test",
+        "java_universal_conformance",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 3.43,
+      "reportSha256": "ec2f2414ab76b5c12bddb03d4581af4d02267735e36163573ec3ebcbf59a7ba4",
+      "logSha256": "fc4f1e7ded1ca61f180e3dd7d90ae20fddd8d32e5aa9f7c6ba84fd0c2d549da9",
+      "testCounts": {
+        "passed": 27,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "resolver-tests": {
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-resolve",
+        "--test",
+        "java_field_access",
+        "--test",
+        "universal_evidence",
+        "--test",
+        "universal_resolution",
+        "--test",
+        "java_constructor_receivers",
+        "--test",
+        "java_varargs",
+        "--test",
+        "java_varargs_phases",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 6.78,
+      "reportSha256": "39e376e1cccd147887502478f8943a2ee35244efb71958eaf9cb95d714c4fc97",
+      "logSha256": "b8fdd62e9ebbae5540ace5e4ed95c947788629e393ab4b2b5ef895af6ddf0462",
+      "testCounts": {
+        "passed": 244,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "cache-tests": {
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-files",
+        "--test",
+        "contracts",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 1.19,
+      "reportSha256": "1cd1b1c3853fda02ea5cec11b44fb600bcb0c2de3036aaa6934f7d93e40238ac",
+      "logSha256": "e11e4f830f7e35a2fc7c7cace36ceaa556ab16c33226bbdf8f45e3cb5fa9c38a",
+      "testCounts": {
+        "passed": 33,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "clippy": {
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--lib",
+        "--bins",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exitCode": 0,
+      "seconds": 19.87,
+      "reportSha256": "1994e48a3a5077f04b7dd885e324e9bd0a94e28a9e1f39cf6f3476ec49ab629b",
+      "logSha256": "6f15f3038220fcb1ed187df07944d683ff66e6ff78b8a36c0e776388ae9af8af"
+    },
+    "focused-clippy": {
+      "argv": [
+        "cargo",
+        "clippy",
+        "-p",
+        "compass-languages",
+        "-p",
+        "compass-resolve",
+        "--test",
+        "java_field_access",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exitCode": 0,
+      "seconds": 0.35,
+      "reportSha256": "ff991cb8170f78e713662fea13be0d76badf53bdcc7f1514fc84d26d0b0e27be",
+      "logSha256": "59e339d2aa27cd2222fead9549dbc67b0a6e0d10e368fb0ddf49b9c9ba0ac0a3"
+    },
+    "workspace-tests": {
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--lib",
+        "--bins",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 82.84,
+      "reportSha256": "be6d154bc770da4cdca83d5f28c5cd2688a6b85120eda17098cab160e815c6c9",
+      "logSha256": "36bfc8e761abce7e729a795b6236eaac6e076249eb3122c365754f1ba2ecd4fa",
+      "testCounts": {
+        "passed": 1106,
+        "failed": 0,
+        "ignored": 2
+      }
+    },
+    "product-tests": {
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-cli",
+        "--test",
+        "compass_product",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 3.47,
+      "reportSha256": "a3880eca791cd111a56398188a7ff225774098c03c34c0991209af16de8132c7",
+      "logSha256": "27cc488ba8d06463219c6cb54a7766883fbc375c51dcae91e6a324a2db1584e5",
+      "testCounts": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "boundary": {
+      "argv": [
+        "sh",
+        "scripts/check_product_boundary.sh"
+      ],
+      "exitCode": 0,
+      "seconds": 0.1,
+      "reportSha256": "babb0ce0501376cea10d60722855d84c56ba3169822708f8a522f9b07c0efcd1",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "fixtures": {
+      "argv": [
+        "bash",
+        "scripts/qualify_code_graph_v1.sh",
+        "--fixtures-only"
+      ],
+      "exitCode": 0,
+      "seconds": 666.34,
+      "reportSha256": "e156b76e25ef0cf0d571d5deff6354eb507bd694c42469638c51685fa3878bb3",
+      "logSha256": "dd6613ebd79db8ecd945a58f98b64b8c0806314eedb02b9619049446ca9262e9",
+      "testCounts": {
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "benchmarks": {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "benchmarks/agent_query/tests"
+      ],
+      "exitCode": 0,
+      "seconds": 2.04,
+      "reportSha256": "d06c8f8c4ec3eca2430ef69b18361dddf60c74720d17dbf824f1366b0560eb09",
+      "logSha256": "729939fb1dec4ad2b7023ded51a5676a1903ebe417b65092f82f8133af5021aa"
+    }
+  },
+  "artifactSha256": {
+    "run.json": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+    "review.json": "e9a01c941adc0c7d42a414ee714f8fc2378527c474f093a8b5095d74cc23d25f",
+    "verification.json": "dc7125509ffd7cf8032e63f7eddf8ec6611b27ca17c6a3044abb078e6debc746",
+    "scope-graphs.json": "b814930e4045cbe975765bdea277f8443cf26d435c4a6594560ac989c94eada8",
+    "scope-review.json": "a4447e67ce4fc99f781d37575ff8d8e75e9a89190820dcf90f7ecaa3b99d41b4",
+    "scope-caller-consistency.json": "8e2ff407ed288d9f26bc234f39e39dd27e372b4671aa7a0f1cd00fc45579b50a",
+    "public-capture.json": "7319b09d0b3c8fa01cddf4a36c1768975433623e31a5668bd73e84c421844bda",
+    "added-occurrence-consistency.json": "64287f4b09c871b98eae8bbda9d8f9c164cefac9952f3e3eb5a13c7c28b69a20",
+    "initializer-ownership.json": "42fff2ea76ff7dc1149acce39971f1897dfa2bef3eb1ba62d7e202387ae90b73",
+    "community-task-impact.json": "0ff221fee89d464db723f1ac8105f353b5ad9fa050a4052712ef014db80be011",
+    "community-impact.json": "db6c2f9d4fe1fa98da6568bfe6f47902c182c9491e710d6729690a2c897938b1",
+    "post-counterexample-delta.json": "d455a9d9c0e66d8dc4128f3925aae64492782c39c34d7f9f4bbda8b3434d936a",
+    "post-counterexample-source-review.json": "00e3aa8f2852bbe2227eb831ca037466d14fad2ead946213f006d35b7a37a5b4",
+    "precedence.json": "a8614a2c881b41b99afc3b90c422f98d4055da77b6e619467f82c30f5c7644f5",
+    "evaluate.py": "624a1483480829e1bada5b9858fdc47da64c616ca2e24d506be7fb72bf1bace6",
+    "scope.py": "c7fafb80c80f9a58baf6cbb2d3b494abc00851881c5a4acb242550cf41d06dfa",
+    "public.py": "da5a67dbea7ec84b5ff651c52d94d9f5c6afe2182c48b6e51210808dc6c17c39",
+    "verify.py": "061b40a069d788087bd1c06605565fcc4d21e312a66707ae6738cf8f72761454",
+    "verify-scope.py": "d39d18cc94102a47f65e4d5d57802c86c468b9322e78ac03a9c4609d51d77aa2",
+    "initializer-audit.py": "ff793fb6b8ffc93d80a6e6753556a430f8d4f1701398cacdd375431801813a00",
+    "initializer_ast.rs": "1d44c3f61bbb2a11766dbce28b4fef54d65a49dcc41196ab861accecc75cc32b",
+    "community-replay.py": "ebcab25f8453955ce80fa0a171d9b862a8a1b766562219c2d2b387c74b8fa165",
+    "community-impact.py": "bc62e80b990b2dbca98e8cfb0f458e17c118707e0b61e244ff11ab5ed3150620",
+    "precedence.py": "0b431b5174a11d82b700419b6b22e9d959c760e34feb3ba327393ef043ab6845",
+    "run.py": "e7e01fedde8cebd9b9994d59e58bbdaacc343d93a3076ffadb3349cacc12368b",
+    "validate-final.py": "623ca47c24b9e1882a3effde9093d5fb95d7b6e0c21592f824a8f2440c01841e"
+  }
+}
