@@ -523,3 +523,50 @@ for Compass; Graphify lacks those fields. This known-subject gain does not
 establish overall superiority, source precision for every added edge, improved
 clustering, read/write effects or god-object defects. Raw captures and replay
 scripts remain under the registered external artifact directory.
+
+
+### Java field-scope compiler challenge
+
+`java_state_scope_registration.json` registers 44 synthetic development cases
+before either graph capture. The source fixture exercises positive field
+selection, repeated occurrences, local/parameter shadowing, block and loop
+lifetimes, lambda/catch/resource bindings, flow-scoped patterns, inheritance,
+field hiding, static access, nested/anonymous/local classes, casts and array receivers.
+The installed Corretto 17.0.8 compiler confirms all 44 source expectations:
+36 positive cases, eight negative controls and 45 field occurrences.
+
+`java_state_scope_oracle.json` retains each compiler instruction and source line.
+`java_state_scope_baseline.json` records fresh native graph captures of that same
+fixture: Compass publishes 12/14 registered fields, Graphify 0/14, and neither
+publishes a contact to any registered field. Both therefore miss all 45 selected
+occurrences. Empty negatives do not establish positive precision. Caller
+ownership is explicitly unscored by this target/line inventory. These synthetic
+results do not replace the five-repository state-access comparison or establish
+cohesion, god-object defects or overall superiority.
+
+Capture with an already installed JDK; classes and logs belong on the external
+workspace volume. This compiles with processors disabled and never runs fixture
+code. There is no JDK requirement for normal Compass execution or Python unit
+tests. The parser is a bounded fixture-specific oracle, not a general Java
+compiler front end. In particular, nonconstant fixture fields avoid constant
+folding; source/class-field inventory mismatches fail, and only compiler-marked
+synthetic fields are excluded from source targets.
+
+```sh
+python3 -m benchmarks.agent_query.java_state_scope_audit \
+  --registration benchmarks/agent_query/java_state_scope_registration.json \
+  --java-home /path/to/installed/jdk \
+  --artifacts /Volumes/Workspace/CrabData/java-scope-new/capture \
+  --output /Volumes/Workspace/CrabData/java-scope-new/oracle.json
+python3 -m unittest benchmarks.agent_query.tests.test_java_state_scope
+```
+
+To replay the committed oracle, omit `--java-home`, point `--artifacts` at the
+saved `java-state-scope-01/capture` directory, and use
+`--output benchmarks/agent_query/java_state_scope_oracle.json --verify`.
+Add `--graph-manifest /path/to/java-state-scope-01/graphs.json` and
+`--oracle benchmarks/agent_query/java_state_scope_oracle.json` to replay the
+baseline into
+`--output benchmarks/agent_query/java_state_scope_baseline.json --verify`. Compilation/disassembly outputs, compiler identities, source,
+registration, class files and graph hashes are retained. Historical exploratory
+reports remain in the external artifact directory.

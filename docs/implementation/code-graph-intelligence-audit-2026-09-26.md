@@ -2876,6 +2876,84 @@ verifier and validation logs are under `rust-state-access-01`. Remaining Java,
 TypeScript, Go and Python state evidence, actual cohesion/god-object judgments,
 authored explanations and fresh held-out confirmation remain unfinished.
 
+## Java field-scope compiler oracle and baseline
+
+Before changing Java extraction, commit `d1b701b5` registered a 44-case source
+fixture. The prior five-repository registration remains unchanged. This is a
+synthetic development challenge motivated by the four missing jsoup accesses,
+not a fresh repository sample or a held-out score.
+
+The existing Java `java_value_types` map is keyed by declaration scope and name;
+local declarations are inserted without block lifetimes. Reusing it for field
+access would lose distinctions required by Java name scope. Local variables,
+loop bindings, resources and catch parameters have different scope boundaries;
+pattern scope depends on flow. Field selection also follows the receiver's
+compile-time type. These rules are specified in
+[JLS scope](https://docs.oracle.com/javase/specs/jls/se21/html/jls-6.html#jls-6.3)
+and [field access](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.11).
+
+The installed Amazon Corretto 17.0.8 compiler was invoked with `--release 17`,
+`-proc:none`, `-implicit:none` and source/line/local-variable debug tables.
+Fixture code was never executed. A bounded class-file reader records declared
+fields, descriptors, synthetic flags and superclass/interface links. Captured
+`javap -p -c -l -s` output supplies field instructions and source-line tables,
+including compiler-generated lambda bodies. Registered expectations agree with
+all **44 cases: 36 positive cases, eight negative cases, 45 field occurrences**.
+Repeated fields on one line retain multiplicity. Inherited bytecode owners are
+resolved to the actual declaring field; enclosing `this$0` instructions remain
+visible but their compiler-marked synthetic targets are not source fields.
+
+Fresh native Compass and Graphify captures use the identical registered source:
+
+| Evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Graph nodes / edges | 53 / 78 | 43 / 62 |
+| Registered source field declarations | 12/14 | 0/14 |
+| Contacts to any registered field | 0 | 0 |
+| Registered occurrence targets recovered | 0/45 | 0/45 |
+| Negative lines with a registered field contact | 0/8 | 0/8 |
+
+Compass's absent declarations are the anonymous-class and local-class fields.
+The compiler challenge also proves targets for resource-scope exit, flow-scoped
+patterns, inherited fields hiding enclosing fields, typed/cast/array receivers,
+and distinct lambda versus anonymous-class `this`. These must be explicit
+coverage requirements or documented unsupported cases in the correction;
+name-only fallback is not acceptable.
+
+This inventory does not score source-caller ownership, read/write classification,
+positive edge precision, complete Java coverage, cohesion or god-object defects.
+With no positive contacts, the empty negative controls provide no positive
+precision evidence. Constant folding and arbitrary compiler desugarings make
+bytecode unsuitable as an unrestricted source-occurrence oracle; this fixture
+uses nonconstant fields and fails when its source inventory, source-line
+coverage or expected multiplicity disagrees. No existing real-repository score
+is increased by these synthetic results.
+
+The Compass executable is the same hashed binary as the previous qualified
+Rust-field run. Graphify 0.9.67 uses its unmodified installed native extractor;
+its existing stale skill-installation warning is retained, and no skill was
+installed or used. Graphify's undirected container flag is preserved. This is
+an extraction/representation diagnostic, not a build-speed or public-query
+comparison.
+
+`java_state_scope_audit.py` supplies bounded capture and deterministic offline
+replay. The 14 new tests exercise bytecode offsets and line boundaries,
+multiplicity, lambdas, hiding, hierarchy ambiguity/cycles, synthetic flags,
+source drift, missing/duplicate graph endpoints, wrong targets and absent edge
+anchors. All **162 benchmark tests pass**. The saved compiler and graph reviews
+replay byte-for-byte, and package/binary/source/capture hashes are checked.
+No production Rust or JavaScript implementation changed in this checkpoint;
+native Rust, browser and packaging gates were not rerun. Java production
+field-access extraction and the unchanged five-repository rerun remain next.
+
+Committed artifacts are `java_state_scope_registration.json`,
+`java_state_scope_oracle.json` and `java_state_scope_baseline.json` under
+`benchmarks/agent_query`; complete compiler/graph captures, exploratory reports
+and verification logs are under external `java-state-scope-01`. The registration
+precedes compiler and graph observations. The graph inventory explicitly reports
+unscored caller ownership rather than treating a matching target/line as a full
+semantic-edge judgment.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

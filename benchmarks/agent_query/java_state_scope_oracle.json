@@ -1,0 +1,1637 @@
+{
+  "schema": "compass.java-state-scope-oracle/1",
+  "registrationSha256": "3a12b108736b5341ed09f0f9c66aa874e2612ef8d8e26afc542692fe0bdf445a",
+  "scriptSha256": "9a7f160a8c2a4a4ae9ed1c33d978aee953f2b9aafe9b8467d5b141a220272123",
+  "supportSha256": {
+    "runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "state_access_audit.py": "2bf95b707f18f34c9df4461a26f011b83d86f166efacfaab652f8e6231161058"
+  },
+  "captureSha256": "ffeb55f94c91af8462243adbfea94b5e4a0c9788ebbd46233a3c48707197de32",
+  "compiler": "IMPLEMENTOR=\"Amazon.com Inc.\"\nIMPLEMENTOR_VERSION=\"Corretto-17.0.8.8.1\"\nJAVA_RUNTIME_VERSION=\"17.0.8.1+8-LTS\"\nJAVA_VERSION=\"17.0.8.1\"\nJAVA_VERSION_DATE=\"2023-08-22\"\nLIBC=\"default\"\nMODULES=\"java.base java.compiler java.datatransfer java.xml java.prefs java.desktop java.instrument java.logging java.management java.security.sasl java.naming java.rmi java.management.rmi java.net.http java.scripting java.security.jgss java.transaction.xa java.sql java.sql.rowset java.xml.crypto java.se java.smartcardio jdk.accessibility jdk.internal.jvmstat jdk.attach jdk.charsets jdk.compiler jdk.crypto.ec jdk.crypto.cryptoki jdk.dynalink jdk.internal.ed jdk.editpad jdk.hotspot.agent jdk.httpserver jdk.incubator.foreign jdk.incubator.vector jdk.internal.le jdk.internal.opt jdk.internal.vm.ci jdk.internal.vm.compiler jdk.internal.vm.compiler.management jdk.jartool jdk.javadoc jdk.jcmd jdk.management jdk.management.agent jdk.jconsole jdk.jdeps jdk.jdwp.agent jdk.jdi jdk.jfr jdk.jlink jdk.jpackage jdk.jshell jdk.jsobject jdk.jstatd jdk.localedata jdk.management.jfr jdk.naming.dns jdk.naming.rmi jdk.net jdk.nio.mapmode jdk.random jdk.sctp jdk.security.auth jdk.security.jgss jdk.unsupported jdk.unsupported.desktop jdk.xml.dom jdk.zipfs\"\nOS_ARCH=\"aarch64\"\nOS_NAME=\"Darwin\"\nSOURCE=\".:git:9a3cc984f76c+\"\n",
+  "classes": {
+    "audit.Base": {
+      "owner": "audit.Base",
+      "parent": "java.lang.Object",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.Cell": {
+      "owner": "audit.Cell",
+      "parent": "java.lang.Object",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.ScopeFixture$1": {
+      "owner": "audit.ScopeFixture$1",
+      "parent": "java.lang.Object",
+      "interfaces": [
+        "java.util.function.IntSupplier"
+      ],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        },
+        {
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "synthetic": true
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.ScopeFixture$1Local": {
+      "owner": "audit.ScopeFixture$1Local",
+      "parent": "java.lang.Object",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        },
+        {
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "synthetic": true
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.ScopeFixture$Inherited": {
+      "owner": "audit.ScopeFixture$Inherited",
+      "parent": "audit.Base",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "synthetic": true
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.ScopeFixture$Inner": {
+      "owner": "audit.ScopeFixture$Inner",
+      "parent": "java.lang.Object",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        },
+        {
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "synthetic": true
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.ScopeFixture": {
+      "owner": "audit.ScopeFixture",
+      "parent": "audit.Base",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        },
+        {
+          "name": "slot",
+          "descriptor": "Laudit/Cell;",
+          "synthetic": false
+        },
+        {
+          "name": "items",
+          "descriptor": "[Laudit/Cell;",
+          "synthetic": false
+        },
+        {
+          "name": "failure",
+          "descriptor": "Ljava/lang/RuntimeException;",
+          "synthetic": false
+        },
+        {
+          "name": "resource",
+          "descriptor": "Laudit/Token;",
+          "synthetic": false
+        },
+        {
+          "name": "pattern",
+          "descriptor": "Ljava/lang/Object;",
+          "synthetic": false
+        },
+        {
+          "name": "staticValue",
+          "descriptor": "I",
+          "synthetic": false
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.Shadow": {
+      "owner": "audit.Shadow",
+      "parent": "audit.Cell",
+      "interfaces": [],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    },
+    "audit.Token": {
+      "owner": "audit.Token",
+      "parent": "java.lang.Object",
+      "interfaces": [
+        "java.lang.AutoCloseable"
+      ],
+      "fields": [
+        {
+          "name": "value",
+          "descriptor": "I",
+          "synthetic": false
+        }
+      ],
+      "major": 61,
+      "minor": 0
+    }
+  },
+  "summary": {
+    "cases": 44,
+    "agreed": 44,
+    "positiveCases": 36,
+    "negativeCases": 8,
+    "fieldOccurrences": 45
+  },
+  "cases": [
+    {
+      "id": "constructor",
+      "line": 17,
+      "text": "        this.value = value; // case constructor: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 6,
+          "opcode": "putfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       6: putfield      #7                  // Field value:I",
+          "line": 17,
+          "method": "audit.ScopeFixture(int);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "explicit_this",
+      "line": 20,
+      "text": "        return this.value; // case explicit_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 20,
+          "method": "int explicit();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "implicit_this",
+      "line": 23,
+      "text": "        return value; // case implicit_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 23,
+          "method": "int implicit();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "repeated",
+      "line": 26,
+      "text": "        return value + this.value; // case repeated: scope_value,scope_value",
+      "expectedFields": [
+        "scope_value",
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value",
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 26,
+          "method": "int repeated();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        },
+        {
+          "offset": 5,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       5: getfield      #7                  // Field value:I",
+          "line": 26,
+          "method": "int repeated();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "parameter_shadow",
+      "line": 29,
+      "text": "        return value; // case parameter_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "block_before",
+      "line": 32,
+      "text": "        sink(value); // case block_before: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 32,
+          "method": "void block();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "block_shadow",
+      "line": 35,
+      "text": "            sink(value); // case block_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "block_after",
+      "line": 37,
+      "text": "        sink(value); // case block_after: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 15,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      15: getfield      #7                  // Field value:I",
+          "line": 37,
+          "method": "void block();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "before_local",
+      "line": 40,
+      "text": "        sink(value); // case before_local: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 40,
+          "method": "int beforeLocal();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "after_local",
+      "line": 42,
+      "text": "        return value; // case after_local: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "for_shadow",
+      "line": 46,
+      "text": "            sink(value); // case for_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "for_after",
+      "line": 48,
+      "text": "        sink(value); // case for_after: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 18,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      18: getfield      #7                  // Field value:I",
+          "line": 48,
+          "method": "void loop();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "enhanced_iterable",
+      "line": 51,
+      "text": "        for (Cell slot : items) { // case enhanced_iterable: scope_items",
+      "expectedFields": [
+        "scope_items"
+      ],
+      "observedFields": [
+        "scope_items"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "items",
+          "descriptor": "[Laudit/Cell;",
+          "raw": "       1: getfield      #17                 // Field items:[Laudit/Cell;",
+          "line": 51,
+          "method": "int enhanced();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "items",
+            "descriptor": "[Laudit/Cell;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_items"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "enhanced_binding",
+      "line": 52,
+      "text": "            sink(slot.value); // case enhanced_binding: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 22,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      22: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 52,
+          "method": "int enhanced();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "enhanced_after",
+      "line": 54,
+      "text": "        return slot.value; // case enhanced_after: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "observedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 35,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "slot",
+          "descriptor": "Laudit/Cell;",
+          "raw": "      35: getfield      #24                 // Field slot:Laudit/Cell;",
+          "line": 54,
+          "method": "int enhanced();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "slot",
+            "descriptor": "Laudit/Cell;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_slot"
+        },
+        {
+          "offset": 38,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      38: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 54,
+          "method": "int enhanced();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "lambda_shadow",
+      "line": 57,
+      "text": "        IntUnaryOperator a = value -> value + 1; // case lambda_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "lambda_this",
+      "line": 58,
+      "text": "        IntSupplier b = () -> this.value; // case lambda_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 58,
+          "method": "private int lambda$lambdas$1();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "lambda_implicit",
+      "line": 59,
+      "text": "        IntSupplier c = () -> value; // case lambda_implicit: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 59,
+          "method": "private int lambda$lambdas$2();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "catch_shadow",
+      "line": 65,
+      "text": "            sink(failure == null ? 0 : 1); // case catch_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "catch_after",
+      "line": 67,
+      "text": "        sink(failure == null ? 0 : 1); // case catch_after: scope_failure",
+      "expectedFields": [
+        "scope_failure"
+      ],
+      "observedFields": [
+        "scope_failure"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 22,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "failure",
+          "descriptor": "Ljava/lang/RuntimeException;",
+          "raw": "      22: getfield      #50                 // Field failure:Ljava/lang/RuntimeException;",
+          "line": 67,
+          "method": "void catches();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "failure",
+            "descriptor": "Ljava/lang/RuntimeException;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_failure"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "resource_binding",
+      "line": 71,
+      "text": "            sink(resource.value); // case resource_binding: token_value",
+      "expectedFields": [
+        "token_value"
+      ],
+      "observedFields": [
+        "token_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 9,
+          "opcode": "getfield",
+          "owner": "audit.Token",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       9: getfield      #57                 // Field audit/Token.value:I",
+          "line": 71,
+          "method": "void resources();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Token"
+          },
+          "field": "token_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "resource_catch",
+      "line": 73,
+      "text": "            sink(resource.value); // case resource_catch: scope_resource,token_value",
+      "expectedFields": [
+        "scope_resource",
+        "token_value"
+      ],
+      "observedFields": [
+        "scope_resource",
+        "token_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 43,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "resource",
+          "descriptor": "Laudit/Token;",
+          "raw": "      43: getfield      #67                 // Field resource:Laudit/Token;",
+          "line": 73,
+          "method": "void resources();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "resource",
+            "descriptor": "Laudit/Token;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_resource"
+        },
+        {
+          "offset": 46,
+          "opcode": "getfield",
+          "owner": "audit.Token",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      46: getfield      #57                 // Field audit/Token.value:I",
+          "line": 73,
+          "method": "void resources();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Token"
+          },
+          "field": "token_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "resource_after",
+      "line": 75,
+      "text": "        sink(resource.value); // case resource_after: scope_resource,token_value",
+      "expectedFields": [
+        "scope_resource",
+        "token_value"
+      ],
+      "observedFields": [
+        "scope_resource",
+        "token_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 53,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "resource",
+          "descriptor": "Laudit/Token;",
+          "raw": "      53: getfield      #67                 // Field resource:Laudit/Token;",
+          "line": 75,
+          "method": "void resources();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "resource",
+            "descriptor": "Laudit/Token;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_resource"
+        },
+        {
+          "offset": 56,
+          "opcode": "getfield",
+          "owner": "audit.Token",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      56: getfield      #57                 // Field audit/Token.value:I",
+          "line": 75,
+          "method": "void resources();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Token"
+          },
+          "field": "token_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "pattern_true",
+      "line": 79,
+      "text": "            return slot.value; // case pattern_true: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 13,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      13: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 79,
+          "method": "int pattern(java.lang.Object);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "pattern_after",
+      "line": 81,
+      "text": "        return slot.value; // case pattern_after: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "observedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 18,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "slot",
+          "descriptor": "Laudit/Cell;",
+          "raw": "      18: getfield      #24                 // Field slot:Laudit/Cell;",
+          "line": 81,
+          "method": "int pattern(java.lang.Object);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "slot",
+            "descriptor": "Laudit/Cell;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_slot"
+        },
+        {
+          "offset": 21,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      21: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 81,
+          "method": "int pattern(java.lang.Object);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "pattern_input",
+      "line": 84,
+      "text": "        if (!(pattern instanceof Cell slot)) return 0; // case pattern_input: scope_pattern",
+      "expectedFields": [
+        "scope_pattern"
+      ],
+      "observedFields": [
+        "scope_pattern"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "pattern",
+          "descriptor": "Ljava/lang/Object;",
+          "raw": "       1: getfield      #71                 // Field pattern:Ljava/lang/Object;",
+          "line": 84,
+          "method": "int negatedPattern();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "pattern",
+            "descriptor": "Ljava/lang/Object;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_pattern"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "pattern_flow",
+      "line": 85,
+      "text": "        return slot.value; // case pattern_flow: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 23,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "      23: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 85,
+          "method": "int negatedPattern();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "typed_parameter",
+      "line": 88,
+      "text": "        return cell.value; // case typed_parameter: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 88,
+          "method": "int typed(audit.Cell);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "cast_receiver",
+      "line": 91,
+      "text": "        return ((Cell) cell).value; // case cast_receiver: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 4,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       4: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 91,
+          "method": "int cast(java.lang.Object);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "field_chain",
+      "line": 94,
+      "text": "        return slot.value; // case field_chain: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "observedFields": [
+        "scope_slot",
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "slot",
+          "descriptor": "Laudit/Cell;",
+          "raw": "       1: getfield      #24                 // Field slot:Laudit/Cell;",
+          "line": 94,
+          "method": "int chain();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "slot",
+            "descriptor": "Laudit/Cell;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_slot"
+        },
+        {
+          "offset": 4,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       4: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 94,
+          "method": "int chain();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "array_receiver",
+      "line": 97,
+      "text": "        return items[0].value; // case array_receiver: scope_items,cell_value",
+      "expectedFields": [
+        "scope_items",
+        "cell_value"
+      ],
+      "observedFields": [
+        "scope_items",
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "items",
+          "descriptor": "[Laudit/Cell;",
+          "raw": "       1: getfield      #17                 // Field items:[Laudit/Cell;",
+          "line": 97,
+          "method": "int indexed();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "items",
+            "descriptor": "[Laudit/Cell;",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_items"
+        },
+        {
+          "offset": 6,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       6: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 97,
+          "method": "int indexed();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "super_field",
+      "line": 100,
+      "text": "        return super.value; // case super_field: base_value",
+      "expectedFields": [
+        "base_value"
+      ],
+      "observedFields": [
+        "base_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.Base",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #75                 // Field audit/Base.value:I",
+          "line": 100,
+          "method": "int parent();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Base"
+          },
+          "field": "base_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "declared_receiver",
+      "line": 103,
+      "text": "        return cell.value; // case declared_receiver: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 103,
+          "method": "int staticBinding(audit.Cell, audit.Shadow);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "hiding_receiver",
+      "line": 106,
+      "text": "        return cell.value; // case hiding_receiver: shadow_value",
+      "expectedFields": [
+        "shadow_value"
+      ],
+      "observedFields": [
+        "shadow_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.Shadow",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #76                 // Field audit/Shadow.value:I",
+          "line": 106,
+          "method": "int subtype(audit.Shadow);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Shadow"
+          },
+          "field": "shadow_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "generic_bound",
+      "line": 109,
+      "text": "        return cell.value; // case generic_bound: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ],
+      "observedFields": [
+        "cell_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.Cell",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #21                 // Field audit/Cell.value:I",
+          "line": 109,
+          "method": "<T extends audit.Cell> int generic(T);",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Cell"
+          },
+          "field": "cell_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "static_fields",
+      "line": 112,
+      "text": "        return staticValue + ScopeFixture.staticValue; // case static_fields: scope_static,scope_static",
+      "expectedFields": [
+        "scope_static",
+        "scope_static"
+      ],
+      "observedFields": [
+        "scope_static",
+        "scope_static"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 0,
+          "opcode": "getstatic",
+          "owner": "audit.ScopeFixture",
+          "name": "staticValue",
+          "descriptor": "I",
+          "raw": "       0: getstatic     #79                 // Field staticValue:I",
+          "line": 112,
+          "method": "static int statics();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "staticValue",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_static"
+        },
+        {
+          "offset": 3,
+          "opcode": "getstatic",
+          "owner": "audit.ScopeFixture",
+          "name": "staticValue",
+          "descriptor": "I",
+          "raw": "       3: getstatic     #79                 // Field staticValue:I",
+          "line": 112,
+          "method": "static int statics();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "staticValue",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_static"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "method_not_field",
+      "line": 116,
+      "text": "        return value(); // case method_not_field: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "declarator_order",
+      "line": 119,
+      "text": "        int first = value, value = 2; // case declarator_order: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #7                  // Field value:I",
+          "line": 119,
+          "method": "void declarators();",
+          "bytecodeClass": "audit.ScopeFixture",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "declarator_shadow",
+      "line": 120,
+      "text": "        sink(first + value); // case declarator_shadow: -",
+      "expectedFields": [],
+      "observedFields": [],
+      "compilerInstructions": [],
+      "agrees": true
+    },
+    {
+      "id": "inner_own",
+      "line": 125,
+      "text": "            return value; // case inner_own: inner_value",
+      "expectedFields": [
+        "inner_value"
+      ],
+      "observedFields": [
+        "inner_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$Inner",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #13                 // Field value:I",
+          "line": 125,
+          "method": "int own();",
+          "bytecodeClass": "audit.ScopeFixture$Inner",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture$Inner"
+          },
+          "field": "inner_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "qualified_this",
+      "line": 128,
+      "text": "            return ScopeFixture.this.value; // case qualified_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ],
+      "observedFields": [
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$Inner",
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "raw": "       1: getfield      #1                  // Field this$0:Laudit/ScopeFixture;",
+          "line": 128,
+          "method": "int outer();",
+          "bytecodeClass": "audit.ScopeFixture$Inner",
+          "declaration": {
+            "name": "this$0",
+            "descriptor": "Laudit/ScopeFixture;",
+            "synthetic": true,
+            "owner": "audit.ScopeFixture$Inner"
+          },
+          "field": null
+        },
+        {
+          "offset": 4,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       4: getfield      #17                 // Field audit/ScopeFixture.value:I",
+          "line": 128,
+          "method": "int outer();",
+          "bytecodeClass": "audit.ScopeFixture$Inner",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "inherited_beats_outer",
+      "line": 133,
+      "text": "            return value; // case inherited_beats_outer: base_value",
+      "expectedFields": [
+        "base_value"
+      ],
+      "observedFields": [
+        "base_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$Inherited",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #13                 // Field value:I",
+          "line": 133,
+          "method": "int inherited();",
+          "bytecodeClass": "audit.ScopeFixture$Inherited",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.Base"
+          },
+          "field": "base_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "anonymous_this",
+      "line": 140,
+      "text": "                return this.value + ScopeFixture.this.value; // case anonymous_this: anonymous_value,scope_value",
+      "expectedFields": [
+        "anonymous_value",
+        "scope_value"
+      ],
+      "observedFields": [
+        "anonymous_value",
+        "scope_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$1",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #13                 // Field value:I",
+          "line": 140,
+          "method": "public int getAsInt();",
+          "bytecodeClass": "audit.ScopeFixture$1",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture$1"
+          },
+          "field": "anonymous_value"
+        },
+        {
+          "offset": 5,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$1",
+          "name": "this$0",
+          "descriptor": "Laudit/ScopeFixture;",
+          "raw": "       5: getfield      #1                  // Field this$0:Laudit/ScopeFixture;",
+          "line": 140,
+          "method": "public int getAsInt();",
+          "bytecodeClass": "audit.ScopeFixture$1",
+          "declaration": {
+            "name": "this$0",
+            "descriptor": "Laudit/ScopeFixture;",
+            "synthetic": true,
+            "owner": "audit.ScopeFixture$1"
+          },
+          "field": null
+        },
+        {
+          "offset": 8,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       8: getfield      #17                 // Field audit/ScopeFixture.value:I",
+          "line": 140,
+          "method": "public int getAsInt();",
+          "bytecodeClass": "audit.ScopeFixture$1",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture"
+          },
+          "field": "scope_value"
+        }
+      ],
+      "agrees": true
+    },
+    {
+      "id": "local_class_this",
+      "line": 148,
+      "text": "                return this.value; // case local_class_this: local_value",
+      "expectedFields": [
+        "local_value"
+      ],
+      "observedFields": [
+        "local_value"
+      ],
+      "compilerInstructions": [
+        {
+          "offset": 1,
+          "opcode": "getfield",
+          "owner": "audit.ScopeFixture$1Local",
+          "name": "value",
+          "descriptor": "I",
+          "raw": "       1: getfield      #13                 // Field value:I",
+          "line": 148,
+          "method": "int get();",
+          "bytecodeClass": "audit.ScopeFixture$1Local",
+          "declaration": {
+            "name": "value",
+            "descriptor": "I",
+            "synthetic": false,
+            "owner": "audit.ScopeFixture$1Local"
+          },
+          "field": "local_value"
+        }
+      ],
+      "agrees": true
+    }
+  ]
+}
