@@ -1,0 +1,46 @@
+{
+  "schema": "compass.sql-regex-cache-whole-registration/1",
+  "purpose": "Recover a complete CloudStack graph for the reviewed Blob cases and check whole-repository preservation after fixed SQL regex caching. This is a declared operational follow-up, not a repeated performance qualification.",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "prerequisites": "The registered four-file release comparison must finish with all 24 outcomes retained, all six complete graphs per file equal, and all candidate native checks passed. Freeze both release executables before this follow-up.",
+  "binaries": {
+    "baselineSha256": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+    "candidateIdentity": "The frozen candidate hash in sql-regex-cache-01/checks.json and samples.json; it must be identical for the four-file and whole-repository arms."
+  },
+  "extraction": {
+    "order": [
+      "baseline",
+      "candidate"
+    ],
+    "repetitions": 1,
+    "scope": "Entire clean pinned apache/cloudstack checkout, with default native discovery. No language or path exclusions added.",
+    "arguments": [
+      "extract",
+      "<source-root>",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<fresh-output>"
+    ],
+    "timeoutSeconds": 1200,
+    "streamLimitBytes": 16777216,
+    "graphLimitBytes": 1073741824,
+    "originalGraphLimitBytes": 268435456,
+    "timing": "Record wall time, UTC timestamps and host load as operational observations. One fixed-order run per version cannot establish a speedup or release-performance qualification.",
+    "isolation": "No compilation or other extraction by this task during either run. Unrelated host work is disclosed; ordinary OS caches are not flushed."
+  },
+  "comparison": "Retain every timeout, limit failure, publication error and partial-graph warning. Hash each admitted complete graph; identical bytes establish whole-artifact equality. Different hashes do not establish semantic inequality without further review, and cannot earn equality credit. Report admission under both original 256 MiB and follow-up 1 GiB bounds.",
+  "laterQueries": "Only a successfully published graph within the declared follow-up bound may supply the same eight-class Blob audit. Keep native ranking, source-assisted identity resolution and neighbor diagnostics distinct. Source truth and human Blob ratings cannot be substituted for native ranking output. Any query capture keeps the existing request and response limits.",
+  "preservation": "Do not overwrite or reclassify either prior unoptimized CloudStack timeout, original graph-admission failures, or any Graphify artifact. Graphify skipped all 119 SQL inputs in its frozen environment; this follow-up is not a Graphify speed comparison.",
+  "forbiddenClaims": [
+    "No whole-product, cross-language or held-out superiority from this follow-up.",
+    "No degree-to-god-object inference, true-negative inference from absent hub rows, or availability-to-correctness inference.",
+    "No timing ratio based on a timeout or incomparable build profiles."
+  ]
+}
