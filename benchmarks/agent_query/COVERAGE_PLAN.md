@@ -256,3 +256,19 @@ on each side. The remaining direct-call gap is Compass's WalkDir indexed
 receiver call. Keep explicit destination identity, source precision and resolver
 output cost as separate next questions; existing APIs already overcome the
 member-label ambiguities with this extra lookup and supplied source coordinates.
+
+
+### Rust indexed-receiver development correction
+
+`rust_index_receiver_development_registration.json` freezes the five-repository
+rebuild, complete changed-call review and unchanged 15-task public workflow.
+`rust_index_receiver_development_review.json` records one source-backed added
+WalkDir call, with no other node/edge changes or changed community assignments.
+The other four Compass graphs and all Graphify graphs are byte-identical.
+Source-assisted collaborator labels improve from 13/14 to 14/14, tying
+Graphify; unambiguous target labels improve from 10/14 to 11/14, also a tie.
+Keep the three target-label ambiguities, supplied seed coordinates, reused
+Graphify graphs, actual payload costs and development-only scope explicit.
+Final unchanged-source validation passed, including the native baseline and
+production fixture qualification. This does not establish overall superiority
+or population precision.

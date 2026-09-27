@@ -1,0 +1,346 @@
+{
+  "schema": "compass.rust-index-receiver-development-review/1",
+  "scope": "Known development miss on the same five pinned repositories and 15 source-defined tasks. Same-agent source review, not held-out or independent evaluation.",
+  "protocolCommit": "6c70df5e91f1971552db1ca68df66bf89f78a680",
+  "implementationCommit": "18bb37ea312bc23a3a677538ac03906c73a8ade4",
+  "artifactRoot": "rust-index-receiver-03",
+  "binarySha256": "6be23e8cc3b82c60a5eca4037d94c4d3c7ef0aab656eaceb0f96e90e369a9b0c",
+  "version": "0.3.30",
+  "cacheSemantics": "AST 6 -> 7; graph/evidence schema and producer capabilities unchanged",
+  "artifacts": {
+    "run.json": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+    "graph-delta.json": "a28bfad40768db17134c7dc39bf7e5f68ab6c4d6754d632f11fa63ec291ae2f3",
+    "community-delta.json": "0374616e4c023a1adafcb7c11a1f72f3f5a3c1f15f3c28f84903700cf8a181fe",
+    "source-review.json": "dfd970416111e0fb295dd7c6864c935bcaed25a8475a52cbd96ea297612d0555",
+    "verification-details.json": "289d053528e3077f331ff9e59dc72fcac3c11a7e4ad58147815a7cae291bd4d0",
+    "policy-equivalence.json": "350b13cc4277968f9c8846e439ea290d8eb09af49be03df0aed5bf7e8890b5dd",
+    "navigation/capture.json": "636833c4a6847e1267b757c2cbf45691dad66cb38ffc33b409d02b7f9dd7e630",
+    "navigation/verified-summary.json": "f13c4828e3391a6befe56f8427a44bc025ee69c731b202171c62af83820592a2",
+    "navigation/verify_capture.py": "50534462013d240637a79093731b2d86760cfd0471661d718d8b910803d44e81",
+    "verify_delta.py": "4fdd2642211478c2abd7158df842b08bea88b78124ade1716c7569ef32e832ec",
+    "binary-manifest.json": "6aa495a2d44c726ce0583941f0ab2db53ff5cbe300f428a3d595a1326f28d71f",
+    "validation.json": "732c2509bc80fed76268c43e53d64ce29235b10f8f81de39b730f3709dc5bd88",
+    "final-validation-summary.json": "fdbf13221cee8d60954d44037f0de1c5f4f4d2a187a570468817a9234cd7b1db",
+    "harness-tests.log": "57825a0457d08a37a3402ce6a4f3535d3687cb458127293393ffca02b46d0a43",
+    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rust-language-tests-final.log": "a62a7ad652853a3aeb5aaa48bbd5518f093b166964421ea5019ce1de5d71c01f",
+    "universal-resolver-tests-final.log": "c4d644ed23bb1c90963351466ac9049441cb5f209e4a1fa44cfcbee517a51855",
+    "clippy-final.log": "5bc29eb199d14541206e2200c80c7f9c3a6823924821a86ececc304018f551e1",
+    "workspace-tests-final.log": "cb017d306359fdcddefecc764dc19fe7ca8ad6dd76ac7d6f868a47092e3465bc",
+    "product-tests-final.log": "79473ac727d45d0e212f0ddebe97969a06208bc3a4d51adb0bfb1e6357ecaacc",
+    "product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "qualification-final.log": "25fd6f552b78d460d95d4812f3b6f63153c597c3efd938530b144e6baaf2e618"
+  },
+  "baseline": {
+    "compass": {
+      "collaboratorLabelPresent": 13,
+      "unambiguousTargetLabel": 10
+    },
+    "graphify": {
+      "collaboratorLabelPresent": 14,
+      "unambiguousTargetLabel": 11
+    }
+  },
+  "summary": {
+    "compass": {
+      "tasks": 15,
+      "resolverIdsCorrect": 15,
+      "completedNeighborLookups": 15,
+      "directCallTasks": 14,
+      "collaboratorLabelPresent": 14,
+      "unambiguousTargetLabel": 11,
+      "callTextBytes": 157011,
+      "callResponseWireBytes": 694390,
+      "fullSessionBytesIncludingRequestsAndStderr": 786025
+    },
+    "graphify": {
+      "tasks": 15,
+      "resolverIdsCorrect": 15,
+      "completedNeighborLookups": 15,
+      "directCallTasks": 14,
+      "collaboratorLabelPresent": 14,
+      "unambiguousTargetLabel": 11,
+      "callTextBytes": 55402,
+      "callResponseWireBytes": 60410,
+      "fullSessionBytesIncludingRequestsAndStderr": 102213
+    }
+  },
+  "graphChanges": [
+    {
+      "repository": "chi",
+      "before": {
+        "nodes": 729,
+        "edges": 1914
+      },
+      "after": {
+        "nodes": 729,
+        "edges": 1914
+      },
+      "addedRecords": 0,
+      "removedRecords": 0,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedExistingCallPayloads": 0
+    },
+    {
+      "repository": "click",
+      "before": {
+        "nodes": 4264,
+        "edges": 6387
+      },
+      "after": {
+        "nodes": 4264,
+        "edges": 6387
+      },
+      "addedRecords": 0,
+      "removedRecords": 0,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedExistingCallPayloads": 0
+    },
+    {
+      "repository": "jsoup",
+      "before": {
+        "nodes": 6116,
+        "edges": 21110
+      },
+      "after": {
+        "nodes": 6116,
+        "edges": 21110
+      },
+      "addedRecords": 0,
+      "removedRecords": 0,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedExistingCallPayloads": 0
+    },
+    {
+      "repository": "redux",
+      "before": {
+        "nodes": 3503,
+        "edges": 5653
+      },
+      "after": {
+        "nodes": 3503,
+        "edges": 5653
+      },
+      "addedRecords": 0,
+      "removedRecords": 0,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedExistingCallPayloads": 0
+    },
+    {
+      "repository": "walkdir",
+      "before": {
+        "nodes": 288,
+        "edges": 1205
+      },
+      "after": {
+        "nodes": 288,
+        "edges": 1206
+      },
+      "addedRecords": 1,
+      "removedRecords": 0,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedExistingCallPayloads": 0
+    }
+  ],
+  "sourceJudgment": {
+    "repository": "walkdir",
+    "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+    "sourceFile": "src/lib.rs",
+    "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+    "caller": "walkdir::IntoIter::push",
+    "callee": "walkdir::DirList::close",
+    "callLine": 906,
+    "targetDeclarationLine": 1008,
+    "sourceReason": "The field stack_list has Vec<DirList> type and oldest_opened has usize type. The indexed receiver at line 906 denotes a DirList, whose inherent close method begins at line 1008. This is an outgoing call from IntoIter.push, independent of graph community assignment."
+  },
+  "unchangedEvidence": {
+    "otherFourCompassGraphsByteIdentical": true,
+    "allFiveNodeArraysIdentical": true,
+    "allCommunityAssignmentsIdentical": true,
+    "all45GraphifyResponsesIdentical": true
+  },
+  "changedCompassResponses": "One neighbor text gains the close call. Three WalkDir resolver packets change only graph identity and view digest; all other response packets are identical.",
+  "remainingAmbiguousTargetLabels": [
+    {
+      "tool": "compass",
+      "task": "click-atomic-close",
+      "identities": 5
+    },
+    {
+      "tool": "graphify",
+      "task": "click-atomic-close",
+      "identities": 5
+    },
+    {
+      "tool": "compass",
+      "task": "jsoup-html-fragment-parse",
+      "identities": 5
+    },
+    {
+      "tool": "compass",
+      "task": "jsoup-html-whitespace",
+      "identities": 3
+    },
+    {
+      "tool": "graphify",
+      "task": "jsoup-html-fragment-parse",
+      "identities": 3
+    },
+    {
+      "tool": "graphify",
+      "task": "jsoup-html-whitespace",
+      "identities": 3
+    }
+  ],
+  "validation": {
+    "status": "passed",
+    "finalSourceDirectory": "rust-index-receiver-03",
+    "sourceCommit": "18bb37ea312bc23a3a677538ac03906c73a8ade4",
+    "binaryMatchesFinalBuild": true,
+    "counts": {
+      "rust-language-tests": {
+        "passed": 38,
+        "failed": 0,
+        "ignored": 0
+      },
+      "universal-resolver-tests": {
+        "passed": 211,
+        "failed": 0,
+        "ignored": 0
+      },
+      "workspace-tests": {
+        "passed": 1101,
+        "failed": 0,
+        "ignored": 2
+      },
+      "product-tests": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 3.92
+      },
+      {
+        "name": "rust-language-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-languages",
+          "--test",
+          "rust_index_receivers",
+          "--test",
+          "rust_universal_conformance",
+          "--test",
+          "rust_universal_phase2",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 13.6
+      },
+      {
+        "name": "universal-resolver-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-resolve",
+          "--test",
+          "universal_resolution",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 4.7
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 20.82
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 129.45
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 2.64
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.04
+      },
+      {
+        "name": "qualification",
+        "argv": [
+          "bash",
+          "scripts/qualify_code_graph_v1.sh",
+          "--fixtures-only"
+        ],
+        "exitCode": 0,
+        "seconds": 168.82
+      }
+    ],
+    "harnessTestsPassed": 129
+  },
+  "interpretation": "Compass recovers the one missing reviewed collaborator, tying Graphify at 14/14 displayed collaborators and 11/14 globally unambiguous target labels. This is not overall superiority or a broad source-precision estimate.",
+  "limitations": [
+    "Graphify graph artifacts are reused byte-for-byte; public MCP calls are recaptured. Extraction timing is not compared.",
+    "Exact seed source coordinates are supplied to both tools. Starting communities are prepared symmetrically and not scored as retrieval.",
+    "Three target display labels remain ambiguous for both tools. A successful lookup with a verified seed ID is distinct from self-identifying neighbor output.",
+    "Only the changed source call is newly source-reviewed; existing graph assertions remain outside this delta review.",
+    "Native payloads differ in richness and controls. Actual byte costs are reported, not equal-token efficiency.",
+    "God-object responsibility evidence, broader source precision, longer directed walks and fresh held-out confirmation remain open."
+  ]
+}

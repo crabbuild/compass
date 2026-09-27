@@ -454,3 +454,16 @@ search returns more candidates and structured evidence; native bounds and
 semantic payloads differ. Report these actual workflow costs with that context.
 This is source-assisted development evidence, not natural-language discovery,
 comprehensive assertion precision, or held-out performance.
+
+
+### Rust indexed-receiver correction
+
+See `rust_index_receiver_development_registration.json` and
+`rust_index_receiver_development_review.json` for the fixed-protocol rerun on
+Chi, Click, jsoup, Redux and WalkDir. One reviewed Rust call is recovered;
+the 15-task source-assisted workflow now ties Graphify at 14/14 collaborator
+labels and 11/14 unambiguous target labels. Other existing graph records and
+all community assignments remain unchanged. Final-source validation passed,
+including the native baseline and production fixture qualification. These reused
+development tasks do not establish broad precision,
+god-object diagnosis or overall superiority.

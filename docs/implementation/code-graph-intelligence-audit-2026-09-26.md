@@ -2212,6 +2212,66 @@ responsibility evidence, longer directed walks and held-out confirmation remain
 open; the supplied declaration coordinates make this a different task from
 unassisted discovery.
 
+## Rust indexed-receiver recovery
+
+The development protocol is frozen in
+`benchmarks/agent_query/rust_index_receiver_development_registration.json`
+(commit `6c70df5e`). Implementation `18bb37ea` follows bounded Rust receiver
+syntax through source-proven scalar indexes into standard vectors, arrays and
+slices. Field types retain their declaration context; nested qualified names
+retain every module segment. Ambiguous imports/layouts, custom containers,
+ranges, unknown index types, raw pointers and root-container method fallbacks
+cannot establish an element-method target. AST cache semantics advance to 7;
+the package stays at 0.3.30 and published graph schemas/history remain unchanged.
+
+All five Compass graphs were rebuilt from the same pinned source commits with
+the original native-only arguments into fresh outputs. The frozen Graphify
+graphs were retained byte-for-byte; both public MCP workflows were recaptured.
+This arm does not compare extraction timing. The review and artifact hashes are
+in `benchmarks/agent_query/rust_index_receiver_development_review.json`;
+complete logs, graphs and transcripts are under `rust-index-receiver-03`.
+
+The complete graph comparison finds **one added call and no removed or changed
+existing records**: WalkDir `IntoIter::push` calls `DirList::close` at
+`src/lib.rs:906`. Source establishes `stack_list: Vec<DirList>` and
+`oldest_opened: usize`; the target method begins at line 1008. A separate
+same-agent verifier checks the full graph-record delta, source bytes, caller
+range and target identity. All five node arrays and community assignments are
+unchanged; the other four Compass graphs are byte-identical. This is evidence
+for the changed call, not precision for every existing graph assertion.
+
+The original 15 tasks, source witnesses, selectors and limits remain unchanged:
+
+| Source-assisted navigation measure | Compass before | Compass after | Graphify |
+| --- | ---: | ---: | ---: |
+| Correct seed ID and completed lookup | 15/15 | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label | 13/14 | 14/14 | 14/14 |
+| Globally unambiguous target label | 10/14 | 11/14 | 11/14 |
+
+All 90 public calls succeed. All 45 Graphify response packets are identical to
+the prior capture. Compass changes one neighbor text to include `close`; three
+WalkDir resolver packets change only graph identity/view digests. The other
+41 packets are identical. Compass totals 157,011 call-text bytes, 694,390 wire
+response bytes and 786,025 full-session bytes; Graphify remains at 55,402,
+60,410 and 102,213. Native payloads and controls differ, so these are actual
+workflow costs rather than an equal-token efficiency ranking.
+
+Three target labels remain ambiguous for both tools: Click `close`, jsoup
+`parseFragment`, and jsoup `isWhitespace`. The fix closes a known extraction
+gap and produces a tie on this development panel. It does not establish overall
+superiority, god-object diagnosis, broad source precision or held-out quality.
+Explicit destination identities, source-grounded explanations and longer
+source-verified directed walks remain next work.
+
+Final validation against unchanged implementation `18bb37ea` passed: formatting,
+38 Rust language tests, 211 universal resolver tests, workspace Clippy, 1,101
+workspace tests (2 ignored), 9 product tests, the product-boundary check and the
+complete production fixture qualification. The Python benchmark harness passed
+129 tests. Source hashes remained unchanged before and after each native gate;
+the frozen evaluated binary is byte-identical to the final build. Commands,
+counts and log hashes are recorded in the review artifact. Broader real-repository
+qualification and fresh held-out evaluation were not run in this development arm.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
