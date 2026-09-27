@@ -1674,6 +1674,79 @@ expressions. No graph, request, or witness changed. This is selected development
 evidence on reused graphs, with concurrent fixture qualification and no speed
 claim. It establishes no directed-navigation lead.
 
+#### Terminal-cursor harness correction and remaining broad-query gap
+
+The benchmark previously treated any `next=` token as a continuation, including
+the published terminal marker `next=none`. Redux's broad question therefore
+received an unnecessary second request and an invalid-cursor error. The harness
+now accepts one pagination footer, stops at `none` or a repeated token, and
+ignores source/prose occurrences. Regressions cover real cursors, multiple
+footers, legacy/discovery/typed footer forms, and LF/CRLF. All **99 benchmark
+tests pass**. Graphify's documented budget continuation is unchanged.
+
+A query-only replay runs all 110 unchanged requests with the same binaries,
+graph digests, source pins, and source working directories. Scores remain
+**Compass 49/55, Graphify 46/55**. The sole outcome change removes the invalid
+Redux follow-up: the question still fails its `miniKindOf` recall requirement,
+now with exit zero and zero follow-ups. Every retained Compass capture is
+byte-identical to its baseline page. Three Graphify query outputs vary in edge
+order/content within their output budgets while scores and byte counts remain
+unchanged; no whole-answer equivalence or causal claim follows.
+
+The first replay used the Compass checkout as its working directory, making
+eight source excerpts unavailable. That attempt is explicitly invalidated and
+retained, along with its later summary-generation error. No cache defect or
+token improvement is inferred from it. The successful second replay preserves
+both tools' original working-directory setup. A failed byte-equality assertion
+also remains documented; it exposed the three Graphify variations rather than
+a scoring change. The
+[correction review](../../benchmarks/agent_query/cursor_harness_correction_review.json)
+records exact runner, executable, graph, source, and raw-capture provenance.
+
+A separate post-output diagnostic leaves the product gap open: the original
+Redux question reads 431 candidates in 73 probes but admits zero seeds and
+reports bounded truncation. Shorter `kind of`, `kindOf`, `miniKindOf`, and
+qualified-name questions recover source-located candidates. These are diagnosis
+inputs, not replacements for the original failed question or extra comparative
+passes. The specificity filter and phrase recall need a native reduction and
+broader positive/negative evaluation before changing their behavior.
+
+During this investigation, help output incorrectly displayed an examined-edge
+default of 128 even though runtime JSON and `DiscoveryLimits` use 10,000. A
+numeric-prefix replacement intended for the 1,000 returned-edge ceiling also
+matched 10,000. The help correction requires the closing delimiter. A native
+regression failed before the change and checks both help entry points against
+the runtime defaults. Verification passes **1,107 native tests, zero failed,
+two ignored** across workspace libraries/binaries and help/product integration
+targets. Workspace and help-integration Clippy pass with warnings denied, as do
+formatting, diff, and the product boundary. Runtime query limits and graph/query
+schemas do not change. Full fixture qualification was not repeated for this
+help-only correction; the recorded pass qualifies query/cache commit `9b63873a`.
+
+#### Java varargs reduction: signature and call recall failures
+
+A [compiler-valid reduction](../../benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java)
+now isolates the varargs issue found during jsoup review. Expected declarations
+and call targets were written before extracting this diagnostic. `javac
+17.0.8.1` compiles it, and `javap` descriptors/instructions independently confirm
+the target overloads; compiled classes were not executed.
+
+The frozen export-binding binary preserves only **two of five** reviewed
+declaration signatures: the boolean overload and ordinary arrays. Both
+varargs-only `join` declarations render `join()`, and the prefixed overload
+omits its trailing varargs parameter. More seriously, it preserves only **two
+of five** reviewed calls: the boolean call and the uniquely named prefixed call.
+Calls with string arguments, integer arguments, and an explicit string array
+are missing. This reduction emits no wrong target for those three calls.
+
+The [diagnostic review](../../benchmarks/agent_query/java_varargs_diagnostic_review.json)
+retains exact identities, source and graph hashes, compiler evidence, and the
+unfixed failures. Initial inspection looked for a top-level signature; corrected
+inspection reads `details.data.signature`. Code inspection suggests the producer
+assumes every spread parameter has a named `type` field; AST inspection and a
+failed-before native regression are still required. This is a post-jsoup-output
+development reduction, not a new comparative result or a completed repair.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

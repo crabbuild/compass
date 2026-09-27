@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Correct natural discovery help to report the 10,000 examined-relationship
+  default independently of the 128 returned-edge default. Runtime limits are
+  unchanged.
+
 - Resolve coincident export-binding and declaration name matches through exact
   export evidence, improving symbol-based paths and relationship queries while
   preserving genuine ambiguity and exact-ID selection. Traversal caches retain

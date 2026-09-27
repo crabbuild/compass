@@ -329,6 +329,53 @@ class ExecutionEvidenceTests(unittest.TestCase):
                     self.assertFalse(observation.first_page_pass)
                     self.assertTrue(observation.failures)
 
+    def test_compass_continuation_requires_one_real_footer_cursor(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        outputs = (
+            "Pagination: range=1-1 of 1 next=none\n",
+            "Source excerpt: next=source_text\n",
+            "Bound: next= continues the response\n",
+            "Pagination: page=1 range=1-2 of 4 next=first\nPagination: page=2 range=3-4 of 4 next=second\n",
+        )
+        for output in outputs:
+            with self.subTest(output=output):
+                result = CommandResult((), 0, False, 1, len(output), 0, output, "")
+                with patch("benchmarks.agent_query.runner.run_bounded", return_value=result) as run:
+                    observation = run_question(
+                        repository, question(kind="broad", compass=("query", "sample"), max_follow_ups=2), tool="compass",
+                        binary=Path("tool"), graph=Path("graph.json"), cwd=ROOT,
+                        raw_dir=ROOT, timeout_seconds=1,
+                    )
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(observation.follow_ups, 0)
+                self.assertFalse(observation.passed)
+                self.assertEqual(observation.exit_code, 0)
+
+    def test_compass_follows_footer_token_and_stops_on_repeated_cursor(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        for footer in (
+            "Pagination: range=1-1 of 2 next=opaque-token",
+            "Pagination: page=1 range=1-1 of 2 next=opaque-token",
+            "Pagination: page=1/2 items=1-1/2 next=opaque-token",
+            "Pagination: range=1-1 of 2 next=opaque-token\r",
+        ):
+            for final in ("sample.go\n", footer + "\n"):
+                with self.subTest(footer=footer, final=final):
+                    first = "source next=unrelated\n" + footer + "\n"
+                    replies = [CommandResult((), 0, False, 1, len(s), 0, s, "")
+                               for s in (first, final)]
+                    with patch("benchmarks.agent_query.runner.run_bounded", side_effect=replies) as run:
+                        observation = run_question(
+                            repository, question(kind="broad", compass=("query", "sample"), max_follow_ups=3), tool="compass",
+                            binary=Path("tool"), graph=Path("graph.json"), cwd=ROOT,
+                            raw_dir=ROOT, timeout_seconds=1,
+                        )
+                    self.assertEqual(run.call_count, 2)
+                    argv = run.call_args_list[1].args[0]
+                    self.assertEqual(argv[argv.index("--cursor") + 1], "opaque-token")
+                    self.assertEqual(observation.follow_ups, 1)
+                    self.assertEqual(observation.passed, final == "sample.go\n")
+
     def test_snapshot_pointer_cannot_fall_back_to_an_unpublished_graph(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

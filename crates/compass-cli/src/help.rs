@@ -1113,12 +1113,12 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
                 "--format <text|agent-json|json> Discovery output",
             )
             .replace(
-                "default/hard maximum: 500",
-                "default: 64; hard maximum: 500",
+                "default/hard maximum: 500]",
+                "default: 64; hard maximum: 500]",
             )
             .replace(
-                "default/hard maximum: 1000",
-                "default: 128; hard maximum: 1000",
+                "default/hard maximum: 1000]",
+                "default: 128; hard maximum: 1000]",
             )
     } else if matches!(
         page.path,

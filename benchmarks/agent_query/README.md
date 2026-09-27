@@ -26,6 +26,14 @@ closest documented operation on each side, and continuations are each tool's own
 Graphify because Compass `path` searches relationships in both directions. A row
 that a tool cannot answer fails and is reported as a recall gap.
 
+Compass continuation requires one `Pagination:` footer with a nonterminal,
+previously unseen cursor. `next=none` ends pagination; `next=` text in source
+excerpts or prose does not authorize a follow-up. Multiple footers or a repeated
+cursor stop continuation while preserving the unmet answer requirements.
+Both LF and CRLF output are supported. Query-only replays must use each pinned
+source checkout as their working directory, matching the full runner, so
+digest-verified source excerpts remain available.
+
 Name-resolution rows (`ambiguity`, `negative`) use Graphify's `explain`, the
 command that reports its candidate list for an ambiguous name and its explicit
 no-match, rather than `query`, which traverses the neighbourhood of a single

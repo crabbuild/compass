@@ -41,7 +41,7 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
-_CURSOR = re.compile(r"next=([^\s]+)")
+_CURSOR = re.compile(r"^Pagination:[^\r\n]*[ \t]next=([^\s]+)[ \t]*\r?$", re.MULTILINE)
 _GRAPHIFY_NODE = re.compile(r"^NODE (.+?) \[src=(\S+) loc=L(\d+)", re.MULTILINE)
 _GRAPHIFY_CANDIDATE = re.compile(r"^\s+id: (\S+)", re.MULTILINE)
 _COMPASS_ENTITY = re.compile(r"^- (\S+) \[[a-z_]+\] \S+:\d", re.MULTILINE)
@@ -547,6 +547,7 @@ def run_question(
     failures: tuple[str, ...] = ("not executed",)
     passed = False
     pages: list[str] = []
+    seen_cursors: set[str] = set()
     for attempt in range(question.max_follow_ups + 1):
         argv = (str(binary), *_tool_argv(tool, question, graph, budget=budget, cursor=cursor))
         stem = f"{question.identifier}.{tool}.{attempt}"
@@ -588,10 +589,13 @@ def run_question(
         if result.output_limited or result.timed_out or result.exit_code != 0:
             break
         if tool == "compass":
-            match = _CURSOR.search(result.stdout)
-            if match is None:
+            # A source excerpt can contain `next=...`; only one actual footer
+            # can authorize continuation. `none` is the end marker, not a token.
+            matches = _CURSOR.findall(result.stdout)
+            if len(matches) != 1 or matches[0] == "none" or matches[0] in seen_cursors:
                 break
-            cursor = match.group(1)
+            cursor = matches[0]
+            seen_cursors.add(cursor)
         else:
             if question.kind != "broad":
                 # Graphify documents a continuation for `query` only: it re-runs
