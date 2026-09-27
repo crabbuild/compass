@@ -74,6 +74,18 @@ class CommunityNavigationTests(unittest.TestCase):
         self.assertEqual(result['expectedDisplayedNeighbors'], 1)
         self.assertTrue(result['displayedAdjacencyMatches'])
 
+    def test_mismatch_diagnostics_have_stable_sorted_order(self):
+        graph = self.graph()
+        graph['nodes'].extend([dict(id='x', name='Zulu()'), dict(id='y', name='Alpha()')])
+        graph['links'].extend([dict(source='a', target='x', kind='calls'),
+                               dict(source='a', target='y', kind='calls')])
+        text = 'Neighbors of Runner.run():\n  --> ZExtra() [calls] [exact]\n  --> AExtra() [calls] [exact]'
+        result = score_navigation(text, graph, 'compass', 'a', 'b', True)
+        self.assertEqual(result['missingDisplayedNeighbors'],
+                         sorted([('-->', 'finish()'), ('-->', 'Zulu()'), ('-->', 'Alpha()')]))
+        self.assertEqual(result['extraDisplayedNeighbors'],
+                         [('-->', 'AExtra()'), ('-->', 'ZExtra()')])
+
     def test_duplicate_neighbor_names_preserve_multiplicity_of_identities(self):
         graph = self.graph()
         graph['nodes'].append(dict(id='other', name='finish()'))
