@@ -1,0 +1,71 @@
+{
+  "schema": "compass.paired-member-focus-registration/1",
+  "baselineCommit": "9f17e0ccd79f373d3201ec57ad930719c8370be9",
+  "scope": "Known five-language development subjects and previously inspected public labels. Fair common retrieval-policy experiment, not held-out evidence or authored answers.",
+  "sourceQuestions": "benchmarks/agent_query/responsibility_questions_panel_a.json",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "tasks": [
+    {
+      "repository": "chi",
+      "symbol": "Mux",
+      "file": "mux.go",
+      "startLine": 21,
+      "kind": "struct"
+    },
+    {
+      "repository": "click",
+      "symbol": "_AtomicFile",
+      "file": "src/click/_compat.py",
+      "startLine": 455,
+      "kind": "class"
+    },
+    {
+      "repository": "jsoup",
+      "symbol": "Cleaner",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43,
+      "kind": "class"
+    },
+    {
+      "repository": "redux",
+      "symbol": "createStore",
+      "file": "src/createStore.ts",
+      "startLine": 86,
+      "kind": "function"
+    },
+    {
+      "repository": "walkdir",
+      "symbol": "IntoIter",
+      "file": "src/lib.rs",
+      "startLine": 566,
+      "kind": "struct"
+    }
+  ],
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "compassBinary": "member-focus-02/compass",
+  "compassBinarySha256": "e33934b94d1e254ba59906fddece098d8433bf7e31af746e46aac3dfc6744f97",
+  "priorCapture": "explanation-budget-01/capture/capture.json",
+  "priorCaptureSha256": "c2db3be974793b100dbb183eab35d474b0ed4d6d3c62f85aba6934c326738e0d",
+  "sourceBudgets": [
+    2000,
+    4000,
+    8000,
+    16000,
+    32000
+  ],
+  "primaryBudget": 8000,
+  "identityControl": "Both tools receive the same known symbol, repository-relative file, declaration line and expected kind. Compass uses search_symbols exact=true, source_file, start_line, kind with existing limits (256 candidates, 500 nodes, 524288 response bytes). Graphify uses its existing file::symbol get_node; validate returned source identity and source-declaration kind afterward. Do not imply Graphify natively accepts all filters. One call per tool/subject, no retries. Preserve all ambiguity/error/limit outcomes.",
+  "capture": "Fresh identical public exact resolver and get_neighbors calls for each tool/subject; Compass uses the latest frozen binary, Graphify the same verified installation and graphs. Preserve raw calls, payload costs, source/graph/binary hashes and all errors. Compare every response to the previous capture.",
+  "selection": "Use only the returned outgoing contains/method label, file and start line. Retain every kind of member exposed by this common interface, including fields and nested containers; do not use Compass-only kind or end-byte metadata. Group equal file/line anchors. Normalize the full unchanged question with the frozen existing Compass query-term policy, identically for both tools. Normalize each returned label with the same identifier/code-token policy, including whole snake-case tokens and components. A group score is the maximum number of distinct matched question terms in any one of its labels; duplicate/alternative labels do not accumulate evidence. Sort by descending score, then original file/line order. Preserve unmatched groups and all ambiguities; no oracle/source-body ranking, language-specific adjustment or extra calls.",
+  "windows": "Determine source end boundaries BEFORE reranking: next greater returned anchor in the same file, or min(EOF,start+4096) for the final anchor. Rerank these fixed intervals and spend each registered shared raw-byte quota in that order. Never let reordered traversal extend an interval, read an oracle witness to select it, or duplicate a source interval. The unchanged source-order control uses the same data and all five quotas.",
+  "scoring": "Preserve all 20 facts at every budget. Report literal witness coverage and the prior fixed semantic allowance for click-1 (only class header missing, source identity verified and all other witness lines present). No partial-fact credit. Missing resolver, source, truncation or tool error remains explicit and cannot become a successful empty inventory. Raw source is evidence, never an authored answer.",
+  "verification": "Commit policy and tests before real score capture. Independently verify every raw call, source pin/hash, group/label score, ordered byte interval and fact result. Replay historical source-order scores exactly; expose response changes. Retain all per-repository/per-budget wins, ties, losses and actual source/payload costs. Distinguish fresh capture, offline interval planning and authored answer synthesis.",
+  "limitations": [
+    "Previously inspected development panel; choices can be informed by prior misses.",
+    "A common helper is not a new native capability of Graphify or proof of equal compute.",
+    "Public member sets and labels differ by extraction. More fields can help or consume source quota; no tool-specific filtering is allowed.",
+    "Keep the native Compass member-focus 14/20 to 15/20 result separate: native callable spans differ from common public-anchor windows.",
+    "No conclusion can establish god-object defects, authored explanations, semantic completeness, broad path/community quality or overall superiority."
+  ]
+}
