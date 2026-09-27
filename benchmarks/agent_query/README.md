@@ -707,3 +707,26 @@ Redux digests. Native and benchmark checks are listed in the main audit.
 This is not a paired Graphify result or authored-answer score. The separate
 symmetric 8,000-byte neighbor-window control remains 14/20 versus 15/20. Remaining
 WalkDir loop evidence shows why lexical name matching alone is insufficient.
+
+### Paired public-member focus: retain the negative result
+
+`paired_member_focus_registration.json` fixes a common helper and five source
+quotas for both tools before capture. `member_focus.py` ranks public labels with
+a frozen lexical policy; equal file/line groups use the maximum single-label
+score, and ties keep source order. `source_windows.py` accepts an exact group
+permutation while preserving interval ends computed from original source order.
+No tool-specific kind filter, source-body ranking or private graph lookup selects
+source. The helper is an evaluation policy, not a new native Graphify feature.
+
+At the primary 8,000-byte quota, common focus regresses **Compass 14/20 → 12/20**
+and **Graphify 15/20 → 14/20**. Both trade Chi shared-state evidence for routing
+evidence; Compass loses two Redux facts and Graphify loses one WalkDir fact.
+The committed `paired_member_focus_review.json` publishes all five quotas and
+all fact-level gains/losses. This policy is rejected as the default. Keep its
+negative result separate from the native callable-span improvement.
+
+All 202 benchmark tests pass, including 15 new tests. All 20 fresh public calls,
+153 anchors and 100 window/scoring arms replay independently; all historical
+source-order controls remain identical. External `paired-member-focus-01`
+retains raw responses, windows, ranked labels, source-boundary diagnosis and
+verification scripts. Product code/version is unchanged in this checkpoint.

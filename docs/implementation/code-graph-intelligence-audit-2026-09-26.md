@@ -3301,6 +3301,91 @@ remains 0.3.30; no graph schema, extraction, cache or history changes occur.
 Authored answers, fair common-workflow focus comparison, longer walks, god-object
 judgments, functional communities and held-out confirmation remain open.
 
+## Common member-name focus: paired negative result
+
+Registration `67e5550b` fixes a symmetric public-interface experiment after the
+native-only improvement above. Policy and tests were committed as `6c9876ee`
+before fresh captures. Both tools receive the same exact identity constraints,
+full questions and five source quotas. Each subject uses one resolver call and
+one neighbor call. The same helper ranks returned outgoing `contains`/`method`
+labels by distinct normalized question-term matches. A shared file/line group's
+score is the maximum score of one of its labels; duplicates and alternative
+labels cannot accumulate weight. Source order breaks ties and unmatched groups
+remain eligible. Fields, bindings and nested types are retained when returned by
+either tool; no Compass-only kind filter or private graph metadata ranks them.
+
+The source intervals are fixed **before** ranking: next greater returned anchor
+in the same file, or the existing 4,096-byte final-window cap. Reranking changes
+visit order, never interval ends. The same raw-byte quota applies to both tools.
+The original source-order controls are captured alongside the focused arm.
+
+| Source quota per subject | Source order: Compass | Source order: Graphify | Common focus: Compass | Common focus: Graphify |
+| --- | ---: | ---: | ---: | ---: |
+| 2,000 | 8/20 | 8/20 | 6/20 | 8/20 |
+| 4,000 | 8/20 | 8/20 | 9/20 | 10/20 |
+| 8,000 (primary) | 14/20 | 15/20 | 12/20 | 14/20 |
+| 16,000 | 19/20 | 18/20 | 19/20 | 18/20 |
+| 32,000 | 20/20 | 18/20 | 20/20 | 18/20 |
+
+**Reject this common name-first window policy as the default explanation
+retrieval policy.** Its primary result regresses for both tools, and Compass
+still trails Graphify. The favorable 4,000-byte result cannot replace the
+registered primary result. This does not invalidate the separate native
+callable-span 14/20 to 15/20 experiment; it shows that the improvement does not
+transfer reliably to a different evidence layout. Native focus remains optional.
+
+At 8,000 bytes:
+
+- Both tools gain Chi routing fact `chi-4` but lose the `With` shared-state fact
+  `chi-1`. Seven matching routing/middleware anchors move first. The existing
+  query normalization removes `With` as a stopword in the full question, and its
+  unmatched window no longer fits. The unchanged total conceals this tradeoff.
+- Compass loses Redux enhancer delegation (`redux-1`) and listener snapshot
+  semantics (`redux-3`). A matching `getState` binding at line 390 promotes a
+  3,886-byte final window ending at line 489. Post-capture inspection of the
+  owner span shows that **3,759 bytes follow the end of `createStore` at line
+  395**. That owner metadata was not used to select, clip or score the window.
+  A name hit can therefore spend most of the quota on subsequent source.
+- Graphify loses WalkDir contents-first evidence (`walkdir-4`). Promoting the
+  606-byte `check_loop` window leaves the `get_deferred_dir` window partial.
+  Neither tool gains the complete multi-method loop-handling fact at this quota.
+- Click and jsoup have no fact changes at this quota. The existing Click
+  class-header allowance is preserved; literal totals remain one lower per tool.
+
+All actual retained-source totals equal the corresponding source-order totals;
+no extra source quota explains these changes. At the primary quota each tool
+retains 35,673 bytes across five subjects. Public response costs remain unchanged
+and unequal: Compass resolver 3,039 text / 21,983 wire bytes and neighbors
+33,061 / 372,871; Graphify resolver 619 / 1,094 and neighbors 6,980 / 7,534.
+These are source-evidence scores, not authored answers, equal-token comparisons
+or a claim of overall superiority.
+
+All 20 fresh public responses and their 153 membership anchors reproduce the
+prior capture. All 50 source-order window/scoring arms match prior results.
+A separate same-agent verifier independently checks normalization on this ASCII
+question/label panel, every group score, all 100 ordered-window arms, raw source
+bytes, transcript costs, witness judgments and historical comparisons. Repeated
+verification is byte-identical. The shared helper also has Unicode tests; no
+universal cross-runtime normalization equivalence is claimed.
+
+All **202 benchmark tests and the product boundary pass**. Fifteen new tests
+cover frozen lexical constants, prior native question-term agreement, Unicode,
+snake/camel case, duplicate terms and labels, maximum-not-union group scores,
+source ties, ignored tool metadata, bounds, exact group permutations and fixed
+source interval ends. No production code changes in this checkpoint; native
+Rust, JavaScript, platform and packaging checks were not rerun. Product commit
+remains `293582c3`, package version 0.3.30.
+
+`paired_member_focus_review.json` publishes every quota, subject, gained/lost
+fact, actual cost and provenance hash. External `paired-member-focus-01` retains
+fresh MCP transcripts, ranked group traces, 100 source-window arms, the Redux
+boundary diagnosis and capture/replay scripts. The next retrieval work needs
+accurate available source extents, preservation of explicitly named symbols,
+and enough linked implementation evidence for multi-method facts. It must be
+qualified under a newly registered common workflow, preserving this negative
+result. Longer paths, authored answers, functional communities, actual god-object
+judgments and held-out confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
