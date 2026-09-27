@@ -651,7 +651,7 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
         .iter()
         .find_map(|content| content.as_text().map(|text| text.text.clone()))
         .ok_or("missing MCP text content")?;
-    assert!(text.starts_with("RESULT\n"));
+    assert!(text.starts_with("RESULT "), "{text}");
     assert!(text.contains("ANSWER\n"));
     let structured = response
         .structured_content
@@ -662,6 +662,9 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
         "compass.query.agent-view/1"
     );
     assert_eq!(structured["result"]["schema"], "compass.query/1");
+    let agent_view: compass_output::AgentQueryView =
+        serde_json::from_value(structured["agentView"].clone())?;
+    assert_eq!(text, compass_output::render_agent_query_text(&agent_view)?);
     assert!(
         client
             .call_tool(CallToolRequestParams::new("search_symbols"))
