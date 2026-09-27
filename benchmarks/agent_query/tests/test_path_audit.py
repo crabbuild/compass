@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from benchmarks.agent_query.path_audit import audit_path, parse_path
+from benchmarks.agent_query.path_audit import audit_observation, audit_path, parse_path
 
 
 class PathAuditTests(unittest.TestCase):
@@ -121,6 +121,28 @@ class PathAuditTests(unittest.TestCase):
     def test_hop_count_is_bounded(self) -> None:
         with self.assertRaises(ValueError):
             parse_path("Shortest path (1000000 hops):\n  start()\n")
+
+    def test_unsuccessful_execution_never_passes_even_with_a_valid_path(self) -> None:
+        successful = {"exitCode": 0, "timedOut": False, "followUps": 0}
+        for output in ("", self.output):
+            for field, value, reason in (("exitCode", 1, "command exited"),
+                                         ("timedOut", True, "timed out"),
+                                         ("followUps", 1, "multiple responses")):
+                observation = {**successful, field: value}
+                with self.subTest(field=field, output=output):
+                    result = audit_observation(self.witness, "compass", self.compass,
+                                               output, self.root, observation)
+                    self.assertFalse(result["matched"])
+                    self.assertEqual(result["execution"], observation)
+                    self.assertTrue(any(reason in failure for failure in result["failures"]))
+        self.assertTrue(audit_observation(self.witness, "compass", self.compass,
+                                         self.output, self.root, successful)["matched"])
+
+    def test_source_drift_still_aborts_an_unsuccessful_execution(self) -> None:
+        (self.root / "code.rs").write_text("changed\n")
+        with self.assertRaisesRegex(ValueError, "source witness changed"):
+            audit_observation(self.witness, "compass", self.compass, "", self.root,
+                              {"exitCode": 1, "timedOut": False, "followUps": 0})
 
 
 if __name__ == "__main__":

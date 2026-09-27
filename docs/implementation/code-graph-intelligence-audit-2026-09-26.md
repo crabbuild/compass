@@ -997,6 +997,112 @@ checkpoint: no extractor, publication, or viewer format changes are made here.
 God-object detection, community cohesion, source-edge precision, and explanation
 usefulness on held-out tasks remain open.
 
+## Frozen confirmation panel A: competitor advantages remain
+
+Inputs were committed as `7c70fbea` before extraction or queries: 55 questions,
+21 selected relationship pairs, and ten forward/reverse path witnesses.
+Chi (Go), Click (Python), jsoup (Java), Redux (TypeScript), and WalkDir (Rust)
+are new repositories for this checkpoint. Both tools use the same five clean,
+pinned checkouts. Selection is purposive, not representative. The Compass
+executable is the frozen `5382b51b…` hub-evidence build above; Graphify reports
+0.9.67. `heldout-a-01` completed all ten builds and 110 question workflows.
+Source commits, registered input bytes, captured graph digests, runner digest,
+and capture byte totals were rechecked. The CLI records executable hashes;
+Graphify's launcher hash does **not** attest to all Python package/dependency
+bytes during execution. Do not conflate the separate MCP environment check
+with a pre/post CLI package check.
+
+### Original text-recall scores
+
+| Surface | Compass | Graphify |
+| --- | ---: | ---: |
+| Explain | 10/10 | 8/10 |
+| Direct callers plus incoming-call ask | 8/10 | 9/10 |
+| Callees | 4/5 | 4/5 |
+| Symbol paths, both directions | 6/10 | 10/10 |
+| File paths | 5/5 | 1/5 |
+| Ambiguity | 5/5 | 4/5 |
+| Missing symbols | 5/5 | 5/5 |
+| Broad natural query | 3/5 | 5/5 |
+| Total text matches | 46/55 | 46/55 |
+
+There are 38 shared passes, eight exclusive passes per tool, and one shared
+failure. On shared text passes, median estimated answer tokens are 158 Compass
+versus 104 Graphify. The single-run overall wall-time medians are 738 versus
+236 ms; these are observations, not a controlled performance benchmark.
+Graphify sometimes exceeds the requested text budget (for example the Chi ask
+response is 2,744 estimated tokens against a requested 2,000). All consumed
+responses and documented follow-ups remain in the cost totals.
+
+These are **not correctness scores**. Manual response inspection catches four
+Compass text passes that do not resolve the requested operation: Redux's
+primary explanation, both WalkDir explanations, and WalkDir callees merely
+list ambiguity candidates. The registered text criteria find names/lines in
+those lists. Graphify's two WalkDir symbol paths also pass by printing the
+requested words while selecting same-named **test** functions and walking
+through their containing test file. Its stderr warns of ambiguity; the body
+still provides a different route. The frozen run is preserved, with these
+judgments recorded separately in `heldout_panel_a_review.json`.
+
+For incoming-call ask, Compass prints the requested callee and incoming
+relationships on Chi, Click, jsoup, and Redux; WalkDir remains unresolved.
+Compass's usage results include references/imports where explicitly labeled,
+not just calls. Graphify's query answers return broader neighborhoods that
+contain the selected incoming call; WalkDir combines library and test seeds.
+These inspected facts do not establish the precision of every returned edge.
+
+### Source and identity checks
+
+The path auditor now retains failed commands as failed rows rather than
+aborting and dropping the remaining denominator. Nonzero exit, timeout, and
+unsupported multi-response execution cannot pass even if stdout prints a valid
+path. Source drift and mismatched graph provenance still abort the audit.
+All ten witnesses remain in each tool's denominator. Source-verified paths
+are **6/10 Compass versus 8/10 Graphify**: both pass Chi, Click, and jsoup;
+Graphify also passes Redux; neither establishes the requested WalkDir route.
+Compass refuses WalkDir's genuinely ambiguous unqualified names and Redux's
+export/function name collision. An ambiguity refusal is safer than selecting
+a wrong declaration, but it is still not a completed path task.
+
+The initial edge audit also exposed an **oracle mistake**. The registered
+Click witness omitted `open_stream`'s second call to `_wrap_io_open` at
+`src/click/_compat.py:450`. Compass preserved both calls, while Graphify kept
+only line 397. The original witness and audit remain unchanged. A separately
+named `edge_witnesses_heldout_click_corrected.json` adds line 450 after reviewing
+the entire function; it is an explicitly post-output diagnostic correction.
+
+| Selected-pair evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Unique endpoint identity, original or corrected | 17/21 | 21/21 |
+| Relationship/absence matches, original or corrected | 15/21 | 20/21 |
+| Full occurrence agreement, registered witness | 14/21 | 18/21 |
+| Reviewed positive occurrences, registered witness | 13/18 | 15/18 |
+| Full occurrence agreement, corrected diagnostic | 15/21 | 17/21 |
+| Reviewed positive occurrences, corrected diagnostic | 14/19 | 15/19 |
+
+The 21 pairs comprise 16 positive pairs and five direct-edge negatives.
+Negatives pass only with both endpoints uniquely identified. Four Compass
+Redux pairs fail identity checks because separate export and function nodes
+share the exact file/start-line/terminal name; they must not be described as
+four missing call edges. The plain-symbol ambiguity is a real workflow issue,
+while the source audit cannot choose between those nodes using its registered
+identity rule. Compass also misses Chi's source-proven `rctx.URLParam` call.
+Both tools miss jsoup's chained `new Cleaner(...).isValidBodyHtml(...)` call.
+Graphify loses repeated occurrences in jsoup and WalkDir as well as corrected
+Click. This checks selected pairs, not complete callee sets or graph precision.
+
+Artifacts are `heldout-a-path-audit-01.json`, five
+`heldout-a-*-edge-audit-01.json` files, and
+`heldout-a-click-edge-audit-corrected-01.json` under the evaluation root.
+The checked-in review records their digests, input digests, response-review
+digests, and limits. Auditor regressions pass all 95 Python tests, including
+unsuccessful execution and source-drift cases (`heldout-a-auditor-tests-01.log`).
+This panel contradicts a broad superiority claim. Its first run remains a
+confirmation checkpoint; subsequent product tuning on it is development and
+requires another independent confirmation panel. MCP/community workflows,
+directed or long walks, source-level cohesion, and god-object judgments remain
+unproven here.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact

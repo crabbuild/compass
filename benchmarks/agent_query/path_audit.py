@@ -1,6 +1,6 @@
 """Audit captured path responses against graphs and reviewed source witnesses.
 
-This diagnoses the checked-in development cases. It does not estimate held-out
+This checks explicitly reviewed source witnesses. It does not estimate population
 accuracy, accept endpoint echoes as paths, or choose among ambiguous labels.
 Run with ``python3 -m benchmarks.agent_query.path_audit --help``.
 """
@@ -144,6 +144,22 @@ def _edge_site(edge: dict, tool: str) -> tuple[object, object]:
     return edge.get("source_file"), int(match[1]) if match else None
 
 
+def audit_observation(witness: dict, tool: str, graph: dict, output: str,
+                      source_root: Path, observation: dict) -> dict:
+    """Keep unsuccessful requests in the denominator, even if they print a path."""
+    result = audit_path(witness, tool, graph, output, source_root)
+    result["execution"] = {key: observation[key] for key in
+                           ("exitCode", "timedOut", "followUps")}
+    if observation["exitCode"] != 0:
+        result["failures"].append(f"command exited {observation['exitCode']}")
+    if observation["timedOut"]:
+        result["failures"].append("command timed out")
+    if observation["followUps"]:
+        result["failures"].append("multiple responses are not supported by this path audit")
+    result["matched"] = not result["failures"]
+    return result
+
+
 def execute(args: argparse.Namespace) -> None:
     root = args.run.resolve()
     run = json.loads(read_bounded(root / "run.json"))
@@ -180,12 +196,13 @@ def execute(args: argparse.Namespace) -> None:
             if hashlib.sha256(graph_bytes).hexdigest() != record[f"{tool}GraphSha256"]:
                 raise ValueError("captured graph digest mismatch")
             observation = observations[repository, question, tool]
-            if observation["exitCode"] != 0 or observation["timedOut"] or observation["followUps"]:
-                raise ValueError("path audit requires a successful single-response execution")
             raw = read_bounded(root / "raw" / repository / f"{question}.{tool}.0.stdout")
-            if len(raw) != observation["stdoutBytes"]:
+            # stdoutBytes totals all pages; only compare it to the first capture
+            # for single-response requests. Unsupported follow-ups fail below.
+            if not observation["followUps"] and len(raw) != observation["stdoutBytes"]:
                 raise ValueError("captured response length mismatch")
-            result = audit_path(witness, tool, json.loads(graph_bytes), raw.decode("utf-8"), source)
+            result = audit_observation(witness, tool, json.loads(graph_bytes),
+                                       raw.decode("utf-8"), source, observation)
             results.append({"repository": repository, "question": question,
                             "stdoutSha256": hashlib.sha256(raw).hexdigest(), **result})
         _verify_source(pinned, source)

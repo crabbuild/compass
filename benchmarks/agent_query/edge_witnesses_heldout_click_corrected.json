@@ -1,0 +1,108 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "click",
+  "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+  "scope": "Post-output diagnostic correction to the registered held-out panel A Click witness. The original manifest remains unchanged. Full source-body review found a second open_stream -> _wrap_io_open call at line 450; this is an oracle correction, not a preregistered result.",
+  "witnesses": [
+    {
+      "id": "click-source-edge-1",
+      "source": {
+        "file": "src/click/utils.py",
+        "line": 381,
+        "symbol": "open_file",
+        "text": "def open_file("
+      },
+      "target": {
+        "file": "src/click/_compat.py",
+        "line": 374,
+        "symbol": "open_stream",
+        "text": "def open_stream("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/click/utils.py",
+          "line": 422,
+          "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "click-source-edge-2",
+      "source": {
+        "file": "src/click/_compat.py",
+        "line": 374,
+        "symbol": "open_stream",
+        "text": "def open_stream("
+      },
+      "target": {
+        "file": "src/click/_compat.py",
+        "line": 361,
+        "symbol": "_wrap_io_open",
+        "text": "def _wrap_io_open("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/click/_compat.py",
+          "line": 397,
+          "text": "return _wrap_io_open(filename, mode, encoding, errors), True"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 450,
+          "text": "f = _wrap_io_open(fd, mode, encoding, errors)"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "click-source-edge-3",
+      "source": {
+        "file": "src/click/utils.py",
+        "line": 153,
+        "symbol": "open",
+        "text": "def open(self) -> t.IO[t.Any]:"
+      },
+      "target": {
+        "file": "src/click/_compat.py",
+        "line": 374,
+        "symbol": "open_stream",
+        "text": "def open_stream("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/click/utils.py",
+          "line": 161,
+          "text": "rv, self.should_close = open_stream("
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "click-source-edge-4",
+      "source": {
+        "file": "src/click/utils.py",
+        "line": 381,
+        "symbol": "open_file",
+        "text": "def open_file("
+      },
+      "target": {
+        "file": "src/click/utils.py",
+        "line": 430,
+        "symbol": "format_filename",
+        "text": "def format_filename("
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    }
+  ],
+  "correctionOf": "edge_witnesses_heldout_click.json"
+}

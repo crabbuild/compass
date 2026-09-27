@@ -243,6 +243,15 @@ the panel. The question score remains a text-recall proxy; report independent
 identity/direction/occurrence checks and all failures separately. Repository
 selection is purposive, so this does not estimate population accuracy.
 
+The first frozen results and post-output review are recorded in
+`heldout_panel_a_review.json` and the main code-graph intelligence audit report.
+Keep the original Click edge witness: its missing second `_wrap_io_open` site
+is corrected only in `edge_witnesses_heldout_click_corrected.json`. Report both
+registered and corrected diagnostic scores. The path auditor retains nonzero,
+timed-out, and unsupported multi-response executions as failed rows; it still
+rejects source/graph provenance drift. Later product tuning on panel A is
+**development**, not another held-out confirmation.
+
 ## Shared MCP comparison
 
 `suite_mcp.json` preregisters 29 questions per tool across the same five-language
