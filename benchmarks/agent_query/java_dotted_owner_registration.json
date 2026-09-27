@@ -1,0 +1,137 @@
+{
+  "schema": "compass.java-dotted-owner-registration/1",
+  "scope": "Complete unchanged compiler-backed jsoup development census after Java nominal dotted-name resolution; paired preservation controls on all four other known cohort repositories. Not held-out or broad quality confirmation.",
+  "registrationPhase": "Before any candidate real-repository extraction; compiler regression and focused native tests have informed this implementation.",
+  "baselineBranchCommit": "1fc6225ccb63b976e22b25c1fc4cf3695959e78e",
+  "previousRegistrationSha256": "eaaa3c887089c339ba29d84cd5dab84a180a074b67e870bc2165667614623107",
+  "previousReviewSha256": "e37b6699464d57bb9f1f1a03bfd531a6c3b3c5a172a5a8648d50c41dbd8925a5",
+  "source": {
+    "repository": "jhy/jsoup",
+    "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+    "sourceRoot": "src/main/java",
+    "files": 88,
+    "sourceRegistrationSha256": "6088df9f4cf420437a71ca06324bbe80817ed73142eb61c5686d8d3da36180af"
+  },
+  "oracle": {
+    "path": "jsoup-java-field-oracle-02/capture-final/bindings.stdout",
+    "sha256": "4596b24d67fab7f728bc5dfe54e9b381fc42d411b9cb9042646cffbed420e95c",
+    "manifestSha256": "6b9532e36846aa7c2df0ac799c1c9f01dbf8c5061dd3adfa5a0fbc8e8bb64d3a",
+    "auditorSha256": "2ced23208ab1171d33ec00a6385fce34367a87c67d2cadef249650a1b8264e9b",
+    "release": "8",
+    "internalOrdinaryFieldReferences": 3785,
+    "internalEnumReferences": 529,
+    "nonSourceCategories": "Retain external fields, array lengths and class literals separately, as in the unchanged oracle."
+  },
+  "baselineBinary": {
+    "path": "java-enum-access-01/compass-candidate-release",
+    "sha256": "28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889",
+    "productionCommit": "a8b4a490eddeccb210d1e3c4390979c80d1e678a"
+  },
+  "candidate": "Freeze a release binary after native qualification; bind exact source/build/test inputs, commands, outcomes and binary hashes. Version remains 0.3.30.",
+  "comparison": {
+    "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+    "originalCompassGraphSha256": "300f9afd2bf1f3c04d11b7f4563e464fd85d4a95da6de68d940d42d9f99f6227",
+    "originalReviewSha256": "e37b6699464d57bb9f1f1a03bfd531a6c3b3c5a172a5a8648d50c41dbd8925a5",
+    "commandTemplate": [
+      "<frozen-compass-binary>",
+      "extract",
+      "<complete-pinned-jsoup-source>",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<fresh-output>"
+    ],
+    "order": [
+      "baseline",
+      "candidate"
+    ],
+    "graphBoundBytes": 268435456,
+    "streamBoundBytes": 16777216,
+    "timeoutSeconds": 1200,
+    "sourcePolicy": "Read-only pinned clean repository; entire original extraction scope, fresh outputs for each frozen release binary. The source oracle only scores its registered 88-file Java 8 cohort; retain other graph records separately. Preserve all failures and graph omission warnings. Timing is operational only; no performance conclusion from these two observations."
+  },
+  "scoring": [
+    "Use the unchanged compiler capture, UTF-16 to UTF-8 conversion, exact target declaration and source owner joins. Retain the complete 3785 ordinary plus 529 enum-reference denominator.",
+    "Inventory every returned field/enum contact in the registered source files, including extra, wrong, ambiguous, unanchored and unmapped contacts. Any unsupported new contact requires source review and a correction before claiming precision.",
+    "Run the fresh preceding enum-fixed baseline against the same frozen oracle; compare its complete graph to the preserved preceding candidate graph. Retain all original results and failed attempts.",
+    "Report declaration joins, exact target-plus-owner occurrence recall, every miss and all precision failures separately for ordinary fields and enum constants; Graphify keeps its frozen environment and graph.",
+    "Compare whole graph additions/removals, identities, edge direction/multiplicity/provenance and omission warnings; do not infer functional community quality from graph changes.",
+    "Repeat complete verification and compare report bytes. Repeated verifier agreement is consistency evidence, not an independent source oracle.",
+    "Check each of the four non-Java baseline/candidate graph pairs byte-for-byte, including metadata and array order; compare to preserved originals, retaining all differences. Record timing operationally without speed claims."
+  ],
+  "controls": {
+    "sourceRun": "java-state-access-02/run.json",
+    "sourceRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+    "repositories": [
+      {
+        "name": "chi",
+        "repository": "go-chi/chi",
+        "language": "Go",
+        "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+        "originalCompassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "frozenGraphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+      },
+      {
+        "name": "click",
+        "repository": "pallets/click",
+        "language": "Python",
+        "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+        "originalCompassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "frozenGraphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+      },
+      {
+        "name": "redux",
+        "repository": "reduxjs/redux",
+        "language": "TypeScript",
+        "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+        "originalCompassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "frozenGraphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+      },
+      {
+        "name": "walkdir",
+        "repository": "BurntSushi/walkdir",
+        "language": "Rust",
+        "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+        "originalCompassGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+        "frozenGraphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+      }
+    ],
+    "order": [
+      "baseline",
+      "candidate"
+    ],
+    "limits": {
+      "timeoutSeconds": 1200,
+      "streamBytes": 16777216,
+      "graphBytes": 268435456
+    },
+    "commandTemplate": [
+      "<frozen-binary>",
+      "extract",
+      "<complete-pinned-source>",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<fresh-output>"
+    ],
+    "requirements": [
+      "Use complete clean pinned checkouts as read-only source inputs. Preserve every failure and omission warning; do not reduce input scope or selectively repeat.",
+      "Record both frozen binary hashes, command arguments, process exit/timeout/stream limits, raw logs and full artifact hashes for all eight observations.",
+      "Compare complete baseline/candidate graph bytes, including metadata and array order; also compare each to its original preserved Compass graph. Any difference is retained and investigated, not silently excluded.",
+      "Keep frozen Graphify graphs and environment unchanged. These controls do not rerun Graphify or establish a new paired quality score.",
+      "Repeat artifact verification and compare reports. Operational durations are recorded but do not establish a timing comparison.",
+      "The original Java census remains 3785 ordinary plus 529 enum occurrences. These controls do not add to its recall denominator or replace any earlier failed outcomes."
+    ]
+  },
+  "limitations": [
+    "This is one known Java configuration; general cross-language superiority remains unproven.",
+    "The change was motivated by observed missed enum constants. All scores are development results, even though this follow-up protocol precedes candidate extraction.",
+    "No authored explanation, runtime feasibility, functional community or god-object classification claim follows.",
+    "The preceding compiler fixture captures remain separate development diagnostics; neither changes the fixed real-source denominator.",
+    "This correction canonicalizes already established nominal receivers. Missing type/value expression-chain, static-import, hierarchy and selector typing evidence remains explicit."
+  ]
+}
