@@ -421,6 +421,25 @@ compass explore "<symbol>" ... [--format text|agent-json|json]
 compass node "<source>" "<target>" [--format text|agent-json|json]
 ```
 
+When the symbol name and source location are known, use exact lookup:
+
+```bash
+compass search createStore --exact --file src/createStore.ts --line 86 --kind function --format json
+```
+
+The file, line and kind constraints are optional and conjunctive. A line requires
+a file; all three filters require `--exact`. File paths match the stored
+repository-relative spelling. Exact IDs take precedence; names use Compass's
+normalized exact comparison. Every matching record is returned, including
+overloads and export bindings, with no lexical fallback or guessed winner.
+The candidate bound applies before filtering: a truncated one-result response
+does not prove uniqueness, and a truncated empty response does not prove
+absence. Exact text requests keep the supplied bounds without automatic widening.
+
+MCP exposes the same operation through `search_symbols` with `exact: true` and
+optional `source_file`, `start_line` and `kind` fields. The raw response stays
+`compass.query/1`; ordinary ranked search remains the default.
+
 `node` searches directed, weighted trails within `--max-depth`. It retains
 shorter and cheaper prefixes when either can affect reachability within that
 hop limit. Node and edge work limits still apply: a truncated result is not

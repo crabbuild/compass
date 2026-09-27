@@ -1311,8 +1311,8 @@ fn tool_specs() -> Vec<Tool> {
     let mut specs = vec![
         tool(
             "search_symbols",
-            "Search Compass code symbols with the trusted FTS5 index.",
-            code_query::schema(&["query"]),
+            "Search Compass code symbols. Set exact=true for bounded exact ID/name candidates with optional source_file, start_line and kind filters; all matching records and truncation remain visible.",
+            code_query::search_schema(),
         ),
         tool(
             "get_callers",

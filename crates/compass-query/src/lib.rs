@@ -28,7 +28,9 @@ mod traversal;
 
 pub use affected::{DEFAULT_AFFECTED_RELATIONS, affected_nodes, format_affected, resolve_seed};
 pub use benchmark::{BenchmarkQuestion, BenchmarkResult, format_benchmark, run_benchmark};
-pub use code_query::{CodeQueryEngine, normalize_symbol as normalize_code_query_symbol};
+pub use code_query::{
+    CodeQueryEngine, ExactSearchFilter, normalize_symbol as normalize_code_query_symbol,
+};
 pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,

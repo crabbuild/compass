@@ -431,6 +431,33 @@ shared JSON output envelopes. The query library exposes `digest_verified` on
 `--no-source` restores a metadata-only answer; `--source` remains accepted.
 Ambiguous or unsourced targets do not produce source text.
 
+### Exact symbol search
+
+`search --exact` and MCP `search_symbols` with `exact: true` use the existing
+bounded exact ID/name index without lexical or fuzzy recall. Optional CLI
+`--file`, `--line`, `--kind` filters correspond to MCP `source_file`,
+`start_line`, `kind`. Filters require exact mode; a line also requires a file.
+File strings match stored paths exactly and are not opened or canonicalized.
+Selectors and file filters accept 1..4096 non-control bytes; lines are positive
+32-bit integers and kinds use the stored node-kind spellings.
+
+Exact IDs take precedence over name lookup, then must satisfy every supplied
+filter. Names use the existing normalization (trim whitespace, trailing `()`,
+leading `.`, and lowercase); file paths and IDs remain case-sensitive. All
+matching records remain visible, including overloads and export bindings.
+Scores are uniformly 1 and order is stable by ID. This mode does not select a
+winner or collapse a binding into its declaration.
+
+The candidate cap applies before filtering. A truncated prefix cannot prove
+uniqueness or absence, even when filtering returns one or zero nodes. Node and
+response bounds and coverage diagnostics still apply. Exact CLI text requests
+do not automatically widen candidate bounds. Default ranked search and the
+`compass.query/1` response schema remain unchanged. The query API adds
+`search_exact(SearchRequest, ExactSearchFilter)` without changing `SearchRequest`.
+Agent View uses typed name normalization when identifying exact search matches.
+An empty bounded search without a no-match diagnostic retains `match=unknown`
+and partial execution instead of asserting absence or failing view validation.
+
 ### Explanation member source
 
 `explain --source-members` replaces the declaration excerpt with callable member

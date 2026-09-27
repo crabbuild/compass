@@ -3,7 +3,7 @@ use compass_model::query_contract::{
     DiscoveryQueryRequest, DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind,
     DiscoveryTraversal, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
 };
-use compass_query::{CodeQueryEngine, NaturalQueryRequest, QueryErrorKind};
+use compass_query::{CodeQueryEngine, ExactSearchFilter, NaturalQueryRequest, QueryErrorKind};
 use serde_json::{Map, Value, json};
 
 pub(super) fn schema(required: &[&str]) -> Value {
@@ -45,11 +45,29 @@ pub(super) fn schema(required: &[&str]) -> Value {
     })
 }
 
+pub(super) fn search_schema() -> Value {
+    let mut result = schema(&["query"]);
+    result["properties"]["exact"] = json!({"type":"boolean","default":false,"description":"Only exact ID or normalized name matches; no lexical fallback."});
+    result["properties"]["source_file"] = json!({"type":"string","minLength":1,"maxLength":4096,"description":"Exact stored source path; requires exact=true."});
+    result["properties"]["start_line"] = json!({"type":"integer","minimum":1,"maximum":u32::MAX,"description":"Declaration start line; requires exact=true and source_file."});
+    result["properties"]["kind"] = json!({"type":"string","description":"Stored node kind (for example function, class, struct); requires exact=true."});
+    result
+}
+
 pub(super) fn invoke_with_engine(
     name: &str,
     arguments: &Map<String, Value>,
     engine: &CodeQueryEngine,
 ) -> Result<CodeQueryResponse, super::InvocationError> {
+    if name != "search_symbols"
+        && ["exact", "source_file", "start_line", "kind"]
+            .iter()
+            .any(|key| arguments.contains_key(*key))
+    {
+        return Err(super::InvocationError::InvalidParams(
+            "exact symbol filters require search_symbols".to_owned(),
+        ));
+    }
     let limits = limits(arguments)?;
     match name {
         "query_graph" => engine.query_natural(NaturalQueryRequest {
@@ -57,10 +75,51 @@ pub(super) fn invoke_with_engine(
             include_heuristic: false,
             limits,
         }),
-        "search_symbols" => engine.search(SearchRequest {
-            query: required_string(arguments, "query")?,
-            limits,
-        }),
+        "search_symbols" => {
+            let request = SearchRequest {
+                query: required_string(arguments, "query")?,
+                limits,
+            };
+            let exact = boolean(arguments, "exact")?;
+            if !exact
+                && ["source_file", "start_line", "kind"]
+                    .iter()
+                    .any(|key| arguments.contains_key(*key))
+            {
+                return Err(super::InvocationError::InvalidParams(
+                    "source_file, start_line and kind require exact=true".to_owned(),
+                ));
+            }
+            if exact {
+                let source_file = arguments
+                    .get("source_file")
+                    .map(|_| required_string(arguments, "source_file"))
+                    .transpose()?;
+                let start_line = arguments
+                    .get("start_line")
+                    .map(|_| u32_value(arguments, "start_line", 0))
+                    .transpose()?;
+                let kind = arguments
+                    .get("kind")
+                    .map(|value| {
+                        serde_json::from_value(value.clone()).map_err(|_| {
+                            "kind must be a stored node kind such as function, class, or struct"
+                                .to_owned()
+                        })
+                    })
+                    .transpose()?;
+                engine.search_exact(
+                    request,
+                    ExactSearchFilter {
+                        source_file,
+                        start_line,
+                        kind,
+                    },
+                )
+            } else {
+                engine.search(request)
+            }
+        }
         "get_callers" => engine.callers(CallRequest {
             symbol: required_string(arguments, "symbol")?,
             include_heuristic: boolean(arguments, "include_heuristic")?,

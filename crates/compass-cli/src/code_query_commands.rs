@@ -11,8 +11,8 @@ use compass_output::{
     render_code_query_text_page,
 };
 use compass_query::{
-    EngineSelection, NaturalQueryIntent, NaturalQueryRequest, QueryError, QueryErrorKind,
-    open_with_engine, open_with_verified_document, plan_natural_query,
+    EngineSelection, ExactSearchFilter, NaturalQueryIntent, NaturalQueryRequest, QueryError,
+    QueryErrorKind, open_with_engine, open_with_verified_document, plan_natural_query,
 };
 
 use crate::{Outcome, SharedOutputFormat, parse_shared_output_format};
@@ -133,7 +133,10 @@ fn execute_paged(
     let mut scale = 1_u32;
     loop {
         let execution = execute(operation, args, scale, deadline)?;
-        if !execution.response.truncated || scale >= MAX_PAGE_WIDENING_SCALE {
+        if !execution.response.truncated
+            || scale >= MAX_PAGE_WIDENING_SCALE
+            || args.iter().any(|arg| arg == "--exact")
+        {
             return Ok(execution);
         }
         scale = scale.saturating_mul(4);
@@ -146,6 +149,39 @@ fn execute(
     page_scale: u32,
     deadline: Instant,
 ) -> Result<QueryExecution, String> {
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut exact_filter = ExactSearchFilter::default();
+    for name in ["--file", "--line", "--kind"] {
+        let present = args
+            .iter()
+            .any(|arg| arg == name || arg.starts_with(&format!("{name}=")));
+        if present && (!exact || operation != "search") {
+            return Err(format!("{name} requires search --exact"));
+        }
+        if present {
+            let value = option(args, name)
+                .filter(|value| !value.starts_with("--"))
+                .ok_or_else(|| format!("{name} requires a value"))?;
+            match name {
+                "--file" => exact_filter.source_file = Some(value.to_owned()),
+                "--line" => {
+                    exact_filter.start_line = Some(
+                        value
+                            .parse()
+                            .map_err(|_| "--line requires a positive integer")?,
+                    )
+                }
+                "--kind" => exact_filter.kind =
+                    Some(serde_json::from_value(serde_json::json!(value)).map_err(
+                        |_| "--kind requires a stored node kind such as function, class, or struct",
+                    )?),
+                _ => {}
+            }
+        }
+    }
+    if exact && operation != "search" {
+        return Err("--exact requires search".to_owned());
+    }
     let positional = positional(args);
     let graph_option = option(args, "--graph");
     let revision = option(args, "--at");
@@ -257,12 +293,16 @@ fn execute(
         }
         "search" => {
             let query = required(&positional, 0, "search <QUERY>")?.to_owned();
-            let response = engine
-                .search(SearchRequest {
-                    query: query.clone(),
-                    limits,
-                })
-                .map_err(query_error)?;
+            let request = SearchRequest {
+                query: query.clone(),
+                limits,
+            };
+            let response = if exact {
+                engine.search_exact(request, exact_filter)
+            } else {
+                engine.search(request)
+            }
+            .map_err(query_error)?;
             (response, None, vec![(AgentOperandRole::Query, query)])
         }
         "callers" | "callees" | "impact" => {
@@ -430,6 +470,9 @@ fn positional(args: &[String]) -> Vec<String> {
         "--text-budget",
         "--cursor",
         "--timeout-ms",
+        "--file",
+        "--line",
+        "--kind",
     ];
     let mut values = Vec::new();
     let mut skip = false;

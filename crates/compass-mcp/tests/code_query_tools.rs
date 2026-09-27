@@ -175,7 +175,8 @@ fn invoke(server: &CompassMcp, name: &str, arguments: Value) -> Result<Value, Bo
         name,
         arguments.as_object().cloned().unwrap_or_else(Map::new),
     );
-    let envelope = serde_json::from_str::<Value>(&output)?;
+    let envelope = serde_json::from_str::<Value>(&output)
+        .map_err(|error| format!("invalid {name} response: {error}: {output}"))?;
     assert_eq!(envelope["schema"], "compass.mcp.tool-result/1");
     assert_eq!(envelope["transportTruncation"]["truncated"], false);
     Ok(envelope["result"].clone())
@@ -673,5 +674,66 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
     );
     client.cancel().await?;
     server_task.await?.map_err(std::io::Error::other)?;
+    Ok(())
+}
+
+#[test]
+fn exact_symbol_tool_preserves_filters_and_rejects_incomplete_requests()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter()
+        .find(|n| n.name == "Target")
+        .ok_or("target")?
+        .clone();
+    let source = target.source.as_ref().ok_or("source")?;
+    let mut export = target.clone();
+    export.id = "export:target".to_owned();
+    export.kind = NodeKind::Export;
+    graph.nodes.push(export);
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let server = CompassMcp::new(path);
+    let result = invoke(
+        &server,
+        "search_symbols",
+        json!({"query":"Target", "exact":true, "source_file":source.file, "start_line":source.start_line,"kind":"function"}),
+    )?;
+    assert_eq!(result["truncated"], false);
+    assert_eq!(result["results"].as_array().ok_or("results")?.len(), 1);
+    assert_eq!(result["results"][0]["nodeId"], target.id);
+    let ambiguity = invoke(
+        &server,
+        "search_symbols",
+        json!({"query":"Target", "exact":true}),
+    )?;
+    assert_eq!(ambiguity["results"].as_array().ok_or("results")?.len(), 2);
+    let bounded = invoke(
+        &server,
+        "search_symbols",
+        json!({"query":"Target", "exact":true,"max_candidates":1,"kind":"class"}),
+    )?;
+    assert_eq!(bounded["truncated"], true);
+    assert_eq!(bounded["results"], json!([]));
+    for args in [
+        json!({"query":"Target","kind":"function"}),
+        json!({"query":"Target","exact":"true"}),
+        json!({"query":"Target","exact":true,"start_line":1}),
+        json!({"query":"Target","exact":true,"source_file":null}),
+        json!({"query":"Target","exact":true,"kind":"unknown"}),
+        json!({"query":"Target","exact":true,"source_file":"src/lib.rs","start_line":0}),
+    ] {
+        let output = server.invoke("search_symbols", args.as_object().ok_or("args")?.clone());
+        assert!(
+            output.starts_with("Error executing search_symbols:"),
+            "{output}"
+        );
+        assert!(
+            !output.contains("\"schema\":\"compass.query/1\""),
+            "{output}"
+        );
+    }
     Ok(())
 }

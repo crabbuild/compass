@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `search --exact` and MCP `search_symbols` exact mode with optional
+  source file, declaration line and node-kind filters. Return all bounded exact
+  matches without lexical fallback; preserve ambiguity and incomplete lookup.
+
 - Add opt-in `explain --source-members` to retrieve callable implementations
   through recorded containment, including nested types. Share one source-byte
   budget, retain individual verification status, and report unavailable or

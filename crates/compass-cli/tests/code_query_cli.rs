@@ -2375,3 +2375,73 @@ fn explain_member_source_reaches_implementations_outside_type_declarations()
     );
     Ok(())
 }
+
+#[test]
+fn exact_search_cli_filters_explicitly_and_preserves_bounded_ambiguity()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let target = graph
+        .nodes
+        .iter()
+        .find(|n| n.name == "Target")
+        .ok_or("target")?
+        .clone();
+    let source = target.source.as_ref().ok_or("target source")?;
+    let mut export = target.clone();
+    export.id = "duplicate:export".to_owned();
+    export.kind = NodeKind::Export;
+    graph.nodes.push(export);
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let execute = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let line = source.start_line.to_string();
+    let result = execute(&[
+        "--exact",
+        "--file",
+        &source.file,
+        "--line",
+        &line,
+        "--kind",
+        "function",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    let body: Value = serde_json::from_str(&result.stdout)?;
+    assert_eq!(body["truncated"], false);
+    assert_eq!(body["results"].as_array().ok_or("results")?.len(), 1);
+    assert_eq!(body["results"][0]["nodeId"], target.id);
+    let ambiguous = execute(&["--exact", "--format", "json"]);
+    let body: Value = serde_json::from_str(&ambiguous.stdout)?;
+    assert_eq!(body["results"].as_array().ok_or("results")?.len(), 2);
+    for format in ["text", "agent-json"] {
+        let bounded = execute(&["--exact", "--max-candidates", "1", "--format", format]);
+        assert_eq!(bounded.code, 0, "{}", bounded.stderr);
+        assert!(
+            bounded.stdout.contains("bounded_truncation"),
+            "{}",
+            bounded.stdout
+        );
+    }
+    for args in [
+        vec!["--file", &source.file],
+        vec!["--exact", "--file"],
+        vec!["--exact", "--kind", "unknown"],
+        vec!["--exact", "--line", "0"],
+        vec!["--exact", "--line", "1"],
+        vec!["--exact", "--file", "--kind", "function"],
+    ] {
+        assert_ne!(execute(&args).code, 0, "{args:?}");
+    }
+    Ok(())
+}

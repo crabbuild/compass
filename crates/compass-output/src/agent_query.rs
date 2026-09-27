@@ -2595,13 +2595,26 @@ fn code_match_state(
         if query.is_some_and(|query| {
             response.results.first().is_some_and(|hit| {
                 nodes.get(&hit.node_id).is_some_and(|node| {
-                    node.id == query || node.name == query || node.qualified_name == query
+                    node.id == query
+                        || normalize_code_query_symbol(&node.name)
+                            == normalize_code_query_symbol(query)
+                        || normalize_code_query_symbol(&node.qualified_name)
+                            == normalize_code_query_symbol(query)
                 })
             })
         }) {
             AgentMatch::Exact
         } else if response.results.is_empty() {
-            AgentMatch::None
+            if response.truncated
+                || has_diagnostic(
+                    &response.diagnostics,
+                    QueryDiagnosticCode::BoundedTruncation,
+                )
+            {
+                AgentMatch::Unknown
+            } else {
+                AgentMatch::None
+            }
         } else {
             AgentMatch::Fuzzy
         }
@@ -2635,7 +2648,9 @@ fn code_result_state(
     {
         return AgentResultState::NoPath;
     }
-    if operation == AgentOperation::Search && match_state == AgentMatch::Fuzzy {
+    if operation == AgentOperation::Search
+        && matches!(match_state, AgentMatch::Fuzzy | AgentMatch::Unknown)
+    {
         AgentResultState::Candidates
     } else {
         AgentResultState::Answered
@@ -2696,6 +2711,13 @@ fn answer_for_code(
         .unwrap_or_else(|| requested.clone());
     let headline = match context.operation {
         AgentOperation::Search => match result_state {
+            AgentResultState::Candidates
+                if match_state == AgentMatch::Unknown && response.results.is_empty() =>
+            {
+                format!(
+                    "Search stopped at its bound before a match or absence could be established for \"{requested}\"."
+                )
+            }
             AgentResultState::NoMatch => {
                 format!("No exact match for \"{requested}\"; fallback candidates are shown.")
             }

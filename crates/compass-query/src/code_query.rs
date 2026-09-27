@@ -307,6 +307,15 @@ const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Renders,
 ];
 
+/// Optional conjunctive filters for exact symbol lookup. Paths are compared to
+/// stored repository-relative paths; they are never opened or canonicalized.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExactSearchFilter {
+    pub source_file: Option<String>,
+    pub start_line: Option<u32>,
+    pub kind: Option<NodeKind>,
+}
+
 pub struct CodeQueryEngine {
     pub(crate) backend: CodeGraphBackend,
     pub(crate) program: Option<ProgramBundle>,
@@ -1566,6 +1575,104 @@ impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
         self.search_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    /// Return every bounded exact ID/name candidate satisfying explicit filters.
+    /// Name normalization matches typed symbol resolution. No lexical fallback,
+    /// ranking-based selection or export-binding elimination is performed.
+    /// The candidate bound applies before filtering: a filtered prefix never
+    /// establishes uniqueness or absence when exact lookup was truncated.
+    pub fn search_exact(
+        &self,
+        request: SearchRequest,
+        filter: ExactSearchFilter,
+    ) -> Result<CodeQueryResponse, QueryError> {
+        self.check_deadline()?;
+        validate_limits(&request.limits)?;
+        let valid_text = |value: &str| {
+            !value.trim().is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control)
+        };
+        if !valid_text(&request.query)
+            || filter
+                .source_file
+                .as_deref()
+                .is_some_and(|value| !valid_text(value))
+            || filter.start_line == Some(0)
+            || (filter.start_line.is_some() && filter.source_file.is_none())
+        {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "invalid_exact_search",
+                "exact search requires 1..4096 non-control selector/file bytes; start line must be positive and requires a source file",
+            ));
+        }
+        let bound = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
+        let exact_id = self.backend.node_by_id(&request.query)?;
+        let id_match = exact_id.is_some();
+        let (mut candidates, truncated) = if let Some(node) = exact_id {
+            (vec![node], false)
+        } else {
+            self.backend
+                .nodes_by_normalized_name(&normalize_symbol(&request.query), bound)?
+        };
+        self.check_deadline()?;
+        candidates.retain(|node| {
+            filter.kind.is_none_or(|kind| node.kind == kind)
+                && filter.source_file.as_deref().is_none_or(|file| {
+                    node.source
+                        .as_ref()
+                        .is_some_and(|source| source.file == file)
+                })
+                && filter.start_line.is_none_or(|line| {
+                    node.source
+                        .as_ref()
+                        .is_some_and(|source| source.start_line == line)
+                })
+        });
+        candidates.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut response = CodeQueryResponse::empty(CodeQueryOperation::Search, request.limits);
+        response.truncated = truncated;
+        if truncated {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: format!("Exact-name lookup exceeded {bound} candidates before filtering; returned matches do not establish uniqueness or absence"),
+                node_id: None,
+                path: None,
+            });
+        } else if candidates.is_empty() {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: "No exact symbol satisfies the supplied filters".to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
+        let max_nodes = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
+        if candidates.len() > max_nodes {
+            response.truncated = true;
+            candidates.truncate(max_nodes);
+        }
+        for node in candidates {
+            let matched_fields = if id_match {
+                vec!["id".to_owned()]
+            } else {
+                [
+                    ("name", &node.name),
+                    ("qualified_name", &node.qualified_name),
+                ]
+                .into_iter()
+                .filter(|(_, value)| normalize_symbol(value) == normalize_symbol(&request.query))
+                .map(|(field, _)| field.to_owned())
+                .collect()
+            };
+            response.results.push(SearchHit {
+                node_id: node.id.clone(),
+                score: 1.0,
+                matched_fields,
+            });
+            response.nodes.push(query_node(&node));
+        }
+        self.finish_response(&mut response)
     }
 
     pub(crate) fn search_instrumented(

@@ -972,3 +972,51 @@ fn unresolved_relationship_answers_never_speak_for_another_symbol() -> Result<()
     );
     Ok(())
 }
+
+#[test]
+fn bounded_empty_search_is_unknown_instead_of_a_no_match_claim() -> Result<(), Box<dyn Error>> {
+    for diagnostic_only in [false, true] {
+        let mut result = response(CodeQueryOperation::Search);
+        result.truncated = !diagnostic_only;
+        result.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::BoundedTruncation,
+            message: "Exact lookup stopped before filtering was complete".to_owned(),
+            node_id: None,
+            path: None,
+        });
+        let view = build_code_query_view(
+            &result,
+            context(AgentOperation::Search)
+                .with_operand(compass_output::AgentOperandRole::Query, "Subject"),
+        )?;
+        assert_eq!(view.status.match_state, AgentMatch::Unknown);
+        assert_eq!(view.status.result_state, AgentResultState::Candidates);
+        assert_eq!(view.status.source_execution, AgentExecution::Partial);
+        assert!(view.primary_results.is_empty());
+        let text = render_agent_query_text(&view)?;
+        assert!(text.contains("before a match or absence could be established"));
+        assert!(!view.caveats.iter().any(|c| c.code == "no_match"));
+    }
+    Ok(())
+}
+
+#[test]
+fn search_exact_match_display_uses_typed_name_normalization() -> Result<(), Box<dyn Error>> {
+    let mut result = response(CodeQueryOperation::Search);
+    result
+        .nodes
+        .push(node("id:subject", ".Subject()", &anchor("src/lib.rs", 1)));
+    result.results.push(SearchHit {
+        node_id: "id:subject".to_owned(),
+        score: 1.0,
+        matched_fields: vec!["name".to_owned()],
+    });
+    let view = build_code_query_view(
+        &result,
+        context(AgentOperation::Search)
+            .with_operand(compass_output::AgentOperandRole::Query, " SUBJECT "),
+    )?;
+    assert_eq!(view.status.match_state, AgentMatch::Exact);
+    assert_eq!(view.status.result_state, AgentResultState::Answered);
+    Ok(())
+}
