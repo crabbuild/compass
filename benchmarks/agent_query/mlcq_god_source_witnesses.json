@@ -5,14 +5,12 @@
     {
       "repository": "apache/cloudstack",
       "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
-      "root": "/Volumes/Workspace/Github/apache/cloudstack",
       "trackedFiles": 7764,
       "trackedJavaFiles": 5474
     },
     {
       "repository": "eclipse/eclipse.platform.ui",
       "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
-      "root": "/Volumes/Workspace/Github/eclipse/eclipse.platform.ui",
       "trackedFiles": 8964,
       "trackedJavaFiles": 6060
     }

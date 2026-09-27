@@ -803,3 +803,36 @@ permission error is retained. Fourteen new tests include all 4,096 four-node
 directed graphs at three depth bounds. External `public-neighbor-path-01`
 retains raw evidence and repeated verification. No product/version change,
 held-out evidence or overall superiority claim follows.
+
+### Externally rated Blob classes
+
+`mlcq_god_audit_registration.json` freezes a Java addition to the multilingual
+panel using Lech Madeyski and Tomasz Lewowski's [MLCQ v1.1 dataset](https://zenodo.org/records/3666840)
+(CC-BY-4.0; paper DOI: 10.1145/3383219.3383264). The full downloaded CSV stays
+outside the repository; the registration retains attribution, digests and
+selected review metadata.
+
+`mlcq_corpus.py` reduces 4,019 Blob review rows to 2,334 source classes. Duplicate
+reviews by one reviewer never add independent votes. It selects every pinned
+repository/revision with at least two multi-reviewer unanimous `none` classes
+and two classes whose reviewers all assigned `major` or `critical`: CloudStack
+and Eclipse Platform UI. All 55 classes and 104 review rows in those revisions
+remain visible; only eight classes enter the primary denominator (four in each
+rating group). The remaining 47 classes retain single-reviewer, minor or
+conflicting judgments. This consensus-enriched sample is not prevalence data.
+
+`mlcq_god_source_witnesses.json` pins exact class declaration coordinates and
+source hashes. `mlcq_god_source_review.json` records a complete annotated-span
+review for all eight classes. One positive case is a test class. These authored
+responsibility observations supplement imperfect external labels; they are not
+tool-generated explanations, proven refactoring requirements or new labels.
+
+`mlcq_hubs.py` scores the registered native top-100 hub response at cutoffs
+10/50/100, separately for each rating group. Missing graph declarations,
+ambiguous graph anchors, ambiguous displayed labels, nonreturned classes and
+unavailable captures remain distinct. Source coordinates never disambiguate a
+returned label. Unlabeled hubs cannot establish precision-at-k or a false-positive
+rate. Source-assisted class neighbors are a separate diagnostic and cannot
+replace native ranking retrieval. Neither tool's ordinary degree ranking is an
+established god-object classifier. The original extraction and artifact limits
+remain part of the outcome, including failures.
