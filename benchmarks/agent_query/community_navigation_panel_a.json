@@ -1,0 +1,50 @@
+{
+  "schema": "compass.community-navigation-policy/1",
+  "scope": "Development diagnostic on reused graphs and source-reviewed tasks; no held-out or overall-superiority claim. Frozen before this public community-to-neighbor capture.",
+  "registrationSha256": "71faed0f477ee97da98c8bbb86686fae09de450664e4e000d9b2404496b94b6d",
+  "startingInput": "For every task, prepare the community containing the first exact source declaration symmetrically from each stored graph. Preparation is not scored as retrieval. Missing, ambiguous or unassigned inputs remain unresolved.",
+  "selectorPolicy": "Call get_community. Parse complete text member rows as two spaces, displayed label, space, [source file]. Match the public seed file and exact terminal symbol using runner._terminal_symbol. Retain every matching row. If exactly one distinct displayed label exists, send that label to get_neighbors even if repeated identically; record repeated rows. Otherwise stop unresolved. Never consult a graph to choose or substitute a follow-up selector. This baseline does not consume future structured community schemas.",
+  "followup": {
+    "tool": "get_neighbors",
+    "relation_filter": "calls",
+    "maximumCallsPerTask": 1,
+    "disambiguationRetries": 0
+  },
+  "bounds": {
+    "requestTimeoutSeconds": 60,
+    "maxResponseBytes": 1048576,
+    "maxSessionBytes": 67108864,
+    "graphifyTokenBudget": 262144
+  },
+  "budgetInterpretation": "Generous full-enumeration capability arm. Common external time/byte bounds; Graphify explicit token_budget and Compass whole-result interface are unequal native controls. Preserve wire bytes including initialization/listing and all errors. No latency or token-efficiency superiority claim.",
+  "scoring": [
+    "Separate successful transport/tool execution, selected label, explicit ambiguity, matching seed heading, and identity support. Graphs may be consulted only for preparation/scoring, never follow-up selection.",
+    "Seed identity support requires a successful expected heading whose displayed label maps to exactly the expected source declaration across the entire stored graph. Do not disambiguate using expected adjacency or degree.",
+    "Compare displayed direction/name counts against distinct neighbors on stored calls edges. This is projection consistency, not source precision, complete relation coverage, or occurrence recall.",
+    "For the 14 reviewed direct-call tasks, report a displayed outgoing collaborator calls row separately from exact collaborator identity support. Exact support also requires seed identity support and the displayed target label to be unique graph-wide and equal the reviewed target ID. Do not substitute a convenient overloaded declaration.",
+    "Chi RequestID/GetReqID share a context key and have no direct call requirement. Keep that task in the 15-task navigation denominator, exclude it from the 14-task direct-collaborator denominator.",
+    "Report community splits separately; different tool-specific split subsets are not equal denominators. Record original community size, matching-row count, output sizes, failures and all unresolved outcomes."
+  ],
+  "directCallTasks": [
+    "chi-router-construction",
+    "chi-route-pattern-parameters",
+    "click-atomic-close",
+    "click-terminal-string-width",
+    "click-help-definition-layout",
+    "jsoup-safe-document-copy",
+    "jsoup-html-fragment-parse",
+    "jsoup-html-whitespace",
+    "redux-listener-registration",
+    "redux-action-shape-validation",
+    "redux-action-creator-binding",
+    "walkdir-directory-handle-budget",
+    "walkdir-deferred-directory-depth",
+    "walkdir-symlink-loop-detection"
+  ],
+  "limitations": [
+    "Only 15 purposively selected development tasks across five pinned repositories.",
+    "Public get_community to one get_neighbors follow-up is one workflow; additional searches, IDs from other tools and disambiguation retries are unmeasured.",
+    "Graph-wide display-label uniqueness is a conservative identity audit, not information directly supplied in the successful text response.",
+    "No extra assertion precision, architecture defect, god-object diagnosis or agent-generated explanation is scored."
+  ]
+}

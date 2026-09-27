@@ -213,3 +213,17 @@ complete top-N eligibility, and ranking correctness remain separate questions.
 - Existing fixes and development-suite leads do not satisfy the complete
   objective. God-object judgments and the additional community/ask surfaces
   still require measured evidence across the repository panel.
+
+### Community-to-neighbor workflow
+
+`community_navigation_panel_a.json` freezes a development workflow over all 15
+source-defined tasks. Prepare each starting community symmetrically, then choose
+one calls-neighbor lookup solely from the returned member label matching the
+seed file and terminal symbol. Retain duplicate rows and stop on multiple
+distinct selectors. Score ambiguity, displayed adjacency and exact identity
+separately; never use the expected neighbors to identify an ambiguous seed.
+Fourteen pairs require a direct call; Chi's request-ID pair shares context state.
+Both tools receive common external 60-second/1-MiB response bounds, with
+Graphify's generous explicit token allowance disclosed. Preserve complete
+transcripts and startup overhead. This is a capability diagnostic, not an
+output-efficiency, source-precision or whole-architecture score.
