@@ -2787,6 +2787,95 @@ real-repository review replays byte-for-byte. No Rust/JavaScript tests or
 extraction gates were rerun for this benchmark/documentation-only checkpoint;
 previous production validation remains tied to its earlier commit.
 
+## Rust field-access correction and paired navigation control
+
+Registrations `4a1be265` and `56d7d559` fix the production contract, unchanged
+20-site comparison and four known-ID-assisted public neighbor requests before
+rebuilt graphs or follow-up outputs were inspected. Production commit
+`390406c1` emits Rust `MemberAccess` occurrences and qualified `AccessesMember`
+candidates for explicit field expressions. It reuses bounded source-type
+inference and existing universal resolution, restricts targets to fields,
+retains unknown/shadowed receivers as unresolved, and excludes method selectors.
+Parallel occurrences keep exact field-identifier anchors. It does not infer
+read/write effects, aliasing, independent responsibilities or god-object defects.
+
+AST cache semantics advance from 7 to 8 so older facts rebuild. Evidence/graph
+schemas, advertised producer capabilities and package version stay unchanged;
+published historical realizations are immutable. Graphs must be rebuilt to
+receive the new evidence. The CI workflow now runs both new integration suites
+explicitly because its library/binary test invocations would otherwise skip them.
+
+All five Compass graphs were rebuilt from the same pinned, read-only sources.
+Graphify's frozen native graphs remain unchanged. The original 0/20 versus
+0/20 report is preserved; it is not rewritten with the improved graph.
+
+| Evidence | Compass before | Compass after | Graphify |
+| --- | ---: | ---: | ---: |
+| Registered state-contact access sites, all five repositories | 0/20 | **4/20** | 0/20 |
+| Registered Rust access sites | 0/4 | **4/4** | 0/4 |
+| State slots represented, all five repositories | 6/10 | 6/10 | 0/10 |
+
+The four recovered sites link `IntoIter::handle_entry` and `get_deferred_dir`
+to `deferred_dirs`, and `push` and `pop` to `oldest_opened`, at the registered
+lines. Java and TypeScript still miss their eight selected contact edges;
+Go and Python still lack the four selected state-slot declarations. Both tools
+continue to identify all twenty accessing callable coordinates.
+
+Chi, Click, jsoup and Redux graphs are byte-for-byte identical to their frozen
+controls, including all communities. jsoup and Redux still report two omitted
+edges each; this checkpoint does not repair those partial publications. WalkDir
+keeps all 288 nodes and all 1,206 earlier edge records unchanged, adds 174
+member-access references, and changes 122 node community assignments. It now
+has 1,380 edge records. Recomputed clustering is an observable consequence, not
+proof of improved communities. The verifier checks every added record's field
+target kind, exact identifier bytes, enclosing source extent and provenance;
+this is occurrence consistency rather than a compiler/type-resolution oracle
+or full semantic precision review of all 174 records.
+
+The separate public MCP arm provides each tool its own exact callable IDs as
+explicit task inputs, then makes one unfiltered `get_neighbors` request per
+method. All eight requests succeed. Compass exposes the field identity and the
+selected source-line occurrence in **4/4** replies; Graphify exposes neither
+in **0/4**. Compass's complete neighbor nodes and records match its new graph.
+This is a known-ID retrieval control with native defaults, not natural-language
+identity discovery or authored responsibility explanation. It is not held-out.
+
+Compass returns 10,308 text / 139,303 full response bytes; Graphify returns
+1,519 / 1,904. The larger Compass responses retain full records and repeated
+occurrences; no token-efficiency or latency advantage is claimed. The scoped
+four-site gain must not be substituted for the earlier five-language source
+explanation comparison, where Graphify retained a 15/20 versus 14/20 lead.
+
+All six initial extraction regressions failed before the change. The final
+seven extraction tests and three resolver/publication tests cover direct and
+nested fields, indexed receivers, lexical shadowing, unknown/raw-pointer
+receivers, duplicate fields, ambiguous imports, depth exhaustion, trait impls,
+callable fields versus method selectors, cross-file targets, parallel anchors
+and input-order determinism. An integration fixture initially lacked physical
+source inventory and checked the wrong raw kind key; both were corrected.
+Another assertion exposed an audit wording error: `member-access` is retained
+in provenance, not necessarily in the optional `context` field. The earlier
+wording is corrected. Focused Clippy also caught and corrected a test-helper
+type-complexity warning. Failed attempts remain in the external logs.
+
+Final validation passed formatting, 45 Rust language integration tests,
+237 resolver integration tests, 33 cache contracts, workspace and focused-test
+Clippy, 1,106 workspace tests (2 ignored), 9 product tests, the product boundary,
+full code-graph fixture qualification (including Markdown and the independent
+React release-binary fixture gate), and 148 benchmark tests. The new CI command
+also passes all ten new integration tests. The evaluated debug binary matches
+the qualifying debug binary, and validated source hashes match `390406c1`.
+Warnings retained in the logs include fixture publication omissions, a linker
+warning and an existing unused-mut test warning; passing does not mean the logs
+are warning-free. Hosted platform/packaging/browser matrices are not claimed.
+
+Verification and artifact hashes are recorded in
+`benchmarks/agent_query/rust_state_access_development_review.json`; the complete
+capture, fresh graph manifests, graph deltas, raw MCP transcripts, source checks,
+verifier and validation logs are under `rust-state-access-01`. Remaining Java,
+TypeScript, Go and Python state evidence, actual cohesion/god-object judgments,
+authored explanations and fresh held-out confirmation remain unfinished.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

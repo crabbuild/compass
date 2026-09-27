@@ -1,0 +1,476 @@
+{
+  "schema": "compass.rust-state-access-development-review/1",
+  "scope": "Known development sources and fixed source-access sites. Full-graph coverage plus a separate known-ID-assisted public retrieval control; not held-out, representative god-object classification, exhaustive edge precision, read/write analysis, clustering quality or overall superiority.",
+  "productCommit": "390406c1",
+  "registrationCommits": [
+    "4a1be265",
+    "56d7d559"
+  ],
+  "registrationSha256": "badb11879b8a646ee208a27f521dd012417f16b8ddc561d2ee24a7d388b1fc70",
+  "sourceRegistrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "baselineReviewSha256": "7716b9c160a6b113d0ee14af146e279e7de191f393ef92862737673f45675afc",
+  "artifactDirectory": "rust-state-access-01",
+  "sourceSha256": {
+    "crates/compass-languages/src/evidence/build.rs": "e27fa5637afe57e2b21c28029878746806798121b212cbc8d8ec47f4fad7d48f",
+    "crates/compass-files/src/cache.rs": "5e7850bb2ce97c17e91cd763c4a36a6c7f2260edb082278c16ffcbdfbd6e9c73",
+    "crates/compass-files/tests/contracts.rs": "a9f37e4bbf888a91034fb9332fac3f7efe1872bc9c7752aad4372ffc04c616e6",
+    "crates/compass-languages/tests/rust_field_access.rs": "0c8bdcc6e1a5a5e881518ec1cd0e60a04afda16044c98a98d037da9979a0202e",
+    "crates/compass-resolve/tests/rust_field_access.rs": "afc0aeac1a8e74418667a0507aa9c84cbadf8787820c0f4df1f25e9a1d351730"
+  },
+  "compassBinarySha256": "a1692336191eff63849846eb91c1804798381d9e9f1a4ff1180a73a37c61f505",
+  "graphResults": {
+    "compass": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 6,
+      "contactSupported": 4,
+      "selectedLineSupported": 4,
+      "status": {
+        "contact_edge": 4,
+        "missing_state": 8,
+        "no_contact_edge": 8
+      }
+    },
+    "graphify": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 0,
+      "contactSupported": 0,
+      "selectedLineSupported": 0,
+      "status": {
+        "missing_state": 20
+      }
+    }
+  },
+  "graphDeltas": [
+    {
+      "repository": "chi",
+      "oldGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "newGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "nodesBefore": 729,
+      "nodesAfter": 729,
+      "edgesBefore": 1914,
+      "edgesAfter": 1914,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "click",
+      "oldGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "newGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "nodesBefore": 4264,
+      "nodesAfter": 4264,
+      "edgesBefore": 6387,
+      "edgesAfter": 6387,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "jsoup",
+      "oldGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "newGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "nodesBefore": 6116,
+      "nodesAfter": 6116,
+      "edgesBefore": 21110,
+      "edgesAfter": 21110,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "redux",
+      "oldGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "newGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "nodesBefore": 3503,
+      "nodesAfter": 3503,
+      "edgesBefore": 5653,
+      "edgesAfter": 5653,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 0,
+      "addedEdges": 0,
+      "removedEdges": 0,
+      "changedEdges": 0
+    },
+    {
+      "repository": "walkdir",
+      "oldGraphSha256": "e68fbe798dcf7422184736971dcdfc29d577e1e37269ea9c43456b9f6af54cb3",
+      "newGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+      "nodesBefore": 288,
+      "nodesAfter": 288,
+      "edgesBefore": 1206,
+      "edgesAfter": 1380,
+      "addedNodes": 0,
+      "removedNodes": 0,
+      "changedNodes": 0,
+      "communityChanges": 122,
+      "addedEdges": 174,
+      "removedEdges": 0,
+      "changedEdges": 0
+    }
+  ],
+  "publicSummary": {
+    "compass": {
+      "tasks": 4,
+      "fieldNeighborIdentity": 4,
+      "selectedLineAnchored": 4,
+      "textBytes": 10308,
+      "wireBytes": 139303
+    },
+    "graphify": {
+      "tasks": 4,
+      "fieldNeighborIdentity": 0,
+      "selectedLineAnchored": 0,
+      "textBytes": 1519,
+      "wireBytes": 1904
+    }
+  },
+  "publicRows": [
+    {
+      "tool": "compass",
+      "method": "handle_entry",
+      "state": "deferred_dirs",
+      "fieldNeighborIdentity": true,
+      "selectedLineAnchored": true,
+      "textBytes": 3839,
+      "wireBytes": 55221
+    },
+    {
+      "tool": "compass",
+      "method": "get_deferred_dir",
+      "state": "deferred_dirs",
+      "fieldNeighborIdentity": true,
+      "selectedLineAnchored": true,
+      "textBytes": 1601,
+      "wireBytes": 18620
+    },
+    {
+      "tool": "compass",
+      "method": "push",
+      "state": "oldest_opened",
+      "fieldNeighborIdentity": true,
+      "selectedLineAnchored": true,
+      "textBytes": 3264,
+      "wireBytes": 46122
+    },
+    {
+      "tool": "compass",
+      "method": "pop",
+      "state": "oldest_opened",
+      "fieldNeighborIdentity": true,
+      "selectedLineAnchored": true,
+      "textBytes": 1604,
+      "wireBytes": 19340
+    },
+    {
+      "tool": "graphify",
+      "method": "handle_entry",
+      "state": "deferred_dirs",
+      "fieldNeighborIdentity": false,
+      "selectedLineAnchored": false,
+      "textBytes": 421,
+      "wireBytes": 518
+    },
+    {
+      "tool": "graphify",
+      "method": "get_deferred_dir",
+      "state": "deferred_dirs",
+      "fieldNeighborIdentity": false,
+      "selectedLineAnchored": false,
+      "textBytes": 367,
+      "wireBytes": 463
+    },
+    {
+      "tool": "graphify",
+      "method": "push",
+      "state": "oldest_opened",
+      "fieldNeighborIdentity": false,
+      "selectedLineAnchored": false,
+      "textBytes": 473,
+      "wireBytes": 571
+    },
+    {
+      "tool": "graphify",
+      "method": "pop",
+      "state": "oldest_opened",
+      "fieldNeighborIdentity": false,
+      "selectedLineAnchored": false,
+      "textBytes": 258,
+      "wireBytes": 352
+    }
+  ],
+  "addedOccurrenceConsistency": 174,
+  "validation": [
+    {
+      "name": "fmt",
+      "argv": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 4.31,
+      "testCounts": null,
+      "metadataSha256": "f86b0a171fb71e1337471cdc2bf28079df4868ceee2802671bf88729d3037734",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "language-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-languages",
+        "--test",
+        "rust_field_access",
+        "--test",
+        "rust_index_receivers",
+        "--test",
+        "rust_universal_conformance",
+        "--test",
+        "rust_universal_phase2",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 8.32,
+      "testCounts": [
+        45,
+        0,
+        0
+      ],
+      "metadataSha256": "1f0cedad05d94a9d10f3cef56ee0941582f247c2a8e39b05efa0e26b604fc489",
+      "logSha256": "4041f3ff2f138574fa4a3ddeb44283eb4716642799695fd5d29a93ac516565b3"
+    },
+    {
+      "name": "resolver-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-resolve",
+        "--test",
+        "rust_field_access",
+        "--test",
+        "universal_evidence",
+        "--test",
+        "universal_resolution",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 1.29,
+      "testCounts": [
+        237,
+        0,
+        0
+      ],
+      "metadataSha256": "6277dd30dbf6d092c8db7132ce31a07bcccca41cb16be717ee916eb92ba23122",
+      "logSha256": "14aa5273ffdd547b5cd3f9c58ce4aad1de0126ee2d973b9752a90621ca314573"
+    },
+    {
+      "name": "cache-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-files",
+        "--test",
+        "contracts",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 1.13,
+      "testCounts": [
+        33,
+        0,
+        0
+      ],
+      "metadataSha256": "a60275701716533ee5f1ec66e6d30c6a6b928cc5c4011403ea8d2235abce13ed",
+      "logSha256": "07f20992c401957f5dfc5d98f6ba45169569edbd67a5c6bf00c1b603213632a6"
+    },
+    {
+      "name": "clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--lib",
+        "--bins",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exitCode": 0,
+      "seconds": 1.21,
+      "testCounts": null,
+      "metadataSha256": "49269c798c0ea6a34cce01cd9697d9a017f4479b5d29cecb78e81980302c67f1",
+      "logSha256": "00e61713e19859fe5a2aa621594e80ce8447dfdaca7fa6adcdd310bae37c4406"
+    },
+    {
+      "name": "focused-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "-p",
+        "compass-languages",
+        "-p",
+        "compass-resolve",
+        "--test",
+        "rust_field_access",
+        "--locked",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exitCode": 0,
+      "seconds": 0.68,
+      "testCounts": null,
+      "metadataSha256": "5e4afd17a18c55c067028eaeba4f9609b5ba53bcfd21e1f2bc5f9a5845a20e70",
+      "logSha256": "b0b99394e88f6c488aef84cb39e9bccb7e1fa624de1ffebf9ff580d9f54e0415"
+    },
+    {
+      "name": "workspace-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--lib",
+        "--bins",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 136.93,
+      "testCounts": [
+        1106,
+        0,
+        2
+      ],
+      "metadataSha256": "673338d8608edc04cde894666158884e88254c0b93b3da5f1dc40b8f82398614",
+      "logSha256": "93ef2074f2aba191d8114e02b12c7c5fad24ab8dc0c1d6c1759544828675e4b0"
+    },
+    {
+      "name": "product-tests",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "compass-cli",
+        "--test",
+        "compass_product",
+        "--locked"
+      ],
+      "exitCode": 0,
+      "seconds": 67.24,
+      "testCounts": [
+        9,
+        0,
+        0
+      ],
+      "metadataSha256": "030ac33a8880c4804ac13015ee412974d7ae680c865b2ce46063993b2aa1aff7",
+      "logSha256": "f401555994c89c6569f6a9aa327caf5e8998f48c9b7f3adc80d559634acd94c8"
+    },
+    {
+      "name": "boundary",
+      "argv": [
+        "sh",
+        "scripts/check_product_boundary.sh"
+      ],
+      "exitCode": 0,
+      "seconds": 0.26,
+      "testCounts": null,
+      "metadataSha256": "fcfd459348474f184179f16612ef3509909aec6adc4a18d659cd759ff7eb707f",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "fixtures",
+      "argv": [
+        "bash",
+        "scripts/qualify_code_graph_v1.sh",
+        "--fixtures-only"
+      ],
+      "exitCode": 0,
+      "seconds": 910.11,
+      "testCounts": [
+        6,
+        0,
+        0
+      ],
+      "metadataSha256": "8a70d1d7e50db27558a4fc9b668340604631f587d089fa531f9f462ec22d3267",
+      "logSha256": "03e528b0d4e5af1253b4a41e2b1b50bf4b672f64d8c56c26208a868c17a5d0a7"
+    },
+    {
+      "name": "benchmarks",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "benchmarks/agent_query/tests"
+      ],
+      "exitCode": 0,
+      "seconds": 2.38,
+      "testCounts": null,
+      "metadataSha256": "7850844ae639f7122cbbf6afa4778989c70e7312631dfdb4b55bb6c80453b2e2",
+      "logSha256": "6e6e1f38ab8af6fcf53fef9d922c261be18d5c5b5bd470bf964c227087c2c825"
+    }
+  ],
+  "artifacts": {
+    "run.json": "529f842b347802c59687560b6338bda8038fe704579c3e5434ee6654bcb59aad",
+    "state-access-registration.json": "a4c74826dd45d4d52379e70e9f8b11dc29495a6d7de37590ee263ec4b816aabb",
+    "review.json": "35960cdaf41f1ab99b965a319ff78997872f030a9fb56e8cf982d3b9af558567",
+    "delta-summary.json": "cbea1f337c19ce7cd3c736e1274ce34fe2e972e9637b9d1ee78a5c20cf4e47fb",
+    "public-capture.json": "2fa6f9f365bb0a566144ebe47b68bc4e4c716791ebcac3686ce483f7809091b0",
+    "verification.json": "63eeb921b301712184a5391e85aa33bbcdac96ae4b6719ae63764e97397b4721",
+    "added-occurrence-consistency.json": "b285a3564cd14dc08532f6a4b02968c0e065b984e73108c1f591e58bb5b5e011",
+    "evaluate.py": "b3d8e0dd1af6681456751ae569a1d40dee942ce460343a8eeb909b3ae475c9b9",
+    "public.py": "bb6af84e80791722a0321c121939dba087591188a6374bc5c0413151234a6e18",
+    "verify.py": "99ad35c67b09ec4cee2335ce48e3e2fb6f4d3229504b2da8a61ca8797b109339",
+    "run.py": "e7e01fedde8cebd9b9994d59e58bbdaacc343d93a3076ffadb3349cacc12368b",
+    "validate.py": "dbb79f30742668c11f482a374117fb9bb7b852c3c37c23e9a4d917ef5ecd283e",
+    "summarize.py": "a4a97d5fd22277e7a65c2733f64ded7c57597187d7de45931f0440aea89d0e49"
+  },
+  "limitations": [
+    "The two state slots create four related Rust observations, not four independent repositories. Other sixteen source-access sites remain unsupported.",
+    "All old WalkDir nodes/edges are retained; 122 community assignments change. No clustering-quality judgment follows.",
+    "174 added records pass occurrence/endpoint consistency; comprehensive semantic precision is unproven.",
+    "jsoup and Redux retain partial-publication warnings for two omitted edges each; their graphs are byte-identical controls.",
+    "MCP requests use native defaults and exact IDs supplied as task inputs. Compass carries richer and much larger payloads. No efficiency/latency win.",
+    "Same-agent source selection/adjudication; no independent human or compiler semantic oracle.",
+    "Six fail-before extraction tests; early integration fixture errors and a mistaken context-field assertion were corrected. Member-access provenance is present; optional context is not required.",
+    "Qualification logs retain existing partial-fixture publication, linker and unused-mut warnings. Full hosted CI/platform/packaging results are not claimed."
+  ],
+  "ciCommandVerification": {
+    "argv": [
+      "cargo",
+      "test",
+      "-p",
+      "compass-languages",
+      "-p",
+      "compass-resolve",
+      "--test",
+      "rust_field_access",
+      "--locked"
+    ],
+    "exitCode": 0,
+    "metadataSha256": "e2bb261068b0af36acd657b9d78442036b3cdf0ff86dee18a8bd308cf1168fbb",
+    "logSha256": "fff186f2a65c1904a55d18a7953178cd73e9c2317422bddf4b6c3b2542c0e281"
+  }
+}

@@ -508,3 +508,18 @@ hashes, all candidate/connecting records and the auditor's own code hash. It
 preserves Graphify's undirected container flag; stored endpoint order is not a
 native directed-path claim. Same-agent review and purposive development scope
 remain explicit.
+
+
+### Rust field-access correction
+
+`rust_state_access_development_registration.json` freezes the correction and a
+known-ID public neighbor control. `rust_state_access_development_review.json`
+records the five-repository rebuild: Compass now supports 4/20 registered access
+sites (all four Rust sites), versus Graphify's unchanged 0/20. The four other
+Compass graphs are byte-identical. WalkDir adds 174 field-reference records and
+changes 122 community assignments while preserving all earlier nodes/edges.
+The four public neighbor requests retrieve the selected identities and anchors
+for Compass; Graphify lacks those fields. This known-subject gain does not
+establish overall superiority, source precision for every added edge, improved
+clustering, read/write effects or god-object defects. Raw captures and replay
+scripts remain under the registered external artifact directory.
