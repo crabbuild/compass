@@ -3139,6 +3139,85 @@ checks were not rerun. This strengthens semantic precision evidence for one
 Java source configuration; authored explanations, longer walks, functional
 communities, actual god-object judgments and held-out confirmation remain open.
 
+## Explanation retrieval: paired source-budget sensitivity
+
+Registration `35cb4aee` freezes five per-subject source quotas before capture:
+2,000, 4,000, 8,000, 16,000 and 32,000 bytes. All 20 existing responsibility
+facts, five pinned repositories, exact identity constraints and source-window
+rules remain fixed. Both tools receive one public resolver request and one
+public neighbor request per subject. Only returned outgoing `contains`/`method`
+anchors determine source selection. Sorted windows end at the next returned
+anchor; the last window is limited to 4,096 bytes. No witness, source-content
+ranking or extra query selects the source. The latest `f2cacfeb` binary and
+`java-state-access-02` graphs are used; Graphify's frozen native graphs and
+installed package hashes are unchanged.
+
+This is a known development panel. Earlier questions and failures informed the
+choice to examine budget sensitivity. The results are **source-evidence
+coverage**, with no authored answers, held-out claim or production change.
+
+| Source quota per subject | Compass facts | Graphify facts | Compass actual source bytes, five subjects | Graphify actual source bytes, five subjects |
+| --- | ---: | ---: | ---: | ---: |
+| 2,000 | 8/20 | 8/20 | 10,000 | 10,000 |
+| 4,000 | 8/20 | 8/20 | 19,673 | 19,673 |
+| 8,000 | 14/20 | 15/20 | 35,673 | 35,673 |
+| 16,000 | 19/20 | 18/20 | 59,542 | 53,417 |
+| 32,000 | 20/20 | 18/20 | 64,644 | 53,747 |
+
+Literal-witness counts are one lower for each tool at every quota. The prior
+Click allowance remains explicit: the class header alone is absent, while the
+source-validated owner and every other required line are present. It cannot be
+applied when identity is unverified or another required line is missing.
+
+At 8,000 bytes, every membership row and retained source interval is unchanged
+from the earlier 14/20 versus 15/20 control. Added Java/Rust field contacts do not
+help this membership-only policy. Changed jsoup/WalkDir resolver responses carry
+new graph/view digests; jsoup neighbor differences are community metadata and
+the corresponding serialized-byte requirement.
+Full payload differences are retained, not silently discarded.
+
+The remaining Compass fact at 16,000 bytes is WalkDir's symlink-loop handling.
+Earlier fields, methods and intervening comments consume the quota before its
+implementation is reached. At 32,000 bytes, all four WalkDir witnesses fit.
+Graphify's two remaining facts are Redux enhancer delegation and the complete
+observable/store API. Its earliest returned member begins after the enhancer
+implementation, and its last-member window reaches only part of the observable
+implementation before the fixed 4,096-byte cap. Raising the global quota cannot
+repair those intervals. This does not establish that Graphify cannot retrieve
+that code with a different workflow.
+
+Payload costs remain unequal. Across the five subjects, Compass resolver
+responses contain 3,039 text / 21,983 wire bytes and neighbor responses contain
+33,061 / 372,871 bytes. Graphify returns 619 / 1,094 resolver bytes and
+6,980 / 7,534 neighbor bytes. Larger-quota Compass coverage also consumes more
+actual source bytes. Equal retained-source ceilings therefore do not imply
+equal context, compute or total information cost.
+
+The reusable `source_windows.py` evaluator bounds files, aggregate source reads,
+anchors and quotas; validates every anchor, including omitted ones; preserves
+raw byte cuts through UTF-8; and checks source hashes before scoring. Eleven
+new tests cover budget exhaustion, deduplication, order, final-window caps,
+invalid anchors, path/symlink escapes, corruption, Unicode and the constrained
+Click allowance. All **187 benchmark tests and the product boundary pass**.
+The separate artifact verifier checks all 20 public calls, 153 membership
+anchors and 50 window/scoring arms from raw transcripts and pinned source.
+Independent repeated verification is byte-identical. The unchanged historical
+8,000-byte policy is also replayed directly against each newly captured response.
+
+Committed `explanation_budget_registration.json` and
+`explanation_budget_review.json` retain the protocol, every budget result,
+actual costs, misses and artifact hashes. External `explanation-budget-01`
+contains capture/replay scripts, raw calls, literal source windows, payload
+deltas and verification logs. No native Rust, JavaScript, platform or packaging
+checks were rerun because the product is unchanged; version remains 0.3.30.
+
+A 20/20 witness score does not establish complete answers to the original
+natural-language questions or behavior of unseen callees. The next production
+work should improve bounded explanation evidence selection and context costs,
+then evaluate authored answers under a separately registered common workflow.
+God-object defect judgments, longer-walk quality, functional community quality
+and held-out confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

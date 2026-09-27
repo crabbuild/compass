@@ -658,3 +658,28 @@ round 01's mixed non-source category remains explicitly superseded. These result
 strengthen source-declaration precision evidence for this configuration; they
 do not score read/write effects, explanations, paths, community quality or
 actual god-object defects.
+
+### Explanation source-budget sensitivity
+
+`explanation_budget_registration.json` freezes the existing five repositories,
+20 facts, exact identity constraints, and five source quotas before capture.
+`explanation_budget_review.json` publishes every result and actual byte cost.
+The latest graphs still score 14/20 versus 15/20 at 8,000 bytes. At 16,000 the
+scores are 19/20 versus 18/20; at 32,000 they are 20/20 versus 18/20. Both tie
+8/20 at 2,000 and 4,000. These measure source evidence, not authored answers or
+overall superiority; larger quotas also have unequal actual source usage.
+
+`source_windows.py` plans bounded windows solely from public membership anchors
+and scores the unchanged witnesses. It rejects missing anchors and unsafe paths,
+retains clipped raw bytes, and applies the historical Click header allowance only
+with verified identity. All 187 benchmark tests pass, including 11 new tests:
+
+```sh
+python3 -m unittest benchmarks.agent_query.tests.test_source_windows
+```
+
+External `explanation-budget-01` contains the collector, independent verifier,
+20 public-call transcripts, 50 source-window arms and payload deltas. All ten
+8,000-byte source controls reproduce the old bytes and outcomes. The audit
+explains source-order starvation, Graphify's two Redux interval gaps, and the
+much larger Compass graph payloads. No production code changes in this arm.
