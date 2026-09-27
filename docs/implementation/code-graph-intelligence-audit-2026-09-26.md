@@ -3607,3 +3607,98 @@ communities and held-out superiority remain unproven.
 6. Improve the owning production layer for reproduced failures, retain native
    regressions, then rerun equivalent questions. Report category-level evidence
    and uncertainty rather than claiming universal dominance.
+
+## Externally rated Blob cohort: original bounded run
+
+The first external god-object label panel uses Lech Madeyski and Tomasz
+Lewowski's [MLCQ v1.1](https://zenodo.org/records/3666840), CC-BY-4.0, paper
+DOI 10.1145/3383219.3383264. The frozen registration selects every repository
+revision with at least two multi-reviewer unanimous `none` classes and two
+classes whose reviewers all assigned `major` or `critical`. Those are
+CloudStack `8d3feb100aab4a45b31a789f444038b892161eec` and Eclipse Platform UI
+`e3bbb556534a1fb945e1036948325d14a8dd9c7a`. The obsolete Eclipse repository URL
+failed; its current official repository supplied the same exact revision.
+
+The CSV has 4,019 Blob reviews covering 2,334 classes. All 55 classes and 104
+review rows in the selected revisions are retained. Eight classes form the
+primary panel: four positive and four `none`; 47 retain uncertain ratings.
+Repeated reviews by one reviewer do not add independent votes. All eight
+annotated spans were read in full and pinned before querying. The positive
+`DeprecatedUIWizardsAuto` case is a test class and stays in the denominator.
+Authored responsibility notes remain separate from developer ratings and tool
+answers. This purposive Java sample supplements the existing multilingual
+panel; it does not establish population prevalence or cross-language detection.
+
+### Extraction and artifact admission
+
+Both tools received the same clean whole-repository source roots and native-only
+extraction requests. Limits were registered before execution: 1,200 seconds per
+extraction, 16 MiB per output stream and 256 MiB per graph artifact. Tool-native
+file discovery and worker counts remain different. Timings below are single-run
+operational observations with concurrent repository runs, not a controlled speed
+comparison.
+
+| Repository/tool | Observation | Admitted for queries |
+| --- | --- | --- |
+| CloudStack / Compass | Harness timeout at 1,200.258 s; exit -9 | No |
+| CloudStack / Graphify | Exit 0 in 88.899 s; 227,334,534-byte graph | Yes |
+| Eclipse / Compass | Exit 0 in 671.990 s; 477,211,091-byte graph | No: above registered artifact bound |
+| Eclipse / Graphify | Exit 0 in 65.246 s; 189,557,807-byte graph | Yes |
+
+Compass Eclipse reported 6,162 indexed files, 95,084 nodes, 347,974 edges and
+317 communities, **with 62 omitted edges and a partial-graph warning**. Its
+exit code is not evidence of complete coverage. Graphify reported 6,775 code
+files for CloudStack and 6,162 for Eclipse; its admitted graphs contain
+93,793/70,420 nodes and 340,129/258,146 edges, respectively. These counts are
+coverage diagnostics, not correctness scores.
+
+### Native ranking and separate source-assisted diagnosis
+
+The registered request is `god_nodes(top_n=100)`. At each cutoff 10, 50 and 100:
+
+| Tool | Positive class retrieval | `none` class retrieval |
+| --- | --- | --- |
+| Compass | Unavailable for all 4 cases | Unavailable for all 4 cases |
+| Graphify | 0/4 | 0/4 |
+
+Compass's original timeout and artifact-limit failures remain explicit. They
+are not four negative classification decisions. All eight reviewed classes
+exist at the exact coordinates in Graphify's graphs and resolve through its
+public `file::symbol` lookup, so their absence from the top 100 is not an
+extraction miss. Unlabeled returned hubs cannot establish precision-at-k or a
+false-positive rate.
+
+Across Graphify's 200 returned hub rows, 163 have unique graph label identities
+and matching distinct-pair degrees; 37 remain ambiguous. No identity is chosen
+using expected degree or the external rating. All eight source-assisted,
+unfiltered neighbor calls match stored displayed direction/label/relation
+triples (234 rows). They provide graph-consistency evidence, not source edge
+precision, direct neighbor IDs or responsibility synthesis. These follow-ups
+never replace the native ranking score.
+
+### Verification and next improvement
+
+The verifier rechecks raw requests/responses for 18 tool calls, source revisions
+and hashes, graph hashes, binary and Graphify installation fingerprints,
+registration provenance and class denominators. Its second run is byte-identical
+(`420eb2fc950039450f77c0561aea887e905f0c1a80c21de9fc99c95e031c8878`).
+All 237 benchmark tests and the product-boundary gate pass. No Rust or JavaScript
+production code changed in this checkpoint, so their build/test matrices were
+not rerun. Version remains 0.3.30.
+
+A two-second live sample during CloudStack extraction identifies SQL prefix
+scanning as a likely bottleneck. Code inspection shows
+`dollar_quote_delimiter_at` calls `statement_start_before` before rejecting
+bytes that cannot begin dollar delimiters. Per-byte callers can repeatedly scan
+the file prefix. CloudStack's largest SQL file is 411,080 bytes and contains no
+dollar signs. This is a measured profiling lead, not a tested optimization or
+whole-run attribution. A follow-up must preserve syntax semantics and compare
+old/new results on pinned sources. Any larger-artifact query run must be
+separately declared and retain the original admission failure.
+
+`mlcq_god_audit_review.json` records the full results and artifact digests under
+external run `mlcq-god-audit-01`; registration, source witnesses, source reviews
+and scorer are committed alongside it. This run proves neither Compass
+superiority nor a validated god-object classifier. Authored explanations,
+functional communities, broader source precision and held-out confirmation also
+remain open.

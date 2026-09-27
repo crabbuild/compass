@@ -836,3 +836,13 @@ rate. Source-assisted class neighbors are a separate diagnostic and cannot
 replace native ranking retrieval. Neither tool's ordinary degree ranking is an
 established god-object classifier. The original extraction and artifact limits
 remain part of the outcome, including failures.
+
+`mlcq_god_audit_review.json` preserves the first bounded run: Compass timed out
+on CloudStack and exceeded the registered graph-artifact limit on Eclipse.
+Graphify admitted both graphs but retrieved none of the four positive or four
+`none` classes in its top 100. All eight existed at their exact source anchors
+and resolved through public queries. Eighteen raw tool request/response pairs were verified;
+all eight neighbor projections matched stored displayed triples. The repeated
+verifier is byte-identical. These outcomes establish no Compass superiority or
+validated god-object classifier; they identify extraction/admission work and
+the gap between degree ranking and externally rated Blob classes.
