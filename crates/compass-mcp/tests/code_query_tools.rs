@@ -737,3 +737,83 @@ fn exact_symbol_tool_preserves_filters_and_rejects_incomplete_requests()
     }
     Ok(())
 }
+
+#[test]
+fn calls_only_mcp_policy_is_scoped_boolean_and_excludes_structural_routes()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = write_typed_graph(directory.path())?;
+    let server = CompassMcp::new(path.clone());
+    let calls = invoke(
+        &server,
+        "get_node",
+        json!({"source":"Caller","target":"Target","calls_only":true}),
+    )?;
+    assert_eq!(calls["paths"].as_array().ok_or("paths")?.len(), 1);
+    assert_eq!(calls["edges"][0]["kind"], "calls");
+    let mut graph = GraphDocument::load(&path)?;
+    let edge = graph.links.first_mut().ok_or("edge")?;
+    edge.kind = EdgeKind::Contains;
+    edge.id = edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        edge.relationship_site.as_ref(),
+        None,
+    );
+    edge.key.clone_from(&edge.id);
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let server = CompassMcp::new(path);
+    let default = invoke(
+        &server,
+        "get_node",
+        json!({"source":"Caller","target":"Target"}),
+    )?;
+    let explicit = invoke(
+        &server,
+        "get_node",
+        json!({"source":"Caller","target":"Target","calls_only":false}),
+    )?;
+    assert_eq!(default, explicit);
+    assert_eq!(default["paths"].as_array().ok_or("paths")?.len(), 1);
+    let filtered = invoke(
+        &server,
+        "get_node",
+        json!({"source":"Caller","target":"Target","calls_only":true}),
+    )?;
+    assert_eq!(filtered["paths"], json!([]));
+    assert!(
+        filtered["diagnostics"]
+            .to_string()
+            .contains("No bounded directed call trail")
+    );
+    for value in [json!("true"), json!(1), Value::Null] {
+        let output = server.invoke(
+            "get_node",
+            json!({"source":"Caller","target":"Target","calls_only":value})
+                .as_object()
+                .cloned()
+                .ok_or("arguments")?,
+        );
+        assert!(output.contains("must be a boolean"), "{output}");
+    }
+    let rejected = server.invoke(
+        "get_callees",
+        json!({"symbol":"Caller","calls_only":true})
+            .as_object()
+            .cloned()
+            .ok_or("arguments")?,
+    );
+    assert!(
+        rejected.contains("calls_only requires get_node"),
+        "{rejected}"
+    );
+    for tool in CompassMcp::tools() {
+        let property = tool
+            .input_schema
+            .get("properties")
+            .and_then(|p| p.get("calls_only"));
+        assert_eq!(property.is_some(), tool.name.as_ref() == "get_node");
+    }
+    Ok(())
+}

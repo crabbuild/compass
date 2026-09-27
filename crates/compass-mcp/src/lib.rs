@@ -1113,7 +1113,22 @@ fn typed_agent_query_context(
         }
         "get_node" => {
             let context = operand(AgentOperandRole::Source, "source", context);
-            operand(AgentOperandRole::Target, "target", context)
+            let context = operand(AgentOperandRole::Target, "target", context);
+            if arguments.get("calls_only").and_then(Value::as_bool) == Some(true) {
+                context.with_question(format!(
+                    "call path from {} to {}",
+                    arguments
+                        .get("source")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    arguments
+                        .get("target")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ))
+            } else {
+                context
+            }
         }
         "explore_code" => {
             let mut context = context;
@@ -1337,7 +1352,7 @@ fn tool_specs() -> Vec<Tool> {
         tool(
             "get_node",
             "Return the trusted evidence trail between two code-graph nodes.",
-            code_query::schema(&["source", "target"]),
+            code_query::trail_schema(),
         ),
         tool(
             "query_graph",

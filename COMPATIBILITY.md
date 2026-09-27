@@ -244,6 +244,29 @@ Groups sort by outgoing/incoming direction then exact ID; records sort by
 canonical JSON. Self loops appear in both directions and count once against
 the incident-record budget. Published graphs and historical artifacts are unchanged.
 
+### Calls-only directed trails
+
+`node --calls-only`, MCP `get_node` with `calls_only: true`, and explicit
+`ask "call path from SOURCE to TARGET"` / `"call chain from SOURCE to TARGET"`
+restrict trails to stored directed `calls` edges. Structural shortcuts cannot
+satisfy this request. The typed `NodeTrailRequest` adds optional boolean
+`callsOnly`; omission defaults to false and false is omitted when serialized.
+Rust struct-literal callers must initialize the new `calls_only` field.
+
+The policy applies to endpoint relationship-role probes, traversal, depth
+frontiers and undirected direction diagnostics. Exact-name ambiguity remains
+unresolved. Existing heuristic opt-in, occurrence provenance, deterministic
+ties, node/edge/byte bounds and partial-graph diagnostics remain effective.
+The undirected diagnostic charges examined structural records to its work
+budget even though they cannot form a call path. Empty bounded results remain
+incomplete, never proof of no call path.
+
+Existing structural trail and natural `path from` requests retain their
+behavior. The response stays `compass.query/1`; Agent View request metadata
+records the explicit call-path question. No graph, extraction/cache, history,
+or package version changes are needed. These are static call relationships,
+not a guarantee that the chain executes for every input.
+
 ### Directed trail depth diagnostics
 
 Typed `node`/`get_node` trails now report `truncated: true` with

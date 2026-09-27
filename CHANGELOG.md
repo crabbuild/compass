@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `node --calls-only`, MCP `get_node` `calls_only`, and explicit `ask`
+  call-path/call-chain syntax. Restrict traversal and direction/depth diagnostics
+  to call edges while retaining structural defaults and bounded-work semantics.
+
 - Add opt-in `explain --source-members --member-focus TEXT` to prioritize
   normalized member-name matches within the existing shared source budget.
   Preserve source order for ties, retain unmatched candidates and report the

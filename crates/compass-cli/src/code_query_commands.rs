@@ -149,6 +149,16 @@ fn execute(
     page_scale: u32,
     deadline: Instant,
 ) -> Result<QueryExecution, String> {
+    let calls_only = args.iter().any(|arg| arg == "--calls-only");
+    if args.iter().any(|arg| arg.starts_with("--calls-only=")) {
+        return Err("--calls-only is a flag and does not accept a value".to_owned());
+    }
+    if calls_only && operation != "node" {
+        return Err("--calls-only requires node".to_owned());
+    }
+    if args.iter().filter(|arg| *arg == "--calls-only").count() > 1 {
+        return Err("--calls-only may be supplied only once".to_owned());
+    }
     let exact = args.iter().any(|arg| arg == "--exact");
     let mut exact_filter = ExactSearchFilter::default();
     for name in ["--file", "--line", "--kind"] {
@@ -183,6 +193,9 @@ fn execute(
         return Err("--exact requires search".to_owned());
     }
     let positional = positional(args);
+    if calls_only && positional.len() != 2 {
+        return Err("node --calls-only requires exactly SOURCE and TARGET".to_owned());
+    }
     let graph_option = option(args, "--graph");
     let revision = option(args, "--at");
     if graph_option.is_some() && revision.is_some() {
@@ -352,6 +365,7 @@ fn execute(
             let target = required(&positional, 1, "node <SOURCE> <TARGET>")?.to_owned();
             let response = engine
                 .node_trail(NodeTrailRequest {
+                    calls_only,
                     source: source.clone(),
                     target: target.clone(),
                     include_heuristic,
@@ -360,7 +374,7 @@ fn execute(
                 .map_err(query_error)?;
             (
                 response,
-                None,
+                calls_only.then(|| format!("call path from {source} to {target}")),
                 vec![
                     (AgentOperandRole::Source, source),
                     (AgentOperandRole::Target, target),

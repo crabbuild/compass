@@ -440,6 +440,15 @@ MCP exposes the same operation through `search_symbols` with `exact: true` and
 optional `source_file`, `start_line` and `kind` fields. The raw response stays
 `compass.query/1`; ordinary ranked search remains the default.
 
+Use `compass node SOURCE TARGET --calls-only` to find a directed call chain.
+The equivalent natural forms are `compass ask "call path from SOURCE to TARGET"`
+and `compass ask "call chain from SOURCE to TARGET"`. MCP `get_node` accepts
+boolean `calls_only` (default false). Only stored `calls` relationships qualify;
+containment, instantiation, return-type and other structural edges cannot form
+shortcuts. All existing limits, ambiguity and heuristic policies still apply.
+Call chains may be conditional; their existence does not guarantee execution.
+The CLI flag takes no value, may appear once, and is valid only for `node`.
+
 `node` searches directed, weighted trails within `--max-depth`. It retains
 shorter and cheaper prefixes when either can affect reachability within that
 hop limit. Node and edge work limits still apply: a truncated result is not

@@ -54,11 +54,22 @@ pub(super) fn search_schema() -> Value {
     result
 }
 
+pub(super) fn trail_schema() -> Value {
+    let mut result = schema(&["source", "target"]);
+    result["properties"]["calls_only"] = json!({"type":"boolean","default":false,"description":"Only directed calls edges; excludes structural shortcuts and applies to direction diagnostics too."});
+    result
+}
+
 pub(super) fn invoke_with_engine(
     name: &str,
     arguments: &Map<String, Value>,
     engine: &CodeQueryEngine,
 ) -> Result<CodeQueryResponse, super::InvocationError> {
+    if name != "get_node" && arguments.contains_key("calls_only") {
+        return Err(super::InvocationError::InvalidParams(
+            "calls_only requires get_node".to_owned(),
+        ));
+    }
     if name != "search_symbols"
         && ["exact", "source_file", "start_line", "kind"]
             .iter()
@@ -157,6 +168,7 @@ pub(super) fn invoke_with_engine(
             limits,
         }),
         "get_node" => engine.node_trail(NodeTrailRequest {
+            calls_only: boolean(arguments, "calls_only")?,
             source: required_string(arguments, "source")?,
             target: required_string(arguments, "target")?,
             include_heuristic: boolean(arguments, "include_heuristic")?,

@@ -2542,3 +2542,100 @@ fn exact_search_cli_filters_explicitly_and_preserves_bounded_ambiguity()
     }
     Ok(())
 }
+
+#[test]
+fn calls_only_cli_and_ask_reject_structural_routes_and_invalid_flags() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = support::write_typed_graph(directory.path())?;
+    let invoke = |args: &[&str]| -> Result<std::process::Output, Box<dyn Error>> {
+        Ok(support::compass_command()
+            .args(args)
+            .arg("--graph")
+            .arg(&path)
+            .output()?)
+    };
+    for args in [
+        vec!["node", "Caller", "Target", "--calls-only", "--format=json"],
+        vec!["ask", "call path from Caller to Target", "--format=json"],
+    ] {
+        let output = invoke(&args)?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let body: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(body["paths"].as_array().ok_or("paths")?.len(), 1);
+        assert_eq!(body["edges"][0]["kind"], "calls");
+    }
+    let mut graph = GraphDocument::load(&path)?;
+    let edge = graph.links.first_mut().ok_or("edge")?;
+    edge.kind = EdgeKind::Contains;
+    edge.id = compass_model::identity::edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        edge.relationship_site.as_ref(),
+        None,
+    );
+    edge.key.clone_from(&edge.id);
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let default = invoke(&["node", "Caller", "Target", "--format=json"])?;
+    assert!(default.status.success());
+    let body: Value = serde_json::from_slice(&default.stdout)?;
+    assert_eq!(body["paths"].as_array().ok_or("paths")?.len(), 1);
+    for format in ["json", "agent-json", "text"] {
+        for args in [
+            vec![
+                "node",
+                "Caller",
+                "Target",
+                "--calls-only",
+                "--format",
+                format,
+            ],
+            vec![
+                "ask",
+                "call chain from Caller to Target",
+                "--format",
+                format,
+            ],
+        ] {
+            let output = invoke(&args)?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if format == "json" {
+                let body: Value = serde_json::from_slice(&output.stdout)?;
+                assert_eq!(body["paths"], serde_json::json!([]));
+                assert!(
+                    body["diagnostics"]
+                        .to_string()
+                        .contains("No bounded directed call trail")
+                );
+            } else {
+                assert!(String::from_utf8(output.stdout)?.contains("call "));
+            }
+        }
+    }
+    for args in [
+        vec!["node", "Caller", "Target", "--calls-only=true"],
+        vec!["node", "Caller", "Target", "--calls-only", "--calls-only"],
+        vec!["node", "Caller", "Target", "--calls-only", "true"],
+        vec!["search", "Caller", "--calls-only"],
+    ] {
+        let mut args = args;
+        args.push("--format=json");
+        let output = invoke(&args)?;
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8(output.stderr)?.contains("calls-only"));
+    }
+    let help = support::compass_command().args(["help", "node"]).output()?;
+    assert!(help.status.success());
+    assert!(String::from_utf8(help.stdout)?.contains("--calls-only"));
+    Ok(())
+}

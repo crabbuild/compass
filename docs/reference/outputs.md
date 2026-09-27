@@ -1349,6 +1349,20 @@ allocating an unbounded JSON graph.
 **Next step:** identify the most structured available output for your consumer
 and validate its major version/direction/multiplicity before reading values.
 
+### Calls-only directed trails
+
+`node --calls-only` and MCP `get_node` with `calls_only: true` return the same
+`compass.query/1` response schema, restricted to directed `calls` edges. Typed
+`NodeTrailRequest` accepts optional `callsOnly: true`; omission preserves the
+structural default. CLI Agent View and MCP metadata retain a call-path question.
+The `ask` forms `call path from SOURCE to TARGET` and `call chain from SOURCE to
+TARGET` select the same policy. Unknown/nonboolean policy values fail explicitly.
+
+Direction-mismatch and depth-frontier checks use the same call restriction.
+Provenance, parallel occurrence identity, ambiguity and incomplete graph/work
+status remain explicit. A structural connection cannot prove a call connection;
+a static call chain is not a runtime trace.
+
 ### Directed trail depth limits
 
 For typed `node` and MCP `get_node`, an unsuccessful search that leaves an open

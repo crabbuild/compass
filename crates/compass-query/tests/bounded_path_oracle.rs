@@ -148,6 +148,45 @@ fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn E
         let engine = open_with_document(graph.clone(), &graph_path, None, cache.path())?;
         for depth in 1..=3 {
             let context = format!("graph={encoding}, depth={depth}");
+            let calls = directed.map(|row| row.map(|edge| edge.filter(|weight| *weight == 1)));
+            let filtered = engine.node_trail(NodeTrailRequest {
+                source: "n:0".into(),
+                target: "n:3".into(),
+                calls_only: true,
+                include_heuristic: false,
+                limits: CodeQueryLimits {
+                    max_depth: depth as u32,
+                    ..CodeQueryLimits::default()
+                },
+            })?;
+            if let Some((_, hops)) = oracle(&calls, depth) {
+                assert!(!filtered.truncated, "calls-only {context}");
+                assert_eq!(filtered.paths.len(), 1, "calls-only {context}");
+                let path = &filtered.paths[0];
+                assert_eq!(path.edge_ids.len(), hops, "calls-only {context}");
+                assert_eq!(path.node_ids.first().map(String::as_str), Some("n:0"));
+                assert_eq!(path.node_ids.last().map(String::as_str), Some("n:3"));
+                for (pair, identity) in path.node_ids.windows(2).zip(&path.edge_ids) {
+                    let edge = graph
+                        .links
+                        .iter()
+                        .find(|edge| &edge.id == identity)
+                        .ok_or("invented edge")?;
+                    assert_eq!(edge.kind, EdgeKind::Calls);
+                    assert_eq!((&edge.source, &edge.target), (&pair[0], &pair[1]));
+                }
+            } else {
+                assert!(filtered.paths.is_empty(), "calls-only {context}");
+                if open_frontier(&calls, depth) {
+                    assert!(filtered.truncated, "calls-only {context}");
+                    assert!(!filtered.diagnostics.iter().any(|d| matches!(
+                        d.code,
+                        compass_model::query_contract::QueryDiagnosticCode::NoMatch
+                            | compass_model::query_contract::QueryDiagnosticCode::DirectionMismatch
+                    )));
+                }
+            }
+
             let start = legacy.node_index("n:0").ok_or("start")?;
             let end = legacy.node_index("n:3").ok_or("end")?;
             match (
@@ -238,6 +277,7 @@ fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn E
                 assert!(output.contains("NO PATH FOUND"), "{context}: {output}");
             }
             let response = engine.node_trail(NodeTrailRequest {
+                calls_only: false,
                 source: "n:0".to_owned(),
                 target: "n:3".to_owned(),
                 include_heuristic: false,

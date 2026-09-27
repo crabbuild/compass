@@ -1220,6 +1220,7 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
         serde_json::to_value(json.explore(explore)?)?,
     );
     let trail = NodeTrailRequest {
+        calls_only: false,
         source: "Api.caller".to_owned(),
         target: "Store.callee".to_owned(),
         include_heuristic: false,
@@ -1380,6 +1381,7 @@ fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::e
         serde_json::to_value(json.explore(explore)?)?,
     );
     let trail = NodeTrailRequest {
+        calls_only: false,
         source: "Api.caller".to_owned(),
         target: "Store.callee".to_owned(),
         include_heuristic: false,

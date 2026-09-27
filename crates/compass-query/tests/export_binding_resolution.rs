@@ -128,6 +128,7 @@ fn coincident_export_binding_resolves_to_its_proven_declaration() -> Result<(), 
                     .any(|e| e.source == "function" && e.target == "leaf")
             );
             let trail = engine.node_trail(NodeTrailRequest {
+                calls_only: false,
                 source: "entry".to_owned(),
                 target: "leaf".to_owned(),
                 include_heuristic: false,

@@ -103,6 +103,7 @@ pub(crate) enum StructuralOperandRole {
     ImpactTarget,
     TrailSource,
     TrailTarget,
+    CallTrailTarget,
 }
 
 impl StructuralOperandRole {
@@ -113,6 +114,7 @@ impl StructuralOperandRole {
             Self::ImpactTarget => (true, IMPACT_KINDS),
             Self::TrailSource => (false, ALL_EDGE_KINDS),
             Self::TrailTarget => (true, ALL_EDGE_KINDS),
+            Self::CallTrailTarget => (true, &[EdgeKind::Calls]),
         }
     }
 }
@@ -232,6 +234,12 @@ impl CandidateReadBudget {
             .saturating_add(u64::try_from(admitted).unwrap_or(u64::MAX));
         self.truncated |= source_truncated || admitted < examined || self.remaining == 0;
     }
+}
+
+#[derive(Clone, Copy)]
+struct TrailPolicy {
+    directed: bool,
+    calls_only: bool,
 }
 
 struct TraversalBudget {
@@ -3133,7 +3141,10 @@ impl CodeQueryEngine {
                     request.include_heuristic,
                     &request.limits,
                     &mut budget,
-                    false,
+                    TrailPolicy {
+                        directed: false,
+                        calls_only: false,
+                    },
                 )?;
                 response.truncated |= truncated;
                 if let Some((nodes, edges)) = path {
@@ -3171,7 +3182,11 @@ impl CodeQueryEngine {
         let source = self.resolve_symbol(
             &request.source,
             &mut response,
-            Some(StructuralOperandRole::TrailSource),
+            Some(if request.calls_only {
+                StructuralOperandRole::CalleesSource
+            } else {
+                StructuralOperandRole::TrailSource
+            }),
             request.include_heuristic,
             instrumentation,
         )?;
@@ -3185,7 +3200,11 @@ impl CodeQueryEngine {
         let target = self.resolve_symbol(
             &request.target,
             &mut response,
-            Some(StructuralOperandRole::TrailTarget),
+            Some(if request.calls_only {
+                StructuralOperandRole::CallTrailTarget
+            } else {
+                StructuralOperandRole::TrailTarget
+            }),
             request.include_heuristic,
             instrumentation,
         )?;
@@ -3204,7 +3223,10 @@ impl CodeQueryEngine {
             request.include_heuristic,
             &request.limits,
             &mut budget,
-            true,
+            TrailPolicy {
+                directed: true,
+                calls_only: request.calls_only,
+            },
         )?;
         response.truncated |= truncated;
         let Some((nodes, edges)) = path else {
@@ -3220,15 +3242,19 @@ impl CodeQueryEngine {
                 request.include_heuristic,
                 &request.limits,
                 &mut budget,
-                false,
+                TrailPolicy {
+                    directed: false,
+                    calls_only: request.calls_only,
+                },
             )?;
             budget.record_work(instrumentation);
             response.truncated |= mismatch_truncated;
+            let qualifier = if request.calls_only { "call " } else { "" };
             if undirected_path.is_some() {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::DirectionMismatch,
                     message: format!(
-                        "A trail connects {source} and {target}, but not in the requested source-to-target direction"
+                        "A {qualifier}trail connects {source} and {target}, but not in the requested source-to-target direction"
                     ),
                     node_id: Some(source),
                     path: None,
@@ -3236,7 +3262,9 @@ impl CodeQueryEngine {
             } else if !mismatch_truncated {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::NoMatch,
-                    message: format!("No bounded directed trail connects {source} to {target}"),
+                    message: format!(
+                        "No bounded directed {qualifier}trail connects {source} to {target}"
+                    ),
                     node_id: Some(source),
                     path: None,
                 });
@@ -3595,8 +3623,17 @@ impl CodeQueryEngine {
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
         budget: &mut TraversalBudget,
-        directed: bool,
+        policy: TrailPolicy,
     ) -> Result<BoundedPathResult, QueryError> {
+        let TrailPolicy {
+            directed,
+            calls_only,
+        } = policy;
+        let kinds = if calls_only {
+            &[EdgeKind::Calls][..]
+        } else {
+            ALL_EDGE_KINDS
+        };
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
         if !budget.consume_node() {
             return Ok((None, true));
@@ -3653,7 +3690,7 @@ impl CodeQueryEngine {
                 self.backend.matching_bounded(
                     &node,
                     false,
-                    ALL_EDGE_KINDS,
+                    kinds,
                     include_heuristic,
                     budget.remaining_edges,
                 )?
@@ -3666,6 +3703,11 @@ impl CodeQueryEngine {
                 if !budget.consume_edge() {
                     truncated = true;
                     break;
+                }
+                // The undirected diagnostic still charges every incident
+                // record it examines, including excluded structural edges.
+                if calls_only && edge.kind != EdgeKind::Calls {
+                    continue;
                 }
                 if edge.source == node {
                     adjacent.push((edge.target.clone(), edge));
@@ -3731,7 +3773,7 @@ impl CodeQueryEngine {
                     self.backend.matching_bounded(
                         &node,
                         false,
-                        ALL_EDGE_KINDS,
+                        kinds,
                         include_heuristic,
                         budget.remaining_edges,
                     )?
@@ -3750,6 +3792,9 @@ impl CodeQueryEngine {
                     if !budget.consume_edge() {
                         truncated = true;
                         break;
+                    }
+                    if calls_only && edge.kind != EdgeKind::Calls {
+                        continue;
                     }
                     let next = if edge.source == node {
                         &edge.target

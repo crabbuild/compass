@@ -910,6 +910,7 @@ fn backend_parity_subset_preserves_normalized_search_ids_and_edges()
             .all(|edge| !edge.kind.as_str().is_empty())
     );
     let trail = NodeTrailRequest {
+        calls_only: false,
         source: "Api.caller".to_owned(),
         target: "Store.callee".to_owned(),
         include_heuristic: false,
