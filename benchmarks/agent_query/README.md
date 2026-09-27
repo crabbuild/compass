@@ -481,3 +481,30 @@ for each. All 15 Compass full-record projections match their graphs, preserving
 181 record appearances. This is graph consistency, not source precision for all
 records. The extra source coordinates, richer Compass payload cost and reused
 development scope remain explicit; no overall superiority claim follows.
+
+
+### State-access evidence prerequisite
+
+`state_access_development_registration.json` fixes 20 source access sites across
+Go, Python, Java, TypeScript and Rust. This known-subject diagnostic inspects full
+frozen graphs, not public query output or a god-object classifier. Both tools
+lack all 20 selected state-contact links; Compass represents six of ten state
+slots and Graphify none at the pinned coordinates. Missing edges must not be
+interpreted as method independence or low cohesion.
+
+Replay the committed per-site results against the original external artifacts:
+
+```sh
+python3 -m benchmarks.agent_query.state_access_audit \
+  --registration benchmarks/agent_query/state_access_development_registration.json \
+  --artifact-root /path/to/code-graph-audit-20260926 \
+  --output benchmarks/agent_query/state_access_development_review.json --verify
+python3 -m unittest benchmarks.agent_query.tests.test_state_access
+```
+
+Omit `--verify` with a new output path to produce a fresh report. Existing reports
+are never overwritten. The verifier checks source commits and witnesses, graph
+hashes, all candidate/connecting records and the auditor's own code hash. It
+preserves Graphify's undirected container flag; stored endpoint order is not a
+native directed-path claim. Same-agent review and purposive development scope
+remain explicit.

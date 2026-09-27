@@ -2706,6 +2706,87 @@ artifacts under `exact-symbol-01` through `exact-symbol-08`. Source selection,
 responsibility synthesis, actual god-object defect evidence, broader edge
 precision, longer walks and fresh confirmation remain unfinished.
 
+## Shared-state evidence prerequisite for cohesion analysis
+
+Registration `1c6f2a43` freezes 20 source-selected access sites: two state slots,
+each used by two methods, in each of the existing five development repositories.
+The subjects and earlier graph inventories were already known; this is not a
+blind or held-out evaluation. Java includes `Cleaner.CleaningVisitor`, and Redux
+uses closure variables rather than class fields. These are prerequisites for
+state-sharing analysis, not equivalent whole-class cohesion samples.
+
+The diagnostic scans the same complete, hash-pinned frozen graphs for both
+tools, with a 512 MiB bound per graph. It identifies endpoints by exact source
+file, declaration line and symbol, retaining ambiguity. It separately checks
+method-to-state contact records and occurrence provenance at the selected access
+line. Calls on a field's type, containment, owner-type references and excerpts do
+not count as state-access edges. It does not measure public query retrieval.
+
+| Subject | Compass state slots represented | Graphify state slots represented | Compass access sites | Graphify access sites |
+| --- | ---: | ---: | ---: | ---: |
+| Chi / Go | 0/2 | 0/2 | 0/4 | 0/4 |
+| Click / Python | 0/2 | 0/2 | 0/4 | 0/4 |
+| jsoup / Java | 2/2 | 0/2 | 0/4 | 0/4 |
+| Redux / TypeScript | 2/2 | 0/2 | 0/4 | 0/4 |
+| WalkDir / Rust | 2/2 | 0/2 | 0/4 | 0/4 |
+| **Total** | **6/10** | **0/10** | **0/20** | **0/20** |
+
+All 20 accessing callable coordinates identify one node in both tools. Compass
+has missing state endpoints at eight access sites and represented endpoints
+with no connecting records at the other twelve. Graphify has no state endpoint
+at any of the ten pinned declaration/introduction coordinates. There are no
+connecting records of any kind or direction between any candidate endpoints;
+the zero result is not caused by the diagnostic's relation whitelist. The
+Graphify containers declare `directed: false`; saved endpoint order must not be
+interpreted as native directed path support. The report preserves that flag.
+
+These results contradict using absent method/state links as evidence of low
+cohesion in these subjects. They do not show independent responsibilities,
+a god-object defect, poor whole-class cohesion, or overall tool superiority.
+The extra six Compass declarations do not supply the missing access evidence.
+Python's state coordinates are first assignments to instance attributes, so
+those rows specifically test whether the graph represents those introductions.
+
+Code inspection locates concrete producer gaps at baseline `7aef6a0c`:
+
+- `walk_rust_evidence` in `compass-languages/src/evidence/build.rs` emits calls,
+  macro invocations and declaration references, but has no field-expression
+  access emission arm. The selected Rust field declarations already exist.
+- `walk_java_evidence` in that module emits calls, construction, annotations and
+  type relationships, but has no ordinary field-access emission arm. Both
+  selected Java field declarations already exist.
+- TypeScript identifier traversal calls `emit_callable_reference`; that function
+  explicitly skips local declarations without proven callable status. The two
+  Redux closure variables are declared but their ordinary value uses are lost.
+  Broadening that code requires a truthful value-reference contract, not
+  relabeling arbitrary state as callable.
+
+The existing member-access candidate projects to a `references` edge with
+`member-access` context, so qualified field-access evidence can use an existing
+relationship representation. The next production work belongs in language
+fact emission and qualified resolution, with shadowing/ambiguity negatives,
+precise occurrence anchors, bounded lookup, cache invalidation and affected
+language qualification. Hub ranking cannot reconstruct these missing facts.
+No producer, capability, runtime behavior or release version changes in this
+checkpoint; the gaps remain open.
+
+`state_access_audit.py` replays source pins, clean checkout state, exact source
+witnesses, graph hashes, candidate sets, all connecting records and its own
+script hash. The committed registration and review live under
+`benchmarks/agent_query/`; raw development artifacts and logs are under
+`state-access-01`. The first collector attempt incorrectly required a directed
+container and stopped on Graphify's undirected container; retaining that flag
+instead permitted the registered stored-endpoint diagnostic. No partial result
+was scored. Before registration, source-coordinate assertions also caught and
+corrected off-by-one Redux/Rust anchors.
+
+The eleven focused auditor tests pass, including positive contact evidence,
+shadowed targets, duplicate candidates, wrong relations/directions, occurrence
+mismatch, constructor spelling, parallel records and bounded reads. The complete benchmark suite passes 148 tests. The saved
+real-repository review replays byte-for-byte. No Rust/JavaScript tests or
+extraction gates were rerun for this benchmark/documentation-only checkpoint;
+previous production validation remains tied to its earlier commit.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
