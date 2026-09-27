@@ -50,6 +50,17 @@ class NeighborIdentityTests(unittest.TestCase):
         call['response']['result']['structuredContent']['result']['neighbors'][0]['edges'].append(copy.deepcopy(graph['links'][0]))
         self.assertTrue(audit_direct(call,graph,'compass','a','b')['fullProjectionMatches'])
 
+    def test_unfiltered_projection_keeps_noncall_relations(self):
+        graph,call=self.fixture()
+        body=call['response']['result']['structuredContent']['result']
+        body['relationFilter']=None
+        edge=dict(id='contains',source='a',target='c',kind='contains')
+        graph['links'].append(edge)
+        self.assertFalse(audit_direct(call,graph,'compass','a',None,relation_filter=None)['fullProjectionMatches'])
+        body['neighbors'].append(dict(direction='outgoing',node=graph['nodes'][2],edges=[edge]))
+        self.assertTrue(audit_direct(call,graph,'compass','a',None,relation_filter=None)['fullProjectionMatches'])
+        self.assertFalse(audit_direct(call,graph,'compass','a',None)['fullProjectionMatches'])
+
     def test_followup_uses_only_returned_outgoing_symbol_and_public_coordinates(self):
         target=dict(file='src/a.py',symbol='close',startLine=10)
         call=dict(executionSucceeded=True,text='Neighbors of run:\n  --> close() [calls] [EXTRACTED]')

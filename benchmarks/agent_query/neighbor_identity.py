@@ -38,7 +38,8 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
 
-def audit_direct(call, graph, tool, seed, target):
+def audit_direct(call, graph, tool, seed, target, *, relation_filter="calls"):
+    """Check the full requested projection; None requests all relations."""
     result = dict(status='unavailable', explicitDestinationSupported=False,
                   fullProjectionMatches=False, returnedGroups=0, returnedRecordAppearances=0)
     if not call.get('executionSucceeded'):
@@ -56,7 +57,7 @@ def audit_direct(call, graph, tool, seed, target):
     body = envelope.get('result')
     if (not isinstance(body, dict) or body.get('schema') != 'compass.query.neighbors/1'
             or body.get('truncated') is not False or body.get('directionBasis') != 'stored-endpoints'
-            or body.get('relationFilter') != 'calls'):
+            or body.get('relationFilter') != relation_filter):
         return result
     nodes = {n['id']: n for n in graph['nodes']}
     if body.get('seed') != nodes.get(seed) or body.get('graphDirected') is not graph.get('directed', False):
@@ -66,7 +67,7 @@ def audit_direct(call, graph, tool, seed, target):
         return result
     expected = defaultdict(Counter)
     for edge in graph['links']:
-        if 'calls' not in edge.get('kind' if tool == 'compass' else 'relation', '').lower():
+        if relation_filter is not None and relation_filter.lower() not in edge.get('kind' if tool == 'compass' else 'relation', '').lower():
             continue
         if edge['source'] == seed:
             expected['outgoing', edge['target']][canonical(edge)] += 1
