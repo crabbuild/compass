@@ -4419,3 +4419,39 @@ frozen inputs. Five exact matches are useful source-to-graph evidence for
 those sites, but far too narrow to validate the remaining field references,
 foreign-state access, cohesion or god-object classification. A larger
 independent relationship oracle is still needed.
+
+### Compiler-bound direct-field relationship census
+
+The [registration](../../benchmarks/agent_query/mlcq_javac_field_binding_registration.json)
+expanded the same eight known Java files from explicit `this.field` syntax to
+every direct-method field expression that a public JDK 17 compiler could bind
+to a field declared directly in the witnessed class. The compiler used an
+empty external classpath and no annotation processors, and its missing
+dependency diagnostics are preserved. Only `VariableElement` bindings equal
+to one direct source field entered the denominator; unresolved or other
+bindings were not treated as absent field accesses.
+
+The JDK reported **265 bound direct-own-field tokens**: 142, 4, 43 and 2 in
+the four CloudStack classes, and 55, 0, 4 and 15 in the four Eclipse classes
+(in the fixed sample-ID order). It also found three same-named expressions
+bound to nonfield symbols. All 65 direct source fields had compiler elements.
+For every bound token, the frozen Compass graph has **exactly one** directed
+`references` edge from the independently matched method to the matched field
+at the exact UTF-8 byte interval, with exact AST provenance and no competing
+record at that token. Conversely, all 265 stored method-to-own-field records
+in these eight selected classes are represented in this compiler-bound set.
+The five earlier explicit `this.field` controls preserve the same edge IDs and
+targets. Source files and both graphs remain byte-identical; repeated oracle
+and verifier outputs are byte-identical.
+
+The first compiler capture set a 1,000-error display cap. It is preserved;
+the corrected capture raised the cap within the registered 10,000-diagnostic
+bound and recorded all **1,047 compiler errors**. Both captures produced the
+same 268 candidate bindings. The full errors, source tokens, graph endpoints,
+per-case counts and hashes are in the
+[review](../../benchmarks/agent_query/mlcq_javac_field_binding_review.json).
+This is strong agreement on the selected **direct own-field** relationship
+subset despite missing project dependencies. It does not prove recall for
+unresolved, inherited or foreign fields; it does not measure ATFD, TCC,
+responsibility defects, other languages or Graphify quality. The known rated
+panel, including one positive test class, remains development data.
