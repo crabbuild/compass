@@ -46,10 +46,19 @@ previous margin. Counts alone do not validate edge meaning or community quality.
 The [fixture review](../../benchmarks/agent_query/route_hierarchy_fixture_review.json)
 records all removed identities, source hashes, and policy changes; eight new
 semantic negatives reject the former links independently of those counts.
-The current route-hierarchy checkpoint still fails one of these negatives:
+That route-hierarchy checkpoint still failed one of these negatives:
 the directory-order lookup makes sibling `/tanstack` and `/home` modules a
-parent-child pair. This is an unresolved production defect; the recalibrated
-topology counts do not constitute a qualification pass.
+parent-child pair. The subsequent framework-specific correction removes the
+remaining 12 unsupported file-route records from identical original sources.
+The negative manifest now covers 18 source-file pairs. Two explicit Next layout
+fixtures separately add four expected layout relationships, checked as an exact
+set by the frontend fixture gate. The
+[follow-up review](../../benchmarks/agent_query/semantic_route_parent_fixture_review.json)
+records both identical-input comparisons and the fixture-only delta, along with
+mutation checks and topology bound adjustments preserving their prior margins.
+These focused checks pass; the complete fixture gate is pending. Historical
+pinned frontend hierarchy scorecards are invalidated until their sources are
+re-reviewed, so their prior counts cannot establish current qualification.
 
 ## Command
 

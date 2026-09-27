@@ -2,36 +2,36 @@
   "schema": "compass.code-graph-topology-policy/1",
   "topology": {
     "minimums": {
-      "communities": 232,
-      "edges": 1265,
+      "communities": 239,
+      "edges": 1277,
       "exactCrossCommunityEdges": 3,
-      "exactCrossFileEdges": 62,
-      "exactCrossFileEdgesPerThousandNodes": 48,
-      "exactEdgeBearingNodePermille": 709,
-      "exactEdgeBearingNodes": 905,
-      "exactEdges": 946,
+      "exactCrossFileEdges": 56,
+      "exactCrossFileEdgesPerThousandNodes": 43,
+      "exactEdgeBearingNodePermille": 710,
+      "exactEdgeBearingNodes": 918,
+      "exactEdges": 956,
       "exactLargestComponentNodes": 54,
-      "exactUniqueTypedEndpointPairs": 938,
-      "exactUniqueTypedEndpointPairsPerThousandNodes": 735,
-      "nodes": 1276,
-      "uniqueTypedEndpointPairs": 1243
+      "exactUniqueTypedEndpointPairs": 948,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 733,
+      "nodes": 1292,
+      "uniqueTypedEndpointPairs": 1255
     },
     "maximums": {
-      "communities": 233,
-      "connectedComponents": 230,
-      "exactConnectedComponents": 504,
-      "exactIsolatedNodes": 371,
+      "communities": 240,
+      "connectedComponents": 237,
+      "exactConnectedComponents": 513,
+      "exactIsolatedNodes": 374,
       "exactSelfLoops": 0,
-      "isolatedNodes": 99,
+      "isolatedNodes": 100,
       "selfLoops": 0,
-      "singletonCommunities": 99
+      "singletonCommunities": 100
     },
     "relationshipMinimums": {
       "calls": {
         "exactUniqueEndpointPairs": 13
       },
       "contains": {
-        "exactCrossFileEdges": 12,
+        "exactCrossFileEdges": 4,
         "exactUniqueEndpointPairs": 606
       },
       "documents": {
@@ -39,8 +39,8 @@
         "exactUniqueEndpointPairs": 3
       },
       "imports": {
-        "exactCrossFileEdges": 12,
-        "exactUniqueEndpointPairs": 29
+        "exactCrossFileEdges": 14,
+        "exactUniqueEndpointPairs": 31
       },
       "maps_to": {
         "exactCrossFileEdges": 10,
@@ -48,7 +48,7 @@
       },
       "references": {
         "exactCrossFileEdges": 7,
-        "exactUniqueEndpointPairs": 49
+        "exactUniqueEndpointPairs": 51
       },
       "renders": {
         "exactCrossFileEdges": 4,
@@ -56,7 +56,7 @@
       },
       "routes_to": {
         "exactCrossFileEdges": 14,
-        "exactUniqueEndpointPairs": 111
+        "exactUniqueEndpointPairs": 113
       }
     }
   }

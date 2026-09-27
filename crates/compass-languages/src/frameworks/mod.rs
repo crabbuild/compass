@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, resolution/publication, or resource limits must
 /// invalidate framework facts without changing the parser/evidence producer.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/7";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/8";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///

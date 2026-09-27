@@ -16,6 +16,7 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { HIERARCHY_SEMANTICS, sourceRouteParent, sourceRouteScope } from "./react_route_hierarchy_oracle.mjs";
 
 const SCHEMA = "compass.react-frontend-source-oracle/1";
 const PROVIDER = "typescript_compiler_api_5_9_3_frontend_projection";
@@ -821,37 +822,6 @@ function sourceFacts(root, framework, records) {
     if (framework === "tanstack-router") return /(^|\/)src\/routes\/.+\.[cm]?[jt]sx?$/u.test(file);
     return false;
   };
-  const routeParent = (file, candidates) => {
-    const parts = file.replaceAll("\\", "/").split("/");
-    for (let index = parts.length - 1; index > 0; index -= 1) {
-      const parentDirectory = parts.slice(0, index).join("/");
-      // Do not select the child itself as its own parent.  A route module is
-      // always a candidate in its own directory, so omitting this identity
-      // guard would make the loop stop at the first iteration and silently
-      // drop every ancestor hierarchy relationship.
-      const parent = candidates.find((candidate) => candidate !== file && candidate.split("/").slice(0, -1).join("/") === parentDirectory);
-      if (parent) return parent;
-    }
-    return null;
-  };
-  const routeHierarchyScope = (file) => {
-    const normalized = file.replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "");
-    for (const marker of [
-      "src/app/",
-      "app/",
-      "src/pages/",
-      "pages/",
-      "app/routes/",
-      "src/routes/",
-      "routes/",
-    ]) {
-      const index = normalized.indexOf(marker);
-      if (index >= 0 && (index === 0 || normalized[index - 1] === "/")) {
-        return `${normalized.slice(0, index)}${marker.slice(0, -1)}`;
-      }
-    }
-    return "";
-  };
   const resolveSourceFile = (file, moduleSpecifier) => {
     if (typeof moduleSpecifier !== "string" || !moduleSpecifier || moduleSpecifier.startsWith("@")) return null;
     const clean = moduleSpecifier.replace(/^\.\//u, "");
@@ -1070,8 +1040,7 @@ function sourceFacts(root, framework, records) {
     }
   }
 
-  // Compass uses bytewise portable-path ordering at the resolver boundary;
-  // avoid locale-dependent ordering when selecting a same-directory parent.
+  // Sort output deterministically; ordering is never evidence of parentage.
   routeFiles.sort();
   const hierarchyCapability = {
     "next-app": "next.app.hierarchy",
@@ -1083,14 +1052,15 @@ function sourceFacts(root, framework, records) {
   if (hierarchyCapability) {
     const groups = new Map();
     for (const file of routeFiles) {
-      const scope = routeHierarchyScope(file);
+      const scope = sourceRouteScope(file, framework);
+      if (!scope) continue;
       if (!groups.has(scope)) groups.set(scope, []);
       groups.get(scope).push(file);
     }
     for (const candidates of groups.values()) {
       candidates.sort();
       for (const file of candidates) {
-        const parent = routeParent(file, candidates);
+        const parent = sourceRouteParent(file, candidates, framework);
         if (parent) addHierarchyFact(hierarchyCapability, parent, file);
       }
     }
@@ -1206,6 +1176,7 @@ function main() {
   const document = {
     schema: SCHEMA,
     provider: PROVIDER,
+    hierarchySemantics: HIERARCHY_SEMANTICS,
     toolchain: `node-${process.versions.node.split(".")[0]};typescript-${oracle.header.metadata?.compilerVersion ?? "5.9.3"}`,
     rootRelative: true,
     framework,

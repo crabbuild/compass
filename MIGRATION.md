@@ -8,10 +8,16 @@ layout remains visible and clearly owned.
 ## Graph rebuilds and query resolution
 
 Rebuild graphs with programmatic framework routes to remove filesystem-derived
-containment between independent routers. Framework-pack semantics version 7
+containment between independent routers and unsupported file-route parents.
+Framework-pack semantics version 8
 invalidates prior build profiles and build-state seals; disposable framework
 facts can be rebuilt from source. Hub rankings, navigation paths, and communities
 can change. Existing historical realizations remain unchanged.
+
+Version 8 corrects the directory-order parent rule introduced before version 7.
+File-route siblings, standalone endpoints, and page files without a layout
+parent may lose containment edges. Source-proven nested layouts and flat-route
+parents can gain the correct edges. The graph schema is unchanged.
 
 Rebuild existing Go graphs to receive the control-initializer and receiver
 shadowing corrections. Normal builds automatically discard AST cache versions

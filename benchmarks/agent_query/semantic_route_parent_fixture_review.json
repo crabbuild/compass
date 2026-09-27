@@ -1,0 +1,2185 @@
+{
+  "schema": "compass.semantic-route-parent-fixture-review/1",
+  "scope": "Development fixture review, not representative real-repository precision or Graphify superiority",
+  "beforeBinarySha256": "872aff05f6c1723d27ee96230a4e315d3f0d6e1849387de09530b907f0ff3f40",
+  "afterBinarySha256": "9efe548537b106c69d1da7a5ac7955e764e43103e0d1e4a754a3c1880c292bea",
+  "original": {
+    "beforeGraphSha256": "996ae5b52508a6b8b099624c0bb52163242d10e9a440a6d3a3a7203d3d2900d3",
+    "afterGraphSha256": "ae449b966b660b2f714a155e18075cb408246f4a66abe094999395abaaad4438",
+    "beforeMetrics": {
+      "communities": 232,
+      "connectedComponents": 229,
+      "crossCommunityEdges": 3,
+      "crossFileEdges": 63,
+      "crossFileEdgesPerThousandNodes": 49,
+      "edgeBearingNodes": 1178,
+      "edgeBearingNodePermille": 923,
+      "edges": 1270,
+      "exactConnectedComponents": 503,
+      "exactCrossCommunityEdges": 3,
+      "exactCrossFileEdges": 62,
+      "exactCrossFileEdgesPerThousandNodes": 48,
+      "exactEdgeBearingNodes": 906,
+      "exactEdgeBearingNodePermille": 710,
+      "exactEdges": 951,
+      "exactIsolatedNodes": 370,
+      "exactLargestComponentNodes": 54,
+      "exactSelfLoops": 0,
+      "exactUniqueTypedEndpointPairs": 943,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 739,
+      "isolatedNodes": 98,
+      "largestComponentNodes": 81,
+      "nodes": 1276,
+      "selfLoops": 0,
+      "singletonCommunities": 98,
+      "uniqueTypedEndpointPairs": 1248,
+      "uniqueTypedEndpointPairsPerThousandNodes": 978,
+      "byRelation": {
+        "aliases": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 14,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "calls": {
+          "crossFileEdges": 1,
+          "edgeBearingNodes": 132,
+          "edges": 103,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 24,
+          "exactEdges": 17,
+          "exactUniqueEndpointPairs": 13,
+          "uniqueEndpointPairs": 88
+        },
+        "consumes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "contains": {
+          "crossFileEdges": 12,
+          "edgeBearingNodes": 757,
+          "edges": 606,
+          "exactCrossFileEdges": 12,
+          "exactEdgeBearingNodes": 757,
+          "exactEdges": 606,
+          "exactUniqueEndpointPairs": 606,
+          "uniqueEndpointPairs": 606
+        },
+        "decorates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 36,
+          "edges": 18,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 18
+        },
+        "depends_on": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 20,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 20,
+          "exactEdges": 16,
+          "exactUniqueEndpointPairs": 16,
+          "uniqueEndpointPairs": 16
+        },
+        "documents": {
+          "crossFileEdges": 3,
+          "edgeBearingNodes": 5,
+          "edges": 3,
+          "exactCrossFileEdges": 3,
+          "exactEdgeBearingNodes": 5,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "exports": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 49,
+          "edges": 27,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 48,
+          "exactEdges": 26,
+          "exactUniqueEndpointPairs": 26,
+          "uniqueEndpointPairs": 27
+        },
+        "extends": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 28,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 11,
+          "exactEdges": 6,
+          "exactUniqueEndpointPairs": 6,
+          "uniqueEndpointPairs": 16
+        },
+        "handles": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "implements": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "imports": {
+          "crossFileEdges": 12,
+          "edgeBearingNodes": 210,
+          "edges": 144,
+          "exactCrossFileEdges": 12,
+          "exactEdgeBearingNodes": 50,
+          "exactEdges": 29,
+          "exactUniqueEndpointPairs": 29,
+          "uniqueEndpointPairs": 144
+        },
+        "instantiates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 6
+        },
+        "maps_to": {
+          "crossFileEdges": 10,
+          "edgeBearingNodes": 19,
+          "edges": 10,
+          "exactCrossFileEdges": 10,
+          "exactEdgeBearingNodes": 19,
+          "exactEdges": 10,
+          "exactUniqueEndpointPairs": 10,
+          "uniqueEndpointPairs": 10
+        },
+        "mixes_in": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 4,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        },
+        "overrides": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "produces": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "publishes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "reads": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "references": {
+          "crossFileEdges": 7,
+          "edgeBearingNodes": 200,
+          "edges": 137,
+          "exactCrossFileEdges": 7,
+          "exactEdgeBearingNodes": 80,
+          "exactEdges": 52,
+          "exactUniqueEndpointPairs": 49,
+          "uniqueEndpointPairs": 131
+        },
+        "registers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "renders": {
+          "crossFileEdges": 4,
+          "edgeBearingNodes": 7,
+          "edges": 5,
+          "exactCrossFileEdges": 4,
+          "exactEdgeBearingNodes": 7,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "returns": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 6
+        },
+        "routes_to": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 197,
+          "edges": 114,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 197,
+          "exactEdges": 114,
+          "exactUniqueEndpointPairs": 113,
+          "uniqueEndpointPairs": 113
+        },
+        "schedules": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "subscribes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 3,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "tests": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "triggers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 13,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 13,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "type_of": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 8,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 9,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 8
+        },
+        "writes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 3,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 3,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        }
+      }
+    },
+    "afterMetrics": {
+      "communities": 241,
+      "connectedComponents": 238,
+      "crossCommunityEdges": 3,
+      "crossFileEdges": 51,
+      "crossFileEdgesPerThousandNodes": 39,
+      "edgeBearingNodes": 1177,
+      "edgeBearingNodePermille": 922,
+      "edges": 1258,
+      "exactConnectedComponents": 512,
+      "exactCrossCommunityEdges": 3,
+      "exactCrossFileEdges": 50,
+      "exactCrossFileEdgesPerThousandNodes": 39,
+      "exactEdgeBearingNodes": 905,
+      "exactEdgeBearingNodePermille": 709,
+      "exactEdges": 939,
+      "exactIsolatedNodes": 371,
+      "exactLargestComponentNodes": 54,
+      "exactSelfLoops": 0,
+      "exactUniqueTypedEndpointPairs": 931,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 729,
+      "isolatedNodes": 99,
+      "largestComponentNodes": 81,
+      "nodes": 1276,
+      "selfLoops": 0,
+      "singletonCommunities": 99,
+      "uniqueTypedEndpointPairs": 1236,
+      "uniqueTypedEndpointPairsPerThousandNodes": 968,
+      "byRelation": {
+        "aliases": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 14,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "calls": {
+          "crossFileEdges": 1,
+          "edgeBearingNodes": 132,
+          "edges": 103,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 24,
+          "exactEdges": 17,
+          "exactUniqueEndpointPairs": 13,
+          "uniqueEndpointPairs": 88
+        },
+        "consumes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "contains": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 742,
+          "edges": 594,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 742,
+          "exactEdges": 594,
+          "exactUniqueEndpointPairs": 594,
+          "uniqueEndpointPairs": 594
+        },
+        "decorates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 36,
+          "edges": 18,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 18
+        },
+        "depends_on": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 20,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 20,
+          "exactEdges": 16,
+          "exactUniqueEndpointPairs": 16,
+          "uniqueEndpointPairs": 16
+        },
+        "documents": {
+          "crossFileEdges": 3,
+          "edgeBearingNodes": 5,
+          "edges": 3,
+          "exactCrossFileEdges": 3,
+          "exactEdgeBearingNodes": 5,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "exports": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 49,
+          "edges": 27,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 48,
+          "exactEdges": 26,
+          "exactUniqueEndpointPairs": 26,
+          "uniqueEndpointPairs": 27
+        },
+        "extends": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 28,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 11,
+          "exactEdges": 6,
+          "exactUniqueEndpointPairs": 6,
+          "uniqueEndpointPairs": 16
+        },
+        "handles": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "implements": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "imports": {
+          "crossFileEdges": 12,
+          "edgeBearingNodes": 210,
+          "edges": 144,
+          "exactCrossFileEdges": 12,
+          "exactEdgeBearingNodes": 50,
+          "exactEdges": 29,
+          "exactUniqueEndpointPairs": 29,
+          "uniqueEndpointPairs": 144
+        },
+        "instantiates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 6
+        },
+        "maps_to": {
+          "crossFileEdges": 10,
+          "edgeBearingNodes": 19,
+          "edges": 10,
+          "exactCrossFileEdges": 10,
+          "exactEdgeBearingNodes": 19,
+          "exactEdges": 10,
+          "exactUniqueEndpointPairs": 10,
+          "uniqueEndpointPairs": 10
+        },
+        "mixes_in": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 4,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        },
+        "overrides": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "produces": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "publishes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "reads": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "references": {
+          "crossFileEdges": 7,
+          "edgeBearingNodes": 200,
+          "edges": 137,
+          "exactCrossFileEdges": 7,
+          "exactEdgeBearingNodes": 80,
+          "exactEdges": 52,
+          "exactUniqueEndpointPairs": 49,
+          "uniqueEndpointPairs": 131
+        },
+        "registers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "renders": {
+          "crossFileEdges": 4,
+          "edgeBearingNodes": 7,
+          "edges": 5,
+          "exactCrossFileEdges": 4,
+          "exactEdgeBearingNodes": 7,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "returns": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 6
+        },
+        "routes_to": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 197,
+          "edges": 114,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 197,
+          "exactEdges": 114,
+          "exactUniqueEndpointPairs": 113,
+          "uniqueEndpointPairs": 113
+        },
+        "schedules": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "subscribes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 3,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "tests": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "triggers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 13,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 13,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "type_of": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 8,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 9,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 8
+        },
+        "writes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 3,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 3,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        }
+      }
+    },
+    "removed": [
+      {
+        "edgeId": "sha256:3aa44343cb0774ab19678aab3ea377d69781a9b0e22e6c7bf4bf7ba54f24f616",
+        "kind": "contains",
+        "framework": "react-router",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+          "startByte": 228,
+          "endByte": 274,
+          "startLine": 9,
+          "startColumn": 2,
+          "endLine": 9,
+          "endColumn": 48
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+          "startByte": 0,
+          "endByte": 291,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 12,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:3c0731a84fa2ef12843d75ebae20556eda6a3372c1756380c1de41b5b24e5cdb",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+          "startByte": 0,
+          "endByte": 143,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 8,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:4e8881635f480ed920670d90fa8d2c3051b9d98b5d059349e87b8d29ad85d84e",
+        "kind": "contains",
+        "framework": "next",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/page.tsx",
+          "startByte": 0,
+          "endByte": 123,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/settings/page.tsx",
+          "startByte": 0,
+          "endByte": 143,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:5ae11324f64f9a609b5a24016f510b99f4f51ea0a2860061408943c409c8dbc4",
+        "kind": "contains",
+        "framework": "nuxt",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
+          "startByte": 0,
+          "endByte": 54,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/nuxt/server/api/users/[id].post.ts",
+          "startByte": 0,
+          "endByte": 57,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:5e07c1998ceb2f807df7ef57d15c19b0ba1c97364ac7c4cb7b0768e10387557b",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/users/[id].ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:74b5ddc96a4ba0ec2403b0a4ad937f2ba30d36792459bbaa69a607d40a39a775",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+          "startByte": 0,
+          "endByte": 143,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 8,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:af33acc5c2410bfe410a84dcd588d63735560f116d81da4ceb1c7c369c5dc79f",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/files/[...rest].astro",
+          "startByte": 0,
+          "endByte": 56,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:bb46aca40a48532523fe60b675b4535a3e21c26156e42364bf3b70d4ed6c1c57",
+        "kind": "contains",
+        "framework": "sveltekit",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+          "startByte": 0,
+          "endByte": 75,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:be0806a621daff555e8e36c37ba605edfbf50402e8d893ab6360c06feb84182c",
+        "kind": "contains",
+        "framework": "react-router",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+          "startByte": 0,
+          "endByte": 291,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 12,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+          "startByte": 228,
+          "endByte": 274,
+          "startLine": 9,
+          "startColumn": 2,
+          "endLine": 9,
+          "endColumn": 48
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:d46d3de0405622e796a7a6f0dcc243408431e4164c43d12c8a32847aa3b5b02d",
+        "kind": "contains",
+        "framework": "sveltekit",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+          "startByte": 0,
+          "endByte": 75,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:ecfc5aa101e90cb633af15515c78217dce4aa5e4ceb17ab4361dbc70e490bd14",
+        "kind": "contains",
+        "framework": "next",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/app/page.tsx",
+          "startByte": 0,
+          "endByte": 118,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/page.tsx",
+          "startByte": 0,
+          "endByte": 123,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:f3ec5a2fafccd62c8b555db443547e3846923fb5101e9a26d70dadc737902266",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/blog/[slug].astro",
+          "startByte": 0,
+          "endByte": 55,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 5,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      }
+    ],
+    "added": [],
+    "nodesUnchangedExceptCommunity": true,
+    "commonEdgesUnchanged": true
+  },
+  "expanded": {
+    "beforeGraphSha256": "f151e061efa28f476db8cbcded366e647560b3480fa24470bed11d962c351489",
+    "afterGraphSha256": "35fc2c2df9b7160000c1187a6519f17a89bdea18d3eb247c9c75532ea23c7367",
+    "beforeMetrics": {
+      "communities": 233,
+      "connectedComponents": 230,
+      "crossCommunityEdges": 3,
+      "crossFileEdges": 68,
+      "crossFileEdgesPerThousandNodes": 52,
+      "edgeBearingNodes": 1194,
+      "edgeBearingNodePermille": 924,
+      "edges": 1293,
+      "exactConnectedComponents": 506,
+      "exactCrossCommunityEdges": 3,
+      "exactCrossFileEdges": 67,
+      "exactCrossFileEdgesPerThousandNodes": 51,
+      "exactEdgeBearingNodes": 920,
+      "exactEdgeBearingNodePermille": 712,
+      "exactEdges": 972,
+      "exactIsolatedNodes": 372,
+      "exactLargestComponentNodes": 54,
+      "exactSelfLoops": 0,
+      "exactUniqueTypedEndpointPairs": 964,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 746,
+      "isolatedNodes": 98,
+      "largestComponentNodes": 81,
+      "nodes": 1292,
+      "selfLoops": 0,
+      "singletonCommunities": 98,
+      "uniqueTypedEndpointPairs": 1271,
+      "uniqueTypedEndpointPairsPerThousandNodes": 983,
+      "byRelation": {
+        "aliases": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 18,
+          "edges": 9,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 18,
+          "exactEdges": 9,
+          "exactUniqueEndpointPairs": 9,
+          "uniqueEndpointPairs": 9
+        },
+        "calls": {
+          "crossFileEdges": 1,
+          "edgeBearingNodes": 132,
+          "edges": 103,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 24,
+          "exactEdges": 17,
+          "exactUniqueEndpointPairs": 13,
+          "uniqueEndpointPairs": 88
+        },
+        "consumes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "contains": {
+          "crossFileEdges": 15,
+          "edgeBearingNodes": 769,
+          "edges": 617,
+          "exactCrossFileEdges": 15,
+          "exactEdgeBearingNodes": 769,
+          "exactEdges": 617,
+          "exactUniqueEndpointPairs": 617,
+          "uniqueEndpointPairs": 617
+        },
+        "decorates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 36,
+          "edges": 18,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 18
+        },
+        "depends_on": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 20,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 20,
+          "exactEdges": 16,
+          "exactUniqueEndpointPairs": 16,
+          "uniqueEndpointPairs": 16
+        },
+        "documents": {
+          "crossFileEdges": 3,
+          "edgeBearingNodes": 5,
+          "edges": 3,
+          "exactCrossFileEdges": 3,
+          "exactEdgeBearingNodes": 5,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "exports": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 53,
+          "edges": 29,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 52,
+          "exactEdges": 28,
+          "exactUniqueEndpointPairs": 28,
+          "uniqueEndpointPairs": 29
+        },
+        "extends": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 28,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 11,
+          "exactEdges": 6,
+          "exactUniqueEndpointPairs": 6,
+          "uniqueEndpointPairs": 16
+        },
+        "handles": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "implements": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "imports": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 212,
+          "edges": 146,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 52,
+          "exactEdges": 31,
+          "exactUniqueEndpointPairs": 31,
+          "uniqueEndpointPairs": 146
+        },
+        "instantiates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 6
+        },
+        "maps_to": {
+          "crossFileEdges": 10,
+          "edgeBearingNodes": 19,
+          "edges": 10,
+          "exactCrossFileEdges": 10,
+          "exactEdgeBearingNodes": 19,
+          "exactEdges": 10,
+          "exactUniqueEndpointPairs": 10,
+          "uniqueEndpointPairs": 10
+        },
+        "mixes_in": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 4,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        },
+        "overrides": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "produces": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "publishes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "reads": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "references": {
+          "crossFileEdges": 7,
+          "edgeBearingNodes": 206,
+          "edges": 141,
+          "exactCrossFileEdges": 7,
+          "exactEdgeBearingNodes": 84,
+          "exactEdges": 54,
+          "exactUniqueEndpointPairs": 51,
+          "uniqueEndpointPairs": 135
+        },
+        "registers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "renders": {
+          "crossFileEdges": 4,
+          "edgeBearingNodes": 7,
+          "edges": 5,
+          "exactCrossFileEdges": 4,
+          "exactEdgeBearingNodes": 7,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "returns": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 6
+        },
+        "routes_to": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 201,
+          "edges": 116,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 201,
+          "exactEdges": 116,
+          "exactUniqueEndpointPairs": 115,
+          "uniqueEndpointPairs": 115
+        },
+        "schedules": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "subscribes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 3,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "tests": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "triggers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 13,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 13,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "type_of": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 8,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 9,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 8
+        },
+        "writes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 3,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 3,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        }
+      }
+    },
+    "afterMetrics": {
+      "communities": 239,
+      "connectedComponents": 236,
+      "crossCommunityEdges": 3,
+      "crossFileEdges": 57,
+      "crossFileEdgesPerThousandNodes": 44,
+      "edgeBearingNodes": 1193,
+      "edgeBearingNodePermille": 923,
+      "edges": 1282,
+      "exactConnectedComponents": 512,
+      "exactCrossCommunityEdges": 3,
+      "exactCrossFileEdges": 56,
+      "exactCrossFileEdgesPerThousandNodes": 43,
+      "exactEdgeBearingNodes": 919,
+      "exactEdgeBearingNodePermille": 711,
+      "exactEdges": 961,
+      "exactIsolatedNodes": 373,
+      "exactLargestComponentNodes": 54,
+      "exactSelfLoops": 0,
+      "exactUniqueTypedEndpointPairs": 953,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 737,
+      "isolatedNodes": 99,
+      "largestComponentNodes": 81,
+      "nodes": 1292,
+      "selfLoops": 0,
+      "singletonCommunities": 99,
+      "uniqueTypedEndpointPairs": 1260,
+      "uniqueTypedEndpointPairsPerThousandNodes": 975,
+      "byRelation": {
+        "aliases": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 18,
+          "edges": 9,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 18,
+          "exactEdges": 9,
+          "exactUniqueEndpointPairs": 9,
+          "uniqueEndpointPairs": 9
+        },
+        "calls": {
+          "crossFileEdges": 1,
+          "edgeBearingNodes": 132,
+          "edges": 103,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 24,
+          "exactEdges": 17,
+          "exactUniqueEndpointPairs": 13,
+          "uniqueEndpointPairs": 88
+        },
+        "consumes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "contains": {
+          "crossFileEdges": 4,
+          "edgeBearingNodes": 757,
+          "edges": 606,
+          "exactCrossFileEdges": 4,
+          "exactEdgeBearingNodes": 757,
+          "exactEdges": 606,
+          "exactUniqueEndpointPairs": 606,
+          "uniqueEndpointPairs": 606
+        },
+        "decorates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 36,
+          "edges": 18,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 18
+        },
+        "depends_on": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 20,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 20,
+          "exactEdges": 16,
+          "exactUniqueEndpointPairs": 16,
+          "uniqueEndpointPairs": 16
+        },
+        "documents": {
+          "crossFileEdges": 3,
+          "edgeBearingNodes": 5,
+          "edges": 3,
+          "exactCrossFileEdges": 3,
+          "exactEdgeBearingNodes": 5,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "exports": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 53,
+          "edges": 29,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 52,
+          "exactEdges": 28,
+          "exactUniqueEndpointPairs": 28,
+          "uniqueEndpointPairs": 29
+        },
+        "extends": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 28,
+          "edges": 16,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 11,
+          "exactEdges": 6,
+          "exactUniqueEndpointPairs": 6,
+          "uniqueEndpointPairs": 16
+        },
+        "handles": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "implements": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "imports": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 212,
+          "edges": 146,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 52,
+          "exactEdges": 31,
+          "exactUniqueEndpointPairs": 31,
+          "uniqueEndpointPairs": 146
+        },
+        "instantiates": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 6
+        },
+        "maps_to": {
+          "crossFileEdges": 10,
+          "edgeBearingNodes": 19,
+          "edges": 10,
+          "exactCrossFileEdges": 10,
+          "exactEdgeBearingNodes": 19,
+          "exactEdges": 10,
+          "exactUniqueEndpointPairs": 10,
+          "uniqueEndpointPairs": 10
+        },
+        "mixes_in": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 4,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 4,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        },
+        "overrides": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "produces": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "publishes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "reads": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "references": {
+          "crossFileEdges": 7,
+          "edgeBearingNodes": 206,
+          "edges": 141,
+          "exactCrossFileEdges": 7,
+          "exactEdgeBearingNodes": 84,
+          "exactEdges": 54,
+          "exactUniqueEndpointPairs": 51,
+          "uniqueEndpointPairs": 135
+        },
+        "registers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 8,
+          "edges": 4,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 4
+        },
+        "renders": {
+          "crossFileEdges": 4,
+          "edgeBearingNodes": 7,
+          "edges": 5,
+          "exactCrossFileEdges": 4,
+          "exactEdgeBearingNodes": 7,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "returns": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 12,
+          "edges": 6,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 8,
+          "exactEdges": 4,
+          "exactUniqueEndpointPairs": 4,
+          "uniqueEndpointPairs": 6
+        },
+        "routes_to": {
+          "crossFileEdges": 14,
+          "edgeBearingNodes": 201,
+          "edges": 116,
+          "exactCrossFileEdges": 14,
+          "exactEdgeBearingNodes": 201,
+          "exactEdges": 116,
+          "exactUniqueEndpointPairs": 115,
+          "uniqueEndpointPairs": 115
+        },
+        "schedules": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 10,
+          "edges": 5,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 10,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 5
+        },
+        "subscribes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 6,
+          "edges": 3,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 6,
+          "exactEdges": 3,
+          "exactUniqueEndpointPairs": 3,
+          "uniqueEndpointPairs": 3
+        },
+        "tests": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 2,
+          "edges": 1,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 2,
+          "exactEdges": 1,
+          "exactUniqueEndpointPairs": 1,
+          "uniqueEndpointPairs": 1
+        },
+        "triggers": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 13,
+          "edges": 7,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 13,
+          "exactEdges": 7,
+          "exactUniqueEndpointPairs": 7,
+          "uniqueEndpointPairs": 7
+        },
+        "type_of": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 14,
+          "edges": 8,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 9,
+          "exactEdges": 5,
+          "exactUniqueEndpointPairs": 5,
+          "uniqueEndpointPairs": 8
+        },
+        "writes": {
+          "crossFileEdges": 0,
+          "edgeBearingNodes": 3,
+          "edges": 2,
+          "exactCrossFileEdges": 0,
+          "exactEdgeBearingNodes": 3,
+          "exactEdges": 2,
+          "exactUniqueEndpointPairs": 2,
+          "uniqueEndpointPairs": 2
+        }
+      }
+    },
+    "removed": [
+      {
+        "edgeId": "sha256:3aa44343cb0774ab19678aab3ea377d69781a9b0e22e6c7bf4bf7ba54f24f616",
+        "kind": "contains",
+        "framework": "react-router",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+          "startByte": 228,
+          "endByte": 274,
+          "startLine": 9,
+          "startColumn": 2,
+          "endLine": 9,
+          "endColumn": 48
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+          "startByte": 0,
+          "endByte": 291,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 12,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:3c0731a84fa2ef12843d75ebae20556eda6a3372c1756380c1de41b5b24e5cdb",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+          "startByte": 0,
+          "endByte": 143,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 8,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:5ae11324f64f9a609b5a24016f510b99f4f51ea0a2860061408943c409c8dbc4",
+        "kind": "contains",
+        "framework": "nuxt",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
+          "startByte": 0,
+          "endByte": 54,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/nuxt/server/api/users/[id].post.ts",
+          "startByte": 0,
+          "endByte": 57,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:5e07c1998ceb2f807df7ef57d15c19b0ba1c97364ac7c4cb7b0768e10387557b",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/users/[id].ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:74b5ddc96a4ba0ec2403b0a4ad937f2ba30d36792459bbaa69a607d40a39a775",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+          "startByte": 0,
+          "endByte": 143,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 8,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:8aacce23b5a2487d3bb46f47f728bb0ab266cfc21d6449cf9b63cc2e25fb79f6",
+        "kind": "contains",
+        "framework": "next",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/page.tsx",
+          "startByte": 0,
+          "endByte": 123,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/layout.tsx",
+          "startByte": 0,
+          "endByte": 125,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:af33acc5c2410bfe410a84dcd588d63735560f116d81da4ceb1c7c369c5dc79f",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/files/[...rest].astro",
+          "startByte": 0,
+          "endByte": 56,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:bb46aca40a48532523fe60b675b4535a3e21c26156e42364bf3b70d4ed6c1c57",
+        "kind": "contains",
+        "framework": "sveltekit",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+          "startByte": 0,
+          "endByte": 75,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:bc51e7d1d4870e3569f5e8074fcddd5fcd8bca5ba508e5c18f330aef59420911",
+        "kind": "contains",
+        "framework": "next",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/app/page.tsx",
+          "startByte": 0,
+          "endByte": 118,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 131,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:be0806a621daff555e8e36c37ba605edfbf50402e8d893ab6360c06feb84182c",
+        "kind": "contains",
+        "framework": "react-router",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+          "startByte": 0,
+          "endByte": 291,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 12,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+          "startByte": 228,
+          "endByte": 274,
+          "startLine": 9,
+          "startColumn": 2,
+          "endLine": 9,
+          "endColumn": 48
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:d46d3de0405622e796a7a6f0dcc243408431e4164c43d12c8a32847aa3b5b02d",
+        "kind": "contains",
+        "framework": "sveltekit",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+          "startByte": 0,
+          "endByte": 61,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+          "startByte": 0,
+          "endByte": 75,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "edgeId": "sha256:f3ec5a2fafccd62c8b555db443547e3846923fb5101e9a26d70dadc737902266",
+        "kind": "contains",
+        "framework": "astro",
+        "source": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+          "startByte": 0,
+          "endByte": 15,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 2,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/routes/typescript/astro/src/pages/blog/[slug].astro",
+          "startByte": 0,
+          "endByte": 55,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 5,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      }
+    ],
+    "added": [
+      {
+        "edgeId": "sha256:7967424549b29c267d115cd60a4426bb1cf23abf50811f98ae62346f24f49388",
+        "kind": "contains",
+        "framework": "next",
+        "source": {
+          "file": "fixtures/code-graph/frontend-react/src/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 131,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "fixtures/code-graph/frontend-react/src/app/admin/layout.tsx",
+          "startByte": 0,
+          "endByte": 125,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      }
+    ],
+    "nodesUnchangedExceptCommunity": true,
+    "commonEdgesUnchanged": true
+  },
+  "fixtureAddition": {
+    "files": [
+      "fixtures/code-graph/frontend-react/src/app/layout.tsx",
+      "fixtures/code-graph/frontend-react/src/app/admin/layout.tsx"
+    ],
+    "addedNodes": 16,
+    "addedEdges": 24,
+    "removedNodes": 0,
+    "removedEdges": 0,
+    "note": "Two layout modules add declarations, parameters, default exports, type references, Vite glob imports, route targets, and four containing layout relationships. Source additions are kept separate from the identical-input production comparison."
+  },
+  "semanticAssertions": {
+    "negativeGroups": 18,
+    "restoredFalseEdgesIndividuallyRejected": [
+      "sha256:3aa44343cb0774ab19678aab3ea377d69781a9b0e22e6c7bf4bf7ba54f24f616",
+      "sha256:3c0731a84fa2ef12843d75ebae20556eda6a3372c1756380c1de41b5b24e5cdb",
+      "sha256:4e8881635f480ed920670d90fa8d2c3051b9d98b5d059349e87b8d29ad85d84e",
+      "sha256:5ae11324f64f9a609b5a24016f510b99f4f51ea0a2860061408943c409c8dbc4",
+      "sha256:5e07c1998ceb2f807df7ef57d15c19b0ba1c97364ac7c4cb7b0768e10387557b",
+      "sha256:74b5ddc96a4ba0ec2403b0a4ad937f2ba30d36792459bbaa69a607d40a39a775",
+      "sha256:af33acc5c2410bfe410a84dcd588d63735560f116d81da4ceb1c7c369c5dc79f",
+      "sha256:bb46aca40a48532523fe60b675b4535a3e21c26156e42364bf3b70d4ed6c1c57",
+      "sha256:be0806a621daff555e8e36c37ba605edfbf50402e8d893ab6360c06feb84182c",
+      "sha256:d46d3de0405622e796a7a6f0dcc243408431e4164c43d12c8a32847aa3b5b02d",
+      "sha256:ecfc5aa101e90cb633af15515c78217dce4aa5e4ceb17ab4361dbc70e490bd14",
+      "sha256:f3ec5a2fafccd62c8b555db443547e3846923fb5101e9a26d70dadc737902266"
+    ],
+    "exactLayoutEdges": 4,
+    "missingLayoutEdgesIndividuallyRejected": 4
+  },
+  "policyChanges": [
+    {
+      "category": "minimums",
+      "metric": "communities",
+      "beforeMetric": 232,
+      "afterMetric": 239,
+      "beforeBound": 232,
+      "afterBound": 239,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "edges",
+      "beforeMetric": 1270,
+      "afterMetric": 1282,
+      "beforeBound": 1265,
+      "afterBound": 1277,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactCrossFileEdges",
+      "beforeMetric": 62,
+      "afterMetric": 56,
+      "beforeBound": 62,
+      "afterBound": 56,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactCrossFileEdgesPerThousandNodes",
+      "beforeMetric": 48,
+      "afterMetric": 43,
+      "beforeBound": 48,
+      "afterBound": 43,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactEdgeBearingNodePermille",
+      "beforeMetric": 710,
+      "afterMetric": 711,
+      "beforeBound": 709,
+      "afterBound": 710,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactEdgeBearingNodes",
+      "beforeMetric": 906,
+      "afterMetric": 919,
+      "beforeBound": 905,
+      "afterBound": 918,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactEdges",
+      "beforeMetric": 951,
+      "afterMetric": 961,
+      "beforeBound": 946,
+      "afterBound": 956,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactUniqueTypedEndpointPairs",
+      "beforeMetric": 943,
+      "afterMetric": 953,
+      "beforeBound": 938,
+      "afterBound": 948,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "exactUniqueTypedEndpointPairsPerThousandNodes",
+      "beforeMetric": 739,
+      "afterMetric": 737,
+      "beforeBound": 735,
+      "afterBound": 733,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "nodes",
+      "beforeMetric": 1276,
+      "afterMetric": 1292,
+      "beforeBound": 1276,
+      "afterBound": 1292,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "minimums",
+      "metric": "uniqueTypedEndpointPairs",
+      "beforeMetric": 1248,
+      "afterMetric": 1260,
+      "beforeBound": 1243,
+      "afterBound": 1255,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "communities",
+      "beforeMetric": 232,
+      "afterMetric": 239,
+      "beforeBound": 233,
+      "afterBound": 240,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "connectedComponents",
+      "beforeMetric": 229,
+      "afterMetric": 236,
+      "beforeBound": 230,
+      "afterBound": 237,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "exactConnectedComponents",
+      "beforeMetric": 503,
+      "afterMetric": 512,
+      "beforeBound": 504,
+      "afterBound": 513,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "exactIsolatedNodes",
+      "beforeMetric": 370,
+      "afterMetric": 373,
+      "beforeBound": 371,
+      "afterBound": 374,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "isolatedNodes",
+      "beforeMetric": 98,
+      "afterMetric": 99,
+      "beforeBound": 99,
+      "afterBound": 100,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "maximums",
+      "metric": "singletonCommunities",
+      "beforeMetric": 98,
+      "afterMetric": 99,
+      "beforeBound": 99,
+      "afterBound": 100,
+      "reason": "Measured correction on unchanged original corpus plus separately reviewed addition of two layout fixtures; previous bound margin retained."
+    },
+    {
+      "category": "relationshipMinimums",
+      "relation": "contains",
+      "metric": "exactCrossFileEdges",
+      "beforeMetric": 12,
+      "afterMetric": 4,
+      "beforeBound": 12,
+      "afterBound": 4
+    },
+    {
+      "category": "relationshipMinimums",
+      "relation": "imports",
+      "metric": "exactCrossFileEdges",
+      "beforeMetric": 12,
+      "afterMetric": 14,
+      "beforeBound": 12,
+      "afterBound": 14
+    },
+    {
+      "category": "relationshipMinimums",
+      "relation": "imports",
+      "metric": "exactUniqueEndpointPairs",
+      "beforeMetric": 29,
+      "afterMetric": 31,
+      "beforeBound": 29,
+      "afterBound": 31
+    },
+    {
+      "category": "relationshipMinimums",
+      "relation": "references",
+      "metric": "exactUniqueEndpointPairs",
+      "beforeMetric": 49,
+      "afterMetric": 51,
+      "beforeBound": 49,
+      "afterBound": 51
+    },
+    {
+      "category": "relationshipMinimums",
+      "relation": "routes_to",
+      "metric": "exactUniqueEndpointPairs",
+      "beforeMetric": 113,
+      "afterMetric": 115,
+      "beforeBound": 111,
+      "afterBound": 113
+    }
+  ],
+  "artifactSha256": {
+    "semantic-route-parent-fixture-delta/original-delta.json": "7ba3a6dc0c07c1d37bf9f1db588c2df6fe0d8eb21256986e4c67f201eaa1d5b9",
+    "semantic-route-parent-fixture-delta/expanded-delta.json": "a0ae2b90b86d4fe6b511d1b94be2a73cb69cd853e1524a44e4b8d961a057ae46",
+    "semantic-route-parent-fixture-delta/fixture-addition-delta.json": "7ebfc69c21c62ff8da71e68adc38542793a947f974d25eac4dbad9b6454e0e1a",
+    "semantic-route-parent-fixture-delta/source-inventories.json": "2fbdb4d3b12e29b00324832ac2710f2b29b427f15a51342ad7b67f315cb191fb"
+  }
+}

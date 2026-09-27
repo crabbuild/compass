@@ -225,10 +225,21 @@ Framework route hierarchy now requires a recognized filesystem-convention fact
 from its owning framework producer. A receiver name such as `r` or `app` does
 not establish parentage between programmatic routes in separate source files.
 Framework composition rules still own programmatic mounts and groups. The
-framework-pack semantics identity advances from 6 to 7, and build-state seals
+framework-pack semantics identity initially advanced from 6 to 7, and build-state seals
 now include that identity. Rebuild existing graphs to remove unsupported
 containment edges and recompute affected paths, degrees, and communities.
 Graph/evidence schema majors and immutable historical realizations are unchanged.
+
+Framework semantics 8 additionally replaces first-file directory selection with
+framework-specific nesting. Next App Router parents must be layout modules;
+flat route parents use filename segments, including pathless and non-nesting
+markers; Nuxt parents require a matching page module above a child directory.
+Index pages and sibling modules cannot become parents merely through ordering.
+Ambiguous nearest parents remain unresolved instead of falling back outward.
+Rebuild graphs to correct containment, degrees, paths, and communities. These
+rules do not infer custom router configuration, runtime mounts, or an omitted
+layout declaration. See the supported boundaries in the
+[framework graph reference](docs/reference/react-framework-graph.md).
 
 ### Agent Query View
 

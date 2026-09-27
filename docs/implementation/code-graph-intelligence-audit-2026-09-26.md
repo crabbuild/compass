@@ -1423,6 +1423,87 @@ the new assertion. This mutation exercise validates the checker; it is not a
 production correction. Existing native results describe the unchanged Rust
 production code, not a fix for this newly exposed defect.
 
+#### Framework-specific filesystem parents and independent source review
+
+The next correction replaces directory-order selection with an indexed lookup
+of framework parent roles: Next layouts, the supported Svelte layout facts,
+Nuxt parent pages, and default React Router/Remix/TanStack flat-route names.
+Pages, standalone HTTP endpoints, and Astro routes no longer establish parents
+by proximity. Ambiguous nearest parents remain unresolved. Custom configuration
+and extraction gaps are documented in the framework reference; this change does
+not claim complete routing support. Framework semantics advance to version 8;
+the product version remains 0.3.30 and historical graphs remain immutable.
+
+The frozen binary SHA256 is
+`9efe548537b106c69d1da7a5ac7955e764e43103e0d1e4a754a3c1880c292bea`.
+On the **identical original fixture corpus**, it removes exactly **12 more
+unsupported containment records**, adds none, and retains all **1,276 nodes**
+unchanged except for community assignments. All common edges are unchanged.
+The removed records are two React Router sibling links, two Next page-parent
+links, five Astro links, one Nuxt endpoint link, and two Svelte page/server
+links. The source-reviewed negative manifest now covers **18 file pairs** and
+passes on the production graph. Restoring each of these 12 false records
+individually makes the checker fail.
+
+Adding two explicit Next layout fixtures is measured separately: the sources
+add 16 nodes and 24 edges to the corrected original graph, including four
+expected layout relationships. On identical expanded sources, old versus new
+production removes 12 false links and adds the missing root-to-nested-layout
+link. No other common edge or node content changes. The frontend fixture gate
+requires exactly the four source-specified layout pairs; omitting any one fails
+its mutation check. The topology bounds move by the measured original-before to
+expanded-after deltas, preserving every previous margin. The
+[complete fixture review](../../benchmarks/agent_query/semantic_route_parent_fixture_review.json)
+separates the production delta, fixture addition, mutation checks, and each
+policy adjustment. Increased fragmentation is not evidence of better cohesion.
+
+The JavaScript source oracle now uses a separate pairwise convention predicate,
+with 15 manually specified cases in both input orders. The native route matrix
+contains 23 cases, also in both orders. Agreement is still insufficient by
+itself: the historical Next, React Router, and TanStack hierarchy scorecards
+are explicitly **invalidated**, retaining their old counts and digests until
+their sources are independently reviewed. Pinned hierarchy qualification
+cannot use those records as passing evidence.
+
+A real Next diagnostic uses 273 files (1,398,028 bytes) projected read-only from
+shadcn/ui commit `a87a63b2ca25143d26c8bd0903e4e9bc77b3f824`. Four positive and
+three negative pairs were recorded before inspecting either graph for this
+projection. Old production passes **6/7** and corrected production **7/7**.
+The complete graph delta contains **13 removed** links (nine to HTTP handlers,
+two page-to-layout reversals, and two loading-to-layout reversals) and **four
+added** AppLayout-to-nested-layout links. Every changed pair was source-reviewed;
+the 14,762 nodes are unchanged except for communities and all common edges are
+unchanged. This is a source-selected development diagnostic over a partial
+repository, not held-out evidence or a graph-wide precision estimate.
+
+Fresh paired builds on the unchanged five-language panel produce byte-identical
+Compass graphs to the preceding route correction. The same 110 requests yield:
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 46/55 | 46/55 |
+| Source-checked paths | 6/10 | 8/10 |
+| Selected source relationships | 16/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 16/21 | 17/21 |
+
+The [development review](../../benchmarks/agent_query/semantic_route_parent_development_review.json)
+records pins, binary and graph hashes, source witnesses, and raw-artifact hashes.
+This correction does not improve the panel scores or prove superiority. The
+shared-machine timing run overlaps other verification and supports no speed
+claim. MCP scores from the earlier run are not presented as a fresh rerun.
+
+Verification: **1,436 native tests passed, zero failed, two ignored** before a
+trivial Clippy needless-borrow correction; the final production binary built
+successfully. Workspace library/binary and selected-integration Clippy passes.
+A broader invocation including the untouched `react_frontend` test failed on
+39 existing `unwrap`/`expect` lint violations; its failure log is retained.
+All **88 script tests**, **15 JavaScript oracle cases**, and **97 benchmark
+tests** pass, as do formatting and the product-boundary check. The first full
+fixture invocation stopped because its default parser-source path was absent.
+A second invocation uses the existing parser bundle in this worktree's target
+directory; its complete result remains pending. No full qualification pass is
+claimed at this checkpoint.
+
 #### Java constructor receiver diagnostic
 
 A separate frozen-binary diagnostic reproduces the jsoup constructor receiver
@@ -1439,9 +1520,10 @@ The native evidence and corrected graph inspection agree on the missing calls.
 
 ## Next evidence to collect
 
-1. Correct filesystem route-parent selection and its non-independent frontend
-   oracle; keep the new semantic negative failing until the false parent is
-   removed by production behavior. Then rerun the full qualification gate.
+1. Finish the full qualification run for framework-specific route parents and
+   re-review the invalidated pinned hierarchy scorecards from their sources.
+   The corrected fixture and selected real-source evidence above do not replace
+   those broader checks.
 2. Extend source-proven constructor, loop/result/iterator inference to recover
    the jsoup and fd misses. Keep exact
    build/source provenance for subsequent release comparisons;

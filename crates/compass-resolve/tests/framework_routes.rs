@@ -162,6 +162,310 @@ fn filesystem_parentage_requires_a_recognized_convention() -> Result<(), Box<dyn
 }
 
 #[test]
+fn filesystem_parentage_follows_framework_nesting_not_nearby_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    type Case<'a> = (&'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
+    let cases: &[Case<'_>] = &[
+        (
+            "next",
+            &[
+                "app/page.tsx",
+                "app/admin/page.tsx",
+                "app/admin/settings/page.tsx",
+            ],
+            &[],
+        ),
+        (
+            "next",
+            &[
+                "app/layout.tsx",
+                "app/page.tsx",
+                "app/blog/layout.tsx",
+                "app/blog/page.tsx",
+                "app/blog/item/page.tsx",
+                "app/api/route.ts",
+                "app/global-error.tsx",
+            ],
+            &[
+                ("app/layout.tsx", "app/page.tsx"),
+                ("app/layout.tsx", "app/blog/layout.tsx"),
+                ("app/blog/layout.tsx", "app/blog/page.tsx"),
+                ("app/blog/layout.tsx", "app/blog/item/page.tsx"),
+            ],
+        ),
+        (
+            "next",
+            &["app/layout.tsx", "app/layout.jsx", "app/page.tsx"],
+            &[],
+        ),
+        ("next", &["one/app/layout.tsx", "two/app/page.tsx"], &[]),
+        (
+            "next",
+            &["pages/index.tsx", "pages/blog.tsx", "pages/blog/post.tsx"],
+            &[],
+        ),
+        (
+            "next",
+            &[
+                "app/layout.tsx",
+                "app/(private)/layout.tsx",
+                "app/(private)/page.tsx",
+            ],
+            &[
+                ("app/layout.tsx", "app/(private)/layout.tsx"),
+                ("app/(private)/layout.tsx", "app/(private)/page.tsx"),
+            ],
+        ),
+        (
+            "react-router",
+            &["src/routes/home.tsx", "src/routes/tanstack.tsx"],
+            &[],
+        ),
+        (
+            "react-router",
+            &[
+                "app/routes/concerts.tsx",
+                "app/routes/concerts.$city.tsx",
+                "app/routes/concerts._index.tsx",
+                "app/routes/concerts_.mine.tsx",
+            ],
+            &[
+                ("app/routes/concerts.tsx", "app/routes/concerts.$city.tsx"),
+                ("app/routes/concerts.tsx", "app/routes/concerts._index.tsx"),
+            ],
+        ),
+        (
+            "react-router",
+            &[
+                "app/routes/_auth.tsx",
+                "app/routes/_auth.login.tsx",
+                "app/routes/_index.tsx",
+                "app/routes/about.tsx",
+            ],
+            &[("app/routes/_auth.tsx", "app/routes/_auth.login.tsx")],
+        ),
+        (
+            "remix",
+            &[
+                "app/routes/concerts/route.tsx",
+                "app/routes/concerts.$city.tsx",
+                "app/routes/concerts/helper.tsx",
+            ],
+            &[(
+                "app/routes/concerts/route.tsx",
+                "app/routes/concerts.$city.tsx",
+            )],
+        ),
+        (
+            "remix",
+            &[
+                "app/routes/concerts.tsx",
+                "app/routes/concerts/route.tsx",
+                "app/routes/concerts.$city.tsx",
+            ],
+            &[],
+        ),
+        (
+            "react-router",
+            &[
+                "app/routes/a.tsx",
+                "app/routes/a.b.tsx",
+                "app/routes/a.b_.c.tsx",
+            ],
+            &[
+                ("app/routes/a.tsx", "app/routes/a.b.tsx"),
+                ("app/routes/a.tsx", "app/routes/a.b_.c.tsx"),
+            ],
+        ),
+        (
+            "react-router",
+            &[
+                "app/routes/foo[.]bar.tsx",
+                "app/routes/foo[.]bar.child.tsx",
+                "app/routes/foo.tsx",
+            ],
+            &[("app/routes/foo[.]bar.tsx", "app/routes/foo[.]bar.child.tsx")],
+        ),
+        (
+            "react-router",
+            &[
+                "app/routes/a.tsx",
+                "app/routes/a.jsx",
+                "app/routes/a.child.tsx",
+            ],
+            &[],
+        ),
+        (
+            "tanstack-router",
+            &[
+                "src/routes/__root.tsx",
+                "src/routes/index.tsx",
+                "src/routes/posts.tsx",
+                "src/routes/posts.index.tsx",
+                "src/routes/posts.$id.tsx",
+                "src/routes/posts_.$id.edit.tsx",
+            ],
+            &[
+                ("src/routes/__root.tsx", "src/routes/index.tsx"),
+                ("src/routes/__root.tsx", "src/routes/posts.tsx"),
+                ("src/routes/posts.tsx", "src/routes/posts.index.tsx"),
+                ("src/routes/posts.tsx", "src/routes/posts.$id.tsx"),
+                ("src/routes/__root.tsx", "src/routes/posts_.$id.edit.tsx"),
+            ],
+        ),
+        (
+            "tanstack-router",
+            &[
+                "src/routes/account/route.tsx",
+                "src/routes/account/overview.tsx",
+                "src/routes/account/index.tsx",
+                "src/routes/account/-helper.tsx",
+                "src/routes/account/route.lazy.tsx",
+            ],
+            &[
+                (
+                    "src/routes/account/route.tsx",
+                    "src/routes/account/overview.tsx",
+                ),
+                (
+                    "src/routes/account/route.tsx",
+                    "src/routes/account/index.tsx",
+                ),
+            ],
+        ),
+        (
+            "tanstack-router",
+            &["src/routes/_auth.tsx", "src/routes/(group)/_auth.login.tsx"],
+            &[("src/routes/_auth.tsx", "src/routes/(group)/_auth.login.tsx")],
+        ),
+        (
+            "tanstack-router",
+            &["src/routes/index.tsx", "src/routes/about.tsx"],
+            &[],
+        ),
+        (
+            "nuxt",
+            &[
+                "pages/index.vue",
+                "pages/parent.vue",
+                "pages/parent/child.vue",
+                "pages/parent/index.vue",
+                "pages/other.vue",
+            ],
+            &[
+                ("pages/parent.vue", "pages/parent/child.vue"),
+                ("pages/parent.vue", "pages/parent/index.vue"),
+            ],
+        ),
+        (
+            "nuxt",
+            &[
+                "pages/parent/index.vue",
+                "pages/parent/child.vue",
+                "server/api/users.get.ts",
+                "server/api/users/[id].post.ts",
+            ],
+            &[],
+        ),
+        (
+            "sveltekit",
+            &["src/routes/+page.svelte", "src/routes/+server.ts"],
+            &[],
+        ),
+        (
+            "sveltekit",
+            &[
+                "src/routes/+layout.svelte",
+                "src/routes/+page.svelte",
+                "src/routes/blog/+layout.svelte",
+                "src/routes/blog/+page.svelte",
+                "src/routes/blog/+server.ts",
+            ],
+            &[
+                ("src/routes/+layout.svelte", "src/routes/+page.svelte"),
+                (
+                    "src/routes/+layout.svelte",
+                    "src/routes/blog/+layout.svelte",
+                ),
+                (
+                    "src/routes/blog/+layout.svelte",
+                    "src/routes/blog/+page.svelte",
+                ),
+            ],
+        ),
+        (
+            "astro",
+            &[
+                "src/pages/about.astro",
+                "src/pages/blog/post.astro",
+                "src/pages/api/items.ts",
+            ],
+            &[],
+        ),
+    ];
+    for (framework, files, expected) in cases {
+        let facts = files
+            .iter()
+            .map(|file| {
+                let mut fact = route("Page");
+                fact.framework = (*framework).to_owned();
+                fact.operation = "PAGE".to_owned();
+                fact.origin = RawFrameworkOrigin::Convention;
+                fact.anchor.source_file = (*file).to_owned();
+                fact.rule = Some(
+                    match *framework {
+                        "next" if file.starts_with("pages/") => "next-file-route-convention",
+                        "next" if file.ends_with("/route.ts") => "next-app-route-convention",
+                        "next" => "next-app-router-convention",
+                        "react-router" => "react-router-file-route-convention",
+                        "remix" => "remix-route-convention",
+                        "tanstack-router" => "tanstack-file-route-convention",
+                        "nuxt" => "nuxt-file-route-convention",
+                        "sveltekit" => "sveltekit-file-route-convention",
+                        "astro" => "astro-file-route-convention",
+                        _ => "unknown",
+                    }
+                    .to_owned(),
+                );
+                RawFrameworkFact::Route(fact)
+            })
+            .collect::<Vec<_>>();
+        let expected = expected
+            .iter()
+            .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+            .collect::<std::collections::BTreeSet<_>>();
+        for facts in [facts.clone(), facts.into_iter().rev().collect()] {
+            let mut extraction = Extraction {
+                framework_facts: facts,
+                ..Extraction::default()
+            };
+            resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+            let mut actual = std::collections::BTreeSet::new();
+            for edge in extraction
+                .edges
+                .iter()
+                .filter(|edge| edge.string("relation") == "contains")
+            {
+                let source = extraction
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.source)
+                    .ok_or("missing hierarchy source")?;
+                let target = extraction
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.target)
+                    .ok_or("missing hierarchy target")?;
+                actual.insert((source.string("source_file"), target.string("source_file")));
+                assert_eq!(edge.string("rule"), "framework-route-hierarchy");
+            }
+            assert_eq!(actual, expected, "{framework}: {files:?}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn neutral_framework_roles_publish_existing_node_roles_and_reject_unknown_values()
 -> Result<(), Box<dyn std::error::Error>> {
     let anchor = route("service").anchor;

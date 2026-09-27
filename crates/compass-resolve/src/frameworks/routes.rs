@@ -1,3 +1,5 @@
+mod hierarchy;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -218,91 +220,25 @@ pub fn publish_resolved_routes(
         .map(|edge| (edge.source.clone(), edge.target.clone()))
         .collect::<HashSet<_>>();
     let mut hierarchy_diagnostics = Vec::new();
-    let mut route_sources_by_scope =
-        BTreeMap::<(String, String), Vec<(String, String, RawFrameworkAnchor, bool)>>::new();
-    for (route_id, route) in &route_ids {
-        if !has_filesystem_route_convention(route) {
-            continue;
-        }
-        route_sources_by_scope
-            .entry((route.framework.clone(), route_hierarchy_scope(route)))
-            .or_default()
-            .push((
-                route.anchor.source_file.clone(),
-                route_id.clone(),
-                route.anchor.clone(),
-                route
-                    .stages
-                    .iter()
-                    .any(|stage| stage.role == RawRouteStageRole::RouteComponent),
-            ));
-    }
-    for candidates in route_sources_by_scope.values_mut() {
-        candidates.sort_by(|left, right| left.0.cmp(&right.0));
-    }
-    // Parent lookup is on the hot path for large convention route trees.  A
-    // direct scan of every route in a scope makes a corpus with many routes
-    // in the same source file quadratic (the synthetic enterprise guard uses
-    // exactly that shape).  Keep the original candidate ordering, but index
-    // the distinct source files by their parent directory once per scope.
-    let mut route_parent_sources_by_scope =
-        BTreeMap::<(String, String), BTreeMap<String, Vec<String>>>::new();
-    for ((framework, scope), candidates) in &route_sources_by_scope {
-        let mut by_directory = BTreeMap::<String, Vec<String>>::new();
-        for (source, _, _, _) in candidates {
-            let portable = source.replace('\\', "/");
-            let Some((directory, _)) = portable.rsplit_once('/') else {
-                continue;
-            };
-            let sources = by_directory.entry(directory.to_owned()).or_default();
-            if sources.last().is_none_or(|previous| previous != source) {
-                sources.push(source.clone());
-            }
-        }
-        route_parent_sources_by_scope.insert((framework.clone(), scope.clone()), by_directory);
-    }
+    let hierarchy = hierarchy::FileRouteHierarchy::new(&route_ids);
     for (child_id, child) in &route_ids {
-        if !has_filesystem_route_convention(child) {
-            continue;
-        }
-        let scope = route_hierarchy_scope(child);
-        let mut selected = None;
-        if let Some(candidates) =
-            route_sources_by_scope.get(&(child.framework.clone(), scope.clone()))
-            && let Some(parent_sources) =
-                route_parent_sources_by_scope.get(&(child.framework.clone(), scope.clone()))
-            && let Some(parent_source) =
-                route_parent_source_file_indexed(&child.anchor.source_file, parent_sources)
-        {
-            let matching = candidates
-                .iter()
-                .filter(|(source, _, _, _)| source == &parent_source)
-                .collect::<Vec<_>>();
-            if matching.len() == 1 {
-                let (_, parent_id, parent_anchor, component) = matching[0];
-                selected = Some((parent_id.clone(), parent_anchor.clone(), *component));
-            } else if matching.len() > 1 {
-                let component_candidates = matching
-                    .iter()
-                    .filter(|(_, _, _, component)| *component)
-                    .collect::<Vec<_>>();
-                if component_candidates.len() == 1 {
-                    let (_, parent_id, parent_anchor, component) = component_candidates[0];
-                    selected = Some((parent_id.clone(), parent_anchor.clone(), *component));
-                } else {
-                    hierarchy_diagnostics.push(json!({
-                        "kind": "ambiguous_route_parent",
-                        "framework": child.framework,
-                        "sourceFile": child.anchor.source_file,
-                        "parentSourceFile": parent_source,
-                        "candidates": matching.iter().map(|(_, id, _, _)| id).collect::<Vec<_>>(),
-                    }));
-                }
-            }
-        }
-        let Some((parent_id, parent_anchor, _)) = selected else {
+        let Some(candidates) = hierarchy.candidates(child) else {
             continue;
         };
+        let [parent_index] = candidates else {
+            hierarchy_diagnostics.push(json!({
+                "kind": "ambiguous_route_parent",
+                "framework": child.framework,
+                "sourceFile": child.anchor.source_file,
+                "parentSourceFiles": candidates.iter()
+                    .map(|index| &route_ids[*index].1.anchor.source_file).collect::<Vec<_>>(),
+                "candidates": candidates.iter().map(|index| &route_ids[*index].0).collect::<Vec<_>>(),
+            }));
+            continue;
+        };
+        let (parent_id, parent) = &route_ids[*parent_index];
+        let parent_id = parent_id.clone();
+        let parent_anchor = &parent.anchor;
         if parent_id == *child_id
             || !existing_hierarchy.insert((parent_id.clone(), child_id.clone()))
         {
@@ -342,7 +278,7 @@ pub fn publish_resolved_routes(
         ]);
         attributes.insert(
             "parent_source_anchor".into(),
-            serde_json::to_value(source_anchor(&parent_anchor)).unwrap_or(Value::Null),
+            serde_json::to_value(source_anchor(parent_anchor)).unwrap_or(Value::Null),
         );
         hierarchy_edges.push(RawEdgeRecord {
             source: parent_id,
@@ -381,52 +317,6 @@ fn route_node_id(route: &RawRouteFact) -> String {
         &route.anchor.end_line.to_string(),
         &route.anchor.end_column.to_string(),
     ])
-}
-
-/// Select the same physical parent route that the independent frontend oracle
-/// uses: walk up the source directory tree and take the first route module in
-/// that directory's deterministic order.  This preserves file-based route
-/// conventions (including same-path layouts and TanStack dot segments) that
-/// cannot be reconstructed from a normalized URL alone.
-#[cfg(test)]
-fn route_parent_source_file(
-    child_source: &str,
-    candidates: &[(String, String, RawFrameworkAnchor, bool)],
-) -> Option<String> {
-    let mut by_directory = BTreeMap::<String, Vec<String>>::new();
-    for (source, _, _, _) in candidates {
-        let portable = source.replace('\\', "/");
-        let Some((directory, _)) = portable.rsplit_once('/') else {
-            continue;
-        };
-        let sources = by_directory.entry(directory.to_owned()).or_default();
-        if sources.last().is_none_or(|previous| previous != source) {
-            sources.push(source.clone());
-        }
-    }
-    route_parent_source_file_indexed(child_source, &by_directory)
-}
-
-fn route_parent_source_file_indexed(
-    child_source: &str,
-    sources_by_directory: &BTreeMap<String, Vec<String>>,
-) -> Option<String> {
-    let portable = child_source.replace('\\', "/");
-    let parts = portable.split('/').collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return None;
-    }
-    for index in (1..parts.len()).rev() {
-        let parent_directory = parts[..index].join("/");
-        if let Some(candidates) = sources_by_directory.get(&parent_directory)
-            && let Some(source) = candidates
-                .iter()
-                .find(|source| source.replace('\\', "/") != portable)
-        {
-            return Some(source.clone());
-        }
-    }
-    None
 }
 
 fn has_filesystem_route_convention(route: &RawRouteFact) -> bool {
@@ -477,15 +367,14 @@ fn route_hierarchy_scope(route: &RawRouteFact) -> String {
         .replace('\\', "/")
         .trim_matches('/')
         .to_owned();
-    for marker in [
-        "src/app/",
-        "app/",
-        "src/pages/",
-        "pages/",
-        "app/routes/",
-        "src/routes/",
-        "routes/",
-    ] {
+    let markers: &[&str] = match route.framework.as_str() {
+        "next" => &["src/app/", "app/", "src/pages/", "pages/"],
+        "react-router" | "remix" => &["app/routes/", "src/routes/", "routes/"],
+        "tanstack-router" | "sveltekit" => &["src/routes/", "routes/"],
+        "nuxt" => &["app/pages/", "src/pages/", "pages/"],
+        _ => &[],
+    };
+    for &marker in markers {
         let mut offset = 0;
         while let Some(found) = source.get(offset..).and_then(|suffix| suffix.find(marker)) {
             let index = offset + found;
@@ -1370,13 +1259,9 @@ mod tests {
     fn route_hierarchy_never_selects_the_route_as_its_own_parent() {
         let source = "src/routes/home.tsx";
         let route = route_for_scope(source);
-        let candidates = vec![(
-            source.to_owned(),
-            "route-id".to_owned(),
-            route.anchor,
-            false,
-        )];
-        assert_eq!(route_parent_source_file(source, &candidates), None);
+        let candidates = vec![("route-id".to_owned(), route.clone())];
+        let hierarchy = hierarchy::FileRouteHierarchy::new(&candidates);
+        assert_eq!(hierarchy.candidates(&route), None);
     }
 
     #[test]

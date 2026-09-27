@@ -1847,6 +1847,66 @@
       "sourceFile": "fixtures/code-graph/routes/typescript/vue-router.ts",
       "targetFile": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
       "reason": "Both modules independently call createRouter. Neither route array declares the other route as a child or imports the other router."
+    },
+    {
+      "id": "route-containment-independent-9",
+      "sourceFile": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+      "targetFile": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+      "reason": "These flat modules declare separate React Router and TanStack routes. Neither declares the other as a child."
+    },
+    {
+      "id": "route-containment-independent-10",
+      "sourceFile": "fixtures/code-graph/frontend-react/src/app/page.tsx",
+      "targetFile": "fixtures/code-graph/frontend-react/src/app/admin/page.tsx",
+      "reason": "Next page modules are leaves. An ancestor page is not the layout wrapping the nested page."
+    },
+    {
+      "id": "route-containment-independent-11",
+      "sourceFile": "fixtures/code-graph/frontend-react/src/app/admin/page.tsx",
+      "targetFile": "fixtures/code-graph/frontend-react/src/app/admin/settings/page.tsx",
+      "reason": "Next nesting is established by layout modules, not an ancestor page module."
+    },
+    {
+      "id": "route-containment-independent-12",
+      "sourceFile": "fixtures/code-graph/routes/typescript/nuxt/server/api/users.get.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/nuxt/server/api/users/[id].post.ts",
+      "reason": "Independent Nitro HTTP handlers share a URL prefix but do not form a page or layout hierarchy."
+    },
+    {
+      "id": "route-containment-independent-13",
+      "sourceFile": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+      "targetFile": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+      "reason": "A SvelteKit page and its colocated HTTP server endpoint are separate entry points; the page is not the endpoint parent."
+    },
+    {
+      "id": "route-containment-independent-14",
+      "sourceFile": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+server.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/sveltekit/src/routes/users/[id]/+page.svelte",
+      "reason": "A colocated HTTP server endpoint is not a SvelteKit layout and cannot contain the page."
+    },
+    {
+      "id": "route-containment-independent-15",
+      "sourceFile": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+      "targetFile": "fixtures/code-graph/routes/typescript/astro/src/pages/api/items/[id].ts",
+      "reason": "The About page only renders an h1. Astro layouts require explicit component composition; directory proximity establishes no parent for these independent routes."
+    },
+    {
+      "id": "route-containment-independent-16",
+      "sourceFile": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+      "targetFile": "fixtures/code-graph/routes/typescript/astro/src/pages/users/[id].ts",
+      "reason": "The About page only renders an h1. Astro layouts require explicit component composition; directory proximity establishes no parent for these independent routes."
+    },
+    {
+      "id": "route-containment-independent-17",
+      "sourceFile": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+      "targetFile": "fixtures/code-graph/routes/typescript/astro/src/pages/blog/[slug].astro",
+      "reason": "The About page only renders an h1. Astro layouts require explicit component composition; directory proximity establishes no parent for these independent routes."
+    },
+    {
+      "id": "route-containment-independent-18",
+      "sourceFile": "fixtures/code-graph/routes/typescript/astro/src/pages/about.astro",
+      "targetFile": "fixtures/code-graph/routes/typescript/astro/src/pages/files/[...rest].astro",
+      "reason": "The About page only renders an h1. Astro layouts require explicit component composition; directory proximity establishes no parent for these independent routes."
     }
   ]
 }

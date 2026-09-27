@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve file-route parents from framework nesting conventions instead of
+  choosing a nearby module. Preserve layout, flat-route, index, pathless, and
+  non-nesting distinctions; retain ambiguous parents without inventing edges.
+  Pages Router, Astro, and HTTP endpoints no longer acquire automatic layout
+  parents from directory order. Rebuild graphs under framework semantics 8.
+
 - Restrict filesystem route hierarchy to recognized file-route conventions.
   Independent programmatic routers no longer acquire containment edges merely
   from shared receiver names and source directories, which could inflate hubs
