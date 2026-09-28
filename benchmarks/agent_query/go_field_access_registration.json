@@ -1,0 +1,40 @@
+{
+  "schema": "compass.go-field-access-registration/1",
+  "declaredBeforeSourceCapture": true,
+  "purpose": "Measure exact direct receiver-to-named-field contacts across every tracked Go file in the pinned Litestream repository, and preserve unsupported cases rather than crediting name-only matches.",
+  "developmentStatus": "The prior all-file field declaration result and candidate graph were inspected. This is development qualification, not a fresh holdout or a god-object label evaluation.",
+  "sourceRepository": "benbjohnson/litestream",
+  "sourceCommit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+  "sourceSelection": "All 146 tracked Go paths from go_full_field_registration.json, including tests and generated files, with no post-hoc file exclusions.",
+  "priorFieldRegistrationSha256": "3beb1693382f278730f083a43bc8e6444f893ae12967ee0339d3139a3ce4c84d",
+  "priorFieldReviewSha256": "773f3eb5744da9f530811d296605cf06ad5b793121efce9e306c16dab40837e0",
+  "frozenGraphs": [
+    {
+      "tool": "compass-before-access",
+      "sha256": "3aed3fe0dab1fec6e1a9e197474ae3727f4c74dd6f3b68ff7cd91462cb4d29e4",
+      "bytes": 12971447
+    },
+    {
+      "tool": "graphify",
+      "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e",
+      "bytes": 5333935
+    }
+  ],
+  "sourceOracle": {
+    "implementation": "Use only Go standard-library go/parser and go/ast on every tracked file, with default identifier-object resolution enabled. Index top-level named struct fields by directory, parsed package name, struct name, field name and exact declaration position. For each method body, accept only selector expressions whose operand identifier resolves to that method's receiver declaration object and whose selector has one unique direct named field declaration in the package/type index. Exclude selector expressions used as the direct function of a call expression. Record all other selector categories and duplicate type/field identities separately.",
+    "coordinates": "Preserve repository-relative source file, parsed package, owner struct and its declaration source line, method name and declaration source line, field name and declaration source line, and exact selector identifier source line and byte offset. Preserve repeated uses as separate occurrences.",
+    "negativePolicy": "A selector on a different local variable, a shadowed receiver spelling, package qualifier, method call, promoted or embedded-only field, or ambiguous declaration is never credited as a direct self-field contact. Report categories and examples rather than removing uncertain cases silently.",
+    "scopeLimit": "This independent syntax oracle checks explicit direct receiver field selectors only. It does not establish expression-chain, promoted, interface, package-wide alias, reflection, or indirect field contacts. It does not validate responsibility cohesion."
+  },
+  "graphJoin": "Require unique source-located method and field declarations and a directed, source-anchored method-to-field accesses relationship at the exact selector line. Require the field's direct contains owner to be the source struct. Preserve missing, ambiguous, unresolved and extra candidate outcomes. Compare frozen graphs with the same exact join; Graphify field-type context records remain a separate category, not named field targets.",
+  "bounds": {
+    "maxSourcePaths": 200,
+    "maxSourceBytesPerFile": 1048576,
+    "maxOracleOccurrences": 100000,
+    "maxGraphBytes": 16777216,
+    "maxGraphNodes": 100000,
+    "maxGraphEdges": 100000,
+    "maxSecondsPerOracle": 60
+  },
+  "outputs": "Retain all source contacts and exclusions, exact graph outcomes, producer/binary/graph/source hashes, cold/warm equivalence, unexpected additions and omissions, and public god_nodes member-evidence changes. Run twice for deterministic reports. Do not infer broad source precision or Graphify superiority from this one known repository."
+}
