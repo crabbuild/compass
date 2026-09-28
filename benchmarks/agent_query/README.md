@@ -1018,3 +1018,22 @@ the first overload, although some class-to-method edges cite later lines.
 This is paired declaration coverage in a selected development cohort. It
 does not validate field-access targets, cohesion, responsibilities, god-object
 labels, whole-repository precision or cross-language superiority.
+
+## Hub member-evidence production replay
+
+`hub_members_replay.py` calls the public MCP `god_nodes(top_n=100)` tool twice
+on each frozen Litestream, FastAPI and Celld graph. It checks clean source and
+graph hashes, then requires every previous structured hub row to remain
+identical after removing the new `memberEvidence` field. The compact
+`hub_members_three_language_replay.json` records 300 unchanged rows and
+identical repeated member results; raw transcripts stay in external run
+`hub-members-three-language-02`. The new counts retain
+`sourceCoverage: "unverified"`. They do not rescue the selected Celld
+`PeerAuth` top-100 miss or establish field completeness in Go/Python.
+
+`hub_members_eclipse_replay.json` records a separate public top-5,000
+development read on the frozen Eclipse graph. Three rated classes returned;
+their stored direct methods/fields and own-field records equal the selected
+independent JDK source and compiler-bound counts. The fourth rated Eclipse
+class was outside that request. These checks validate the projection for
+known examples, not god-object diagnosis or overall superiority.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Show stored direct-member and own-field reference counts for typed class and
+  struct hubs in MCP `god_nodes`, with ambiguous owners excluded and undirected
+  graphs left unavailable. Keep hub ranks unchanged; the counts are graph
+  evidence, not a god-object diagnosis.
+
 - Resolve a unique owner-qualified method such as `APIRoute.get_route_handler`
   in typed callers, callees, impact and trail questions and the legacy
   `explain`/`path` commands when the stored name includes a module prefix or

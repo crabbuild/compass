@@ -8,7 +8,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel below checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. A separately registered class-only degree scan still retrieves 0/4 Java positives for either tool. These panels do not establish god-object classifier quality. |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. Class-only degree still retrieves 0/4 Java positives for either tool. New typed member evidence exposes stored methods, fields and own-field contacts without changing ranks; selected Java source checks agree, but coverage and god-object classifier quality remain unproven. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. A separate JDK syntax census of eight rated Java classes finds 95/95 direct methods and 65/65 direct fields as unique Compass graph nodes versus 90/95 methods and 0/65 field nodes in Graphify's frozen graphs under the registered source join. These selected results do not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
@@ -4731,3 +4731,53 @@ selected declaration-presence comparison, not a field-access correctness,
 source responsibility, class cohesion, or god-object classifier score.
 The frozen graphs have different direction and coverage, and one positive
 rating belongs to a test class. No production code changed in this checkpoint.
+
+### Stored member evidence in public hub results
+
+The native graph layer now adds `compass.hub-members/1` observations to
+directed typed class and struct hubs. It counts uniquely owned direct
+methods/constructors and fields/properties, marks members with more than one
+class/struct owner as ambiguous, and reports stored method-to-own-field
+`references` records, distinct method-field pairs and participating methods.
+Undirected or other node kinds return null member evidence. The text and
+structured MCP `god_nodes` results expose the same counts with
+`sourceCoverage: "unverified"`; hub eligibility, degree and order do not
+change. A zero is an observed graph count, not proof of absence in source.
+No god-object label or cohesion score is produced.
+
+The [two-pass Go/Python/Rust replay](../../benchmarks/agent_query/hub_members_three_language_replay.json)
+used the already frozen graphs and compared every new public MCP response
+against the previous 100-row result after removing only `memberEvidence`.
+All **300 prior IDs, ranks, degrees, source anchors and connectivity objects
+remain identical as structured values**; both passes returned identical
+new rows. Member evidence appears in 33/100 Litestream, 34/100 FastAPI and
+26/100 Celld rows. The returned Litestream `Store` has 27 stored direct
+methods and zero direct fields; FastAPI `FastAPI` has 23 methods and zero
+fields. Those zeros show why this cannot be treated as a cross-language
+source-complete field census. `PeerAuth` remains outside Celld's top 100;
+the new evidence does not repair its retrieval miss. Graphify was not rerun
+for this additive Compass result.
+
+A separate bounded public MCP read of the frozen Eclipse graph requested
+5,000 hubs and retained raw responses externally. The
+[Java replay summary](../../benchmarks/agent_query/hub_members_eclipse_replay.json)
+checks three returned rated classes against the earlier independent JDK
+member census and compiler-bound direct-own-field subset. `BindingModel` at
+rank 1,173 reports 15 methods/constructors, 11 fields and 55 own-field
+reference records; the selected source witnesses have exactly those counts.
+`DeprecatedUIWizardsAuto`, a positive-rated **test** class at rank 2,641,
+reports 15 methods/constructors, five fields and 15 selected field records,
+again matching its selected source witnesses. `SimpleValueProperty` at rank
+599 reports seven methods and no fields or selected field contacts, matching
+the same source checks. The fourth rated Eclipse class was outside the
+requested 5,000; no rank or evidence was invented for it. These are known
+development cases on unchanged graphs. They do not establish full field-use
+coverage, responsibility cohesion, a god-object classifier or broad
+superiority.
+
+Focused graph/MCP tests, workspace formatting, library/binary Clippy and
+tests, nine CLI product tests, the product boundary script and the full
+fixtures-only code-graph qualification passed using the per-worktree external
+Cargo target. The release fixture emitted its existing partial-graph warnings;
+no unrelated generated files entered the patch. Package version remains
+0.3.30.

@@ -870,6 +870,23 @@ distinguish containment, incoming use, and outgoing dependencies. They do not
 infer responsibility count, source correctness, or a god-object design defect.
 No test/production role is inferred automatically from a path or label.
 
+For a typed `class` or `struct` in a directed graph, the additive
+`memberEvidence` object uses `compass.hub-members/1`. It reports
+`sourceCoverage: "unverified"` because this projection does not compare the
+stored graph with current source. It reports
+`directMethods` (methods plus constructors), `directFields` (fields plus
+properties), and `ambiguousDirectMembers` for direct `contains` targets owned
+by more than one typed class or struct. Only uniquely owned members contribute
+to the direct counts. `ownFieldReferenceRecords` counts stored directed
+`references` records from one uniquely owned method to one uniquely owned
+field of that same class; `distinctOwnFieldPairs` collapses parallel records,
+and `methodsTouchingOwnFields` counts the participating methods. These are
+stored graph observations across all reference confidence states, not a
+validation of reference targets, a complete source access census or a cohesion
+score. A zero does not prove that source code lacks members or field accesses.
+The object is null for other hub kinds and undirected graphs, where ownership
+direction is unavailable.
+
 MCP `god_nodes` returns human-readable text and a structured projection in
 `structuredContent.result`, inside `compass.mcp.tool-result/1`:
 
@@ -888,7 +905,8 @@ MCP `god_nodes` returns human-readable text and a structured projection in
     "sourceFile": "src/service.rs",
     "sourceLocation": "L5",
     "startLine": 5,
-    "endLine": null
+    "endLine": null,
+    "memberEvidence": null
   }]
 }
 ```

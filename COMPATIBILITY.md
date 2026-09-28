@@ -256,6 +256,15 @@ and available source anchors. Text and the `compass://god-nodes` resource add
 an ID/source/location line beneath each entry; string values are JSON-escaped
 so IDs remain recoverable without injecting extra lines. Missing anchors are
 null. Inputs, eligibility, degree calculation, and ranking are unchanged.
+An additive `memberEvidence` object with schema `compass.hub-members/1` now
+appears for directed typed class and struct hubs. It counts uniquely owned
+direct methods/fields, ambiguous direct members, and stored method-to-own-field
+`references` records, pairs and participating methods. It is null for other
+kinds and undirected graphs. Parallel records remain in the record count;
+ambiguous owners cannot contribute to own-field counts. These observations
+include stored reference records regardless of their confidence and carry
+`sourceCoverage: "unverified"`; they are neither validated reference targets,
+complete source-access coverage nor a god-object classification.
 Exact node lookup checks the original ID before the existing whitespace-trimmed
 fallback, preserving distinct legacy IDs that differ by surrounding whitespace.
 The non-transport `CompassMcp::invoke` compatibility helper still returns text

@@ -676,3 +676,78 @@ fn hub_evidence_bounds_relation_rows_without_hiding_omitted_records() {
         c.edge_records
     );
 }
+
+#[test]
+fn hub_members_require_unique_direct_ownership_and_preserve_parallel_contacts()
+-> Result<(), Box<dyn Error>> {
+    let mut graph = document_with_multigraph(
+        vec![
+            json!({"id":"a","kind":"class","name":"A","source":{"file":"a.rs","startLine":1}}),
+            json!({"id":"b","kind":"class","name":"B","source":{"file":"b.rs","startLine":1}}),
+            json!({"id":"m","kind":"method","name":".run()","source":{"file":"a.rs","startLine":2}}),
+            json!({"id":"shared","kind":"method","name":".shared()","source":{"file":"a.rs","startLine":3}}),
+            json!({"id":"f","kind":"field","name":"value","source":{"file":"a.rs","startLine":4}}),
+            json!({"id":"ambiguous","kind":"field","name":"other","source":{"file":"a.rs","startLine":5}}),
+            json!({"id":"helper","kind":"method","name":".help()","source":{"file":"a.rs","startLine":6}}),
+        ],
+        vec![
+            edge("a", "m", "contains", "EXTRACTED"),
+            edge("a", "shared", "contains", "EXTRACTED"),
+            edge("b", "shared", "contains", "EXTRACTED"),
+            edge("a", "f", "contains", "EXTRACTED"),
+            edge("a", "ambiguous", "contains", "EXTRACTED"),
+            edge("b", "ambiguous", "contains", "EXTRACTED"),
+            edge("m", "f", "references", "EXTRACTED"),
+            edge("m", "f", "references", "EXTRACTED"),
+            edge("m", "ambiguous", "references", "EXTRACTED"),
+            edge("shared", "f", "references", "EXTRACTED"),
+            edge("helper", "f", "references", "EXTRACTED"),
+        ],
+        true,
+        true,
+    );
+    let first = compass_graph::god_nodes_with_evidence(&graph, 10);
+    let a = first
+        .iter()
+        .find(|row| row.hub.id == "a")
+        .and_then(|row| row.members.as_ref());
+    let a = a.ok_or("class member evidence missing")?;
+    assert_eq!(a.schema, compass_graph::HUB_MEMBERS_SCHEMA);
+    assert_eq!(
+        (
+            a.direct_methods,
+            a.direct_fields,
+            a.ambiguous_direct_members
+        ),
+        (1, 1, 2)
+    );
+    assert_eq!(
+        (
+            a.own_field_reference_records,
+            a.distinct_own_field_pairs,
+            a.methods_touching_own_fields
+        ),
+        (2, 1, 1)
+    );
+    let b = first
+        .iter()
+        .find(|row| row.hub.id == "b")
+        .and_then(|row| row.members.as_ref());
+    assert_eq!(b.map(|row| row.ambiguous_direct_members), Some(2));
+    assert!(
+        first
+            .iter()
+            .find(|row| row.hub.id == "m")
+            .is_some_and(|row| row.members.is_none())
+    );
+    graph.nodes.reverse();
+    graph.links.reverse();
+    assert_eq!(first, compass_graph::god_nodes_with_evidence(&graph, 10));
+    graph.directed = false;
+    assert!(
+        compass_graph::god_nodes_with_evidence(&graph, 10)
+            .iter()
+            .all(|row| row.members.is_none())
+    );
+    Ok(())
+}

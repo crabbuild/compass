@@ -2442,11 +2442,23 @@ fn invoke_hub_tool(
                 connectivity.omitted_relation_kinds, connectivity.omitted_relation_records
             ));
         }
+        if let Some(members) = &evidence.members {
+            lines.push(format!(
+                "    stored members (source coverage unverified): {} methods, {} fields, {} ambiguous | own-field references: {} records, {} method-field pairs, {} methods",
+                members.direct_methods,
+                members.direct_fields,
+                members.ambiguous_direct_members,
+                members.own_field_reference_records,
+                members.distinct_own_field_pairs,
+                members.methods_touching_own_fields
+            ));
+        }
         identities.push(json!({
             "rank":index + 1, "id":node.id, "label":node.label, "degree":node.degree,
             "kind":record.kind_name(), "sourceFile":record.source_file(),
             "sourceLocation":source_location, "startLine":record.unsigned("line_start"),
-            "endLine":record.unsigned("line_end"), "connectivity": connectivity
+            "endLine":record.unsigned("line_end"), "connectivity": connectivity,
+            "memberEvidence":evidence.members
         }));
     }
     let structured = transport_envelope(json!({
@@ -3202,6 +3214,63 @@ mod tests {
             );
             assert!(neighbors.starts_with("Neighbors of "), "{neighbors}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn hub_results_expose_stored_class_members_without_changing_ranks()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,
+                "nodes":[
+                    {"id":"class","kind":"class","name":"Service",
+                     "source":{"file":"src/service.rs","startLine":1}},
+                    {"id":"method","kind":"method","name":".run()",
+                     "source":{"file":"src/service.rs","startLine":2}},
+                    {"id":"field","kind":"field","name":"value",
+                     "source":{"file":"src/service.rs","startLine":3}}
+                ],
+                "links":[
+                    {"source":"class","target":"method","kind":"contains"},
+                    {"source":"class","target":"field","kind":"contains"},
+                    {"source":"method","target":"field","kind":"references"}
+                ]
+            }))?,
+        )?;
+        let output = CompassMcp::new(path)
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = output.structured_content.ok_or("missing hub result")?;
+        let rows = content["result"]["nodes"]
+            .as_array()
+            .ok_or("missing hub rows")?;
+        let class = rows
+            .iter()
+            .find(|row| row["id"] == "class")
+            .ok_or("missing class")?;
+        assert_eq!(class["rank"], 1);
+        assert_eq!(class["degree"], 2);
+        assert_eq!(class["memberEvidence"]["schema"], "compass.hub-members/1");
+        assert_eq!(class["memberEvidence"]["sourceCoverage"], "unverified");
+        assert_eq!(class["memberEvidence"]["directMethods"], 1);
+        assert_eq!(class["memberEvidence"]["directFields"], 1);
+        assert_eq!(class["memberEvidence"]["ownFieldReferenceRecords"], 1);
+        assert_eq!(class["memberEvidence"]["distinctOwnFieldPairs"], 1);
+        assert_eq!(class["memberEvidence"]["methodsTouchingOwnFields"], 1);
+        let method = rows
+            .iter()
+            .find(|row| row["id"] == "method")
+            .ok_or("missing method")?;
+        assert!(method["memberEvidence"].is_null());
+        assert!(
+            output
+                .text
+                .contains("stored members (source coverage unverified): 1 methods, 1 fields")
+        );
         Ok(())
     }
 
