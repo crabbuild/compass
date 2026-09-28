@@ -1,0 +1,209 @@
+{
+  "schema": "compass.java-real-field-review/1",
+  "scope": "Complete Java 8 base-source field-reference audit on a previously observed jsoup development repository and frozen graphs. Registered before compiler source binding capture; not held-out or an independent human review. Do not combine with five-language site recall or treat as god-object classification.",
+  "registrationCommit": "2499e927",
+  "registrationSha256": "6088df9f4cf420437a71ca06324bbe80817ed73142eb61c5686d8d3da36180af",
+  "productCommit": "f2cacfebba15d69a738e7c14694d51320e4e07ba",
+  "baselineBranchCommit": "d278c1e9f1e9c99e8a3ca07a7ebd4ceda40f5b63",
+  "sourceCommit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+  "artifactDirectory": "jsoup-java-field-oracle-02",
+  "sourceFiles": 88,
+  "sourceBytes": 1150637,
+  "compilerRuntime": "17.0.8.1+8-LTS",
+  "compilerRelease": "8",
+  "compilerRecords": {
+    "type": "complete",
+    "declarations": 3356,
+    "fieldReferences": 4444,
+    "unboundExpressions": 0
+  },
+  "origins": {
+    "source": 4314,
+    "array-length": 55,
+    "external": 44,
+    "class-literal": 31
+  },
+  "results": {
+    "compass": {
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 0,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 3047,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {
+        "verified_target_and_owner": 3047
+      },
+      "graphSha256": "2a9216926b1c5dfc82e4f88df0cce24a7a14ac67aa2a350158eff39018145314",
+      "graphDirected": true
+    },
+    "graphify": {
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 0,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 0,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 0,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {},
+      "graphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+      "graphDirected": false
+    }
+  },
+  "missingOrdinaryFields": [
+    {
+      "file": "src/main/java/org/jsoup/nodes/Attributes.java",
+      "line": 473,
+      "name": "expectedSize",
+      "qualified": "::expectedSize"
+    },
+    {
+      "file": "src/main/java/org/jsoup/nodes/Attributes.java",
+      "line": 474,
+      "name": "i",
+      "qualified": "::i"
+    }
+  ],
+  "mostMissedOrdinaryTargets": [
+    {
+      "qualified": "org.jsoup.parser.TreeBuilder::stack",
+      "occurrences": 51
+    },
+    {
+      "qualified": "org.jsoup.parser.TokeniserState::nullChar",
+      "occurrences": 47
+    },
+    {
+      "qualified": "org.jsoup.parser.TokeniserState::eof",
+      "occurrences": 41
+    },
+    {
+      "qualified": "org.jsoup.parser.Parser::NamespaceHtml",
+      "occurrences": 32
+    },
+    {
+      "qualified": "org.jsoup.parser.Token.Doctype::forceQuirks",
+      "occurrences": 31
+    },
+    {
+      "qualified": "org.jsoup.parser.TokeniserState::replacementChar",
+      "occurrences": 26
+    },
+    {
+      "qualified": "org.jsoup.parser.Token.Tag::normalName",
+      "occurrences": 21
+    },
+    {
+      "qualified": "org.jsoup.parser.TreeBuilder::settings",
+      "occurrences": 16
+    },
+    {
+      "qualified": "org.jsoup.select.Evaluator.AttributeKeyPair::key",
+      "occurrences": 14
+    },
+    {
+      "qualified": "org.jsoup.nodes.Node::parentNode",
+      "occurrences": 13
+    },
+    {
+      "qualified": "org.jsoup.parser.TreeBuilder::tokeniser",
+      "occurrences": 13
+    },
+    {
+      "qualified": "org.jsoup.parser.Token.Tag::attributes",
+      "occurrences": 13
+    },
+    {
+      "qualified": "org.jsoup.select.StructuralEvaluator::evaluator",
+      "occurrences": 11
+    },
+    {
+      "qualified": "org.jsoup.parser.Parser::NamespaceSvg",
+      "occurrences": 10
+    },
+    {
+      "qualified": "org.jsoup.parser.TreeBuilder::doc",
+      "occurrences": 10
+    },
+    {
+      "qualified": "org.jsoup.select.Evaluator.AttributeKeyPair::value",
+      "occurrences": 10
+    },
+    {
+      "qualified": "::i",
+      "occurrences": 9
+    },
+    {
+      "qualified": "org.jsoup.internal.SharedConstants::DefaultBufferSize",
+      "occurrences": 8
+    },
+    {
+      "qualified": "org.jsoup.parser.Parser::NamespaceMathml",
+      "occurrences": 8
+    },
+    {
+      "qualified": "org.jsoup.helper.DataUtil::UTF_8",
+      "occurrences": 7
+    }
+  ],
+  "qualification": {
+    "sourceBytecodeCases": 44,
+    "sourceBytecodeOccurrences": 45,
+    "adversarialRecords": 20,
+    "unitTests": 176,
+    "productBoundaryPassed": true,
+    "repeatedCaptureByteIdentical": true,
+    "offlineReviewsReplayed": true
+  },
+  "limitations": [
+    "Previously observed development repository; this is a compiler-backed source census for one build configuration, not held-out or five-language generalization.",
+    "All native graph references/reads/writes to field or enum-member endpoints in the registered files are inventoried. Unmapped, ambiguous, wrong and unanchored records must be retained. No such failure occurred among the 3047 Compass contacts here; Graphify has no such contacts and no positive-contact precision denominator.",
+    "Declarations use source regions and names; exact occurrence scoring requires target and owner identities plus UTF-8 spans. Line-only and unordered records are not upgraded to exact/directed proof.",
+    "JDK/base-source version and cached dependencies are pinned. Java 11 overlay, metadata, test sources, external fields and compiler intrinsics are separate from the 4314 internal-reference denominator.",
+    "Read/write effects, runtime aliasing, explanations, graph traversal, functional community quality and god-object judgments remain unscored. Missing field contacts cannot prove independent responsibilities.",
+    "Round 01 mixed array-length and class-literal pseudo-fields into the non-source group; retained as superseded captures. Round 02 separates them. The internal denominator and comparison results remain unchanged.",
+    "This checkpoint changes only the evaluation harness, fixtures and documentation. Native Rust/JS/platform/packaging gates were not rerun."
+  ],
+  "supportSha256": {
+    "java_field_capture.py": "535e43b75cc4aa09349f2086025781bd2301cca923571d9565659849a35c1c06",
+    "java_source_fields.py": "2ced23208ab1171d33ec00a6385fce34367a87c67d2cadef249650a1b8264e9b",
+    "java_oracle/FieldBindings.java": "0616d29730f77fc33a313e5c3280d6905c5435433f8e52ac4250ce2a8124e9d6",
+    "tests/test_java_source_fields.py": "b276d9e2be309c41a7102201deba709923db8e8cce74afa6ae3b635ecf130bd4",
+    "runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "state_access_audit.py": "2bf95b707f18f34c9df4461a26f011b83d86f166efacfaab652f8e6231161058"
+  },
+  "artifactSha256": {
+    "capture-final/manifest.json": "6b9532e36846aa7c2df0ac799c1c9f01dbf8c5061dd3adfa5a0fbc8e8bb64d3a",
+    "capture-final/bindings.stdout": "4596b24d67fab7f728bc5dfe54e9b381fc42d411b9cb9042646cffbed420e95c",
+    "capture-final/bindings.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capture-repeat/manifest.json": "9790bfc817fabd951e733f4a2b2381dfb03d8fba8c88c3f03a8ee7cf35e037ec",
+    "scope.stdout": "f9add7ff7e6b7158f6a0afdc8be51c439417952b7f4a26dad8eedd047484b1c6",
+    "scope-manifest.json": "35346f31a8bf1d6285dff4fe948445c08046f824b1e8671d486328429390f864",
+    "adversarial.stdout": "be9b847db2aa9a8a298c9fe2c91453250e3c8b2d8ba89dbca87c787e6f5f7967",
+    "adversarial-manifest.json": "258b27cf9637ac8e5f5f0af7705372bd1a459730f987fbbf652f8436bb8fe3b0",
+    "compass-review.json": "a08b07df8b4e22eebbd7934867fc188dd321a9fd97f93ccfcc6d49025f0be7a0",
+    "graphify-review.json": "7c7aa583a7ce0394f3bd2c1830a34e0d02cb618602d33feae035b9699e1137e1",
+    "final-tests.log": "df327030d1d1fc29759f586cf5a94946d0d121b4cec3784b2d51a06566d4159c",
+    "product-boundary.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "verify.py": "a43d8bb199b3625875c7470e34ef1bb0414ed135ce802e6e1f53c58ddbd695d6"
+  }
+}

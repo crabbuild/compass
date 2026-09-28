@@ -1,0 +1,240 @@
+{
+  "schema": "compass.export-binding-development-review/1",
+  "scope": "Repeated five-language development comparison; queries and repositories have informed changes. Not held-out evidence, full-answer precision, representative extraction precision, or performance superiority.",
+  "runId": "export-binding-panel-a-01",
+  "baselineRunId": "java-constructor-panel-a-01",
+  "suiteDigest": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "runnerDigest": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "tools": [
+    {
+      "binary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/export-binding-resolution/compass",
+      "binarySha256": "04eab05bd5bbc94f3f0f86580bdd3de9950599bc9e548b8f8ba95791b8baa0c9",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30"
+    },
+    {
+      "binary": "/Users/haipingfu/.local/bin/graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67"
+    }
+  ],
+  "baseCommit": "d71c389bb3a142fe44f79019aea0255e65821ee8",
+  "sourceSha256": {
+    "crates/compass-model/src/document.rs": "44d4f127600283af1adb32a378fcd233b22679ee21b32ab7335f76b4c25dfb6d",
+    "crates/compass-query/src/lib.rs": "e278a19f408edabd934711d725c06c357d590e3e5cf3d971515783b517167540",
+    "crates/compass-query/src/code_query.rs": "738e811194bdf0fac0593c58a594aa6cd7da43209b07d95833864e2cbe1ce856",
+    "crates/compass-query/src/score.rs": "e6e63abff3864a6a0a6d9e9b2a96e366bcb2317c1e0b1acc1fa4cae9fabe60d0",
+    "crates/compass-query/src/export_binding.rs": "f8da01cb357be0b85d140b941e5ea6ceeb602523e4b61242c021d6d750a36dc8",
+    "crates/compass-model/tests/traversal_confidence.rs": "b148d9f96e0cee987392d2e9be712cef01d6d65a8b17d4b988c6989cce729f83",
+    "crates/compass-query/tests/export_binding_resolution.rs": "0a5afcf41ae417f25d791ac8acb16cc2276333e50d06ee4a98e6294bf1e90c77"
+  },
+  "metrics": {
+    "compass": {
+      "text": {
+        "medianAnswerTokens": 148.0,
+        "medianFirstPageTokens": 148.0,
+        "medianWallMs": 765.0,
+        "passRate": 0.8909,
+        "passed": 49,
+        "questions": 55
+      },
+      "selectedSourceRelationships": {
+        "passed": 17,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      }
+    },
+    "graphify": {
+      "text": {
+        "medianAnswerTokens": 104.0,
+        "medianFirstPageTokens": 75.0,
+        "medianWallMs": 150.0,
+        "passRate": 0.8364,
+        "passed": 46,
+        "questions": 55
+      },
+      "selectedSourceRelationships": {
+        "passed": 20,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      }
+    }
+  },
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf",
+      "compassGraphByteIdenticalToBaseline": true,
+      "graphifyGraphByteIdenticalToBaseline": true
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234",
+      "compassGraphByteIdenticalToBaseline": true,
+      "graphifyGraphByteIdenticalToBaseline": true
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "d69152cc8900afc3f11756b8ce841adbed98ae6663fee4ebc64957974c8f860c",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+      "compassGraphByteIdenticalToBaseline": true,
+      "graphifyGraphByteIdenticalToBaseline": true
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b",
+      "compassGraphByteIdenticalToBaseline": true,
+      "graphifyGraphByteIdenticalToBaseline": true
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd",
+      "compassGraphByteIdenticalToBaseline": true,
+      "graphifyGraphByteIdenticalToBaseline": true
+    }
+  ],
+  "textOracleDelta": [
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "question": "redux-holdout-callees",
+      "before": false,
+      "after": true
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "question": "redux-holdout-path-forward",
+      "before": false,
+      "after": true
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "question": "redux-holdout-path-reverse",
+      "before": false,
+      "after": true
+    }
+  ],
+  "queryChange": {
+    "proof": "Remove a redundant export candidate only with complete exact nondeferred contains/exports occurrence evidence, one target already in the candidate set, matching normalized name and nonempty qualified name, and same source file.",
+    "limits": {
+      "candidates": 256,
+      "examinedEdges": 1024,
+      "truncationProbe": 1
+    },
+    "ambiguity": "Missing, conflicting, coarse, deferred, weaker-confidence, or exhausted evidence retains ambiguity. Exact-ID lookup remains available for export bindings.",
+    "graphChange": "None: all five Compass graph files are byte-identical. Published identities/relationships and AST cache semantics 5 are unchanged.",
+    "traversalCache": "TRAILT06 replaces disposable TRAILT05; complete evidence confidence and deferred state survive compact projection.",
+    "reviewedSourceCensus": {
+      "reduxCoincidentBindings": 126,
+      "otherFourRepositories": 0,
+      "limitation": "Post-output static binding/declaration correspondence review, not 126 successful public queries or a representative precision estimate."
+    }
+  },
+  "verification": {
+    "native": {
+      "passed": 1180,
+      "failed": 0,
+      "ignored": 2,
+      "scope": "Workspace lib/bin plus export_binding_resolution, traversal_confidence, code_traversal, store_engine, code_query_cli, compass_product; all --locked."
+    },
+    "clippy": "Workspace lib/bin plus export_binding_resolution and traversal_confidence, --locked, -D warnings: passed.",
+    "newRegressionCounts": {
+      "exportBinding": 4,
+      "traversalCache": 1
+    },
+    "regressionSurfaces": [
+      "JSON graph",
+      "generic materialized store",
+      "direct SQLite reader",
+      "cold and warm compact projection",
+      "stale cache rebuild",
+      "forward/reversed graph order",
+      "exact export ID",
+      "genuine ambiguity",
+      "candidate truncation",
+      "proof work exhaustion",
+      "coarse source location",
+      "weakest mixed confidence and deferred state"
+    ],
+    "fullFixtureQualification": {
+      "status": "passed",
+      "exitCode": 0,
+      "productionCommit": "9b63873a",
+      "scope": "Native scale ceilings, semantic/topology assertions, deterministic lifecycle builds, Markdown, release build and frontend precedence/positive/negative/source-anchor checks.",
+      "logSha256": "08d1d2312cbe4860772a9e7ebf03de41e4c257a03a4ec366cde5ebf2cb93dad4",
+      "releaseExecutableSha256": "a073e8599c83f14fa21e37359ff3c183540c36adce7b7bbdea4823c9f031c322"
+    }
+  },
+  "remainingLimits": [
+    "WalkDir ordinary-name path witnesses fail both tools; Compass retains genuine ambiguity and Graphify returns an unreviewed route.",
+    "Original Redux relationship identity oracle still fails four pairs because distinct export/function records remain; do not relabel these as missing calls or replace the oracle after observing results.",
+    "Click corrected occurrence witness remains a post-output diagnostic; original witness history is preserved.",
+    "Source paths are limited to previously selected short witnesses; directed and long paths remain unqualified.",
+    "No new MCP or source-responsibility/god-object/community-quality evidence in this run.",
+    "Shared-machine query timings overlap native verification; no speed or cost superiority claim.",
+    "General superiority and full-answer precision remain unproven."
+  ],
+  "artifactBase": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926",
+  "artifactsSha256": {
+    "export-binding-resolution/coincident-binding-census.json": "baa84957b4d2fd79a177fbd868310426a4a5cf2b9a713b1d047a4798f832ef7d",
+    "export-binding-resolution/confidence-census.json": "045d11e24b9927a760654cf7620caf651384cfbe463739a490ac7640b6ec9580",
+    "export-binding-resolution/manifest.json": "659c8d97a08ad9c90f9815c851f2f1cf4c2cea2e2954e3932a9d7ddd1debb6c8",
+    "export-binding-resolution/panel-a-chi-audit-01.json": "38d8758985e319e059b6e366e29ed8720c0e6ba8f2cb5ab0202e6c7efbdb59c1",
+    "export-binding-resolution/panel-a-click-audit-01.json": "46fa5eb5468eefe475d83f0f510d45b3f9d7f3e9f2e45916ef303a535472a87c",
+    "export-binding-resolution/panel-a-jsoup-audit-01.json": "7a679e6a705c86b9ede6359828f6ba9b47021bd8532c01fb88adb909637bd20f",
+    "export-binding-resolution/panel-a-path-audit-01.json": "a949ce75bbc98e982c51fe24fcca8dabc7e3a477388e3e3a1e9edf5bd4d08508",
+    "export-binding-resolution/panel-a-redux-audit-01.json": "279d10f15c3c875b45bef0948ee606a37eb18ee6fe5a1d92de298726905aa6b0",
+    "export-binding-resolution/panel-a-walkdir-audit-01.json": "3a4859150163e6f41cb6e4ec421bf112da5ac1b3e9568662c15270dbf55d061d",
+    "export-binding-resolution/policy.json": "19b85a2082136d8bce5694e05aa7082ba9f6316d61c26a2b70446cd018dd78da",
+    "export-binding-resolution/redux-binding-source-rows.json": "5c41ea508e29f6abd723dd6ddf33849958361da9af474904258f2e221c12d971",
+    "export-binding-resolution/build-01.log": "337f2e5fab181a48d2f326cb7b93a44fc0dd3d0551904ea80c45e309f33e6915",
+    "export-binding-resolution/cache-after-01.log": "6c21340925799b40b3cac520020c3ca9582ecc14f1f3fab29237bfe6e1de2d5a",
+    "export-binding-resolution/cache-after-02.log": "8bc84459762d872d85d8e48d6bd6436e17238882ced91936d22fafc59aca7d7a",
+    "export-binding-resolution/cache-after-03.log": "417e780cf9134f02f42e993fe1f3f5634da1fc55f25ac577e0cef9caed2717ae",
+    "export-binding-resolution/cache-before.log": "1902cc5e43b986ce35fe5cf379b892b4a4d09cf33858435bc30124ef81fdbccc",
+    "export-binding-resolution/clippy-01.log": "7fe13ed49c54c46adfde630793497e93676224e421d5e4225a398853e1626e40",
+    "export-binding-resolution/clippy-broad-01.log": "b72c1ff1f61423bc4f887a70bba44054cc2cd7aa52fa27d972367649f3a58e3a",
+    "export-binding-resolution/initial-format.log": "89441c383180099db4e4450c20a6d435e28cc007f3fd956aa6a6ec12de8dccc6",
+    "export-binding-resolution/native-after-01.log": "feb5b2b287d146551b0d242a4713edc2c9d57ed7144c64c75e2b20ca635ebf88",
+    "export-binding-resolution/native-after-02.log": "2b32cf27ae84c6dec132802c5d305b80ee3a8c3e2bbc725f1d0d6838b0032cfa",
+    "export-binding-resolution/native-after-03.log": "2800a5ab5cdc73a643e4c53e62ad0e5f0442780627792ef2008a40e11fb5f7f1",
+    "export-binding-resolution/native-before-02.log": "a2bd56d4129191018cdd298d3df8f7f15c544dd7ecdae33777606aa5e38ebb9b",
+    "export-binding-resolution/native-before.log": "110c861b9e2a5806b5e9d4505af0dc66fdbc859d336d86e72eb503a9fbb17d35",
+    "export-binding-resolution/native-broad-01.log": "27a6976b0a8c97692f75940feb5fa80c0942aa0bfa94a0b39760fdc48b0d449e",
+    "export-binding-resolution/panel-a-01.log": "91ef624640fff89c04522ee0fd95fdd9ab0d35eba5d7e89ac54fdda4d5f9d55d",
+    "runs/export-binding-panel-a-01/run.json": "c96dfecd4fc47096673e7b1eb105e79fb8a3a631394e79be7be1227c0c1db8a4",
+    "export-binding-resolution/full-qualification-01.log": "08d1d2312cbe4860772a9e7ebf03de41e4c257a03a4ec366cde5ebf2cb93dad4"
+  }
+}

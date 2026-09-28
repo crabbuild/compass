@@ -1,0 +1,304 @@
+{
+  "counts": {
+    "constructor-out-of-scope": 4,
+    "direct-field": 5,
+    "method-invocation-out-of-scope": 1
+  },
+  "graphSha256": {
+    "apache/cloudstack": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "eclipse/eclipse.platform.ui": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+  },
+  "inScope": [
+    {
+      "endByte": 1323,
+      "fieldId": "sha256:2d6ac8222d4bad9d2c9b469c6e6589cf78e9bd7ed4dbbd7d29fa20f50d134033",
+      "fieldName": "name",
+      "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+      "graphRecordsAtToken": [
+        {
+          "exactAstAnchor": true,
+          "id": "sha256:b2bd8622c5d87b66ce1266c4ce7b5af565e86b30d1183450fdaf81a88bb0a001",
+          "kind": "references",
+          "relationshipSite": {
+            "endByte": 1323,
+            "endColumn": 17,
+            "endLine": 36,
+            "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+            "startByte": 1319,
+            "startColumn": 13,
+            "startLine": 36
+          },
+          "source": "sha256:d610f427834da5212c077f597a677863c177e7726d9e8e4628cf3051e950282d",
+          "target": "sha256:2d6ac8222d4bad9d2c9b469c6e6589cf78e9bd7ed4dbbd7d29fa20f50d134033"
+        }
+      ],
+      "matchingRecordCount": 1,
+      "methodEndUtf16": 1337,
+      "methodId": "sha256:d610f427834da5212c077f597a677863c177e7726d9e8e4628cf3051e950282d",
+      "methodName": "setName",
+      "methodStartLine": 35,
+      "methodStartUtf16": 1271,
+      "sampleId": 8539645,
+      "sourceFileSha256": "af541c9ae7f6f630462a6aaf61239482ac485188d1837f28888637edd145bea2",
+      "startByte": 1319,
+      "status": "direct-field",
+      "tokenEndUtf16": 1323,
+      "tokenLine": 36,
+      "tokenStartUtf16": 1319,
+      "wrongPairRecordCount": 0
+    },
+    {
+      "endByte": 13476,
+      "fieldId": "sha256:4ee7929d6c49e409e8daf80009251415d642d23c323fd1cb5f4930f9a96b7ffa",
+      "fieldName": "bindingElements",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "graphRecordsAtToken": [
+        {
+          "exactAstAnchor": true,
+          "id": "sha256:38f67377d42082e72b3dcc6aba0c85b7e004c99786a6852ef6aa2abc667857f2",
+          "kind": "references",
+          "relationshipSite": {
+            "endByte": 13476,
+            "endColumn": 36,
+            "endLine": 447,
+            "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+            "startByte": 13461,
+            "startColumn": 21,
+            "startLine": 447
+          },
+          "source": "sha256:97900aab35998e4e4e0f7fc9ad68e92e7b36983a328b79cce8dec93e1fe2961a",
+          "target": "sha256:4ee7929d6c49e409e8daf80009251415d642d23c323fd1cb5f4930f9a96b7ffa"
+        }
+      ],
+      "matchingRecordCount": 1,
+      "methodEndUtf16": 13584,
+      "methodId": "sha256:97900aab35998e4e4e0f7fc9ad68e92e7b36983a328b79cce8dec93e1fe2961a",
+      "methodName": "setBindings",
+      "methodStartLine": 446,
+      "methodStartUtf16": 13396,
+      "sampleId": 6374724,
+      "sourceFileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "startByte": 13461,
+      "status": "direct-field",
+      "tokenEndUtf16": 13476,
+      "tokenLine": 447,
+      "tokenStartUtf16": 13461,
+      "wrongPairRecordCount": 0
+    },
+    {
+      "endByte": 13500,
+      "fieldId": "sha256:4ee7929d6c49e409e8daf80009251415d642d23c323fd1cb5f4930f9a96b7ffa",
+      "fieldName": "bindingElements",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "graphRecordsAtToken": [
+        {
+          "exactAstAnchor": true,
+          "id": "sha256:481709db5e93eec181d6e99f3494d4d6dc8f2e974bed2b67417e7fcf86016f86",
+          "kind": "references",
+          "relationshipSite": {
+            "endByte": 13500,
+            "endColumn": 22,
+            "endLine": 448,
+            "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+            "startByte": 13485,
+            "startColumn": 7,
+            "startLine": 448
+          },
+          "source": "sha256:97900aab35998e4e4e0f7fc9ad68e92e7b36983a328b79cce8dec93e1fe2961a",
+          "target": "sha256:4ee7929d6c49e409e8daf80009251415d642d23c323fd1cb5f4930f9a96b7ffa"
+        }
+      ],
+      "matchingRecordCount": 1,
+      "methodEndUtf16": 13584,
+      "methodId": "sha256:97900aab35998e4e4e0f7fc9ad68e92e7b36983a328b79cce8dec93e1fe2961a",
+      "methodName": "setBindings",
+      "methodStartLine": 446,
+      "methodStartUtf16": 13396,
+      "sampleId": 6374724,
+      "sourceFileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "startByte": 13485,
+      "status": "direct-field",
+      "tokenEndUtf16": 13500,
+      "tokenLine": 448,
+      "tokenStartUtf16": 13485,
+      "wrongPairRecordCount": 0
+    },
+    {
+      "endByte": 13758,
+      "fieldId": "sha256:f0d5e46ffc58ba37ff98b2440bb840c16b702d242e39d2bb1e58abe2718fe8b8",
+      "fieldName": "bindingToElement",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "graphRecordsAtToken": [
+        {
+          "exactAstAnchor": true,
+          "id": "sha256:a1ac81ef8b1ae8085365c22df232eec7caf37e338cc685d2b262a6da9de70821",
+          "kind": "references",
+          "relationshipSite": {
+            "endByte": 13758,
+            "endColumn": 33,
+            "endLine": 457,
+            "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+            "startByte": 13742,
+            "startColumn": 17,
+            "startLine": 457
+          },
+          "source": "sha256:227115069be85ab77ca2ad3f8a550fb3b9c1add66a6f42e659fc8acec4b8195a",
+          "target": "sha256:f0d5e46ffc58ba37ff98b2440bb840c16b702d242e39d2bb1e58abe2718fe8b8"
+        }
+      ],
+      "matchingRecordCount": 1,
+      "methodEndUtf16": 13898,
+      "methodId": "sha256:227115069be85ab77ca2ad3f8a550fb3b9c1add66a6f42e659fc8acec4b8195a",
+      "methodName": "setBindingToElement",
+      "methodStartLine": 456,
+      "methodStartUtf16": 13669,
+      "sampleId": 6374724,
+      "sourceFileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "startByte": 13742,
+      "status": "direct-field",
+      "tokenEndUtf16": 13758,
+      "tokenLine": 457,
+      "tokenStartUtf16": 13742,
+      "wrongPairRecordCount": 0
+    },
+    {
+      "endByte": 13783,
+      "fieldId": "sha256:f0d5e46ffc58ba37ff98b2440bb840c16b702d242e39d2bb1e58abe2718fe8b8",
+      "fieldName": "bindingToElement",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "graphRecordsAtToken": [
+        {
+          "exactAstAnchor": true,
+          "id": "sha256:d10d5cbe4075f49aa50b4bd80e9153e7625613b49a35b7829e111a568bd28b5a",
+          "kind": "references",
+          "relationshipSite": {
+            "endByte": 13783,
+            "endColumn": 23,
+            "endLine": 458,
+            "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+            "startByte": 13767,
+            "startColumn": 7,
+            "startLine": 458
+          },
+          "source": "sha256:227115069be85ab77ca2ad3f8a550fb3b9c1add66a6f42e659fc8acec4b8195a",
+          "target": "sha256:f0d5e46ffc58ba37ff98b2440bb840c16b702d242e39d2bb1e58abe2718fe8b8"
+        }
+      ],
+      "matchingRecordCount": 1,
+      "methodEndUtf16": 13898,
+      "methodId": "sha256:227115069be85ab77ca2ad3f8a550fb3b9c1add66a6f42e659fc8acec4b8195a",
+      "methodName": "setBindingToElement",
+      "methodStartLine": 456,
+      "methodStartUtf16": 13669,
+      "sampleId": 6374724,
+      "sourceFileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "startByte": 13767,
+      "status": "direct-field",
+      "tokenEndUtf16": 13783,
+      "tokenLine": 458,
+      "tokenStartUtf16": 13767,
+      "wrongPairRecordCount": 0
+    }
+  ],
+  "limitations": [
+    "Five explicit direct-method this.field tokens are a small, selected syntactic subset, not all class field uses.",
+    "Four constructor field sites and one method call are retained outside the registered direct-method field denominator.",
+    "Exact source-token and stored edge agreement here does not validate other field references or god-object classification.",
+    "The first collector preflight failed before graph scanning due to a list-versus-set assertion. The corrected run retained all registered inputs and bounds.",
+    "The observed subset contains only five source field sites; no population, cross-language or Graphify comparison follows."
+  ],
+  "oracleOutputSha256": "1a99f94eeeeb62423edd49ce67c45fca0ff3fe37dbb1c08e1557d06e93420ac6",
+  "oracleRepeatByteIdentical": true,
+  "oracleSourceSha256": "6860f872fd4ee65fca3f1b66edeb12b53bdc4c9c6a90e4953dbf2227d2d80052",
+  "outOfScope": [
+    {
+      "endByte": 61345,
+      "fieldName": "getClass",
+      "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+      "methodEndUtf16": 61398,
+      "methodName": "configure",
+      "methodStartLine": 1145,
+      "methodStartUtf16": 61004,
+      "sampleId": 8528735,
+      "sourceFileSha256": "411ae1dbbd20a532d38af6c39c2fbaf0ece284d758c175be6c6f97618aba19bf",
+      "startByte": 61337,
+      "status": "method-invocation-out-of-scope",
+      "tokenEndUtf16": 61345,
+      "tokenLine": 1149,
+      "tokenStartUtf16": 61337
+    },
+    {
+      "endByte": 1242,
+      "fieldName": "isoFile",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "methodEndUtf16": 1357,
+      "methodName": "HandleConfigDriveIsoCommand",
+      "methodStartLine": 33,
+      "methodStartUtf16": 1114,
+      "sampleId": 8537138,
+      "sourceFileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "startByte": 1235,
+      "status": "constructor-out-of-scope",
+      "tokenEndUtf16": 1242,
+      "tokenLine": 34,
+      "tokenStartUtf16": 1235
+    },
+    {
+      "endByte": 1274,
+      "fieldName": "isoData",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "methodEndUtf16": 1357,
+      "methodName": "HandleConfigDriveIsoCommand",
+      "methodStartLine": 33,
+      "methodStartUtf16": 1114,
+      "sampleId": 8537138,
+      "sourceFileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "startByte": 1267,
+      "status": "constructor-out-of-scope",
+      "tokenEndUtf16": 1274,
+      "tokenLine": 35,
+      "tokenStartUtf16": 1267
+    },
+    {
+      "endByte": 1308,
+      "fieldName": "destStore",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "methodEndUtf16": 1357,
+      "methodName": "HandleConfigDriveIsoCommand",
+      "methodStartLine": 33,
+      "methodStartUtf16": 1114,
+      "sampleId": 8537138,
+      "sourceFileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "startByte": 1299,
+      "status": "constructor-out-of-scope",
+      "tokenEndUtf16": 1308,
+      "tokenLine": 36,
+      "tokenStartUtf16": 1299
+    },
+    {
+      "endByte": 1341,
+      "fieldName": "create",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "methodEndUtf16": 1357,
+      "methodName": "HandleConfigDriveIsoCommand",
+      "methodStartLine": 33,
+      "methodStartUtf16": 1114,
+      "sampleId": 8537138,
+      "sourceFileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "startByte": 1335,
+      "status": "constructor-out-of-scope",
+      "tokenEndUtf16": 1341,
+      "tokenLine": 37,
+      "tokenStartUtf16": 1335
+    }
+  ],
+  "preflightFailureSha256": "7ef327aa048275cf9b9d6d0ec24b83be911d2f1b3613d2ef1e43adad631da251",
+  "rawRunSha256": "ab115658c71f2656f8e92fc937fb53f71aaf4b3d04494f387635d00de4666d93",
+  "registrationSha256": "3ce46adde8a7ffb48147a06e004a581efb3bf868ceee229888f143a14f81eb04",
+  "schema": "compass.mlcq-explicit-this-field-review/1",
+  "scope": "Exact explicit this.field syntax in direct methods of eight known Java classes; not a full field-reference census or god-object score.",
+  "sourceWitnessesSha256": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+  "verificationRepeatByteIdentical": true,
+  "verifiedRunSha256": "54ddad9efbc7c35c389f6888f11605f063082ca39f6f73ea428a820adf511ee0",
+  "verifierSha256": "4e25f8b2b67f04c22d278f48c9f5038351de2a9db7f07fb3d82fcd23ba96eaba"
+}

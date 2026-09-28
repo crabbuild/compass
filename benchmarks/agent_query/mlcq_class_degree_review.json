@@ -1,0 +1,2627 @@
+{
+  "cutoffs": {
+    "compass@10": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "compass@100": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "compass@50": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "graphify@10": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "graphify@100": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "graphify@50": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    }
+  },
+  "priorReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "probeSha256": "bf0f386c2e87bed146efd14043dad9ecd3534375791cde72870d4164d1696904",
+  "registrationSha256": "e3fe9693c3458606e07b9b721a4f1a896819614e22c0845b25e921b097301875",
+  "results": [
+    {
+      "cases": [
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 75,
+          "graphId": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+          "rank": 340,
+          "sampleId": 8528735,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 25,
+          "graphId": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+          "rank": 1600,
+          "sampleId": 8537138,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 36,
+          "graphId": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+          "rank": 999,
+          "sampleId": 8538037,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 7,
+          "graphId": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+          "rank": 4668,
+          "sampleId": 8539645,
+          "status": "ranked"
+        }
+      ],
+      "classCandidates": 6373,
+      "danglingPairs": 0,
+      "directed": true,
+      "distinctEndpointPairs": 420494,
+      "edgeRecordCount": 502158,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "nodeCount": 173689,
+      "rawSha256": "4252af4b94153eeee9bb008b64a687352a6735c1a225e22a2d0df7e92eb7c6a2",
+      "repository": "apache/cloudstack",
+      "tool": "compass",
+      "top100": [
+        {
+          "degree": 2260,
+          "id": "sha256:d2e4ecb92cae98091789e380fbfda0cdee48c13f08249e454173bb711a973128",
+          "label": "CloudRuntimeException",
+          "rank": 1
+        },
+        {
+          "degree": 1564,
+          "id": "sha256:dc197decba7245aff13d90baed5b68a2ad59f52e18d66d127a383066e212b8d3",
+          "label": "Answer",
+          "rank": 2
+        },
+        {
+          "degree": 1471,
+          "id": "sha256:763394e17767bbba6c021b7d8ebcdb376421bc8d3660877062abb0888486083c",
+          "label": "ApiConstants",
+          "rank": 3
+        },
+        {
+          "degree": 1207,
+          "id": "sha256:adee8751183e501ac47e2022d9c9e46123b42b1deb21dd691fb6864484c6ea42",
+          "label": "InvalidParameterValueException",
+          "rank": 4
+        },
+        {
+          "degree": 1103,
+          "id": "sha256:63cb3dc1370942ae6e187a052bc43c9417d2408e1b2ab904700b34a01cc6b21a",
+          "label": "SearchBuilder",
+          "rank": 5
+        },
+        {
+          "degree": 1088,
+          "id": "sha256:a5ea55a556d396b69c16b9c89fe1156916f77dca567af963af3d839bb3a496fb",
+          "label": "ServerApiException",
+          "rank": 6
+        },
+        {
+          "degree": 902,
+          "id": "sha256:10b9d8e53eb9370004ad21a5ee78d23b80775d88248d96bf3838b9c4565a8eb9",
+          "label": "Pair",
+          "rank": 7
+        },
+        {
+          "degree": 768,
+          "id": "sha256:15acf633b82e4b42cd27198c6e400b343125e30139ffedd1c83eb60801d5d8d8",
+          "label": "HostVO",
+          "rank": 8
+        },
+        {
+          "degree": 746,
+          "id": "sha256:fb8c6a60cd2b0e582c49204f6b74e98f53da5a9174e24bcc4f1edb27849b6671",
+          "label": "Command",
+          "rank": 9
+        },
+        {
+          "degree": 715,
+          "id": "sha256:5a5135111ba0801a036179946307b20e13f20f038fd93b09efb3b44f8cb79069",
+          "label": "GenericDaoBase",
+          "rank": 10
+        },
+        {
+          "degree": 698,
+          "id": "sha256:58e92219053a7a4ec0bcacc7e40693f084eaab31fdb5fc1eccc3c31e46778b06",
+          "label": "EventTypes",
+          "rank": 11
+        },
+        {
+          "degree": 592,
+          "id": "sha256:f7b64de19f8747ae1369d9a4f7e44772215eb58e44e041ec7179b3516c1683b3",
+          "label": "NicProfile",
+          "rank": 12
+        },
+        {
+          "degree": 521,
+          "id": "sha256:fbf0db418043d6398967ee1db20335abc5d40ad12c92e2b2cc6d187303bbf107",
+          "label": "BaseCmd",
+          "rank": 13
+        },
+        {
+          "degree": 518,
+          "id": "sha256:933b27661896271af12acc470bc715ceabf8d18c89fe75f5a45dd397436af1d9",
+          "label": "ConfigKey",
+          "rank": 14
+        },
+        {
+          "degree": 505,
+          "id": "sha256:2ed7f5aace287679efe47403d9d61c57a9562e436319d2c27a776d0a87dd96d7",
+          "label": "ResourceUnavailableException",
+          "rank": 15
+        },
+        {
+          "degree": 504,
+          "id": "sha256:353f4ca113c738e9bb88c1ac824bb7abea4625d81d78f91526883cc71e4d7a03",
+          "label": "CallContext",
+          "rank": 16
+        },
+        {
+          "degree": 494,
+          "id": "sha256:d57faa2beb351dcd84d28054dea60837fd40033c116880fa44f562a55de29080",
+          "label": "ApiDBUtils",
+          "rank": 17
+        },
+        {
+          "degree": 490,
+          "id": "sha256:0ae9d940f53705ad60e7093a3828aad76965ad7ef5ce168e06c9cef81a5535c4",
+          "label": "SearchCriteria",
+          "rank": 18
+        },
+        {
+          "degree": 463,
+          "id": "sha256:18201c7e9cf9f42f86178640bd75833c2a133cc4205c866b232500e266cd1645",
+          "label": "BaseAsyncCmd",
+          "rank": 19
+        },
+        {
+          "degree": 459,
+          "id": "sha256:79ba46da4eb85850bb2bbf4715f932ab4df40367c139b0e45be3f0a9d7e5e020",
+          "label": "NetworkVO",
+          "rank": 20
+        },
+        {
+          "degree": 456,
+          "id": "sha256:21f6207563d28461d137d67e34a47288d63ee58bee4baa6432c2475870eefc8e",
+          "label": "LibvirtComputingResource",
+          "rank": 21
+        },
+        {
+          "degree": 437,
+          "id": "sha256:556308c59cf4f77ee190f0bb1b1dfb87b040593e5e200648e3937498dcb830d9",
+          "label": "ByteBuffer",
+          "rank": 22
+        },
+        {
+          "degree": 436,
+          "id": "sha256:7be03978054b8014d10c2aae1fff9d6fbae51f554e759fc9d52d4e5e8160bd94",
+          "label": "DeployDestination",
+          "rank": 23
+        },
+        {
+          "degree": 434,
+          "id": "sha256:f0272e08f8faa43a509719e7de9501b28467d6900c98cb2327a4c5e3656d8242",
+          "label": "ListResponse",
+          "rank": 24
+        },
+        {
+          "degree": 431,
+          "id": "sha256:5833adad689f6c0e3a8c3acc6067edf49b75d122e4da180f72a41fd1fc3987cc",
+          "label": "BaseResponse",
+          "rank": 25
+        },
+        {
+          "degree": 403,
+          "id": "sha256:f0f2ef902a83a335e0235910beaf3984af13f8d4a4a7f0fe2ffeddbbbe585883",
+          "label": "CitrixResourceBase",
+          "rank": 26
+        },
+        {
+          "degree": 398,
+          "id": "sha256:d07ab21e064202572dbddd6a6a8675015466c5d348882fc09a5dbde0ab74242d",
+          "label": "VMInstanceVO",
+          "rank": 27
+        },
+        {
+          "degree": 358,
+          "id": "sha256:5702f1c2714190594468642d9275cce5562320f29dbf33e8d9d02c1a67f632ef",
+          "label": "CommandWrapper",
+          "rank": 28
+        },
+        {
+          "degree": 357,
+          "id": "sha256:eff992aae2f3de5d7a20c97fbcfafe3ae8c93924e5b1bce5d12020058598aacd",
+          "label": "StartupCommand",
+          "rank": 29
+        },
+        {
+          "degree": 352,
+          "id": "sha256:7a3cbed27a8b0fdb2801dd6ddd0d9252dd4928cf62484a85fc08593a63b8194d",
+          "label": "ConcurrentOperationException",
+          "rank": 30
+        },
+        {
+          "degree": 336,
+          "id": "sha256:33998566769537dad04ce6725d0e8a562614f6cef98e854292ebd2eafb80bbce",
+          "label": "AccountVO",
+          "rank": 31
+        },
+        {
+          "degree": 333,
+          "id": "sha256:502ae1e063bf5a3e1eff2b5b71b709f102b1272da14edf7ac6743d59df273fe9",
+          "label": "Filter",
+          "rank": 32
+        },
+        {
+          "degree": 330,
+          "id": "sha256:10e2e80ddb963db6f803b02411636819efcc1bff86264eb6251c4d7c27cf8d0b",
+          "label": "VolumeVO",
+          "rank": 33
+        },
+        {
+          "degree": 319,
+          "id": "sha256:a8f7679e45858762cd10b2796d5236f35d41a15e417e83434891c5fdcdd77466",
+          "label": "VMTemplateVO",
+          "rank": 34
+        },
+        {
+          "degree": 318,
+          "id": "sha256:98aac0dac14671d4064646fcf5a844cbbde3b9da98b2e1e84baeab0e5d33c339",
+          "label": "SuccessResponse",
+          "rank": 35
+        },
+        {
+          "degree": 312,
+          "id": "sha256:88cd2c67e4d8d4b7561861d11ead74870f367cad2e520c1ff3bcebde23a4d068",
+          "label": "UserVmResponse",
+          "rank": 36
+        },
+        {
+          "degree": 303,
+          "id": "sha256:31d2d0cdc8750e9e44261c0f8ebe9cf9192797db3411f8fd5dbce4f8950dbd8f",
+          "label": "VirtualMachineTO",
+          "rank": 37
+        },
+        {
+          "degree": 300,
+          "id": "sha256:d179f9cd5d77e95070fad023a5d5892967cf2536050a517a675c91646be055a1",
+          "label": "TransactionLegacy",
+          "rank": 38
+        },
+        {
+          "degree": 298,
+          "id": "sha256:47f0b827831b89461f03228e939d787748c50f64262587383c25697939f1dda7",
+          "label": "InsufficientCapacityException",
+          "rank": 39
+        },
+        {
+          "degree": 285,
+          "id": "sha256:89958b30a68c0d0e26fcf92a9ed7d41013ec332bda1ed95598a8432d7174aaaf",
+          "label": "DataCenterVO",
+          "rank": 40
+        },
+        {
+          "degree": 280,
+          "id": "sha256:d6ebd1fbb0c3a1320e5ef4acc6ecfececfb9b2f48c6752f2568613c5446ffeca",
+          "label": "StoragePoolVO",
+          "rank": 41
+        },
+        {
+          "degree": 279,
+          "id": "sha256:928e095f1a9a31412f81ec8da219b952ccc5798e3082e3b4d4a5511f9614406c",
+          "label": "IPAddressVO",
+          "rank": 42
+        },
+        {
+          "degree": 276,
+          "id": "sha256:17e101b0825609ef7758d7f591d9d36e798a6852348ddbc7c87ec1d87ae778f3",
+          "label": "NetUtils",
+          "rank": 43
+        },
+        {
+          "degree": 265,
+          "id": "sha256:6fa47d4d6da728a86910b6ad86ea18b54a2bd08a5334d7bbfe205178d7e26838",
+          "label": "Script",
+          "rank": 44
+        },
+        {
+          "degree": 265,
+          "id": "sha256:83c9978d3790a4d384ee8629104a1bc83735af9f6769f52939dbf156eb3e9aab",
+          "label": "ResourceAllocationException",
+          "rank": 45
+        },
+        {
+          "degree": 264,
+          "id": "sha256:dc722217a1893cd761ecd6d13f2cbad87dd4c1df1ab488ee69047b4849264d31",
+          "label": "DomainRouterVO",
+          "rank": 46
+        },
+        {
+          "degree": 264,
+          "id": "sha256:e4cf52b34260f87920a861db248903dcbff8a860da6d8ac6801ffba7765d1cd0",
+          "label": "ManagerBase",
+          "rank": 47
+        },
+        {
+          "degree": 255,
+          "id": "sha256:3372aaeb7a8660273353fbc096acda7e2da66dcbcffa6ac3d3d868d57caeea0a",
+          "label": "UserVmManagerImpl",
+          "rank": 48
+        },
+        {
+          "degree": 253,
+          "id": "sha256:58313e5807d22a93c2887853652f38ae6206b130fc5fe47635b839fe836dd15a",
+          "label": "VolumeObjectTO",
+          "rank": 49
+        },
+        {
+          "degree": 249,
+          "id": "sha256:8b1fb4d48f1ca89243c008c2ac1dfbd358f52f448f30ea1e01b6c9920be5c20b",
+          "label": "NicVO",
+          "rank": 50
+        },
+        {
+          "degree": 247,
+          "id": "sha256:12fd3849be2ee9a5bf533d71c5791e6c51c47180391845b0c4462e256f77d310",
+          "label": "UserVmJoinVO",
+          "rank": 51
+        },
+        {
+          "degree": 241,
+          "id": "sha256:37d219588cdf8d2cedeed0912030dba4af95e105df8c78bd961389d41013017f",
+          "label": "VmwareResource",
+          "rank": 52
+        },
+        {
+          "degree": 237,
+          "id": "sha256:2694c6d5b82d189bc3b3a936754be2b39a738d986bf1f6d6bc7820d2e23fab3c",
+          "label": "VirtualMachineManagerImpl",
+          "rank": 53
+        },
+        {
+          "degree": 237,
+          "id": "sha256:4f2eb7becaeaad8d9ea7add0028c7d2a92bb12b1c8e999ba83bd10d8cbb8cfa3",
+          "label": "VirtualMachineMO",
+          "rank": 54
+        },
+        {
+          "degree": 234,
+          "id": "sha256:1042ba9435b94c9afaa280e984726351d3449a1647e432e32898d5f9f3458788",
+          "label": "HostResponse",
+          "rank": 55
+        },
+        {
+          "degree": 232,
+          "id": "sha256:089e5f44d5127c05cd0c3bf58f2941cece3c80db7b520b484445362596161fbd",
+          "label": "VolumeResponse",
+          "rank": 56
+        },
+        {
+          "degree": 221,
+          "id": "sha256:90ce8ab25d1b2753dfc9d7ed386915c7c4d676bb38eea8d0974e8e99c3af2f77",
+          "label": "EngineHostVO",
+          "rank": 57
+        },
+        {
+          "degree": 220,
+          "id": "sha256:c22b779521fcc8a338c39ede759e64570dd5f7b261277382c85da4d87cfc4b9f",
+          "label": "GenericSearchBuilder",
+          "rank": 58
+        },
+        {
+          "degree": 215,
+          "id": "sha256:edf421e1c632472a47397bc2dc0de286fda02a1db1ded529a3e5f3f171fc5059",
+          "label": "UserVO",
+          "rank": 59
+        },
+        {
+          "degree": 210,
+          "id": "sha256:cb8374198eda686d58e7a1145a8cf407d5b563a339e10625254d67ee5f4cdafe",
+          "label": "ElastistorUtil",
+          "rank": 60
+        },
+        {
+          "degree": 209,
+          "id": "sha256:20cb6531bbccad3a9b422deca88e80ec421a3d846b0e8b57d2faa1e6b4b41363",
+          "label": "CloudStackTypes",
+          "rank": 61
+        },
+        {
+          "degree": 205,
+          "id": "sha256:9774fdec448d8c54c8d756129248df2716bf794d149e6ff43adf339ddb1cf8fa",
+          "label": "BaseListCmd",
+          "rank": 62
+        },
+        {
+          "degree": 205,
+          "id": "sha256:b3e319ee0129f0815059f938155db1af69766aa117a52e193f84d65b902ccc73",
+          "label": "DomainResponse",
+          "rank": 63
+        },
+        {
+          "degree": 205,
+          "id": "sha256:ddee23d7950f95811d5c9e2593c99012b214819651358539f6a6a4147855a00f",
+          "label": "AdapterBase",
+          "rank": 64
+        },
+        {
+          "degree": 204,
+          "id": "sha256:d6b39f0d635a23922dd23b9c84e56429443cc4bb4eba896ab8ed733d7b3cd2bb",
+          "label": "VmwareContext",
+          "rank": 65
+        },
+        {
+          "degree": 201,
+          "id": "sha256:b28bca73a88ea7a2f92ea7e72aad8007cd0f0447a65ea20c1066319856833782",
+          "label": "Commands",
+          "rank": 66
+        },
+        {
+          "degree": 199,
+          "id": "sha256:b5aee3850c939c36318912e62042f283e730ce9ee5a31bb842e672180c4b7a70",
+          "label": "StorageManagerImpl",
+          "rank": 67
+        },
+        {
+          "degree": 197,
+          "id": "sha256:bfc3981a540f7e24fbc04ebe6ef97335490a31ccf1949881526c7074aec24499",
+          "label": "NetworkOfferingVO",
+          "rank": 68
+        },
+        {
+          "degree": 194,
+          "id": "sha256:ac1a5592b379c483f1c0fe90e9f7e48307dffb4e854443373386e81c43e5f7a4",
+          "label": "ManagementServerImpl",
+          "rank": 69
+        },
+        {
+          "degree": 188,
+          "id": "sha256:14f73cde2db4a6d9c420149e6d32c85984bbb564dd87c06d4b186e9e1aca4266",
+          "label": "UserVmVO",
+          "rank": 70
+        },
+        {
+          "degree": 187,
+          "id": "sha256:7a856584ffc0970338f1d29cee370a1bda4bb6feeb414b42aa909b017a77e08b",
+          "label": "ZoneResponse",
+          "rank": 71
+        },
+        {
+          "degree": 185,
+          "id": "sha256:a9d2a051a3731dd0119885fe2caf626e142c9387507144e6ffbe08c2152b42e7",
+          "label": "ConfigurationManagerImpl",
+          "rank": 72
+        },
+        {
+          "degree": 183,
+          "id": "sha256:55173996b84b4716c070500a6436ad52d89d21923a3d39dad25f34d8fbfb7705",
+          "label": "TransactionCallbackNoReturn",
+          "rank": 73
+        },
+        {
+          "degree": 182,
+          "id": "sha256:50897be43ce7733cfda83b5ab8a849cc4612ad311146f564f75ac0aa708ccc11",
+          "label": "NetworkOrchestrator",
+          "rank": 74
+        },
+        {
+          "degree": 182,
+          "id": "sha256:5b635ac3a0e8a04f7754a5be91b8fc40077de3a75302150e522dcf92c6e80f48",
+          "label": "NicTO",
+          "rank": 75
+        },
+        {
+          "degree": 181,
+          "id": "sha256:553aaaca9a517a8bca513748989b396fadb95c284a64acbb44e1b01b2f6d59ce",
+          "label": "VolumeJoinVO",
+          "rank": 76
+        },
+        {
+          "degree": 178,
+          "id": "sha256:4346a9ecc54affd64e471d70288f0d8a5115e68fe2c6990c0abb217ce6d046f5",
+          "label": "QueryManagerImpl",
+          "rank": 77
+        },
+        {
+          "degree": 177,
+          "id": "sha256:064509b4b983fea555c42a79b8f709ed16862a76d0bf444b99228b43b4e5f042",
+          "label": "TemplateResponse",
+          "rank": 78
+        },
+        {
+          "degree": 177,
+          "id": "sha256:6737aa6905178f7c2c2593a72ad66f82415728e39a52637f59e7987b11a1b30e",
+          "label": "JuniperSrxResource",
+          "rank": 79
+        },
+        {
+          "degree": 177,
+          "id": "sha256:8c9ed4ba046fe6e515e5d9481bd78bdc283edbde78d333dc6827b4411a6c6912",
+          "label": "NetworkModelImpl",
+          "rank": 80
+        },
+        {
+          "degree": 176,
+          "id": "sha256:a16f931e51c4750800b37f3ba43a9cdf56c3dd4c47d41e491923e73db7972862",
+          "label": "DiskOfferingVO",
+          "rank": 81
+        },
+        {
+          "degree": 176,
+          "id": "sha256:c65f51dea54d452b3a7c61643db9a3ec2ccaef85987c707307a79551d7540cf9",
+          "label": "TemplateDataStoreVO",
+          "rank": 82
+        },
+        {
+          "degree": 176,
+          "id": "sha256:de0d096bbbdb8b3086752ca08a7eee55250934eb14f290074730dd42a0b4ffec",
+          "label": "ResourceManagerImpl",
+          "rank": 83
+        },
+        {
+          "degree": 174,
+          "id": "sha256:c2849cb7bfef25238ba5b84478e08ea41650d0fb73ffde52c6fc7b329d788605",
+          "label": "NetworkServiceImpl",
+          "rank": 84
+        },
+        {
+          "degree": 173,
+          "id": "sha256:594f2211dce1c0d40e5ab1f06ef95b4800a81b8b9c1f5b61cbe2909538a3f483",
+          "label": "TemplateJoinVO",
+          "rank": 85
+        },
+        {
+          "degree": 172,
+          "id": "sha256:0c587dad43b75ac19f21634882d87ef9d95f4c56e8507889d2eed4bb64bf4346",
+          "label": "NetworkElementCommand",
+          "rank": 86
+        },
+        {
+          "degree": 170,
+          "id": "sha256:0220099a0532cfb7eb51e8edc4864402241425615deccc9b118357f0974351da",
+          "label": "DomainVO",
+          "rank": 87
+        },
+        {
+          "degree": 170,
+          "id": "sha256:22de97ca49df9973c49597ace8549768ff88b56006a0af52665c0845b9d05711",
+          "label": "Ovm3Configuration",
+          "rank": 88
+        },
+        {
+          "degree": 169,
+          "id": "sha256:c7f26b60d19cf79bf3231efc2ec47bff55347432d0cabae89277eb0d0dd20181",
+          "label": "NfsSecondaryStorageResource",
+          "rank": 89
+        },
+        {
+          "degree": 168,
+          "id": "sha256:ec0e88626015fc3b2570cf14ad0776141d3392e1512acb47cf59517567dea0ca",
+          "label": "StatsCollector",
+          "rank": 90
+        },
+        {
+          "degree": 167,
+          "id": "sha256:1b1c4d2d746062d55e497732e762de1bce538b978871b30faf567bd008207b8b",
+          "label": "UserVmData",
+          "rank": 91
+        },
+        {
+          "degree": 166,
+          "id": "sha256:307ca6ce65525268cc9a26047acecce3f0862044f21ce2741ca57c21c8a35c9d",
+          "label": "LibvirtComputingResourceTest",
+          "rank": 92
+        },
+        {
+          "degree": 166,
+          "id": "sha256:c03d567c786b7be42c2889377f46837eb1255c1c2fc7ca45b77f4cf853055154",
+          "label": "ExecutionException",
+          "rank": 93
+        },
+        {
+          "degree": 164,
+          "id": "sha256:4087e3837385780f2c28ce3a5bdf19e6b9ac52a73ff84e5c3f052d4a4a88da76",
+          "label": "AccountResponse",
+          "rank": 94
+        },
+        {
+          "degree": 163,
+          "id": "sha256:4f6ae1e700662e8d085e8a26d0461a69034c1afd65f1682c5c3186d3e72c6262",
+          "label": "PermissionDeniedException",
+          "rank": 95
+        },
+        {
+          "degree": 162,
+          "id": "sha256:35534b2fc5e1b18d6a889c5274c588010c9ab5e1aecc01e932bb0c66eb75c732",
+          "label": "Ip",
+          "rank": 96
+        },
+        {
+          "degree": 162,
+          "id": "sha256:b88f9f6fb6d8b75a3ae088332e339ede3114563f1f1f989f23850bade25049c4",
+          "label": "ServiceOfferingVO",
+          "rank": 97
+        },
+        {
+          "degree": 161,
+          "id": "sha256:64b1ddeff133c22eb93ec4b96c5a6dddee8f22354bcf11148ecae90e0c60b19a",
+          "label": "VirtualNetworkApplianceManagerImpl",
+          "rank": 98
+        },
+        {
+          "degree": 161,
+          "id": "sha256:c65cd58ac152078a416d32c49297baabb01422b0db972608568f04e6770e56f6",
+          "label": "ProjectResponse",
+          "rank": 99
+        },
+        {
+          "degree": 161,
+          "id": "sha256:dc460950324fc045331be240f3fea40bc4909897b81bc28d5f34ff5f5f79e223",
+          "label": "ApiResponseHelper",
+          "rank": 100
+        }
+      ]
+    },
+    {
+      "cases": [
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 71,
+          "graphId": "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl",
+          "rank": 463,
+          "sampleId": 8528735,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 21,
+          "graphId": "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand",
+          "rank": 2238,
+          "sampleId": 8537138,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 32,
+          "graphId": "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi",
+          "rank": 1315,
+          "sampleId": 8538037,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 6,
+          "graphId": "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse",
+          "rank": 6242,
+          "sampleId": 8539645,
+          "status": "ranked"
+        }
+      ],
+      "classCandidates": 7700,
+      "danglingPairs": 0,
+      "directed": false,
+      "distinctEndpointPairs": 340129,
+      "edgeRecordCount": 340129,
+      "graphSha256": "8ef3ace655bb60a001851e911737b7995d7da081b04459441b02ab6b68242f72",
+      "nodeCount": 93793,
+      "rawSha256": "e2a9167b206928d68d891e2413a5231493b8bd8b5aa4ab6ebd64b560577729df",
+      "repository": "apache/cloudstack",
+      "tool": "graphify",
+      "top100": [
+        {
+          "degree": 2273,
+          "id": "utils_src_main_java_com_cloud_utils_exception_cloudruntimeexception_cloudruntimeexception",
+          "label": "CloudRuntimeException",
+          "rank": 1
+        },
+        {
+          "degree": 1458,
+          "id": "api_src_main_java_com_cloud_agent_api_answer_answer",
+          "label": "Answer",
+          "rank": 2
+        },
+        {
+          "degree": 1332,
+          "id": "api_src_main_java_org_apache_cloudstack_api_apicommand_apicommand",
+          "label": "APICommand",
+          "rank": 3
+        },
+        {
+          "degree": 1293,
+          "id": "api_src_main_java_com_cloud_network_network_network",
+          "label": "Network",
+          "rank": 4
+        },
+        {
+          "degree": 1149,
+          "id": "api_src_main_java_com_cloud_user_account_account",
+          "label": "Account",
+          "rank": 5
+        },
+        {
+          "degree": 799,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_db_db",
+          "label": "DB",
+          "rank": 6
+        },
+        {
+          "degree": 798,
+          "id": "utils_src_main_java_com_cloud_utils_pair_pair",
+          "label": "Pair",
+          "rank": 7
+        },
+        {
+          "degree": 780,
+          "id": "api_src_main_java_org_apache_cloudstack_api_apiconstants_apiconstants",
+          "label": "ApiConstants",
+          "rank": 8
+        },
+        {
+          "degree": 758,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_genericdao_genericdao",
+          "label": "GenericDao",
+          "rank": 9
+        },
+        {
+          "degree": 711,
+          "id": "api_src_main_java_com_cloud_host_host_host",
+          "label": "Host",
+          "rank": 10
+        },
+        {
+          "degree": 683,
+          "id": "api_src_main_java_com_cloud_agent_api_command_command",
+          "label": "Command",
+          "rank": 11
+        },
+        {
+          "degree": 663,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_genericdaobase_genericdaobase",
+          "label": "GenericDaoBase",
+          "rank": 12
+        },
+        {
+          "degree": 657,
+          "id": "engine_schema_src_main_java_com_cloud_host_hostvo_hostvo",
+          "label": "HostVO",
+          "rank": 13
+        },
+        {
+          "degree": 639,
+          "id": "api_src_main_java_com_cloud_vm_virtualmachineprofile_virtualmachineprofile",
+          "label": "VirtualMachineProfile",
+          "rank": 14
+        },
+        {
+          "degree": 587,
+          "id": "api_src_main_java_org_apache_cloudstack_api_parameter_parameter",
+          "label": "Parameter",
+          "rank": 15
+        },
+        {
+          "degree": 582,
+          "id": "api_src_main_java_com_cloud_hypervisor_hypervisor_hypervisortype",
+          "label": "HypervisorType",
+          "rank": 16
+        },
+        {
+          "degree": 578,
+          "id": "api_src_main_java_com_cloud_vm_virtualmachine_virtualmachine",
+          "label": "VirtualMachine",
+          "rank": 17
+        },
+        {
+          "degree": 560,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_searchbuilder_searchbuilder",
+          "label": "SearchBuilder",
+          "rank": 18
+        },
+        {
+          "degree": 540,
+          "id": "api_src_main_java_org_apache_cloudstack_api_serverapiexception_serverapiexception",
+          "label": "ServerApiException",
+          "rank": 19
+        },
+        {
+          "degree": 523,
+          "id": "api_src_main_java_com_cloud_vm_nicprofile_nicprofile",
+          "label": "NicProfile",
+          "rank": 20
+        },
+        {
+          "degree": 521,
+          "id": "engine_api_src_main_java_org_apache_cloudstack_engine_subsystem_api_storage_datastore_datastore",
+          "label": "DataStore",
+          "rank": 21
+        },
+        {
+          "degree": 521,
+          "id": "tools_marvin_marvin_cloudstacktestcase_cloudstacktestcase",
+          "label": "cloudstackTestCase",
+          "rank": 22
+        },
+        {
+          "degree": 512,
+          "id": "api_src_main_java_org_apache_cloudstack_api_basecmd_basecmd",
+          "label": "BaseCmd",
+          "rank": 23
+        },
+        {
+          "degree": 507,
+          "id": "api_src_main_java_org_apache_cloudstack_api_apierrorcode_apierrorcode",
+          "label": "ApiErrorCode",
+          "rank": 24
+        },
+        {
+          "degree": 505,
+          "id": "api_src_main_java_com_cloud_exception_resourceunavailableexception_resourceunavailableexception",
+          "label": "ResourceUnavailableException",
+          "rank": 25
+        },
+        {
+          "degree": 499,
+          "id": "api_src_main_java_com_cloud_exception_invalidparametervalueexception_invalidparametervalueexception",
+          "label": "InvalidParameterValueException",
+          "rank": 26
+        },
+        {
+          "degree": 489,
+          "id": "api_src_main_java_org_apache_cloudstack_api_internalidentity_internalidentity",
+          "label": "InternalIdentity",
+          "rank": 27
+        },
+        {
+          "degree": 478,
+          "id": "api_src_main_java_org_apache_cloudstack_context_callcontext_callcontext",
+          "label": "CallContext",
+          "rank": 28
+        },
+        {
+          "degree": 457,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_searchcriteria_searchcriteria",
+          "label": "SearchCriteria",
+          "rank": 29
+        },
+        {
+          "degree": 454,
+          "id": "api_src_main_java_org_apache_cloudstack_api_baseasynccmd_baseasynccmd",
+          "label": "BaseAsyncCmd",
+          "rank": 30
+        },
+        {
+          "degree": 454,
+          "id": "tools_marvin_marvin_lib_base_account",
+          "label": "Account",
+          "rank": 31
+        },
+        {
+          "degree": 434,
+          "id": "api_src_main_java_com_cloud_vm_reservationcontext_reservationcontext",
+          "label": "ReservationContext",
+          "rank": 32
+        },
+        {
+          "degree": 434,
+          "id": "api_src_main_java_org_apache_cloudstack_api_baseresponse_baseresponse",
+          "label": "BaseResponse",
+          "rank": 33
+        },
+        {
+          "degree": 433,
+          "id": "tools_marvin_marvin_lib_base_virtualmachine",
+          "label": "VirtualMachine",
+          "rank": 34
+        },
+        {
+          "degree": 431,
+          "id": "api_src_main_java_org_apache_cloudstack_api_response_listresponse_listresponse",
+          "label": "ListResponse",
+          "rank": 35
+        },
+        {
+          "degree": 415,
+          "id": "plugins_hypervisors_kvm_src_main_java_com_cloud_hypervisor_kvm_resource_libvirtcomputingresource_libvirtcomputingresource",
+          "label": "LibvirtComputingResource",
+          "rank": 36
+        },
+        {
+          "degree": 409,
+          "id": "server_src_main_java_com_cloud_configuration_config_config",
+          "label": "Config",
+          "rank": 37
+        },
+        {
+          "degree": 408,
+          "id": "engine_schema_src_main_java_com_cloud_host_dao_hostdao_hostdao",
+          "label": "HostDao",
+          "rank": 38
+        },
+        {
+          "degree": 408,
+          "id": "plugins_hypervisors_xenserver_src_main_java_com_cloud_hypervisor_xenserver_resource_citrixresourcebase_citrixresourcebase",
+          "label": "CitrixResourceBase",
+          "rank": 39
+        },
+        {
+          "degree": 406,
+          "id": "api_src_main_java_com_cloud_deploy_deploydestination_deploydestination",
+          "label": "DeployDestination",
+          "rank": 40
+        },
+        {
+          "degree": 403,
+          "id": "tools_marvin_marvin_lib_base_serviceoffering",
+          "label": "ServiceOffering",
+          "rank": 41
+        },
+        {
+          "degree": 390,
+          "id": "framework_config_src_main_java_org_apache_cloudstack_framework_config_dao_configurationdao_configurationdao",
+          "label": "ConfigurationDao",
+          "rank": 42
+        },
+        {
+          "degree": 379,
+          "id": "server_src_main_java_com_cloud_api_apidbutils_apidbutils",
+          "label": "ApiDBUtils",
+          "rank": 43
+        },
+        {
+          "degree": 376,
+          "id": "core_src_main_java_com_cloud_resource_resourcewrapper_resourcewrapper",
+          "label": "ResourceWrapper",
+          "rank": 44
+        },
+        {
+          "degree": 359,
+          "id": "api_src_main_java_com_cloud_network_network_service",
+          "label": "Service",
+          "rank": 45
+        },
+        {
+          "degree": 354,
+          "id": "api_src_main_java_com_cloud_offering_networkoffering_networkoffering",
+          "label": "NetworkOffering",
+          "rank": 46
+        },
+        {
+          "degree": 353,
+          "id": "core_src_main_java_com_cloud_resource_commandwrapper_commandwrapper",
+          "label": "CommandWrapper",
+          "rank": 47
+        },
+        {
+          "degree": 352,
+          "id": "engine_schema_src_main_java_com_cloud_network_dao_networkvo_networkvo",
+          "label": "NetworkVO",
+          "rank": 48
+        },
+        {
+          "degree": 345,
+          "id": "api_src_main_java_com_cloud_event_eventtypes_eventtypes",
+          "label": "EventTypes",
+          "rank": 49
+        },
+        {
+          "degree": 340,
+          "id": "services_console_proxy_rdpconsole_src_main_java_streamer_bytebuffer_bytebuffer",
+          "label": "ByteBuffer",
+          "rank": 50
+        },
+        {
+          "degree": 339,
+          "id": "api_src_main_java_com_cloud_event_actionevent_actionevent",
+          "label": "ActionEvent",
+          "rank": 51
+        },
+        {
+          "degree": 339,
+          "id": "engine_schema_src_main_java_com_cloud_vm_vminstancevo_vminstancevo",
+          "label": "VMInstanceVO",
+          "rank": 52
+        },
+        {
+          "degree": 336,
+          "id": "engine_components_api_src_main_java_com_cloud_agent_agentmanager_agentmanager",
+          "label": "AgentManager",
+          "rank": 53
+        },
+        {
+          "degree": 329,
+          "id": "api_src_main_java_com_cloud_exception_concurrentoperationexception_concurrentoperationexception",
+          "label": "ConcurrentOperationException",
+          "rank": 54
+        },
+        {
+          "degree": 329,
+          "id": "core_src_main_java_com_cloud_agent_api_startupcommand_startupcommand",
+          "label": "StartupCommand",
+          "rank": 55
+        },
+        {
+          "degree": 321,
+          "id": "api_src_main_java_com_cloud_storage_storagepool_storagepool",
+          "label": "StoragePool",
+          "rank": 56
+        },
+        {
+          "degree": 321,
+          "id": "engine_schema_src_main_java_com_cloud_dc_dao_datacenterdao_datacenterdao",
+          "label": "DataCenterDao",
+          "rank": 57
+        },
+        {
+          "degree": 317,
+          "id": "api_src_main_java_org_apache_cloudstack_api_apicommandjobtype_apicommandjobtype",
+          "label": "ApiCommandJobType",
+          "rank": 58
+        },
+        {
+          "degree": 316,
+          "id": "api_src_main_java_org_apache_cloudstack_api_response_successresponse_successresponse",
+          "label": "SuccessResponse",
+          "rank": 59
+        },
+        {
+          "degree": 313,
+          "id": "api_src_main_java_com_cloud_network_networkmodel_networkmodel",
+          "label": "NetworkModel",
+          "rank": 60
+        },
+        {
+          "degree": 307,
+          "id": "engine_api_src_main_java_org_apache_cloudstack_engine_subsystem_api_storage_dataobject_dataobject",
+          "label": "DataObject",
+          "rank": 61
+        },
+        {
+          "degree": 294,
+          "id": "api_src_main_java_com_cloud_exception_insufficientcapacityexception_insufficientcapacityexception",
+          "label": "InsufficientCapacityException",
+          "rank": 62
+        },
+        {
+          "degree": 292,
+          "id": "api_src_main_java_org_apache_cloudstack_api_response_uservmresponse_uservmresponse",
+          "label": "UserVmResponse",
+          "rank": 63
+        },
+        {
+          "degree": 289,
+          "id": "api_src_main_java_com_cloud_network_networks_traffictype",
+          "label": "TrafficType",
+          "rank": 64
+        },
+        {
+          "degree": 286,
+          "id": "engine_schema_src_main_java_com_cloud_user_accountvo_accountvo",
+          "label": "AccountVO",
+          "rank": 65
+        },
+        {
+          "degree": 285,
+          "id": "server_src_main_java_com_cloud_user_accountmanager_accountmanager",
+          "label": "AccountManager",
+          "rank": 66
+        },
+        {
+          "degree": 280,
+          "id": "engine_schema_src_main_java_com_cloud_network_dao_networkdao_networkdao",
+          "label": "NetworkDao",
+          "rank": 67
+        },
+        {
+          "degree": 278,
+          "id": "engine_schema_src_main_java_com_cloud_vm_dao_vminstancedao_vminstancedao",
+          "label": "VMInstanceDao",
+          "rank": 68
+        },
+        {
+          "degree": 275,
+          "id": "api_src_main_java_com_cloud_storage_volume_volume",
+          "label": "Volume",
+          "rank": 69
+        },
+        {
+          "degree": 272,
+          "id": "engine_schema_src_main_java_com_cloud_storage_volumevo_volumevo",
+          "label": "VolumeVO",
+          "rank": 70
+        },
+        {
+          "degree": 266,
+          "id": "plugins_network_elements_juniper_contrail_src_test_java_org_apache_cloudstack_network_contrail_management_integrationtestconfiguration_integrationtestconfiguration",
+          "label": "IntegrationTestConfiguration",
+          "rank": 71
+        },
+        {
+          "degree": 264,
+          "id": "utils_src_main_java_com_cloud_utils_component_managerbase_managerbase",
+          "label": "ManagerBase",
+          "rank": 72
+        },
+        {
+          "degree": 262,
+          "id": "api_src_main_java_com_cloud_agent_api_to_virtualmachineto_virtualmachineto",
+          "label": "VirtualMachineTO",
+          "rank": 73
+        },
+        {
+          "degree": 262,
+          "id": "engine_api_src_main_java_org_apache_cloudstack_engine_subsystem_api_storage_volumeinfo_volumeinfo",
+          "label": "VolumeInfo",
+          "rank": 74
+        },
+        {
+          "degree": 260,
+          "id": "api_src_main_java_com_cloud_exception_resourceallocationexception_resourceallocationexception",
+          "label": "ResourceAllocationException",
+          "rank": 75
+        },
+        {
+          "degree": 260,
+          "id": "api_src_main_java_com_cloud_network_router_virtualrouter_virtualrouter",
+          "label": "VirtualRouter",
+          "rank": 76
+        },
+        {
+          "degree": 260,
+          "id": "engine_schema_src_main_java_com_cloud_storage_vmtemplatevo_vmtemplatevo",
+          "label": "VMTemplateVO",
+          "rank": 77
+        },
+        {
+          "degree": 258,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_filter_filter",
+          "label": "Filter",
+          "rank": 78
+        },
+        {
+          "degree": 257,
+          "id": "engine_components_api_src_main_java_com_cloud_resource_resourcemanager_resourcemanager",
+          "label": "ResourceManager",
+          "rank": 79
+        },
+        {
+          "degree": 256,
+          "id": "framework_config_src_main_java_org_apache_cloudstack_framework_config_configkey_configkey",
+          "label": "ConfigKey",
+          "rank": 80
+        },
+        {
+          "degree": 255,
+          "id": "framework_db_src_main_java_com_cloud_utils_db_transactionlegacy_transactionlegacy",
+          "label": "TransactionLegacy",
+          "rank": 81
+        },
+        {
+          "degree": 250,
+          "id": "api_src_main_java_com_cloud_dc_datacenter_datacenter",
+          "label": "DataCenter",
+          "rank": 82
+        },
+        {
+          "degree": 249,
+          "id": "api_src_main_java_com_cloud_user_user_user",
+          "label": "User",
+          "rank": 83
+        },
+        {
+          "degree": 243,
+          "id": "utils_src_main_java_com_cloud_utils_net_netutils_netutils",
+          "label": "NetUtils",
+          "rank": 84
+        },
+        {
+          "degree": 241,
+          "id": "utils_src_main_java_com_cloud_utils_script_script_script",
+          "label": "Script",
+          "rank": 85
+        },
+        {
+          "degree": 240,
+          "id": "engine_schema_src_main_java_com_cloud_vm_domainroutervo_domainroutervo",
+          "label": "DomainRouterVO",
+          "rank": 86
+        },
+        {
+          "degree": 239,
+          "id": "api_src_main_java_com_cloud_network_network_provider",
+          "label": "Provider",
+          "rank": 87
+        },
+        {
+          "degree": 235,
+          "id": "api_src_main_java_org_apache_cloudstack_api_entityreference_entityreference",
+          "label": "EntityReference",
+          "rank": 88
+        },
+        {
+          "degree": 233,
+          "id": "engine_schema_src_main_java_org_apache_cloudstack_storage_datastore_db_storagepoolvo_storagepoolvo",
+          "label": "StoragePoolVO",
+          "rank": 89
+        },
+        {
+          "degree": 232,
+          "id": "api_src_main_java_com_cloud_serializer_param_param",
+          "label": "Param",
+          "rank": 90
+        },
+        {
+          "degree": 232,
+          "id": "api_src_main_java_org_apache_cloudstack_acl_roletype_roletype",
+          "label": "RoleType",
+          "rank": 91
+        },
+        {
+          "degree": 231,
+          "id": "engine_schema_src_main_java_com_cloud_dc_datacentervo_datacentervo",
+          "label": "DataCenterVO",
+          "rank": 92
+        },
+        {
+          "degree": 231,
+          "id": "tools_marvin_marvin_sshclient_sshclient",
+          "label": "SshClient",
+          "rank": 93
+        },
+        {
+          "degree": 227,
+          "id": "api_src_main_java_com_cloud_host_status_status",
+          "label": "Status",
+          "rank": 94
+        },
+        {
+          "degree": 225,
+          "id": "engine_schema_src_main_java_com_cloud_storage_dao_volumedao_volumedao",
+          "label": "VolumeDao",
+          "rank": 95
+        },
+        {
+          "degree": 224,
+          "id": "engine_schema_src_main_java_com_cloud_network_dao_ipaddressvo_ipaddressvo",
+          "label": "IPAddressVO",
+          "rank": 96
+        },
+        {
+          "degree": 222,
+          "id": "core_src_main_java_com_cloud_resource_serverresource_serverresource",
+          "label": "ServerResource",
+          "rank": 97
+        },
+        {
+          "degree": 222,
+          "id": "server_src_main_java_com_cloud_vm_uservmmanagerimpl_uservmmanagerimpl",
+          "label": "UserVmManagerImpl",
+          "rank": 98
+        },
+        {
+          "degree": 221,
+          "id": "engine_schema_src_main_java_org_apache_cloudstack_storage_datastore_db_primarydatastoredao_primarydatastoredao",
+          "label": "PrimaryDataStoreDao",
+          "rank": 99
+        },
+        {
+          "degree": 217,
+          "id": "engine_schema_src_main_java_com_cloud_user_dao_accountdao_accountdao",
+          "label": "AccountDao",
+          "rank": 100
+        }
+      ]
+    },
+    {
+      "cases": [
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 36,
+          "graphId": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+          "rank": 728,
+          "sampleId": 6374724,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 54,
+          "graphId": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+          "rank": 366,
+          "sampleId": 6391534,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 11,
+          "graphId": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+          "rank": 3076,
+          "sampleId": 6406137,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 21,
+          "graphId": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+          "rank": 1529,
+          "sampleId": 6413795,
+          "status": "ranked"
+        }
+      ],
+      "classCandidates": 6628,
+      "danglingPairs": 0,
+      "directed": true,
+      "distinctEndpointPairs": 283130,
+      "edgeRecordCount": 347974,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "nodeCount": 95084,
+      "rawSha256": "eea4710ddd035468f9a9ffb286cc8cfdb7a01ee569641507e9dc98bf8137ffcb",
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "compass",
+      "top100": [
+        {
+          "degree": 988,
+          "id": "sha256:e708d23db81026e47a3683017b15d54b1eaa2c1ca677527dafc26deff961503d",
+          "label": "IDEWorkbenchMessages",
+          "rank": 1
+        },
+        {
+          "degree": 904,
+          "id": "sha256:3eba7652c207818ec7caaa3eead51ac5e3c087665d590ddee15eee5f940b8ffe",
+          "label": "WorkbenchMessages",
+          "rank": 2
+        },
+        {
+          "degree": 725,
+          "id": "sha256:2620a7c3781366a2d1276ef4b554b77cc8f4f84ee7ac3254250de7af34d93969",
+          "label": "ImageDescriptor",
+          "rank": 3
+        },
+        {
+          "degree": 682,
+          "id": "sha256:bf77b18db427cf4b42a323d3e11a5ead2b27b5a0e65f955984653a2bfabeef41",
+          "label": "PlatformUI",
+          "rank": 4
+        },
+        {
+          "degree": 663,
+          "id": "sha256:cee1e8f5ab5069a690bef638b5159a81d8edf07bc27a8bfaded753df3e6a6a23",
+          "label": "MenuPackageImpl",
+          "rank": 5
+        },
+        {
+          "degree": 609,
+          "id": "sha256:91afa88ca73a1d57f151d5aab5167c510f727ef4af89084b16bd87a2fa2776a6",
+          "label": "EPartServiceTest",
+          "rank": 6
+        },
+        {
+          "degree": 556,
+          "id": "sha256:20ac60d4cdc9aa29c2943d7482e8e94b6df6ff77f109bbf070ec7a38c2893403",
+          "label": "Realm",
+          "rank": 7
+        },
+        {
+          "degree": 507,
+          "id": "sha256:b3fe27fa216e8438ddccfa03579b4144feb1f867a9f57ab536b9bf8ac6fa1d02",
+          "label": "Viewer",
+          "rank": 8
+        },
+        {
+          "degree": 503,
+          "id": "sha256:b3c51212ee203aa6ff27a86e7d44aa55f3b6398471108fdc90af6a3606c5788d",
+          "label": "BasicPackageImpl",
+          "rank": 9
+        },
+        {
+          "degree": 485,
+          "id": "sha256:9401ba758eaf69803275e812d10a4d61d249592cba57e6314616f21f5259c8e8",
+          "label": "StructuredSelection",
+          "rank": 10
+        },
+        {
+          "degree": 427,
+          "id": "sha256:32c9771a6001d723382486823a763213098b88e19dd1dd695025556dcb7b4125",
+          "label": "Action",
+          "rank": 11
+        },
+        {
+          "degree": 413,
+          "id": "sha256:0e0c6001e76e806395a9a9b38dd20da576525c3a1305aec4cdcdc94d8994f153",
+          "label": "MenuManager",
+          "rank": 12
+        },
+        {
+          "degree": 404,
+          "id": "sha256:7f20223794302f0189dcfdb7886d8f38c6724f999e7340899b3626730aacf114",
+          "label": "TableViewer",
+          "rank": 13
+        },
+        {
+          "degree": 389,
+          "id": "sha256:65ad1e155299d8c1cf7b9415cc10eb275a94f81808ab562fd9a6094213873107",
+          "label": "UITestCase",
+          "rank": 14
+        },
+        {
+          "degree": 386,
+          "id": "sha256:40cf47719df3ebf54a53033264c75399e17ddad7a935bbcb374018c43b2b404c",
+          "label": "ExecutionEvent",
+          "rank": 15
+        },
+        {
+          "degree": 364,
+          "id": "sha256:1da175605d586860e51bc85ee9bd4686633fb854d137dfd0c4fcc783293842a5",
+          "label": "WorkbenchPlugin",
+          "rank": 16
+        },
+        {
+          "degree": 363,
+          "id": "sha256:db9247db35614e289a6cdd4615731180d5635529056f34d144e1aa05f9a97e6e",
+          "label": "TreeViewer",
+          "rank": 17
+        },
+        {
+          "degree": 362,
+          "id": "sha256:bdba1aab396f78d00a7065136d8136f5d06c89e7ac46275bf235aeb8349891c9",
+          "label": "WorkbenchPage",
+          "rank": 18
+        },
+        {
+          "degree": 312,
+          "id": "sha256:328e69d3dc5ff0575f88655ef4c8ed5227d97e607778a07ea5f61b9260505d32",
+          "label": "StructuredViewer",
+          "rank": 19
+        },
+        {
+          "degree": 308,
+          "id": "sha256:2144a08c2fe8633b6c879681f2726f207c2238a61760184f62780fbc8aec3361",
+          "label": "ParameterizedCommand",
+          "rank": 20
+        },
+        {
+          "degree": 284,
+          "id": "sha256:dd11feaec62906800dd12f296e67a7b3492cfcde88bd30dacbf2916a238f49fe",
+          "label": "UiPackageImpl",
+          "rank": 21
+        },
+        {
+          "degree": 283,
+          "id": "sha256:2d6e8401b36ceb51113a9e12c2eda76842ee3fa0fbeb563ba0426b7b798d4ee0",
+          "label": "WorkbenchWindow",
+          "rank": 22
+        },
+        {
+          "degree": 279,
+          "id": "sha256:43ddf535c64365c6c96965a5729cc2dc5e26c9d8b43547fa67b62ab76be07477",
+          "label": "MarkerMessages",
+          "rank": 23
+        },
+        {
+          "degree": 256,
+          "id": "sha256:4167fc9fbe5397d99fce9e603495437ec2759585ce3f1fcf5f0f21357076ed56",
+          "label": "Workbench",
+          "rank": 24
+        },
+        {
+          "degree": 250,
+          "id": "sha256:81006a81c4064a6437e259811ba1915d026548f9e55c053a1ad56f04c1d2efa3",
+          "label": "CSS2PropertiesImpl",
+          "rank": 25
+        },
+        {
+          "degree": 250,
+          "id": "sha256:e7946022aee266e2d86dc590024f07dc6f90ecb62237d027d3547868649c8646",
+          "label": "MessageDialog",
+          "rank": 26
+        },
+        {
+          "degree": 242,
+          "id": "sha256:5401dbacf52c3dda2755bbd86ba079ef4ea911c7f3397cb191f0b83d23e4a355",
+          "label": "LabelProvider",
+          "rank": 27
+        },
+        {
+          "degree": 224,
+          "id": "sha256:ad960c23afffc73291728ffc36b3e7535dd1a9ebc6986e1e01056ca8aa8b7598",
+          "label": "Dialog",
+          "rank": 28
+        },
+        {
+          "degree": 221,
+          "id": "sha256:0056868a827fc246abb5196f9af85e7771ef93cfeca9aef2568748e4a6237610",
+          "label": "JFaceResources",
+          "rank": 29
+        },
+        {
+          "degree": 221,
+          "id": "sha256:6fe18933cedcea17b94e51019bd24d790c42f92367e750adc6c09181e2e3f5e7",
+          "label": "AbstractHandler",
+          "rank": 30
+        },
+        {
+          "degree": 220,
+          "id": "sha256:79d4dae71825770407d2d015e74c615f65f36e4264dfd9f3a161854d4d9172f6",
+          "label": "URI",
+          "rank": 31
+        },
+        {
+          "degree": 209,
+          "id": "sha256:c04f495994a3a6498d744466134c2528ac7e371921dc54f62198271e3f8571b1",
+          "label": "WizardDialog",
+          "rank": 32
+        },
+        {
+          "degree": 209,
+          "id": "sha256:fef9a21a0608ed8f8d6d72c0a1affb936733cc3c2f724dae3385a3de557150c6",
+          "label": "E4Workbench",
+          "rank": 33
+        },
+        {
+          "degree": 208,
+          "id": "sha256:09da78c53b02ef732ec00767705a8d7e302780f87cc123c88979697f1e3c3a96",
+          "label": "PartInitException",
+          "rank": 34
+        },
+        {
+          "degree": 207,
+          "id": "sha256:2683b9c93c202fc1f13e91f7c475fb01f14b625d15c8a302ec152288af084a40",
+          "label": "CellEditor",
+          "rank": 35
+        },
+        {
+          "degree": 204,
+          "id": "sha256:1922835f9250dde6db45183b75dc0e77bb5b3880f20b1f4620cf00f5680e15da",
+          "label": "ExecutionException",
+          "rank": 36
+        },
+        {
+          "degree": 202,
+          "id": "sha256:1acdcdfa2c098a2d56d6cb2f77461aa5424be3b94be2045cb297e5a5eb4eacdb",
+          "label": "ActionFactory",
+          "rank": 37
+        },
+        {
+          "degree": 202,
+          "id": "sha256:26b9445eadccbc738a827c34d94ed3b4820b36ea50b3724b24c2a60d4c4abd5c",
+          "label": "CommandsPackageImpl",
+          "rank": 38
+        },
+        {
+          "degree": 197,
+          "id": "sha256:5301854e28157e543726e5be1b8f7e679fbfc58a205318b3fd3e6e32cea9d2ba",
+          "label": "DataBindingContext",
+          "rank": 39
+        },
+        {
+          "degree": 196,
+          "id": "sha256:b2c96c07db3cbb8c76f8aa9d18ca030f08747e929c20f69998382d04be40beee",
+          "label": "AbstractTreeViewer",
+          "rank": 40
+        },
+        {
+          "degree": 193,
+          "id": "sha256:c1706fc8f66c30bb51d4631963bde0b36e9f4a5f34a3ff0ae3faf66227209604",
+          "label": "SafeRunnable",
+          "rank": 41
+        },
+        {
+          "degree": 191,
+          "id": "sha256:555be66ebc85385891d9bb834536482b809d7f4d0be821df42591f726d5f08a9",
+          "label": "Command",
+          "rank": 42
+        },
+        {
+          "degree": 190,
+          "id": "sha256:6260d986754766a771e68e20ab1a68afd83deae64bde14b9cf7f0adfed4e16a6",
+          "label": "PropertyChangeEvent",
+          "rank": 43
+        },
+        {
+          "degree": 182,
+          "id": "sha256:af235bb0b5c3d3af5c83eb3fbc3a742725d059ea8e251baf2eea255f8c3e8002",
+          "label": "ViewerCell",
+          "rank": 44
+        },
+        {
+          "degree": 179,
+          "id": "sha256:32dfc39a27677a81d5dcacd87cf0df87c5c38c3b6bf885c2f50e4ded58b3dd45",
+          "label": "ColumnViewer",
+          "rank": 45
+        },
+        {
+          "degree": 178,
+          "id": "sha256:a5ae4aacf5a11eb239f566ad2c9586ad1ef882a6c107315fbe026a96c380e820",
+          "label": "DataTransferMessages",
+          "rank": 46
+        },
+        {
+          "degree": 175,
+          "id": "sha256:7c15aadaa0152a60282aacfe9a5f98acc19069a48ec705250949ef7c05c9ba47",
+          "label": "IDEWorkbenchPlugin",
+          "rank": 47
+        },
+        {
+          "degree": 169,
+          "id": "sha256:444cd6aa50c27f4099e110fc194e5ef9a90d31e46a88faa3353ed5d9cdf2a5fb",
+          "label": "WritableList",
+          "rank": 48
+        },
+        {
+          "degree": 169,
+          "id": "sha256:4dea947c761dd00b49fa13ee403853d3ab4cff263012fac92a4daf57bcee4e5b",
+          "label": "AbstractDefaultRealmTestCase",
+          "rank": 49
+        },
+        {
+          "degree": 166,
+          "id": "sha256:51dd50ef136297b31c010eb4995f10138bc31f38f2921c286c6785e7496370fc",
+          "label": "WritableValue",
+          "rank": 50
+        },
+        {
+          "degree": 162,
+          "id": "sha256:cef0e0438f1e55e5fb7c73943f4f41bff352edc21fb3734197cba5c3bccef2c5",
+          "label": "Binding",
+          "rank": 51
+        },
+        {
+          "degree": 159,
+          "id": "sha256:bb4910e3e896d682f45d29aeb47f8b82e2c9b8f5b95fa4e1eff959aaab47b082",
+          "label": "TriggerSequence",
+          "rank": 52
+        },
+        {
+          "degree": 157,
+          "id": "sha256:5de2151919f2ae216efb5a32b7f720163c4fe1b06db24f5bcfb94d79f7ff68ad",
+          "label": "LogView",
+          "rank": 53
+        },
+        {
+          "degree": 154,
+          "id": "sha256:0f14966ccc8b5897cf1352d3cbdab62b0f8c9ad8a13de60808629b4f07c0f47a",
+          "label": "ApplicationPackageImpl",
+          "rank": 54
+        },
+        {
+          "degree": 153,
+          "id": "sha256:e3b7bbd8bb443bb9d62349af81dc92a2369c0fa3a7ccc09d17f632a5d2030887",
+          "label": "ViewerComparator",
+          "rank": 55
+        },
+        {
+          "degree": 150,
+          "id": "sha256:fdd8e8344a0b022ed92c282d8549eb227a1c16aabd0d8aaf9b6b26519a5cd9cc",
+          "label": "BindingManager",
+          "rank": 56
+        },
+        {
+          "degree": 149,
+          "id": "sha256:442165de6e8beead15ee3adcb06cd6e288e87b977981fd5a27b19a6d768126f9",
+          "label": "AdvancedPackageImpl",
+          "rank": 57
+        },
+        {
+          "degree": 149,
+          "id": "sha256:c0c371f756b063274efac61bc1660d29e56d97e30a15484a8cbe4b4bdce67f20",
+          "label": "NavigatorContentService",
+          "rank": 58
+        },
+        {
+          "degree": 148,
+          "id": "sha256:947cf51470bc41174754c59b66fd466fd1d27981b3958f6930b1a608d4097e1c",
+          "label": "Window",
+          "rank": 59
+        },
+        {
+          "degree": 147,
+          "id": "sha256:ce439174f42b61ff2328ef784c55ff33f0f15875fbcee4c4c5c690967e2676bc",
+          "label": "ViewerFilter",
+          "rank": 60
+        },
+        {
+          "degree": 140,
+          "id": "sha256:efe658bf3c14b10f83b9427a80f29b876bff702f58b6fddfe0f1f143658c22b2",
+          "label": "TestHarnessImpl",
+          "rank": 61
+        },
+        {
+          "degree": 138,
+          "id": "sha256:eab305f2191dff03032ffa5379723de17e3584cea26fa2494f6dd3bc7b9370c7",
+          "label": "Util",
+          "rank": 62
+        },
+        {
+          "degree": 136,
+          "id": "sha256:8e94399a6ac7aa40c4d39db871c1fa56c43b1d191548fbc98a8b15035e926753",
+          "label": "Separator",
+          "rank": 63
+        },
+        {
+          "degree": 134,
+          "id": "sha256:2311b73fdec3e49d6dd37c292de92a15b83766d14b26f364137b9bcc175275a8",
+          "label": "ExtendedMarkersView",
+          "rank": 64
+        },
+        {
+          "degree": 134,
+          "id": "sha256:4ac549a8390b25a60b3290cbb46d9bdd7190c1e926ecb9680b15315631063903",
+          "label": "ActionContributionItem",
+          "rank": 65
+        },
+        {
+          "degree": 134,
+          "id": "sha256:841bf6084184a9073a89b37a2900f213723a8a1dd8be63799b64b78bf32af7fe",
+          "label": "StyledString",
+          "rank": 66
+        },
+        {
+          "degree": 134,
+          "id": "sha256:997ea88274a4335167e7e1d0163adf7e653151665f586541a1681d4be0a4b44e",
+          "label": "StatusAdapter",
+          "rank": 67
+        },
+        {
+          "degree": 134,
+          "id": "sha256:bceb9ca97076cc364452f1338992ca30bbabe1482cdcf4b69cde41b4bc9b3048",
+          "label": "ColorsAndFontsPreferencePage",
+          "rank": 68
+        },
+        {
+          "degree": 133,
+          "id": "sha256:c49d13970391df90254f2a3db893641fac5a241456c93afd647432d8e28f41aa",
+          "label": "WorkspaceOperationsTests",
+          "rank": 69
+        },
+        {
+          "degree": 132,
+          "id": "sha256:4257330e946793ca0e224bf56294b8ed504f5cd7dd34e83c717f4f9dc16747db",
+          "label": "IDE",
+          "rank": 70
+        },
+        {
+          "degree": 131,
+          "id": "sha256:7656486c2879fb3397dfece3dd595a332fb6755edd9f6acd82e833575bd0f537",
+          "label": "Bean",
+          "rank": 71
+        },
+        {
+          "degree": 131,
+          "id": "sha256:8644408dc6c5982b1367738e458dfd962b68ec83fd336784d0f40f986c47749b",
+          "label": "FormToolkit",
+          "rank": 72
+        },
+        {
+          "degree": 128,
+          "id": "sha256:1d7c3eca70eaff72f711def10eb3b5be5211438224d9ffa9fefdbb9375577031",
+          "label": "SelectionChangedEvent",
+          "rank": 73
+        },
+        {
+          "degree": 128,
+          "id": "sha256:708e8713c03d58ed1e974ba4df0bf5f01ea21bf8d8c2b8dbb16ee089dfc11b38",
+          "label": "TaskListMessages",
+          "rank": 74
+        },
+        {
+          "degree": 128,
+          "id": "sha256:d1ef42aba5cc93625c2d06adf84ce3bca8f3b655af60b8065febde2bdba716e3",
+          "label": "PreferenceDialog",
+          "rank": 75
+        },
+        {
+          "degree": 127,
+          "id": "sha256:41b14fcf762b109e0c764d79afe866917024d6723a6be62af6536aa7f3c6f955",
+          "label": "TestElement",
+          "rank": 76
+        },
+        {
+          "degree": 127,
+          "id": "sha256:7dc62df9aa22ec920e5f9d8c0df0a2e5de79a2d76db24bcdd323b718e7660c28",
+          "label": "CommandManager",
+          "rank": 77
+        },
+        {
+          "degree": 127,
+          "id": "sha256:d3118394564ea379639c47aaa3c69a1e89ddbde32dcc8b61f000a33b52f455a6",
+          "label": "TextCellEditor",
+          "rank": 78
+        },
+        {
+          "degree": 126,
+          "id": "sha256:bfc19ca0f33b9cab17bd0bb2eca59bdb3999be1c5e393b5356002795c9965787",
+          "label": "AbstractUIPlugin",
+          "rank": 79
+        },
+        {
+          "degree": 124,
+          "id": "sha256:a70d6b16617098538dc7da861d077719634f1a27326ff7ef761611f8cb8d409a",
+          "label": "CustomizePerspectiveDialog",
+          "rank": 80
+        },
+        {
+          "degree": 123,
+          "id": "sha256:d05af660f6d90918db922c71cf3f326e7e30aa5fc8adc40e71ff56ff795d7b51",
+          "label": "WorkbenchActionBuilder",
+          "rank": 81
+        },
+        {
+          "degree": 122,
+          "id": "sha256:3a1de870969848db6a05a6e595557c3aaf51545b2bb0e09b637101afe3bbf640",
+          "label": "Saveable",
+          "rank": 82
+        },
+        {
+          "degree": 122,
+          "id": "sha256:3b75f2d6e3478466207f32707a32621f466ee84d0c600bf4432600ec6cb9edfd",
+          "label": "ViewPart",
+          "rank": 83
+        },
+        {
+          "degree": 122,
+          "id": "sha256:e2fe9878588796c7dfd07d661ee42bbe9f2ad5dd2e67cc0a11d9fbede792621c",
+          "label": "ArrayContentProvider",
+          "rank": 84
+        },
+        {
+          "degree": 121,
+          "id": "sha256:4fa6cfceffbc4c99dcc73d25ddbe99c413d4fd83f4bec8129be2078b88739530",
+          "label": "NavigatorTestBase",
+          "rank": 85
+        },
+        {
+          "degree": 121,
+          "id": "sha256:56ef9e981d8fcc9ce406cdde542cb1c3348d8b81fac4998de2ee7737b2339155",
+          "label": "ListDiff",
+          "rank": 86
+        },
+        {
+          "degree": 121,
+          "id": "sha256:7cea715cadd9f1bee09a1806693d01a14fff6ab8c69c29a406489331041a2f51",
+          "label": "CommandContributionItem",
+          "rank": 87
+        },
+        {
+          "degree": 120,
+          "id": "sha256:fcc13f81d62ce61813b17ab751cb98c96d32f1e64b577c3b31f05a6b313c8b3e",
+          "label": "TreePath",
+          "rank": 88
+        },
+        {
+          "degree": 119,
+          "id": "sha256:2e7d7c9ec4327f5283c20ac1fb9e50558e29a00ba9aad868810980e947f2bbcd",
+          "label": "FileEditorInput",
+          "rank": 89
+        },
+        {
+          "degree": 119,
+          "id": "sha256:753f6edc36ea53425db056e6845257139f0508b13217b1dc814665a697a99b95",
+          "label": "UIEvents",
+          "rank": 90
+        },
+        {
+          "degree": 118,
+          "id": "sha256:d55a2ea4635421bd983bc684105ec9357cbc8d37b36be7097037c411569a5aae",
+          "label": "PreferencePage",
+          "rank": 91
+        },
+        {
+          "degree": 117,
+          "id": "sha256:96cdca444374d848d99b133830dd778fc33fb15a6415c1041ba6230de6739834",
+          "label": "Diffs",
+          "rank": 92
+        },
+        {
+          "degree": 116,
+          "id": "sha256:e5537f27476f39f96d421c40b5691003a4d865cd714b9c5f3270964404dab06d",
+          "label": "NotDefinedException",
+          "rank": 93
+        },
+        {
+          "degree": 115,
+          "id": "sha256:5941ad9816184d58557ff10555cc45866b59c0d81c0c97f7cc9b741801e50edb",
+          "label": "TabbedPropertySheetPage",
+          "rank": 94
+        },
+        {
+          "degree": 115,
+          "id": "sha256:7bc798c19fe05d4c325618c814fc2076789bc568b1e1c256620add6de8705f2d",
+          "label": "Wizard",
+          "rank": 95
+        },
+        {
+          "degree": 115,
+          "id": "sha256:b0c431c8d85f21b30c1afd2fbb3305b15203be2434618d08529ea53e21b3b770",
+          "label": "DisplayRealm",
+          "rank": 96
+        },
+        {
+          "degree": 114,
+          "id": "sha256:0e39bd3c1c4d738ab4553eb53d27d7700b51abebe929c4539b6d4916a30d8ea8",
+          "label": "CommonViewer",
+          "rank": 97
+        },
+        {
+          "degree": 114,
+          "id": "sha256:6a9e04d0245eabd678a374289a977cdece69ef13dc3fc4199be1f09ecfbc08d7",
+          "label": "Util",
+          "rank": 98
+        },
+        {
+          "degree": 114,
+          "id": "sha256:df1ff238cb303325167226944e52f1a5f7e7355bb31475096d1612ce34e21e2c",
+          "label": "HandlerUtil",
+          "rank": 99
+        },
+        {
+          "degree": 114,
+          "id": "sha256:f46e39c4f950524e1846f1fa40f90a7f58d83516b14f69e18041e544b03e07ed",
+          "label": "FilteredItemsSelectionDialog",
+          "rank": 100
+        }
+      ]
+    },
+    {
+      "cases": [
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 22,
+          "graphId": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel",
+          "rank": 1403,
+          "sampleId": 6374724,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 52,
+          "graphId": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty",
+          "rank": 382,
+          "sampleId": 6391534,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-none",
+          "degree": 11,
+          "graphId": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl",
+          "rank": 3093,
+          "sampleId": 6406137,
+          "status": "ranked"
+        },
+        {
+          "classification": "unanimous-major-critical",
+          "degree": 19,
+          "graphId": "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto",
+          "rank": 1740,
+          "sampleId": 6413795,
+          "status": "ranked"
+        }
+      ],
+      "classCandidates": 7597,
+      "danglingPairs": 0,
+      "directed": false,
+      "distinctEndpointPairs": 258146,
+      "edgeRecordCount": 258146,
+      "graphSha256": "cfdc1f9f8db069df24854f5a0786d8777a9daa2e33615ed44ae39e1189b1cdef",
+      "nodeCount": 70420,
+      "rawSha256": "1615667ea0f9fa967d1a72e8431893b7f184e827f4d142a1dfbed1a71a106a6e",
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "graphify",
+      "top100": [
+        {
+          "degree": 770,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchwindow_iworkbenchwindow",
+          "label": "IWorkbenchWindow",
+          "rank": 1
+        },
+        {
+          "degree": 677,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_platformui_platformui",
+          "label": "PlatformUI",
+          "rank": 2
+        },
+        {
+          "degree": 663,
+          "id": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_engine_cssengine_cssengine",
+          "label": "CSSEngine",
+          "rank": 3
+        },
+        {
+          "degree": 652,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_resource_imagedescriptor_imagedescriptor",
+          "label": "ImageDescriptor",
+          "rank": 4
+        },
+        {
+          "degree": 601,
+          "id": "tests_org_eclipse_e4_ui_tests_src_org_eclipse_e4_ui_tests_application_epartservicetest_epartservicetest",
+          "label": "EPartServiceTest",
+          "rank": 5
+        },
+        {
+          "degree": 584,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_value_iobservablevalue_iobservablevalue",
+          "label": "IObservableValue",
+          "rank": 6
+        },
+        {
+          "degree": 569,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_muielement_muielement",
+          "label": "MUIElement",
+          "rank": 7
+        },
+        {
+          "degree": 556,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpage_iworkbenchpage",
+          "label": "IWorkbenchPage",
+          "rank": 8
+        },
+        {
+          "degree": 530,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpart_iworkbenchpart",
+          "label": "IWorkbenchPart",
+          "rank": 9
+        },
+        {
+          "degree": 522,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_realm_realm",
+          "label": "Realm",
+          "rank": 10
+        },
+        {
+          "degree": 508,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_istructuredselection_istructuredselection",
+          "label": "IStructuredSelection",
+          "rank": 11
+        },
+        {
+          "degree": 501,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewer_viewer",
+          "label": "Viewer",
+          "rank": 12
+        },
+        {
+          "degree": 496,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_imemento_imemento",
+          "label": "IMemento",
+          "rank": 13
+        },
+        {
+          "degree": 456,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_structuredselection_structuredselection",
+          "label": "StructuredSelection",
+          "rank": 14
+        },
+        {
+          "degree": 454,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselection_iselection",
+          "label": "ISelection",
+          "rank": 15
+        },
+        {
+          "degree": 402,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_iaction_iaction",
+          "label": "IAction",
+          "rank": 16
+        },
+        {
+          "degree": 388,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_basic_mpart_mpart",
+          "label": "MPart",
+          "rank": 17
+        },
+        {
+          "degree": 387,
+          "id": "tests_org_eclipse_ui_tests_harness_src_org_eclipse_ui_tests_harness_util_uitestcase_uitestcase",
+          "label": "UITestCase",
+          "rank": 18
+        },
+        {
+          "degree": 363,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_executionevent_executionevent",
+          "label": "ExecutionEvent",
+          "rank": 19
+        },
+        {
+          "degree": 342,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_action_action",
+          "label": "Action",
+          "rank": 20
+        },
+        {
+          "degree": 342,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchplugin_workbenchplugin",
+          "label": "WorkbenchPlugin",
+          "rank": 21
+        },
+        {
+          "degree": 339,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_menumanager_menumanager",
+          "label": "MenuManager",
+          "rank": 22
+        },
+        {
+          "degree": 338,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbench_iworkbench",
+          "label": "IWorkbench",
+          "rank": 23
+        },
+        {
+          "degree": 330,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_iobservable_iobservable",
+          "label": "IObservable",
+          "rank": 24
+        },
+        {
+          "degree": 318,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_tableviewer_tableviewer",
+          "label": "TableViewer",
+          "rank": 25
+        },
+        {
+          "degree": 310,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_ipropertychangelistener_ipropertychangelistener",
+          "label": "IPropertyChangeListener",
+          "rank": 26
+        },
+        {
+          "degree": 308,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_treeviewer_treeviewer",
+          "label": "TreeViewer",
+          "rank": 27
+        },
+        {
+          "degree": 308,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchpage_workbenchpage",
+          "label": "WorkbenchPage",
+          "rank": 28
+        },
+        {
+          "degree": 302,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_mapplication_mapplication",
+          "label": "MApplication",
+          "rank": 29
+        },
+        {
+          "degree": 297,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditorpart_ieditorpart",
+          "label": "IEditorPart",
+          "rank": 30
+        },
+        {
+          "degree": 295,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_icontributionitem_icontributionitem",
+          "label": "IContributionItem",
+          "rank": 31
+        },
+        {
+          "degree": 294,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_structuredviewer_structuredviewer",
+          "label": "StructuredViewer",
+          "rank": 32
+        },
+        {
+          "degree": 268,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkingset_iworkingset",
+          "label": "IWorkingSet",
+          "rank": 33
+        },
+        {
+          "degree": 263,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_imenumanager_imenumanager",
+          "label": "IMenuManager",
+          "rank": 34
+        },
+        {
+          "degree": 262,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_list_iobservablelist_iobservablelist",
+          "label": "IObservableList",
+          "rank": 35
+        },
+        {
+          "degree": 250,
+          "id": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_css2propertiesimpl_css2propertiesimpl",
+          "label": "CSS2PropertiesImpl",
+          "rank": 36
+        },
+        {
+          "degree": 248,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_basic_mwindow_mwindow",
+          "label": "MWindow",
+          "rank": 37
+        },
+        {
+          "degree": 243,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_parameterizedcommand_parameterizedcommand",
+          "label": "ParameterizedCommand",
+          "rank": 38
+        },
+        {
+          "degree": 242,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditorinput_ieditorinput",
+          "label": "IEditorInput",
+          "rank": 39
+        },
+        {
+          "degree": 237,
+          "id": "bundles_org_eclipse_e4_ui_workbench_src_org_eclipse_e4_ui_workbench_modeling_emodelservice_emodelservice",
+          "label": "EModelService",
+          "rank": 40
+        },
+        {
+          "degree": 237,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_preference_ipreferencestore_ipreferencestore",
+          "label": "IPreferenceStore",
+          "rank": 41
+        },
+        {
+          "degree": 237,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchwindow_workbenchwindow",
+          "label": "WorkbenchWindow",
+          "rank": 42
+        },
+        {
+          "degree": 233,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_labelprovider_labelprovider",
+          "label": "LabelProvider",
+          "rank": 43
+        },
+        {
+          "degree": 226,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_set_iobservableset_iobservableset",
+          "label": "IObservableSet",
+          "rank": 44
+        },
+        {
+          "degree": 226,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_itreecontentprovider_itreecontentprovider",
+          "label": "ITreeContentProvider",
+          "rank": 45
+        },
+        {
+          "degree": 218,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_abstracthandler_abstracthandler",
+          "label": "AbstractHandler",
+          "rank": 46
+        },
+        {
+          "degree": 218,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbench_workbench",
+          "label": "Workbench",
+          "rank": 47
+        },
+        {
+          "degree": 213,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_resource_jfaceresources_jfaceresources",
+          "label": "JFaceResources",
+          "rank": 48
+        },
+        {
+          "degree": 207,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_messagedialog_messagedialog",
+          "label": "MessageDialog",
+          "rank": 49
+        },
+        {
+          "degree": 203,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iperspectivedescriptor_iperspectivedescriptor",
+          "label": "IPerspectiveDescriptor",
+          "rank": 50
+        },
+        {
+          "degree": 193,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_dialog_dialog",
+          "label": "Dialog",
+          "rank": 51
+        },
+        {
+          "degree": 193,
+          "id": "tests_org_eclipse_jface_tests_databinding_src_org_eclipse_jface_tests_databinding_bindingtestsuite_bindingtestsuite",
+          "label": "BindingTestSuite",
+          "rank": 52
+        },
+        {
+          "degree": 190,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_celleditor_celleditor",
+          "label": "CellEditor",
+          "rank": 53
+        },
+        {
+          "degree": 184,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_ilabelproviderlistener_ilabelproviderlistener",
+          "label": "ILabelProviderListener",
+          "rank": 54
+        },
+        {
+          "degree": 183,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iviewpart_iviewpart",
+          "label": "IViewPart",
+          "rank": 55
+        },
+        {
+          "degree": 178,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_command_command",
+          "label": "Command",
+          "rank": 56
+        },
+        {
+          "degree": 173,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_idialogsettings_idialogsettings",
+          "label": "IDialogSettings",
+          "rank": 57
+        },
+        {
+          "degree": 172,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_melementcontainer_melementcontainer",
+          "label": "MElementContainer",
+          "rank": 58
+        },
+        {
+          "degree": 170,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchmessages_workbenchmessages",
+          "label": "WorkbenchMessages",
+          "rank": 59
+        },
+        {
+          "degree": 169,
+          "id": "tests_org_eclipse_jface_tests_databinding_src_org_eclipse_jface_tests_databinding_abstractdefaultrealmtestcase_abstractdefaultrealmtestcase",
+          "label": "AbstractDefaultRealmTestCase",
+          "rank": 60
+        },
+        {
+          "degree": 167,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_columnviewer_columnviewer",
+          "label": "ColumnViewer",
+          "rank": 61
+        },
+        {
+          "degree": 166,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_abstracttreeviewer_abstracttreeviewer",
+          "label": "AbstractTreeViewer",
+          "rank": 62
+        },
+        {
+          "degree": 165,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iactionbars_iactionbars",
+          "label": "IActionBars",
+          "rank": 63
+        },
+        {
+          "degree": 164,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpartreference_iworkbenchpartreference",
+          "label": "IWorkbenchPartReference",
+          "rank": 64
+        },
+        {
+          "degree": 164,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_partinitexception_partinitexception",
+          "label": "PartInitException",
+          "rank": 65
+        },
+        {
+          "degree": 162,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewercell_viewercell",
+          "label": "ViewerCell",
+          "rank": 66
+        },
+        {
+          "degree": 161,
+          "id": "bundles_org_eclipse_ui_ide_src_org_eclipse_ui_internal_ide_ideworkbenchplugin_ideworkbenchplugin",
+          "label": "IDEWorkbenchPlugin",
+          "rank": 67
+        },
+        {
+          "degree": 161,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_services_iservicelocator_iservicelocator",
+          "label": "IServiceLocator",
+          "rank": 68
+        },
+        {
+          "degree": 155,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_executionexception_executionexception",
+          "label": "ExecutionException",
+          "rank": 69
+        },
+        {
+          "degree": 154,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_ilabelprovider_ilabelprovider",
+          "label": "ILabelProvider",
+          "rank": 70
+        },
+        {
+          "degree": 154,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselectionprovider_iselectionprovider",
+          "label": "ISelectionProvider",
+          "rank": 71
+        },
+        {
+          "degree": 153,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_mapplicationelement_mapplicationelement",
+          "label": "MApplicationElement",
+          "rank": 72
+        },
+        {
+          "degree": 153,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_wizard_wizarddialog_wizarddialog",
+          "label": "WizardDialog",
+          "rank": 73
+        },
+        {
+          "degree": 150,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselectionchangedlistener_iselectionchangedlistener",
+          "label": "ISelectionChangedListener",
+          "rank": 74
+        },
+        {
+          "degree": 149,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewercomparator_viewercomparator",
+          "label": "ViewerComparator",
+          "rank": 75
+        },
+        {
+          "degree": 148,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_iobservablecollection_iobservablecollection",
+          "label": "IObservableCollection",
+          "rank": 76
+        },
+        {
+          "degree": 146,
+          "id": "bundles_org_eclipse_core_databinding_src_org_eclipse_core_databinding_databindingcontext_databindingcontext",
+          "label": "DataBindingContext",
+          "rank": 77
+        },
+        {
+          "degree": 146,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_saferunnable_saferunnable",
+          "label": "SafeRunnable",
+          "rank": 78
+        },
+        {
+          "degree": 145,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_advanced_mperspective_mperspective",
+          "label": "MPerspective",
+          "rank": 79
+        },
+        {
+          "degree": 144,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_map_iobservablemap_iobservablemap",
+          "label": "IObservableMap",
+          "rank": 80
+        },
+        {
+          "degree": 144,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_bindings_binding_binding",
+          "label": "Binding",
+          "rank": 81
+        },
+        {
+          "degree": 142,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewerfilter_viewerfilter",
+          "label": "ViewerFilter",
+          "rank": 82
+        },
+        {
+          "degree": 141,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_idialogconstants_idialogconstants",
+          "label": "IDialogConstants",
+          "rank": 83
+        },
+        {
+          "degree": 140,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_bindings_triggersequence_triggersequence",
+          "label": "TriggerSequence",
+          "rank": 84
+        },
+        {
+          "degree": 139,
+          "id": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_ivalueproperty_ivalueproperty",
+          "label": "IValueProperty",
+          "rank": 85
+        },
+        {
+          "degree": 137,
+          "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_menu_mmenu_mmenu",
+          "label": "MMenu",
+          "rank": 86
+        },
+        {
+          "degree": 135,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_propertychangeevent_propertychangeevent",
+          "label": "PropertyChangeEvent",
+          "rank": 87
+        },
+        {
+          "degree": 135,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_window_window_window",
+          "label": "Window",
+          "rank": 88
+        },
+        {
+          "degree": 134,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditordescriptor_ieditordescriptor",
+          "label": "IEditorDescriptor",
+          "rank": 89
+        },
+        {
+          "degree": 132,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_istructuredcontentprovider_istructuredcontentprovider",
+          "label": "IStructuredContentProvider",
+          "rank": 90
+        },
+        {
+          "degree": 128,
+          "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_value_writablevalue_writablevalue",
+          "label": "WritableValue",
+          "rank": 91
+        },
+        {
+          "degree": 127,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_plugin_abstractuiplugin_abstractuiplugin",
+          "label": "AbstractUIPlugin",
+          "rank": 92
+        },
+        {
+          "degree": 125,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_operations_iundocontext_iundocontext",
+          "label": "IUndoContext",
+          "rank": 93
+        },
+        {
+          "degree": 125,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_bindings_bindingmanager_bindingmanager",
+          "label": "BindingManager",
+          "rank": 94
+        },
+        {
+          "degree": 124,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_operation_irunnablewithprogress_irunnablewithprogress",
+          "label": "IRunnableWithProgress",
+          "rank": 95
+        },
+        {
+          "degree": 123,
+          "id": "bundles_org_eclipse_ui_navigator_src_org_eclipse_ui_internal_navigator_navigatorcontentservice_navigatorcontentservice",
+          "label": "NavigatorContentService",
+          "rank": 96
+        },
+        {
+          "degree": 121,
+          "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_operations_iundoableoperation_iundoableoperation",
+          "label": "IUndoableOperation",
+          "rank": 97
+        },
+        {
+          "degree": 121,
+          "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_part_viewpart_viewpart",
+          "label": "ViewPart",
+          "rank": 98
+        },
+        {
+          "degree": 119,
+          "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_arraycontentprovider_arraycontentprovider",
+          "label": "ArrayContentProvider",
+          "rank": 99
+        },
+        {
+          "degree": 119,
+          "id": "bundles_org_eclipse_ui_ide_src_org_eclipse_ui_internal_views_markers_extendedmarkersview_extendedmarkersview",
+          "label": "ExtendedMarkersView",
+          "rank": 100
+        }
+      ]
+    }
+  ],
+  "schema": "compass.mlcq-class-degree-review/1",
+  "scope": "Run the registered class-only degree diagnostic on frozen Java graphs.\n\nEach graph is processed in a separate bounded process. This is a development\nretrieval diagnostic, not a god-object classifier or native tool comparison.\n"
+}

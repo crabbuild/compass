@@ -117,6 +117,39 @@ component, or fabricates an external endpoint. A limit error is not an empty
 successful result. Every published relationship must retain a valid source
 range, bounded provenance, and a source path contained by the repository root.
 
+Filesystem route-parent inference requires a recognized convention fact from
+the owning file-route producer. Programmatic router variables such as `r` or
+`app` do not establish a filesystem hierarchy across source files; their mounts
+and groups require framework composition evidence. This boundary also applies
+to programmatic registrations using a framework that supports file routes.
+
+Parent selection uses framework-specific source identities, not normalized URL
+prefixes or whichever filename sorts first:
+
+| Framework | File-parent rule |
+| --- | --- |
+| Next App Router | The nearest unique `layout` module in the same or an ancestor directory; a nested layout starts searching above itself. HTTP route handlers and `global-error` do not inherit this UI layout relationship. |
+| React Router / Remix flat routes | The nearest declared dot-segment prefix. Pathless prefixes remain identities, index files cannot parent siblings, and trailing-underscore opt-outs do not match the ordinary parent. A route folder exposes `route.tsx`; colocated helpers are not nested routes. |
+| TanStack default file routes | Dot and directory segments, `route`, `index`, `__root`, pathless names, route groups, and trailing-underscore identities are distinguished. Ignored and lazy companion files do not define parent candidates. |
+| Nuxt page routes | `parent.vue` can parent `parent/child.vue`; a sibling or `index.vue` cannot substitute for that declaration. |
+| SvelteKit | Only an explicitly published `+layout.svelte` route fact can parent UI files. The current producer does not publish these layout facts, so this rule alone does not add layout coverage. `+server` remains separate. |
+| Next Pages Router / Astro / standalone API routes | A source directory or URL prefix establishes no automatic layout parent. Explicit composition remains separate evidence. |
+
+Multiple candidates for the nearest parent key produce an ambiguity diagnostic
+and no containment edge. They do not select the first file or fall back to a
+more distant layout. Root scopes separate independent project trees. Custom
+route tokens/configuration, unrepresented root modules, and advanced layout
+resets require additional evidence; these defaults do not claim full runtime
+routing equivalence.
+
+The naming semantics are documented by
+[Next.js](https://nextjs.org/docs/app/getting-started/layouts-and-pages),
+[React Router](https://reactrouter.com/how-to/file-route-conventions),
+[TanStack Router](https://tanstack.com/router/latest/docs/routing/file-based-routing),
+[Nuxt](https://nuxt.com/docs/3.x/directory-structure/pages/),
+[SvelteKit](https://svelte.dev/docs/kit/routing), and
+[Astro](https://docs.astro.build/en/basics/layouts/).
+
 Generated files, symlinks that escape the owning root, malformed syntax,
 dynamic imports, computed configuration, and conditional values remain
 unsupported or incomplete unless a framework pack has independently qualified

@@ -1,0 +1,107 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "walkdir",
+  "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+  "scope": "Pre-execution source-reviewed selected direct edges and occurrences on held-out panel A; no model output used as gold, no whole-repository precision/recall claim.",
+  "witnesses": [
+    {
+      "id": "walkdir-source-edge-1",
+      "source": {
+        "file": "src/lib.rs",
+        "line": 439,
+        "symbol": "sort_by_key",
+        "text": "pub fn sort_by_key<K, F>(self, mut cmp: F) -> Self"
+      },
+      "target": {
+        "file": "src/lib.rs",
+        "line": 417,
+        "symbol": "sort_by",
+        "text": "pub fn sort_by<F>(mut self, cmp: F) -> Self"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/lib.rs",
+          "line": 444,
+          "text": "self.sort_by(move |a, b| cmp(a).cmp(&cmp(b)))"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "walkdir-source-edge-2",
+      "source": {
+        "file": "src/lib.rs",
+        "line": 456,
+        "symbol": "sort_by_file_name",
+        "text": "pub fn sort_by_file_name(self) -> Self {"
+      },
+      "target": {
+        "file": "src/lib.rs",
+        "line": 417,
+        "symbol": "sort_by",
+        "text": "pub fn sort_by<F>(mut self, cmp: F) -> Self"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/lib.rs",
+          "line": 457,
+          "text": "self.sort_by(|a, b| a.file_name().cmp(b.file_name()))"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "walkdir-source-edge-3",
+      "source": {
+        "file": "src/lib.rs",
+        "line": 687,
+        "symbol": "next",
+        "text": "fn next(&mut self) -> Option<Result<DirEntry>> {"
+      },
+      "target": {
+        "file": "src/lib.rs",
+        "line": 950,
+        "symbol": "pop",
+        "text": "fn pop(&mut self) {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/lib.rs",
+          "line": 707,
+          "text": "self.pop();"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 718,
+          "text": "None => self.pop(),"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "walkdir-source-edge-4",
+      "source": {
+        "file": "src/lib.rs",
+        "line": 456,
+        "symbol": "sort_by_file_name",
+        "text": "pub fn sort_by_file_name(self) -> Self {"
+      },
+      "target": {
+        "file": "src/lib.rs",
+        "line": 439,
+        "symbol": "sort_by_key",
+        "text": "pub fn sort_by_key<K, F>(self, mut cmp: F) -> Self"
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    }
+  ]
+}

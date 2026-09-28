@@ -1,0 +1,297 @@
+{
+  "schema": "compass.mlcq-source-review/1",
+  "scope": "Same-agent qualitative reading of all eight complete annotated spans before either hub response. External published ratings remain separate from these source explanations and later tool scores.",
+  "sourceWitnessesSha256": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+  "reviews": [
+    {
+      "sampleId": 6374724,
+      "repository": "eclipse/eclipse.platform.ui",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "fileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 41,
+      "endLine": 462,
+      "annotatedSpanSha256": "44caa70ca94cd2c16e4d3e88c57e87a931d3c5aa5c892a109e225d4ed4ddcb23",
+      "externalClassification": "unanimous-major-critical",
+      "sourceRole": "production-class",
+      "summary": "Binding model centralizes command enumeration, binding-to-element and command-to-element maps, UI selection/property events, conflict handling and restoration of user/system bindings.",
+      "facts": [
+        {
+          "startLine": 149,
+          "endLine": 198,
+          "claim": "Initialization queries active bindings and command services and constructs several linked collections.",
+          "sourceSpanSha256": "a9a31e7315e01dcb4a62963961f25e9570f494f9d5fce8c891b9b64e42f9d588"
+        },
+        {
+          "startLine": 205,
+          "endLine": 271,
+          "claim": "Refresh synchronizes those collections with active manager bindings and fires add/remove events.",
+          "sourceSpanSha256": "4ba05edff8bce8ab5c7ca64e5ed3e4a8576abb6e78ebad71616a44029325297d"
+        },
+        {
+          "startLine": 287,
+          "endLine": 334,
+          "claim": "Removal changes manager bindings, updates conflict elements and rewrites command mappings.",
+          "sourceSpanSha256": "908cf8f2de9c6f597499f386b45ed507e9618bb640d774f459f25dc471e21bfb"
+        },
+        {
+          "startLine": 343,
+          "endLine": 439,
+          "claim": "Restoration removes user bindings, reconciles maps and reselects the command.",
+          "sourceSpanSha256": "d3a739056c3333fa5e99e01ed6dd70bdeb19d92cd58a8dee0ac627c0db78b259"
+        }
+      ],
+      "qualification": "All operations concern key bindings. The external Blob rating is preserved, but this source reading alone does not prove harmful change coupling or justify a particular refactoring."
+    },
+    {
+      "sampleId": 6391534,
+      "repository": "eclipse/eclipse.platform.ui",
+      "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/SimpleValueProperty.java",
+      "fileSha256": "50407d33afc5ee8283f1022f5bf38278aa20b4cd82db4cd909eb5ee0e2e22b64",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 54,
+      "endLine": 99,
+      "annotatedSpanSha256": "41d9c06501c385b332f4bca06c824bbdc59d85cafbe4712ccb9240358496da03",
+      "externalClassification": "unanimous-none",
+      "sourceRole": "production-class",
+      "summary": "Abstract property adapter delegates value behavior to subclasses and creates observable wrappers for individual values and collection/map details.",
+      "facts": [
+        {
+          "startLine": 54,
+          "endLine": 78,
+          "claim": "Abstract get/set and native-listener hooks define extension points.",
+          "sourceSpanSha256": "b35d691839f3637ab8c0935d7108ba681f70dfff5d296ba055ca21e6bcbc9b2d"
+        },
+        {
+          "startLine": 80,
+          "endLine": 98,
+          "claim": "Four observation methods construct dedicated observable wrapper implementations.",
+          "sourceSpanSha256": "65a3f3270357154534fe844bb8c4d68f835d92450c325de33372b7a7fe9a3304"
+        }
+      ],
+      "qualification": "Unanimous-none applies to Blob only; it does not certify all quality properties or imply low usage/degree."
+    },
+    {
+      "sampleId": 6406137,
+      "repository": "eclipse/eclipse.platform.ui",
+      "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSSValueListImpl.java",
+      "fileSha256": "b45eedb84f09f0a8a258ff2eaa4327dae60fa2e7365ec4046fd3ca53dd9b4d69",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 24,
+      "endLine": 77,
+      "annotatedSpanSha256": "3fcdd11d287627416dcbb7f76f58aac5ffa3562bf7958d72693a4221e40c8023",
+      "externalClassification": "unanimous-none",
+      "sourceRole": "production-class",
+      "summary": "CSS value-list wrapper builds one list from lexical units, exposes indexed access and renders CSS strings.",
+      "facts": [
+        {
+          "startLine": 26,
+          "endLine": 35,
+          "claim": "Constructor populates the owned CSSValue list.",
+          "sourceSpanSha256": "d205ec182a46acdbd23e82efa011b1fb801d2613fe9c8af7f621d265ccc742a6"
+        },
+        {
+          "startLine": 38,
+          "endLine": 60,
+          "claim": "Length, item, CSS text and type operations all address that list representation.",
+          "sourceSpanSha256": "0ca76860348a3ab57adc678d4e085ab874496f14235ebf82ede323878f96b540"
+        },
+        {
+          "startLine": 63,
+          "endLine": 75,
+          "claim": "Text mutation is explicitly unsupported; toString renders the same values.",
+          "sourceSpanSha256": "6ad52c33bc1a2117706c283e88d041323026099d02c734823ec2a7972a86adb8"
+        }
+      ],
+      "qualification": "The unsupported mutation is visible behavior, not a reason to relabel the external Blob judgment."
+    },
+    {
+      "sampleId": 6413795,
+      "repository": "eclipse/eclipse.platform.ui",
+      "file": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/dialogs/DeprecatedUIWizardsAuto.java",
+      "fileSha256": "9a70d77d824154488332a1dcced6c6cf50af5943b1f601ef376832edc73202c7",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 45,
+      "endLine": 340,
+      "annotatedSpanSha256": "22b7ed775db7a8098a78fbe0d99ac9aa91cd50253dc75de099bbe291099c6290",
+      "externalClassification": "unanimous-major-critical",
+      "sourceRole": "test-class",
+      "summary": "JUnit UI test class repeats wizard construction, dialog configuration, help binding and text assertions across import/export and resource-creation cases.",
+      "facts": [
+        {
+          "startLine": 45,
+          "endLine": 65,
+          "claim": "TestCase inheritance and shell/workbench helpers establish its testing role.",
+          "sourceSpanSha256": "2dc99683323ecdac74010146e2b108e2f8f0c34b3c6824f9fb38c172c0bc1202"
+        },
+        {
+          "startLine": 68,
+          "endLine": 121,
+          "claim": "Import/export helpers each configure workbench settings and wizard dialogs.",
+          "sourceSpanSha256": "57cddb705b0f2096cba80684ef7b61bbdaa67fa61d1d937e6cecb77caf8b0436"
+        },
+        {
+          "startLine": 127,
+          "endLine": 159,
+          "claim": "Teardown deletes its test project; tests assert dialog text.",
+          "sourceSpanSha256": "042ca3ed0a442a5fd827633925707fb0c1f85d57009ad394c5e88ba312cf6aa3"
+        },
+        {
+          "startLine": 173,
+          "endLine": 338,
+          "claim": "File, folder, project and resource cases repeat dialog setup; one case creates a project in an overridden page hook.",
+          "sourceSpanSha256": "06cc876fe136c251329abb0dd352ee68ba9bbd6692a38d79187ef95ec9925a50"
+        }
+      ],
+      "qualification": "This is a test class, not production UI architecture. Keep its consensus-major rating in the registered denominator and report the role; do not infer a production god-object defect."
+    },
+    {
+      "sampleId": 8528735,
+      "repository": "apache/cloudstack",
+      "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+      "fileSha256": "411ae1dbbd20a532d38af6c39c2fbaf0ece284d758c175be6c6f97618aba19bf",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 141,
+      "endLine": 1311,
+      "annotatedSpanSha256": "8c628b31e0df0062051daf3a8898a7a1b7de82b24b5540f9ab1a1cd009335ff3",
+      "externalClassification": "unanimous-major-critical",
+      "sourceRole": "production-class",
+      "summary": "Load-balancer manager coordinates device lifecycle, persistence, capacity allocation, appliance provisioning, IP/NIC/NAT state, network-rule deployment, rollback and health-check commands.",
+      "facts": [
+        {
+          "startLine": 143,
+          "endLine": 216,
+          "claim": "Injected collaborators span network, device, account, host, resource, address and VM data/services.",
+          "sourceSpanSha256": "2f836ad19984c80bfb54aab54d09c1f067384f493248d0d5b9fdfa6d36827c03"
+        },
+        {
+          "startLine": 222,
+          "endLine": 417,
+          "claim": "Device registration/deletion and API response construction touch host/device records and resource lifecycle.",
+          "sourceSpanSha256": "04845a9a6d3188f4e18555092953d041cbed81b3415483e7d4b35d4db7e397f5"
+        },
+        {
+          "startLine": 435,
+          "endLine": 676,
+          "claim": "Allocation combines a global lock, database transactions, capacity selection, appliance agent commands and address provisioning/cleanup.",
+          "sourceSpanSha256": "1e2216b2c2e6b45617c92b399418e269021c138ba82bcc97f8a6f6859f5c7633"
+        },
+        {
+          "startLine": 679,
+          "endLine": 893,
+          "claim": "Release and inline load-balancer NIC handling update mappings and apply or undo NAT state.",
+          "sourceSpanSha256": "584e8b990a05a1400df5b0a00a2d0af7dcb0b6627d551d38355a3902bf418c23"
+        },
+        {
+          "startLine": 905,
+          "endLine": 1029,
+          "claim": "Rule application assembles backend commands and rolls back inline mappings after failure.",
+          "sourceSpanSha256": "4cdacc1d5e23a1dab501ebffa111874ed94bb399198bb3af963e8562dc68bd10"
+        },
+        {
+          "startLine": 1032,
+          "endLine": 1143,
+          "claim": "Guest-network lifecycle allocates/releases devices and self IPs and sends association commands.",
+          "sourceSpanSha256": "d1da87d886bc1b354478a427755e5c28e18034ec9c09f19b48a3ca583545fead"
+        },
+        {
+          "startLine": 1214,
+          "endLine": 1297,
+          "claim": "Health checks also translate rules and send device commands.",
+          "sourceSpanSha256": "7035d21e7100e77b2e86496ad35243fceb8f6c1c0a661466a43e984c07952568"
+        }
+      ],
+      "qualification": "The source supports several coupled operational responsibilities and broad collaborator access, consistent with the external concern. No independent fault/change-history study or proven optimal split is claimed."
+    },
+    {
+      "sampleId": 8537138,
+      "repository": "apache/cloudstack",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "fileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 24,
+      "endLine": 60,
+      "annotatedSpanSha256": "1192a692b4ccf5bafd1bad1091074a11c7148099cc23f5b3b6e40554e6a488fd",
+      "externalClassification": "unanimous-none",
+      "sourceRole": "production-class",
+      "summary": "Command carrier initializes four values and exposes getters plus an execution-order flag.",
+      "facts": [
+        {
+          "startLine": 26,
+          "endLine": 38,
+          "claim": "Constructor initializes ISO data/path, destination store and create flag.",
+          "sourceSpanSha256": "8ebe0c2b35d630fbbbb7c4f3cf64a85277d56405ed73a414614a049683a990d2"
+        },
+        {
+          "startLine": 40,
+          "endLine": 59,
+          "claim": "Methods return the flag/fields; there is no provisioning workflow in this class body.",
+          "sourceSpanSha256": "12cbd47cde1fd593bc4d0788f3320ad6d0883bface2b3e8cc678be52d7f127b8"
+        }
+      ],
+      "qualification": "A data carrier may have many users without being a Blob. The rating is limited to this smell and class span."
+    },
+    {
+      "sampleId": 8538037,
+      "repository": "apache/cloudstack",
+      "file": "plugins/network-elements/brocade-vcs/src/main/java/com/cloud/network/brocade/BrocadeVcsApi.java",
+      "fileSha256": "c6999596499204d035357bd6862badaa4d3dcd809d064b9934254917bb6407c9",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 63,
+      "endLine": 542,
+      "annotatedSpanSha256": "03537a504701be2adcb209efa479b005977aa98a8ccdddf9148b204fccef5e0b",
+      "externalClassification": "unanimous-major-critical",
+      "sourceRole": "production-class",
+      "summary": "Switch API facade combines network/profile workflows, schema-object assembly, HTTP method/status/authentication handling and XML serialization/deserialization.",
+      "facts": [
+        {
+          "startLine": 66,
+          "endLine": 100,
+          "claim": "The object owns host credentials and an HTTP client and creates several HTTP method types.",
+          "sourceSpanSha256": "bbb53941914b5467660372291c64f329ad9f9e78dba7d2b3690be8bed89cfc2d"
+        },
+        {
+          "startLine": 114,
+          "endLine": 317,
+          "claim": "VLAN, port-profile and MAC workflows assemble/mutate schema objects and call update/create helpers.",
+          "sourceSpanSha256": "ebd932e73fefb3c0c1d39a9743b0a372db41faecbf17c9bf680b361bed8b117e"
+        },
+        {
+          "startLine": 320,
+          "endLine": 506,
+          "claim": "Transport helpers validate credentials, serialize XML, inspect status codes, translate errors and release connections.",
+          "sourceSpanSha256": "1c1c94141536cfa0913fee29064c0fb79bdaa5c1dc200f0c9235cbdbe6cf514b"
+        },
+        {
+          "startLine": 508,
+          "endLine": 540,
+          "claim": "Execution retries an unauthorized response and extracts HTML error bodies.",
+          "sourceSpanSha256": "4a0c8c2d71cab15c2abead2b6a79fd9b34ffa118b45cdea8435054bc3aefa43c"
+        }
+      ],
+      "qualification": "The concerns are still part of one switch integration. The external major ratings motivate investigation; no standalone source metric proves that decomposition is required."
+    },
+    {
+      "sampleId": 8539645,
+      "repository": "apache/cloudstack",
+      "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+      "fileSha256": "af541c9ae7f6f630462a6aaf61239482ac485188d1837f28888637edd145bea2",
+      "reviewedWholeAnnotatedSpan": true,
+      "startLine": 26,
+      "endLine": 38,
+      "annotatedSpanSha256": "986a0188cad5fe5a7b1ca1a8af8c0305d93da98c0b58d657f3599e7dfbd7dc43",
+      "externalClassification": "unanimous-none",
+      "sourceRole": "production-class",
+      "summary": "Response data carrier holds a single annotated name property with a getter and setter.",
+      "facts": [
+        {
+          "startLine": 26,
+          "endLine": 38,
+          "claim": "One field and two accessors constitute the complete annotated class body.",
+          "sourceSpanSha256": "986a0188cad5fe5a7b1ca1a8af8c0305d93da98c0b58d657f3599e7dfbd7dc43"
+        }
+      ],
+      "qualification": "Unanimous-none is a Blob judgment, not a claim that a response DTO should have no graph connections."
+    }
+  ]
+}

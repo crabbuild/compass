@@ -15,6 +15,8 @@ use super::model::{
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
+mod java_fields;
+
 // Go selector attribution can cross a closure, a multi-return call, and a
 // range expression before reaching the receiver type. Keep that traversal
 // bounded, but allow the real-world chain without falling back to an
@@ -972,7 +974,17 @@ struct RustImplContext {
 #[derive(Clone)]
 struct RustValueTypeVersion {
     raw: Option<String>,
-    active_from: usize,
+    active_range: std::ops::Range<usize>,
+    shadows_alias: bool,
+}
+
+// Preserve the declaration context when a receiver crosses a field boundary.
+// A field's element type is resolved in its defining module, not the caller's.
+#[derive(Clone)]
+struct RustSourceType {
+    raw: String,
+    owner: DeclarationContext,
+    source_start: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1021,9 +1033,12 @@ struct DirectEvidenceState<'source> {
     rust_imported_typed_receivers: HashSet<(String, String)>,
     rust_platform_reexport_bindings: HashMap<String, RustPlatformCfg>,
     rust_platform_fallbacks: HashSet<(String, String)>,
-    rust_field_types: HashMap<String, HashMap<String, String>>,
+    rust_field_types: HashMap<String, HashMap<String, RustSourceType>>,
+    rust_standard_prelude_enabled: bool,
+    rust_ambiguous_field_types: HashSet<(String, String)>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
     rust_callable_return_types: HashMap<String, Vec<String>>,
+    rust_result_self_methods: HashSet<String>,
     rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
@@ -1033,11 +1048,11 @@ struct DirectEvidenceState<'source> {
     go_return_types: HashMap<String, Vec<Option<String>>>,
     go_member_types: HashMap<(String, String), String>,
     go_collection_element_types: HashMap<String, String>,
-    go_collection_binding_element_types: HashMap<String, HashMap<String, String>>,
     go_range_return_types: HashMap<String, Vec<Option<String>>>,
     go_range_member_types: HashMap<(String, String), String>,
     java_containers: HashMap<usize, DeclarationContext>,
     java_value_types: HashMap<String, HashMap<String, String>>,
+    java_fields: java_fields::JavaFieldIndex,
     graph_ids: HashSet<String>,
     parser_error_ranges: Vec<(usize, usize)>,
     builder: EvidenceBuilder,
@@ -1114,8 +1129,12 @@ impl<'source> DirectEvidenceState<'source> {
             rust_platform_reexport_bindings: HashMap::new(),
             rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
+            rust_ambiguous_field_types: HashSet::new(),
+            rust_standard_prelude_enabled: pipeline.producer.language == "rust"
+                && rust_standard_prelude_enabled(root, source),
             rust_value_types: HashMap::new(),
             rust_callable_return_types: HashMap::new(),
+            rust_result_self_methods: HashSet::new(),
             rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
@@ -1125,11 +1144,11 @@ impl<'source> DirectEvidenceState<'source> {
             go_return_types: HashMap::new(),
             go_member_types: HashMap::new(),
             go_collection_element_types: HashMap::new(),
-            go_collection_binding_element_types: HashMap::new(),
             go_range_return_types: HashMap::new(),
             go_range_member_types: HashMap::new(),
             java_containers: HashMap::new(),
             java_value_types: HashMap::new(),
+            java_fields: java_fields::JavaFieldIndex::default(),
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
@@ -2851,6 +2870,7 @@ impl<'source> DirectEvidenceState<'source> {
         self.collect_java_imports(root, &file)?;
         self.collect_java_declarations(root, &file)?;
         self.collect_java_value_types(root, &file)?;
+        self.index_java_field_values(root, &file)?;
         self.walk_java_evidence(root, &file, true)
     }
 
@@ -3350,18 +3370,18 @@ impl<'source> DirectEvidenceState<'source> {
             if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
                 continue;
             }
-            let Some(name) = parameter
+            let Some(name) = java_parameter_declarator(parameter)
                 .child_by_field_name("name")
                 .map(|node| self.text(node))
             else {
                 continue;
             };
-            let Some(target) = parameter
-                .child_by_field_name("type")
-                .map(|node| java_normalize_type(&self.text(node)))
-            else {
+            let Some(mut target) = java_parameter_type_name(parameter, self.source) else {
                 continue;
             };
+            if parameter.kind() == "spread_parameter" {
+                target.push_str("[]");
+            }
             self.java_value_types
                 .entry(owner.scope_id.clone())
                 .or_default()
@@ -3428,6 +3448,7 @@ impl<'source> DirectEvidenceState<'source> {
         match node.kind() {
             "import_declaration" => return Ok(()),
             "method_invocation" => self.add_java_method_call(node, &active)?,
+            "field_access" | "identifier" => self.add_java_field_access(node, &active)?,
             "object_creation_expression" => self.add_java_construction(node, &active)?,
             _ => {}
         }
@@ -3566,10 +3587,10 @@ impl<'source> DirectEvidenceState<'source> {
         }
         let type_root = match node.kind() {
             "method_declaration" => node.child_by_field_name("type"),
-            "field_declaration"
-            | "constant_declaration"
-            | "formal_parameter"
-            | "spread_parameter" => node.child_by_field_name("type"),
+            "field_declaration" | "constant_declaration" | "formal_parameter" => {
+                node.child_by_field_name("type")
+            }
+            "spread_parameter" => java_parameter_type_node(node),
             _ => None,
         };
         if let Some(type_root) = type_root {
@@ -3670,12 +3691,10 @@ impl<'source> DirectEvidenceState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let receiver = node
-            .child_by_field_name("object")
-            .map(|object| self.text(object));
-        let receiver_type = receiver
-            .as_deref()
-            .and_then(|receiver| self.java_receiver_type(owner, receiver, node.start_byte()));
+        let receiver_node = node.child_by_field_name("object");
+        let receiver = receiver_node.map(|object| self.text(object));
+        let receiver_type =
+            receiver_node.and_then(|object| self.java_method_receiver_type(owner, object, 0));
         let qualified_name = receiver_type
             .as_ref()
             .map(|receiver| format!("{receiver}::{spelling}"));
@@ -3732,18 +3751,35 @@ impl<'source> DirectEvidenceState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let qualified_name = self.java_qualified_type(owner, &normalized, type_node.start_byte());
+        let mut cursor = node.walk();
+        let enclosing_receiver = node
+            .children(&mut cursor)
+            .find(|child| !child.is_extra())
+            .filter(|child| child.kind() != "new")
+            .map(|receiver| self.text(receiver));
+        // A qualified instance creation looks up the member class through
+        // its enclosing receiver. An import with the same terminal name
+        // cannot establish that ownership. Retain an unresolved occurrence
+        // until the enclosing type can be proven.
+        let qualified_name = if enclosing_receiver.is_some() {
+            None
+        } else {
+            self.java_qualified_type(owner, &normalized, type_node.start_byte())
+        };
         let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        let binding = self
-            .binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
-            .cloned();
+        let binding = if enclosing_receiver.is_some() {
+            None
+        } else {
+            self.binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
+                .cloned()
+        };
         let argument_count = java_argument_count(node);
         let argument_types = self.java_argument_types(node, owner);
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Construction,
             &owner.fact_id,
             spelling,
-            qualifier,
+            enclosing_receiver.as_deref().or(qualifier),
             Some(&owner.scope_id),
             Some(&format!("arity:{argument_count}")),
             range_for_node(self.source_file, type_node),
@@ -3764,7 +3800,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types,
                 allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
                 hierarchy: None,
-                allow_external: true,
+                allow_external: enclosing_receiver.is_none(),
             },
         )?;
         Ok(())
@@ -3873,10 +3909,23 @@ impl<'source> DirectEvidenceState<'source> {
                 }
                 .to_owned(),
             ),
-            "object_creation_expression" | "array_creation_expression" => {
+            "object_creation_expression" => {
                 expression.child_by_field_name("type").and_then(|target| {
                     self.java_canonical_type(owner, &self.text(target), target.start_byte())
                 })
+            }
+            "array_creation_expression" => {
+                let target = expression.child_by_field_name("type")?;
+                let mut raw = self.text(target);
+                let mut cursor = expression.walk();
+                for dimension in expression.named_children(&mut cursor) {
+                    match dimension.kind() {
+                        "dimensions_expr" => raw.push_str("[]"),
+                        "dimensions" => raw.push_str(&java_dimensions_suffix(dimension)),
+                        _ => {}
+                    }
+                }
+                self.java_canonical_type(owner, &raw, target.start_byte())
             }
             "cast_expression" => expression.child_by_field_name("type").and_then(|target| {
                 self.java_canonical_type(owner, &self.text(target), target.start_byte())
@@ -3885,6 +3934,51 @@ impl<'source> DirectEvidenceState<'source> {
             "parenthesized_expression" => expression
                 .named_child(0)
                 .and_then(|inner| self.java_expression_type(owner, inner, depth + 1)),
+            _ => None,
+        }
+    }
+
+    fn java_method_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        expression: Node<'_>,
+        depth: usize,
+    ) -> Option<String> {
+        if depth >= 8 || expression.has_error() {
+            return None;
+        }
+        match expression.kind() {
+            "parenthesized_expression" => {
+                let mut cursor = expression.walk();
+                expression
+                    .named_children(&mut cursor)
+                    .find(|child| !child.is_extra())
+                    .and_then(|inner| self.java_method_receiver_type(owner, inner, depth + 1))
+            }
+            "object_creation_expression" => {
+                let mut cursor = expression.walk();
+                // An enclosing-instance creation (`outer.new Inner()`) needs
+                // its own owner resolution. Anonymous classes may override
+                // methods on the named base; neither proves a base call.
+                if expression
+                    .children(&mut cursor)
+                    .find(|child| !child.is_extra())
+                    .is_none_or(|child| child.kind() != "new")
+                    || expression
+                        .named_children(&mut cursor)
+                        .any(|child| child.kind() == "class_body")
+                {
+                    return None;
+                }
+                let target = expression.child_by_field_name("type")?;
+                self.java_qualified_type(owner, &self.text(target), target.start_byte())
+            }
+            "identifier" | "this" | "super" | "field_access" => {
+                self.java_receiver_type(owner, &self.text(expression), expression.start_byte())
+            }
+            // Do not normalize arbitrary receiver expressions as type text:
+            // it invents targets such as `newlib.Cleaner::check`. Arrays,
+            // casts, and chained results need separate type/dispatch proof.
             _ => None,
         }
     }
@@ -3899,6 +3993,10 @@ impl<'source> DirectEvidenceState<'source> {
             return owner.enclosing_type_qualified_name.clone();
         }
         if let Some(target) = self.local_java_value_type(owner, receiver) {
+            // An array receiver is not an instance of its element class.
+            if target.ends_with("[]") {
+                return None;
+            }
             return self.java_qualified_type(owner, target, use_start);
         }
         if receiver
@@ -3943,6 +4041,7 @@ impl<'source> DirectEvidenceState<'source> {
         self.collect_rust_declarations(root, &file, None)?;
         self.collect_rust_imports(root, &file)?;
         self.collect_rust_callable_return_types(root);
+        self.collect_rust_callable_value_types(root);
         self.collect_rust_parameter_bindings(root, &file)?;
         self.walk_rust_evidence(root, &file, true)
     }
@@ -3953,6 +4052,14 @@ impl<'source> DirectEvidenceState<'source> {
             && let Some(return_type) = node.child_by_field_name("return_type")
         {
             let raw = self.text(return_type);
+            if rust_single_generic_type_argument(&raw) == Some("Self")
+                && let Some(result) = rust_nominal_type_path(&raw)
+                && self.rust_standard_result_type(&owner, &result, return_type.start_byte())
+                && self.rust_concrete_callable_receiver(&owner).is_some()
+            {
+                self.rust_result_self_methods
+                    .insert(owner.qualified_name.clone());
+            }
             let qualified = if raw.trim() == "Self" {
                 self.rust_concrete_callable_receiver(&owner)
             } else {
@@ -3970,6 +4077,18 @@ impl<'source> DirectEvidenceState<'source> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_rust_callable_return_types(child);
+        }
+    }
+
+    fn collect_rust_callable_value_types(&mut self, node: Node<'_>) {
+        if let Some(owner) = self.declarations.get(&node.id()).cloned()
+            && matches!(owner.kind.as_str(), "function" | "method")
+        {
+            self.collect_rust_value_types(node, &owner);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_callable_value_types(child);
         }
     }
 
@@ -4313,7 +4432,6 @@ impl<'source> DirectEvidenceState<'source> {
                 .map(|implementation| implementation.type_qualified_name.clone())
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
         };
-        self.collect_rust_value_types(node, &context);
         self.collect_rust_generic_bounds(node, &context);
         if owner.kind == "trait" {
             self.rust_trait_methods
@@ -4847,7 +4965,8 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id: &str,
         name: &str,
         raw: Option<String>,
-        active_from: usize,
+        active_range: std::ops::Range<usize>,
+        shadows_alias: bool,
     ) {
         if name.is_empty() || name == "_" || name == "self" {
             return;
@@ -4857,7 +4976,11 @@ impl<'source> DirectEvidenceState<'source> {
             .or_default()
             .entry(name.to_owned())
             .or_default()
-            .push(RustValueTypeVersion { raw, active_from });
+            .push(RustValueTypeVersion {
+                raw,
+                active_range,
+                shadows_alias,
+            });
     }
 
     fn rust_value_type_for<'a>(
@@ -4867,12 +4990,23 @@ impl<'source> DirectEvidenceState<'source> {
         use_start: usize,
         use_node: Option<Node<'_>>,
     ) -> Option<&'a str> {
+        self.rust_value_binding_for(owner, name, use_start, use_node)
+            .and_then(|version| version.raw.as_deref())
+    }
+
+    fn rust_value_binding_for<'a>(
+        &'a self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        use_node: Option<Node<'_>>,
+    ) -> Option<&'a RustValueTypeVersion> {
         let mut node = use_node;
         while let Some(current) = node {
             if rust_is_lexical_scope_node(current.kind()) {
                 let scope_id = format!("rust-lexical:{}", current.id());
-                if let Some(raw) = self.rust_value_type_in_scope(&scope_id, name, use_start) {
-                    return Some(raw);
+                if let Some(version) = self.rust_value_type_in_scope(&scope_id, name, use_start) {
+                    return Some(version);
                 }
             }
             node = current.parent();
@@ -4880,8 +5014,8 @@ impl<'source> DirectEvidenceState<'source> {
         let mut scope_id = Some(owner.scope_id.as_str());
         for _ in 0..64 {
             let current = scope_id?;
-            if let Some(raw) = self.rust_value_type_in_scope(current, name, use_start) {
-                return Some(raw);
+            if let Some(version) = self.rust_value_type_in_scope(current, name, use_start) {
+                return Some(version);
             }
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
@@ -4893,17 +5027,16 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id: &str,
         name: &str,
         use_start: usize,
-    ) -> Option<&'a str> {
+    ) -> Option<&'a RustValueTypeVersion> {
         self.rust_value_types
             .get(scope_id)
             .and_then(|values| values.get(name))
             .and_then(|versions| {
                 versions
                     .iter()
-                    .filter(|version| version.active_from <= use_start)
-                    .max_by_key(|version| version.active_from)
+                    .filter(|version| version.active_range.contains(&use_start))
+                    .max_by_key(|version| version.active_range.start)
             })
-            .and_then(|version| version.raw.as_deref())
     }
 
     fn ensure_rust_lexical_scope(&mut self, node: Node<'_>, parent: &str) -> String {
@@ -4912,6 +5045,160 @@ impl<'source> DirectEvidenceState<'source> {
             .entry(scope_id.clone())
             .or_insert_with(|| parent.to_owned());
         scope_id
+    }
+
+    fn rust_indexed_type_name(&self, receiver: &RustSourceType) -> Option<String> {
+        let nominal = rust_nominal_type_path(rust_indexable_type(&receiver.raw)?)?;
+        if self
+            .visible_import_binding_is_ambiguous(&receiver.owner, qualified_binding_head(&nominal))
+        {
+            return None;
+        }
+        rust_qualify_evidence_path(self, &receiver.owner, &nominal, receiver.source_start)
+    }
+
+    // Bounded source types for indexed method receivers and field accesses.
+    // Unsupported forms stay unresolved instead of falling back to a name.
+    fn rust_indexed_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+        budget: usize,
+    ) -> Option<RustSourceType> {
+        let budget = budget.checked_sub(1)?;
+        if self.overlaps_parser_error(node) {
+            return None;
+        }
+        match node.kind() {
+            "self" => Some(RustSourceType {
+                raw: rust_callable_owner(owner)?.to_owned(),
+                owner: owner.clone(),
+                source_start: node.start_byte(),
+            }),
+            "identifier" => Some(RustSourceType {
+                raw: self
+                    .rust_value_type_for(owner, &self.text(node), node.start_byte(), Some(node))?
+                    .to_owned(),
+                owner: owner.clone(),
+                source_start: node.start_byte(),
+            }),
+            "parenthesized_expression" => {
+                self.rust_indexed_receiver_type(owner, node.named_child(0)?, budget)
+            }
+            "reference_expression" => {
+                let value = node.child_by_field_name("value")?;
+                let mut receiver = self.rust_indexed_receiver_type(owner, value, budget)?;
+                // Method/field receivers may auto-dereference this reference,
+                // but an index operand such as &n is not a scalar usize.
+                receiver.raw = format!("&{}", receiver.raw);
+                Some(receiver)
+            }
+            "field_expression" => {
+                let mut receiver = self.rust_indexed_receiver_type(
+                    owner,
+                    node.child_by_field_name("value")?,
+                    budget,
+                )?;
+                let field = self.text(node.child_by_field_name("field")?);
+                for _ in 0..16 {
+                    let raw = rust_indexable_type(&receiver.raw)?;
+                    let qualified = self.rust_indexed_type_name(&receiver)?;
+                    if self
+                        .rust_ambiguous_field_types
+                        .contains(&(qualified.clone(), field.clone()))
+                    {
+                        return None;
+                    }
+                    if let Some(field_type) = self
+                        .rust_field_types
+                        .get(&qualified)
+                        .and_then(|fields| fields.get(&field))
+                    {
+                        return Some(field_type.clone());
+                    }
+                    if !rust_source_proven_deref_wrapper(&qualified) {
+                        return None;
+                    }
+                    receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                }
+                None
+            }
+            "index_expression" => {
+                let container = node.named_child(0)?;
+                let index = node.named_child(1)?;
+                if !self.rust_scalar_index(owner, index, budget) {
+                    return None;
+                }
+                let mut receiver = self.rust_indexed_receiver_type(owner, container, budget)?;
+                for _ in 0..16 {
+                    let raw = rust_indexable_type(&receiver.raw)?;
+                    if let Some(element) = rust_array_or_slice_element(raw) {
+                        receiver.raw = element.to_owned();
+                        return Some(receiver);
+                    }
+                    let nominal = rust_nominal_type_path(raw)?;
+                    let context = &receiver.owner;
+                    let position = receiver.source_start;
+                    let qualified = self.rust_indexed_type_name(&receiver)?;
+                    let standard_vec =
+                        matches!(qualified.as_str(), "std::vec::Vec" | "alloc::vec::Vec")
+                            || (nominal == "Vec"
+                                && self.rust_standard_prelude_enabled
+                                && self.local_target_for(context, "Vec").is_none()
+                                && self
+                                    .imported_target_for_occurrence(context, "Vec", position, true)
+                                    .is_none()
+                                && self
+                                    .import_binding_version_at(context, "*", position, true)
+                                    .is_none()
+                                && !self.visible_import_binding_is_ambiguous(context, "*"));
+                    if standard_vec {
+                        receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                        return Some(receiver);
+                    }
+                    if !rust_source_proven_deref_wrapper(&qualified) {
+                        return None;
+                    }
+                    receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn rust_scalar_index(&self, owner: &DeclarationContext, node: Node<'_>, budget: usize) -> bool {
+        if budget == 0 {
+            return false;
+        }
+        if node.kind() == "integer_literal" {
+            // Unsuffixed literals acquire usize from built-in sequence indexing.
+            // Keep suffixed non-usize integers and arbitrary index expressions unresolved.
+            let raw = self.text(node);
+            let raw = raw.strip_suffix("usize").unwrap_or(&raw);
+            return !raw.is_empty()
+                && raw
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b'_');
+        }
+        self.rust_indexed_receiver_type(owner, node, budget)
+            .is_some_and(|index| {
+                index.raw.trim() == "usize"
+                    && self.local_target_for(&index.owner, "usize").is_none()
+                    && self
+                        .imported_target_for_occurrence(
+                            &index.owner,
+                            "usize",
+                            index.source_start,
+                            true,
+                        )
+                        .is_none()
+                    && self
+                        .import_binding_version_at(&index.owner, "*", index.source_start, true)
+                        .is_none()
+                    && !self.visible_import_binding_is_ambiguous(&index.owner, "usize")
+                    && !self.visible_import_binding_is_ambiguous(&index.owner, "*")
+            })
     }
 
     fn rust_field_receiver_type(
@@ -4981,7 +5268,7 @@ impl<'source> DirectEvidenceState<'source> {
                 .get(&qualified)
                 .and_then(|fields| fields.get(field))
             {
-                return Some(field_type.clone());
+                return Some(field_type.raw.clone());
             }
             if !rust_source_proven_deref_wrapper(&qualified) {
                 return None;
@@ -4991,22 +5278,34 @@ impl<'source> DirectEvidenceState<'source> {
         None
     }
 
-    fn collect_rust_parameter_value_types(&mut self, parameters: Node<'_>, scope_id: &str) {
+    fn collect_rust_parameter_value_types(
+        &mut self,
+        parameters: Node<'_>,
+        scope_id: &str,
+        shadows_alias: bool,
+    ) {
         let mut cursor = parameters.walk();
         for parameter in parameters
             .children(&mut cursor)
             .filter(|child| child.is_named())
         {
-            let Some(pattern) = parameter.child_by_field_name("pattern") else {
-                continue;
-            };
+            let pattern = parameter
+                .child_by_field_name("pattern")
+                .unwrap_or(parameter);
             let raw = parameter
                 .child_by_field_name("type")
+                .filter(|_| rust_pattern_binds_whole_value(pattern))
                 .map(|type_node| self.text(type_node));
             let mut names = Vec::new();
             collect_rust_pattern_names(pattern, &mut names, self.source);
             for name in names {
-                self.record_rust_value_type(scope_id, &name, raw.clone(), parameter.start_byte());
+                self.record_rust_value_type(
+                    scope_id,
+                    &name,
+                    raw.clone(),
+                    parameter.start_byte()..usize::MAX,
+                    shadows_alias,
+                );
             }
         }
     }
@@ -5014,7 +5313,7 @@ impl<'source> DirectEvidenceState<'source> {
     fn collect_rust_value_types(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
         let scope_id = owner.scope_id.clone();
         if let Some(parameters) = callable.child_by_field_name("parameters") {
-            self.collect_rust_parameter_value_types(parameters, &scope_id);
+            self.collect_rust_parameter_value_types(parameters, &scope_id, false);
         }
         let Some(body) = callable.child_by_field_name("body") else {
             return;
@@ -5040,28 +5339,359 @@ impl<'source> DirectEvidenceState<'source> {
         if node.kind() == "closure_expression"
             && let Some(parameters) = node.child_by_field_name("parameters")
         {
-            self.collect_rust_parameter_value_types(parameters, &scope_id);
+            if let Some(raw) = self.rust_map_closure_element_type(node, owner)
+                && parameters.named_child_count() == 1
+                && let Some(pattern) = parameters.named_child(0)
+                && rust_pattern_binds_whole_value(pattern)
+            {
+                let mut names = Vec::new();
+                collect_rust_pattern_names(pattern, &mut names, self.source);
+                for name in names {
+                    self.record_rust_value_type(
+                        &scope_id,
+                        &name,
+                        Some(raw.clone()),
+                        pattern.end_byte()..node.end_byte(),
+                        true,
+                    );
+                }
+            } else {
+                self.collect_rust_parameter_value_types(parameters, &scope_id, true);
+            }
         }
         if node.kind() == "let_declaration"
             && let Some(pattern) = node.child_by_field_name("pattern")
         {
-            let raw = node
-                .child_by_field_name("type")
-                .map(|type_node| self.text(type_node))
-                .or_else(|| {
-                    node.child_by_field_name("value")
-                        .and_then(|value| self.rust_inferred_value_type(value, owner))
-                });
+            let raw = rust_pattern_binds_whole_value(pattern)
+                .then(|| {
+                    node.child_by_field_name("type")
+                        .map(|type_node| {
+                            let declared = self.text(type_node);
+                            node.child_by_field_name("value")
+                                .and_then(|value| {
+                                    self.rust_collected_result_vec_type(owner, type_node, value)
+                                })
+                                .unwrap_or(declared)
+                        })
+                        .or_else(|| {
+                            node.child_by_field_name("value")
+                                .and_then(|value| self.rust_inferred_value_type(value, owner))
+                        })
+                })
+                .flatten();
             let mut names = Vec::new();
             collect_rust_pattern_names(pattern, &mut names, self.source);
             for name in names {
-                self.record_rust_value_type(&scope_id, &name, raw.clone(), pattern.start_byte());
+                // A let binding starts after its initializer; the previous
+                // binding remains visible while the initializer is evaluated.
+                self.record_rust_value_type(
+                    &scope_id,
+                    &name,
+                    raw.clone(),
+                    node.end_byte()..usize::MAX,
+                    true,
+                );
+            }
+        }
+        if matches!(node.kind(), "for_expression" | "match_arm")
+            && let Some(pattern) = node.child_by_field_name("pattern")
+        {
+            let inferred = if node.kind() == "for_expression" {
+                self.rust_for_element_type(node, owner, pattern)
+            } else {
+                self.rust_ok_arm_type(node, owner, pattern)
+            };
+            let active_from = if node.kind() == "for_expression" {
+                node.child_by_field_name("body")
+                    .map(|body| body.start_byte())
+            } else {
+                pattern.named_child(0).map(|pattern| pattern.end_byte())
+            };
+            if let Some(active_from) = active_from {
+                let mut names = Vec::new();
+                collect_rust_pattern_names(pattern, &mut names, self.source);
+                for name in names {
+                    // An unknown inner receiver still shadows an outer alias.
+                    // Do not invent an element type from a method's spelling.
+                    self.record_rust_value_type(
+                        &scope_id,
+                        &name,
+                        inferred.clone(),
+                        active_from..node.end_byte(),
+                        true,
+                    );
+                }
+            }
+        }
+        if node.kind() == "let_condition"
+            && let Some(pattern) = node.child_by_field_name("pattern")
+        {
+            let mut enclosing = node.parent();
+            while let Some(conditional) = enclosing {
+                if matches!(conditional.kind(), "if_expression" | "while_expression") {
+                    let body = conditional
+                        .child_by_field_name("consequence")
+                        .or_else(|| conditional.child_by_field_name("body"));
+                    if let Some(body) = body {
+                        let mut names = Vec::new();
+                        collect_rust_pattern_names(pattern, &mut names, self.source);
+                        for name in names {
+                            // Let-chain guards and the success body see this
+                            // binding; its initializer and else branch do not.
+                            self.record_rust_value_type(
+                                &scope_id,
+                                &name,
+                                None,
+                                node.end_byte()..body.end_byte(),
+                                true,
+                            );
+                        }
+                    }
+                    break;
+                }
+                enclosing = conditional.parent();
             }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_rust_value_types_in_body(child, owner, &scope_id, false);
         }
+    }
+
+    fn rust_standard_result_type(
+        &self,
+        owner: &DeclarationContext,
+        nominal: &str,
+        position: usize,
+    ) -> bool {
+        if self.visible_import_binding_is_ambiguous(owner, qualified_binding_head(nominal)) {
+            return false;
+        }
+        let qualified = rust_qualify_evidence_path(self, owner, nominal, position);
+        matches!(
+            qualified.as_deref(),
+            Some("std::io::Result" | "std::result::Result")
+        ) && (nominal != "Result"
+            || (self.rust_standard_prelude_enabled
+                && self.local_target_for(owner, "Result").is_none()
+                && self
+                    .imported_target_for_occurrence(owner, "Result", position, true)
+                    .is_none()
+                && self
+                    .import_binding_version_at(owner, "*", position, true)
+                    .is_none()))
+    }
+
+    fn rust_standard_vec_element<'b>(
+        &self,
+        owner: &DeclarationContext,
+        raw: &'b str,
+        position: usize,
+    ) -> Option<&'b str> {
+        let nominal = rust_nominal_type_path(raw)?;
+        if self.visible_import_binding_is_ambiguous(owner, qualified_binding_head(&nominal)) {
+            return None;
+        }
+        let qualified = rust_qualify_evidence_path(self, owner, &nominal, position)?;
+        let standard = matches!(qualified.as_str(), "std::vec::Vec" | "alloc::vec::Vec")
+            || (nominal == "Vec"
+                && self.rust_standard_prelude_enabled
+                && self.local_target_for(owner, "Vec").is_none()
+                && self
+                    .imported_target_for_occurrence(owner, "Vec", position, true)
+                    .is_none()
+                && self
+                    .import_binding_version_at(owner, "*", position, true)
+                    .is_none());
+        standard
+            .then(|| rust_single_generic_type_argument(raw))
+            .flatten()
+    }
+
+    fn rust_collected_result_vec_type(
+        &self,
+        owner: &DeclarationContext,
+        declared: Node<'_>,
+        collect: Node<'_>,
+    ) -> Option<String> {
+        let raw = self.text(declared);
+        let result = rust_nominal_type_path(&raw)?;
+        if !self.rust_standard_result_type(owner, &result, declared.start_byte()) {
+            return None;
+        }
+        let vector = rust_single_generic_type_argument(&raw)?;
+        if self.rust_standard_vec_element(owner, vector, declared.start_byte())? != "_" {
+            return None;
+        }
+        let collect_function = collect.child_by_field_name("function")?;
+        if collect.kind() != "call_expression"
+            || collect_function.kind() != "field_expression"
+            || self.text(collect_function.child_by_field_name("field")?) != "collect"
+            || collect
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let map = collect_function.child_by_field_name("value")?;
+        let map_function = map.child_by_field_name("function")?;
+        if map.kind() != "call_expression"
+            || map_function.kind() != "field_expression"
+            || self.text(map_function.child_by_field_name("field")?) != "map"
+        {
+            return None;
+        }
+        let iterator = map_function.child_by_field_name("value")?;
+        let iterator_function = iterator.child_by_field_name("function")?;
+        if iterator.kind() != "call_expression"
+            || iterator_function.kind() != "field_expression"
+            || self.text(iterator_function.child_by_field_name("field")?) != "iter"
+            || iterator
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let source = self.rust_indexed_receiver_type(
+            owner,
+            iterator_function.child_by_field_name("value")?,
+            16,
+        )?;
+        self.rust_standard_vec_element(&source.owner, &source.raw, source.source_start)?;
+        let arguments = map.child_by_field_name("arguments")?;
+        if arguments.named_child_count() != 1 {
+            return None;
+        }
+        let closure = arguments.named_child(0)?;
+        if closure.kind() != "closure_expression" {
+            return None;
+        }
+        let body = closure.child_by_field_name("body")?;
+        if body.kind() != "call_expression" {
+            return None;
+        }
+        let function = body.child_by_field_name("function")?;
+        let raw_function = self.text(function);
+        let (receiver, method) = split_qualified(&raw_function);
+        let receiver = rust_qualify_evidence_path(self, owner, receiver?, function.start_byte())?;
+        let target = self.rust_receiver_method_target(&receiver, method)?;
+        if !self.rust_result_self_methods.contains(&target) {
+            return None;
+        }
+        Some(format!("{result}<Vec<{receiver}>>"))
+    }
+
+    fn rust_ok_arm_type(
+        &self,
+        arm: Node<'_>,
+        owner: &DeclarationContext,
+        pattern: Node<'_>,
+    ) -> Option<String> {
+        let match_expression = arm.parent()?.parent()?;
+        if match_expression.kind() != "match_expression" {
+            return None;
+        }
+        let scrutinee = match_expression.child_by_field_name("value")?;
+        if scrutinee.kind() != "identifier" {
+            return None;
+        }
+        let raw = self.rust_value_type_for(
+            owner,
+            &self.text(scrutinee),
+            scrutinee.start_byte(),
+            Some(scrutinee),
+        )?;
+        let result = rust_nominal_type_path(raw)?;
+        if !self.rust_standard_result_type(owner, &result, scrutinee.start_byte()) {
+            return None;
+        }
+        let inner = rust_single_generic_type_argument(raw)?;
+        let wrapper = pattern.named_child(0)?;
+        if wrapper.kind() != "tuple_struct_pattern"
+            || self.text(wrapper.child_by_field_name("type")?) != "Ok"
+            || wrapper.named_child_count() != 2
+            || !rust_pattern_binds_whole_value(wrapper.named_child(1)?)
+            || self.local_target_for(owner, "Ok").is_some()
+            || self
+                .imported_target_for_occurrence(owner, "Ok", pattern.start_byte(), true)
+                .is_some()
+            || self
+                .import_binding_version_at(owner, "*", pattern.start_byte(), true)
+                .is_some()
+            || !self.rust_standard_prelude_enabled
+        {
+            return None;
+        }
+        self.rust_standard_vec_element(owner, inner, scrutinee.start_byte())?;
+        Some(inner.to_owned())
+    }
+
+    fn rust_for_element_type(
+        &self,
+        loop_node: Node<'_>,
+        owner: &DeclarationContext,
+        pattern: Node<'_>,
+    ) -> Option<String> {
+        if !rust_pattern_binds_whole_value(pattern) {
+            return None;
+        }
+        let iterable = loop_node.child_by_field_name("value")?;
+        if iterable.kind() != "reference_expression" {
+            return None;
+        }
+        let binding = iterable.child_by_field_name("value")?;
+        if binding.kind() != "identifier" {
+            return None;
+        }
+        let raw = self.rust_value_type_for(
+            owner,
+            &self.text(binding),
+            binding.start_byte(),
+            Some(binding),
+        )?;
+        let element = self.rust_standard_vec_element(owner, raw, binding.start_byte())?;
+        (element != "_").then(|| element.to_owned())
+    }
+
+    fn rust_map_closure_element_type(
+        &self,
+        closure: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Option<String> {
+        let arguments = closure.parent()?;
+        if arguments.kind() != "arguments" || arguments.named_child_count() != 1 {
+            return None;
+        }
+        let map = arguments.parent()?;
+        let function = map.child_by_field_name("function")?;
+        if map.kind() != "call_expression"
+            || function.kind() != "field_expression"
+            || self.text(function.child_by_field_name("field")?) != "map"
+        {
+            return None;
+        }
+        let iterator = function.child_by_field_name("value")?;
+        let iterator_function = iterator.child_by_field_name("function")?;
+        if iterator.kind() != "call_expression"
+            || iterator_function.kind() != "field_expression"
+            || self.text(iterator_function.child_by_field_name("field")?) != "iter"
+            || iterator
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let source = self.rust_indexed_receiver_type(
+            owner,
+            iterator_function.child_by_field_name("value")?,
+            16,
+        )?;
+        let element =
+            self.rust_standard_vec_element(&source.owner, &source.raw, source.source_start)?;
+        (element != "_").then(|| element.to_owned())
     }
 
     fn rust_inferred_value_type(
@@ -5177,10 +5807,25 @@ impl<'source> DirectEvidenceState<'source> {
         if name.is_empty() || raw.is_empty() {
             return;
         }
-        self.rust_field_types
+        let fields = self
+            .rust_field_types
             .entry(owner.qualified_name.clone())
-            .or_default()
-            .insert(name, raw);
+            .or_default();
+        if fields
+            .get(&name)
+            .is_some_and(|previous| previous.source_start != type_node.start_byte())
+        {
+            self.rust_ambiguous_field_types
+                .insert((owner.qualified_name.clone(), name.clone()));
+        }
+        fields.insert(
+            name,
+            RustSourceType {
+                raw,
+                owner: owner.clone(),
+                source_start: type_node.start_byte(),
+            },
+        );
     }
 
     fn add_rust_enum_members(
@@ -5421,6 +6066,7 @@ impl<'source> DirectEvidenceState<'source> {
         match node.kind() {
             "use_declaration" => return Ok(()),
             "call_expression" => self.add_rust_call(node, &active)?,
+            "field_expression" => self.add_rust_field_access(node, &active)?,
             "macro_invocation" => self.add_rust_macro_invocation(node, &active)?,
             _ => {}
         }
@@ -5550,6 +6196,73 @@ impl<'source> DirectEvidenceState<'source> {
         Ok(())
     }
 
+    fn add_rust_field_access(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(node) {
+            return Ok(());
+        }
+        // In `receiver.method()` the outer selector names a method. Its
+        // nested receiver fields still receive their own traversal visits.
+        let selector = node
+            .parent()
+            .filter(|parent| parent.kind() == "generic_function")
+            .unwrap_or(node);
+        if selector.parent().is_some_and(|parent| {
+            parent.kind() == "call_expression"
+                && parent
+                    .child_by_field_name("function")
+                    .is_some_and(|function| function.id() == selector.id())
+        }) {
+            return Ok(());
+        }
+        let (Some(receiver), Some(field)) = (
+            node.child_by_field_name("value"),
+            node.child_by_field_name("field"),
+        ) else {
+            return Ok(());
+        };
+        let spelling = self.text(field);
+        let qualifier = self.text(receiver);
+        if spelling.is_empty() || qualifier.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self
+            .rust_indexed_receiver_type(owner, receiver, 32)
+            .and_then(|source_type| self.rust_indexed_type_name(&source_type))
+            .map(|receiver_type| rust_join_qualified(&receiver_type, &spelling));
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::MemberAccess,
+            &owner.fact_id,
+            &spelling,
+            Some(&qualifier),
+            Some(&owner.scope_id),
+            Some("member"),
+            range_for_node(self.source_file, field),
+        )?;
+        self.builder.relate(
+            CandidateRelation::AccessesMember,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            None,
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                allowed_target_kinds: vec!["field".to_owned()],
+                // An unknown receiver stays qualified but unresolved. No
+                // terminal-name fallback, method target, or external field
+                // invention can establish a state-sharing relationship.
+                allow_external: false,
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(())
+    }
+
     fn add_rust_call(
         &mut self,
         call: Node<'_>,
@@ -5600,8 +6313,19 @@ impl<'source> DirectEvidenceState<'source> {
         if import_binding_is_ambiguous && platform_reexport_bindings.is_none() {
             return Ok(());
         }
-        let direct_binding = platform_reexport_bindings
-            .is_none()
+        let shadows_alias = function.kind() == "field_expression"
+            && self
+                .rust_value_binding_for(owner, binding_name, function.start_byte(), Some(function))
+                .is_some_and(|version| version.shadows_alias);
+        let indexed_receiver = function.kind() == "field_expression"
+            && function
+                .child_by_field_name("value")
+                .is_some_and(rust_receiver_contains_index);
+        // A binding for the container/root object cannot select the indexed
+        // element's method, including when element-type inference fails.
+        let direct_binding = (platform_reexport_bindings.is_none()
+            && !shadows_alias
+            && !indexed_receiver)
             .then(|| {
                 if uses_type_namespace {
                     self.import_binding_version_at(owner, binding_name, function.start_byte(), true)
@@ -5620,10 +6344,11 @@ impl<'source> DirectEvidenceState<'source> {
                     .next()
                     .is_some_and(char::is_uppercase)
             });
-        let wildcard_binding = (direct_binding.is_none() && wildcard_lookup_eligible)
-            .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
-            .flatten()
-            .cloned();
+        let wildcard_binding =
+            (direct_binding.is_none() && wildcard_lookup_eligible && !indexed_receiver)
+                .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
+                .flatten()
+                .cloned();
         let fallback_binding = direct_binding.clone().or_else(|| wildcard_binding.clone());
         let call_result_binding = if platform_reexport_bindings.is_none() {
             self.rust_call_result_binding_for_occurrence(
@@ -5774,6 +6499,16 @@ impl<'source> DirectEvidenceState<'source> {
                 .imported_target_for_occurrence(owner, spelling, 0, true)
                 .cloned();
         };
+        if use_node.kind() == "field_expression"
+            && let Some(receiver) = use_node.child_by_field_name("value")
+            && rust_receiver_contains_index(receiver)
+        {
+            let receiver = self.rust_indexed_receiver_type(owner, receiver, 32)?;
+            let qualified = self.rust_indexed_type_name(&receiver)?;
+            return self
+                .rust_receiver_method_target(&qualified, spelling)
+                .or_else(|| Some(rust_join_qualified(&qualified, spelling)));
+        }
         let normalized_qualifier = rust_normalize_path(raw_qualifier);
         if let Some(inner) = normalized_qualifier
             .strip_prefix('<')
@@ -5831,6 +6566,20 @@ impl<'source> DirectEvidenceState<'source> {
                 rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
         {
             return Some(rust_join_qualified(&receiver_type, spelling));
+        }
+        if use_node.kind() == "field_expression"
+            && self
+                .rust_value_binding_for(
+                    owner,
+                    qualified_binding_head(qualifier),
+                    use_start,
+                    Some(use_node),
+                )
+                .is_some_and(|version| version.shadows_alias)
+        {
+            // A local with no proven receiver type must not fall back to a
+            // same-named parameter/import binding from the enclosing scope.
+            return None;
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
             if let Some(method) = self.rust_receiver_method_target(target, spelling) {
@@ -6683,6 +7432,9 @@ impl<'source> DirectEvidenceState<'source> {
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context.clone());
+                if kind == "struct" {
+                    self.add_go_struct_fields(node, &context)?;
+                }
                 if kind == "interface" {
                     let mut interfaces = Vec::new();
                     collect_nodes(node, "interface_type", &mut interfaces);
@@ -6757,6 +7509,71 @@ impl<'source> DirectEvidenceState<'source> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_go_declarations(child, file)?;
+        }
+        Ok(())
+    }
+
+    fn add_go_struct_fields(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(structure) = declaration
+            .child_by_field_name("type")
+            .filter(|node| node.kind() == "struct_type")
+        else {
+            return Ok(());
+        };
+        let mut cursor = structure.walk();
+        let Some(fields) = structure
+            .children(&mut cursor)
+            .find(|child| child.kind() == "field_declaration_list")
+        else {
+            return Ok(());
+        };
+        let mut cursor = fields.walk();
+        for field in fields
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "field_declaration")
+        {
+            let mut field_cursor = field.walk();
+            for name_node in field
+                .children(&mut field_cursor)
+                .filter(|child| child.kind() == "field_identifier")
+            {
+                let name = self.text(name_node);
+                if name.is_empty() || name == "_" {
+                    continue;
+                }
+                let qualified_name = format!("{}::{name}", owner.qualified_name);
+                let base = make_id(&[&owner.graph_node_id, &name, "field"]);
+                let graph_node_id = if self.graph_ids.insert(base.clone()) {
+                    base
+                } else {
+                    let duplicate = make_id(&[&base, &name_node.start_byte().to_string()]);
+                    self.graph_ids.insert(duplicate.clone());
+                    duplicate
+                };
+                let fact_id = self.builder.declare(
+                    "field",
+                    &graph_node_id,
+                    &name,
+                    &qualified_name,
+                    Some(&self.module_or_package),
+                    Some(&owner.scope_id),
+                    range_for_node(self.source_file, name_node),
+                )?;
+                let member = DeclarationContext {
+                    fact_id,
+                    scope_id: owner.scope_id.clone(),
+                    graph_node_id,
+                    name,
+                    qualified_name,
+                    kind: "field".to_owned(),
+                    enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                };
+                self.add_ownership(owner, &member)?;
+            }
         }
         Ok(())
     }
@@ -6889,6 +7706,7 @@ impl<'source> DirectEvidenceState<'source> {
                 return Ok(());
             }
             "call_expression" => self.add_call(node, &active, "call_expression")?,
+            "selector_expression" => self.add_go_field_access(node, &active)?,
             "method_declaration" => self.add_go_receiver(node, &active)?,
             "field_declaration" => self.add_go_field_types(node, &active)?,
             "type_elem" => self.add_go_embedded_types(node, &active)?,
@@ -6916,6 +7734,69 @@ impl<'source> DirectEvidenceState<'source> {
             }
             self.walk_go_evidence(child, &active, false)?;
         }
+        Ok(())
+    }
+
+    fn add_go_field_access(
+        &mut self,
+        selector: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(selector)
+            || selector.parent().is_some_and(|parent| {
+                parent.kind() == "call_expression"
+                    && parent
+                        .child_by_field_name("function")
+                        .is_some_and(|function| function.id() == selector.id())
+            })
+        {
+            return Ok(());
+        }
+        let (Some(receiver), Some(field)) = (
+            selector.child_by_field_name("operand"),
+            selector.child_by_field_name("field"),
+        ) else {
+            return Ok(());
+        };
+        let spelling = self.text(field);
+        let qualifier = self.text(receiver);
+        if spelling.is_empty() || qualifier.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self
+            .go_expression_type(owner, receiver, 0, &mut HashSet::new())
+            .map(|receiver_type| format!("{receiver_type}::{spelling}"));
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::MemberAccess,
+            &owner.fact_id,
+            &spelling,
+            Some(&qualifier),
+            Some(&owner.scope_id),
+            Some("member"),
+            range_for_node(self.source_file, field),
+        )?;
+        let Some(qualified_name) = qualified_name else {
+            // Preserve the exact use site without allowing an unrelated
+            // import or terminal name to invent a field target.
+            return Ok(());
+        };
+        self.builder.relate(
+            CandidateRelation::AccessesMember,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            None,
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(qualified_name),
+                allowed_target_kinds: vec!["field".to_owned()],
+                // Unknown receiver types, package selectors and promoted
+                // members stay unresolved. Never choose by terminal name.
+                allow_external: false,
+                ..ResolutionConstraint::default()
+            },
+        )?;
         Ok(())
     }
 
@@ -6959,21 +7840,8 @@ impl<'source> DirectEvidenceState<'source> {
                     continue;
                 };
                 if parameter.kind() == "variadic_parameter_declaration" {
-                    let Some(element_target) = go_direct_type_target(type_node) else {
-                        continue;
-                    };
-                    let Some(element_type) = self.go_qualified_type_target(owner, element_target)
-                    else {
-                        continue;
-                    };
-                    self.go_collection_binding_element_types
-                        .entry(owner.scope_id.clone())
-                        .or_default()
-                        .extend(
-                            names
-                                .into_iter()
-                                .map(|(name, _)| (name, element_type.clone())),
-                        );
+                    // Its element type is read from this exact parameter AST
+                    // when resolving a range; the slice itself is not a receiver.
                     continue;
                 }
                 let mut targets = Vec::new();
@@ -7364,6 +8232,12 @@ impl<'source> DirectEvidenceState<'source> {
         let Some(function) = function else {
             return Ok(());
         };
+        if self.language == "go" && function.kind() == "call_expression" {
+            // factory()() invokes an unnamed returned callback. Its receiver
+            // binding cannot identify the callback or a type conversion. The
+            // walker visits the inner factory call separately.
+            return Ok(());
+        }
         let raw = self.text(function);
         let (qualifier, spelling) = split_qualified(&raw);
         if spelling.is_empty() {
@@ -7493,6 +8367,18 @@ impl<'source> DirectEvidenceState<'source> {
             None
         };
         let binding = call_result_binding.or_else(|| {
+            if self.language == "go"
+                && qualifier.is_some()
+                && let Some((value, _)) =
+                    go_local_initializer_with_index_before(function, binding_name, self.source)
+                && !value
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "parameter_declaration")
+            {
+                // Parameter aliases and package imports carry useful project
+                // evidence. A nearer local/range binding must not reuse them.
+                return None;
+            }
             self.binding_for_occurrence(
                 owner,
                 binding_name,
@@ -7509,7 +8395,9 @@ impl<'source> DirectEvidenceState<'source> {
         } else {
             qualifier
                 .and_then(|qualifier| {
-                    self.local_target_for(owner, qualifier)
+                    (self.language != "go")
+                        .then(|| self.local_target_for(owner, qualifier))
+                        .flatten()
                         .map(|target| format!("{target}::{spelling}"))
                 })
                 .or_else(|| {
@@ -7520,6 +8408,9 @@ impl<'source> DirectEvidenceState<'source> {
                 })
                 .or_else(|| {
                     qualifier
+                        .filter(|qualifier| {
+                            self.language != "go" || !self.go_name_is_locally_bound(call, qualifier)
+                        })
                         .and_then(|qualifier| {
                             self.imported_qualified_target_for(
                                 owner,
@@ -8069,6 +8960,11 @@ impl<'source> DirectEvidenceState<'source> {
         match function.kind() {
             "identifier" => {
                 let spelling = self.text(function);
+                if go_local_initializer_with_index_before(function, &spelling, self.source)
+                    .is_some()
+                {
+                    return None;
+                }
                 self.imported_target_for_occurrence(owner, &spelling, function.start_byte(), true)
                     .cloned()
                     .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
@@ -8083,6 +8979,15 @@ impl<'source> DirectEvidenceState<'source> {
                         (operand.kind() == "identifier")
                             .then(|| self.text(operand))
                             .and_then(|package| {
+                                if go_local_initializer_with_index_before(
+                                    operand,
+                                    &package,
+                                    self.source,
+                                )
+                                .is_some()
+                                {
+                                    return None;
+                                }
                                 self.imported_target_for_occurrence(
                                     owner,
                                     &package,
@@ -8147,12 +9052,10 @@ impl<'source> DirectEvidenceState<'source> {
         if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT || !visited.insert(name.to_owned()) {
             return None;
         }
-        let result = go_enclosing_range_value(use_node, name, self.source)
-            .and_then(|range| self.go_range_expression_type(owner, range, depth + 1, visited))
-            .or_else(|| self.local_target_for(owner, name).cloned())
-            .or_else(|| {
-                let (initializer, output_index) =
-                    go_local_initializer_with_index_before(use_node, name, self.source)?;
+        // The nearest lexical binding owns the receiver, including an unknown
+        // type. Never fall through to an outer parameter after a local shadow.
+        let result = go_local_initializer_with_index_before(use_node, name, self.source).and_then(
+            |(initializer, output_index)| {
                 self.go_expression_type_at_output(
                     owner,
                     initializer,
@@ -8160,7 +9063,8 @@ impl<'source> DirectEvidenceState<'source> {
                     visited,
                     output_index,
                 )
-            });
+            },
+        );
         visited.remove(name);
         result
     }
@@ -8190,6 +9094,11 @@ impl<'source> DirectEvidenceState<'source> {
             "type_identifier" | "qualified_type" | "pointer_type" | "slice_type" | "array_type"
             | "map_type" | "channel_type" => go_direct_type_target(expression)
                 .and_then(|target| self.go_qualified_type_target(owner, target)),
+            "range_clause" if output_index == Some(1) => expression
+                .child_by_field_name("right")
+                .and_then(|collection| {
+                    self.go_range_expression_type(owner, collection, depth + 1, visited)
+                }),
             "identifier" => self.go_local_value_type_inner(
                 owner,
                 expression,
@@ -8222,19 +9131,8 @@ impl<'source> DirectEvidenceState<'source> {
             }
             "call_expression" => {
                 let function = expression.child_by_field_name("function")?;
-                let qualified_callable = match function.kind() {
-                    "identifier" => {
-                        format!("{}.{}", self.module_or_package, self.text(function))
-                    }
-                    "selector_expression" => {
-                        let operand = function.child_by_field_name("operand")?;
-                        let field = function.child_by_field_name("field")?;
-                        let receiver =
-                            self.go_expression_type(owner, operand, depth + 1, visited)?;
-                        format!("{receiver}::{}", self.text(field))
-                    }
-                    _ => return None,
-                };
+                let qualified_callable =
+                    self.go_callable_qualified_name(owner, function, depth + 1, visited)?;
                 self.go_return_types
                     .get(&qualified_callable)
                     .and_then(|types| go_output_type(types, output_index))
@@ -8274,33 +9172,25 @@ impl<'source> DirectEvidenceState<'source> {
                 if !visited.insert(name.clone()) {
                     return None;
                 }
-                let result = self
-                    .local_target_for(owner, &name)
-                    .and_then(|collection| self.go_collection_element_types.get(collection))
-                    .cloned()
-                    .or_else(|| {
-                        self.local_value_for(
-                            &self.go_collection_binding_element_types,
+                let result = go_local_initializer_with_index_before(expression, &name, self.source)
+                    .and_then(|(initializer, output_index)| {
+                        self.go_range_expression_type_at_output(
                             owner,
-                            &name,
+                            initializer,
+                            depth + 1,
+                            visited,
+                            output_index,
                         )
-                        .cloned()
-                    })
-                    .or_else(|| {
-                        go_local_initializer_with_index_before(expression, &name, self.source)
-                            .and_then(|(initializer, output_index)| {
-                                self.go_range_expression_type_at_output(
-                                    owner,
-                                    initializer,
-                                    depth + 1,
-                                    visited,
-                                    output_index,
-                                )
-                            })
                     });
                 visited.remove(&name);
                 result
             }
+            "type_identifier" | "qualified_type" | "pointer_type" | "slice_type" | "array_type"
+            | "map_type" | "channel_type" => self.go_collection_element_type(owner, expression),
+            "variadic_parameter_declaration" => expression
+                .child_by_field_name("type")
+                .and_then(go_direct_type_target)
+                .and_then(|target| self.go_qualified_type_target(owner, target)),
             "call_expression" => {
                 let function = expression.child_by_field_name("function")?;
                 if function.kind() == "identifier" && self.text(function) == "make" {
@@ -8308,19 +9198,8 @@ impl<'source> DirectEvidenceState<'source> {
                     let collection_type = arguments.named_child(0)?;
                     return self.go_collection_element_type(owner, collection_type);
                 }
-                let qualified_callable = match function.kind() {
-                    "identifier" => {
-                        format!("{}.{}", self.module_or_package, self.text(function))
-                    }
-                    "selector_expression" => {
-                        let operand = function.child_by_field_name("operand")?;
-                        let field = function.child_by_field_name("field")?;
-                        let receiver =
-                            self.go_expression_type(owner, operand, depth + 1, visited)?;
-                        format!("{receiver}::{}", self.text(field))
-                    }
-                    _ => return None,
-                };
+                let qualified_callable =
+                    self.go_callable_qualified_name(owner, function, depth + 1, visited)?;
                 self.go_range_return_types
                     .get(&qualified_callable)
                     .and_then(|types| go_output_type(types, output_index))
@@ -8960,6 +9839,63 @@ fn last_java_import_name(node: Node<'_>) -> Option<Node<'_>> {
         .last()
 }
 
+fn java_parameter_type_node(parameter: Node<'_>) -> Option<Node<'_>> {
+    parameter.child_by_field_name("type").or_else(|| {
+        if parameter.kind() != "spread_parameter" {
+            return None;
+        }
+        // The pinned Java grammar leaves spread types unnamed, unlike formal
+        // parameters. Inspect only direct type children, never annotations or
+        // the nested variable declarator.
+        let mut cursor = parameter.walk();
+        parameter.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "type_identifier"
+                    | "scoped_type_identifier"
+                    | "generic_type"
+                    | "array_type"
+                    | "annotated_type"
+                    | "integral_type"
+                    | "floating_point_type"
+                    | "boolean_type"
+            )
+        })
+    })
+}
+
+fn java_parameter_declarator(parameter: Node<'_>) -> Node<'_> {
+    if parameter.kind() == "spread_parameter" {
+        let mut cursor = parameter.walk();
+        if let Some(declarator) = parameter
+            .named_children(&mut cursor)
+            .find(|child| child.kind() == "variable_declarator")
+        {
+            return declarator;
+        }
+    }
+    parameter
+}
+
+fn java_dimensions_suffix(dimensions: Node<'_>) -> String {
+    let mut cursor = dimensions.walk();
+    dimensions
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "[")
+        .map(|_| "[]")
+        .collect()
+}
+
+fn java_parameter_type_name(parameter: Node<'_>, source: &[u8]) -> Option<String> {
+    let type_node = java_parameter_type_node(parameter)?;
+    let mut normalized = java_normalize_type(type_node.utf8_text(source).ok()?);
+    if let Some(dimensions) = java_parameter_declarator(parameter).child_by_field_name("dimensions")
+    {
+        normalized.push_str(&java_dimensions_suffix(dimensions));
+    }
+    Some(normalized)
+}
+
 fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool, Vec<String>) {
     let Some(parameters) = node.child_by_field_name("parameters") else {
         return (String::new(), 0, false, Vec::new());
@@ -8972,31 +9908,18 @@ fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool
         .children(&mut cursor)
         .filter(|child| child.is_named())
     {
-        if !matches!(
-            parameter.kind(),
-            "formal_parameter" | "spread_parameter" | "receiver_parameter"
-        ) {
+        if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
             continue;
         }
         variadic |= parameter.kind() == "spread_parameter";
-        let Some(type_node) = parameter.child_by_field_name("type") else {
+        let Some(mut normalized) = java_parameter_type_name(parameter, source) else {
             continue;
         };
-        let raw = type_node.utf8_text(source).unwrap_or_default();
-        let mut normalized = java_normalize_type(raw);
-        canonical_inputs.push(normalized.clone());
         if parameter.kind() == "spread_parameter" {
+            canonical_inputs.push(format!("{normalized}[]"));
             normalized.push_str("...");
-        }
-        if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
-            normalized.push_str(
-                &dimensions
-                    .utf8_text(source)
-                    .unwrap_or_default()
-                    .chars()
-                    .filter(|character| !character.is_whitespace())
-                    .collect::<String>(),
-            );
+        } else {
+            canonical_inputs.push(normalized.clone());
         }
         types.push(normalized);
     }
@@ -9120,7 +10043,7 @@ fn collect_java_parameter_type_nodes<'tree>(
         .filter(|child| child.is_named())
     {
         if matches!(parameter.kind(), "formal_parameter" | "spread_parameter")
-            && let Some(type_node) = parameter.child_by_field_name("type")
+            && let Some(type_node) = java_parameter_type_node(parameter)
         {
             collect_java_type_nodes(type_node, output);
         }
@@ -9274,6 +10197,92 @@ fn rust_normalize_path(raw: &str) -> String {
         );
     }
     rust_strip_generic_arguments(raw)
+}
+
+fn rust_receiver_contains_index(mut node: Node<'_>) -> bool {
+    for _ in 0..32 {
+        match node.kind() {
+            "index_expression" => return true,
+            "field_expression" => {
+                let Some(value) = node.child_by_field_name("value") else {
+                    return false;
+                };
+                node = value;
+            }
+            "parenthesized_expression" | "reference_expression" | "unary_expression" => {
+                let Some(value) = node
+                    .child_by_field_name("value")
+                    .or_else(|| node.named_child(0))
+                else {
+                    return false;
+                };
+                node = value;
+            }
+            _ => return false,
+        }
+    }
+    // Don't fall back to textual receiver inference when the bound is reached.
+    true
+}
+
+fn rust_standard_prelude_enabled(root: Node<'_>, source: &[u8]) -> bool {
+    let mut cursor = root.walk();
+    loop {
+        let node = cursor.node();
+        if matches!(node.kind(), "attribute_item" | "inner_attribute_item") {
+            let text = source.get(node.byte_range()).unwrap_or_default();
+            // Conservatively reject conditional or nested prelude changes too.
+            if [b"no_implicit_prelude".as_slice(), b"no_std", b"no_core"]
+                .iter()
+                .any(|name| text.windows(name.len()).any(|part| part == *name))
+            {
+                return false;
+            }
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return true;
+            }
+        }
+    }
+}
+
+// Built-in indexing auto-dereferences references, never raw pointers.
+fn rust_indexable_type(mut raw: &str) -> Option<&str> {
+    for _ in 0..16 {
+        raw = raw.trim();
+        if let Some(rest) = raw.strip_prefix('&') {
+            raw = rest.trim_start();
+            if let Some(lifetime) = raw.strip_prefix('\'') {
+                let end = lifetime.find(char::is_whitespace)?;
+                raw = lifetime[end..].trim_start();
+            }
+            raw = raw.strip_prefix("mut ").unwrap_or(raw);
+        } else {
+            return (!raw.is_empty() && !raw.starts_with('*')).then_some(raw);
+        }
+    }
+    None
+}
+
+fn rust_array_or_slice_element(raw: &str) -> Option<&str> {
+    let inner = raw.strip_prefix('[')?.strip_suffix(']')?.trim();
+    let mut depth = 0_u16;
+    for (offset, character) in inner.char_indices() {
+        match character {
+            '[' | '(' | '<' => depth = depth.checked_add(1)?,
+            ']' | ')' | '>' => depth = depth.checked_sub(1)?,
+            ';' if depth == 0 => return Some(inner.get(..offset)?.trim()),
+            _ => {}
+        }
+    }
+    (!inner.is_empty() && depth == 0).then_some(inner)
 }
 
 fn rust_nominal_type_path(raw: &str) -> Option<String> {
@@ -9800,18 +10809,20 @@ fn rust_qualify_evidence_path(
             .rust_associated_type_for(owner, spelling)
             .map(|associated_type| associated_type.qualified_name.clone());
     }
-    let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+    // Keep the entire suffix when expanding a module/type alias. Taking only
+    // the terminal spelling would turn api::nested::Entry into api::Entry.
+    let (binding_name, suffix) = split_qualified_head(&raw);
     if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
     {
-        return Some(if qualifier.is_some() {
-            rust_join_qualified(target, spelling)
+        return Some(if let Some(suffix) = suffix {
+            rust_join_qualified(target, suffix)
         } else {
             target.clone()
         });
     }
     if let Some(target) = state.local_target_for(owner, binding_name) {
-        return Some(if qualifier.is_some() {
-            rust_join_qualified(target, spelling)
+        return Some(if let Some(suffix) = suffix {
+            rust_join_qualified(target, suffix)
         } else {
             target.clone()
         });
@@ -11084,51 +12095,6 @@ fn go_range_value_type_target(node: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-fn go_enclosing_range_value<'tree>(
-    use_node: Node<'tree>,
-    name: &str,
-    source: &[u8],
-) -> Option<Node<'tree>> {
-    fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
-        let mut cursor = node.walk();
-        node.children(&mut cursor)
-            .filter(|child| child.is_named())
-            .collect()
-    }
-
-    let mut ancestor = use_node.parent();
-    while let Some(node) = ancestor {
-        if node.kind() == "for_statement"
-            && let Some(range) = named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "range_clause")
-            && let Some(left) = range.child_by_field_name("left")
-        {
-            let variables = if left.kind() == "expression_list" {
-                named_children(left)
-            } else {
-                vec![left]
-            };
-            let matching_variable = variables.iter().position(|variable| {
-                variable.kind() == "identifier" && variable.utf8_text(source).ok() == Some(name)
-            });
-            if let Some(index) = matching_variable {
-                return (variables.len() == 2 && index == 1)
-                    .then(|| range.child_by_field_name("right"))
-                    .flatten();
-            }
-        }
-        if matches!(
-            node.kind(),
-            "function_declaration" | "method_declaration" | "func_literal"
-        ) {
-            break;
-        }
-        ancestor = node.parent();
-    }
-    None
-}
-
 fn has_descendant(node: Node<'_>, kind: &str) -> bool {
     if node.kind() == kind {
         return true;
@@ -11201,7 +12167,9 @@ fn go_local_initializer_with_index_before<'tree>(
         if names.len() > 1 && values.len() == 1 && values[0].kind() == "call_expression" {
             return Some((values[0], u32::try_from(index).ok()));
         }
-        values.get(index).copied().map(|value| (value, None))
+        // A declared name with an unsupported initializer still shadows an
+        // outer binding. Return an uninterpreted node rather than falling out.
+        Some((values.get(index).copied().unwrap_or(names[index]), None))
     }
 
     fn in_statement<'tree>(
@@ -11227,7 +12195,9 @@ fn go_local_initializer_with_index_before<'tree>(
                 if let Some(type_node) = statement.child_by_field_name("type") {
                     return Some((type_node, None));
                 }
-                let values = statement.child_by_field_name("value")?;
+                let Some(values) = statement.child_by_field_name("value") else {
+                    return Some((statement, None));
+                };
                 let values = if values.kind() == "expression_list" {
                     named_children(values)
                 } else {
@@ -11236,9 +12206,9 @@ fn go_local_initializer_with_index_before<'tree>(
                 if names.len() > 1 && values.len() == 1 && values[0].kind() == "call_expression" {
                     return Some((values[0], u32::try_from(index).ok()));
                 }
-                values.get(index).copied().map(|value| (value, None))
+                Some((values.get(index).copied().unwrap_or(statement), None))
             }
-            "var_declaration" => named_children(statement)
+            "var_declaration" | "var_spec_list" => named_children(statement)
                 .into_iter()
                 .rev()
                 .find_map(|child| in_statement(child, name, source)),
@@ -11249,7 +12219,24 @@ fn go_local_initializer_with_index_before<'tree>(
     let use_start = use_node.start_byte();
     let mut ancestor = use_node.parent();
     while let Some(scope) = ancestor {
-        let for_initializer = if scope.kind() == "for_clause" {
+        if scope.kind() == "type_switch_statement"
+            && let Some(alias) = scope.child_by_field_name("alias")
+            && scope
+                .child_by_field_name("value")
+                .is_some_and(|value| value.end_byte() <= use_start)
+            && (alias.utf8_text(source).ok() == Some(name)
+                || named_children(alias)
+                    .iter()
+                    .any(|node| node.utf8_text(source).ok() == Some(name)))
+        {
+            // Case-specific narrowing is not inferred here. The case binding
+            // still shadows the outer name and cannot borrow its type.
+            return Some((alias, None));
+        }
+        let control_initializer = if matches!(
+            scope.kind(),
+            "for_clause" | "if_statement" | "expression_switch_statement" | "type_switch_statement"
+        ) {
             scope.child_by_field_name("initializer")
         } else if scope.kind() == "for_statement" {
             let mut cursor = scope.walk();
@@ -11260,11 +12247,36 @@ fn go_local_initializer_with_index_before<'tree>(
         } else {
             None
         };
-        if let Some(initializer) = for_initializer
+        if let Some(initializer) = control_initializer
             && initializer.end_byte() <= use_start
             && let Some(found) = in_statement(initializer, name, source)
         {
             return Some(found);
+        }
+        if scope.kind() == "for_statement" {
+            let range = named_children(scope)
+                .into_iter()
+                .find(|child| child.kind() == "range_clause");
+            if let Some(range) = range
+                && range.end_byte() <= use_start
+                && let Some(left) = range.child_by_field_name("left")
+            {
+                let mut cursor = range.walk();
+                let declares = range
+                    .children(&mut cursor)
+                    .any(|child| child.kind() == ":=");
+                let names = named_children(left);
+                if declares
+                    && let Some(index) = names
+                        .iter()
+                        .position(|n| n.utf8_text(source).ok() == Some(name))
+                {
+                    // Only the second variable of a two-value range has the
+                    // existing element-type proof. Keys and other forms stay
+                    // unknown, but still block outer receiver types.
+                    return Some((range, (names.len() == 2 && index == 1).then_some(1)));
+                }
+            }
         }
         if matches!(scope.kind(), "block" | "statement_list") {
             let mut statements = named_children(scope);
@@ -11277,8 +12289,31 @@ fn go_local_initializer_with_index_before<'tree>(
                 return Some(initializer);
             }
         }
-        if matches!(scope.kind(), "function_declaration" | "method_declaration") {
-            break;
+        if matches!(
+            scope.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) {
+            for field in ["receiver", "parameters", "result"] {
+                if let Some(parameters) = scope.child_by_field_name(field) {
+                    for parameter in named_children(parameters) {
+                        let mut cursor = parameter.walk();
+                        if parameter
+                            .children_by_field_name("name", &mut cursor)
+                            .any(|n| n.utf8_text(source).ok() == Some(name))
+                        {
+                            let value = if parameter.kind() == "variadic_parameter_declaration" {
+                                parameter
+                            } else {
+                                parameter.child_by_field_name("type").unwrap_or(parameter)
+                            };
+                            return Some((value, None));
+                        }
+                    }
+                }
+            }
+            if scope.kind() != "func_literal" {
+                break;
+            }
         }
         ancestor = scope.parent();
     }
@@ -11518,7 +12553,7 @@ fn qualified_binding_head(qualifier: &str) -> &str {
 }
 
 fn collect_rust_pattern_names(node: Node<'_>, names: &mut Vec<String>, source: &[u8]) {
-    if node.kind() == "identifier" {
+    if matches!(node.kind(), "identifier" | "shorthand_field_identifier") {
         let name = source
             .get(node.start_byte()..node.end_byte())
             .map_or_else(String::new, |bytes| {
@@ -11530,15 +12565,49 @@ fn collect_rust_pattern_names(node: Node<'_>, names: &mut Vec<String>, source: &
         return;
     }
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+    for (index, child) in node
+        .children(&mut cursor)
+        .enumerate()
+        .filter(|(_, child)| child.is_named())
+    {
+        if matches!(
+            node.field_name_for_child(index as u32),
+            Some("type" | "condition")
+        ) {
+            continue;
+        }
         collect_rust_pattern_names(child, names, source);
     }
+}
+
+fn rust_pattern_binds_whole_value(mut node: Node<'_>) -> bool {
+    for _ in 0..16 {
+        match node.kind() {
+            "identifier" => return true,
+            "mut_pattern" | "ref_pattern" | "reference_pattern" => {
+                let mut cursor = node.walk();
+                let Some(child) = node.named_children(&mut cursor).last() else {
+                    return false;
+                };
+                node = child;
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn rust_is_lexical_scope_node(kind: &str) -> bool {
     matches!(
         kind,
-        "block" | "match_block" | "unsafe_block" | "closure_expression"
+        "block"
+            | "match_block"
+            | "unsafe_block"
+            | "closure_expression"
+            | "for_expression"
+            | "match_arm"
+            | "if_expression"
+            | "while_expression"
     )
 }
 

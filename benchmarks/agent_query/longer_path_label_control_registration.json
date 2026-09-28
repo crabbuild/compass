@@ -1,0 +1,11 @@
+{
+  "schema": "compass.longer-path-label-control-registration/1",
+  "parentProtocolCommit": "0f3df063457368f333a8448c818ce4f010b5f837",
+  "reason": "The first new source-assisted Chi response again used different endpoints in Graphify CLI despite public resolver IDs. Keep cross-interface identity separate from native short-label path quality.",
+  "timing": "Registered after observing the Chi source-assisted output and prior ID/label studies, before this new label control. Other source-assisted cases are still being captured. Not blind or held-out.",
+  "inputs": "Use exactly nodes[0].symbol and nodes[-1].symbol from each of the five longer_path_witnesses.json tasks. No aliases, retries or scope changes.",
+  "commands": "Compass node SOURCE TARGET --max-depth 8 --max-paths 1 --format json --graph GRAPH; Graphify path SOURCE TARGET --directed --graph GRAPH.",
+  "artifacts": "Use the same ten frozen graphs, final evaluated Compass binary and hash-verified Graphify environment as the source-assisted arm.",
+  "bounds": "60 seconds and 16 MiB per stdout/stderr stream. Internal work limits differ; no speed ranking.",
+  "scoring": "Keep all five positive tasks. Review full ordered node identity, directed call edges, source anchors and alternate routes with the same source witnesses. Ambiguity, wrong endpoints, mixed-relation paths, limits and missing paths are distinct failures to complete a reviewed call-chain request. Never combine the best outputs from ID and label arms into a new primary score."
+}

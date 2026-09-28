@@ -1,0 +1,78 @@
+{
+  "bounds": {
+    "graphBytes": 1073741824,
+    "maxClassCandidates": 100000,
+    "maxNodes": 1000000,
+    "maxSecondsPerGraph": 300,
+    "nodeBytes": 8388608
+  },
+  "dataset": {
+    "authors": [
+      "Lech Madeyski",
+      "Tomasz Lewowski"
+    ],
+    "doi": "10.5281/zenodo.3666840",
+    "file": "MLCQCodeSmellSamples.csv",
+    "license": "CC-BY-4.0",
+    "paperDoi": "10.1145/3383219.3383264",
+    "publishedMd5": "9019beae88089838d2d13dc12e69241b",
+    "recordUrl": "https://zenodo.org/records/3666840",
+    "sha256": "8e05db55150a984f0b08ab211f5f612374790ea918ba08afc290cf122b63551b",
+    "title": "MLCQ: Industry-relevant code smell data set",
+    "version": "1.1"
+  },
+  "declaredBeforeExecution": true,
+  "graphs": [
+    {
+      "graphBytes": 671502979,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "producerBinarySha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+      "producerNote": "CloudStack is the 9df5dcf3 release extraction, not a new candidate build.",
+      "repository": "apache/cloudstack"
+    },
+    {
+      "graphBytes": 477211091,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "producerBinarySha256": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+      "producerNote": "CloudStack is the 9df5dcf3 release result; Eclipse is the earlier development extraction. Query this existing artifact without rerunning extraction.",
+      "repository": "eclipse/eclipse.platform.ui"
+    }
+  ],
+  "interpretation": [
+    "This known, purposively consensus-enriched cohort is development data, not a held-out test or population prevalence.",
+    "Do not tune a threshold or weights on the eight primary labels and claim independent success.",
+    "A large class span is not a god-object defect. Require responsibility/cohesion evidence and independent review before any diagnosis claim.",
+    "Do not alter the frozen Graphify environment, graphs, label votes, or prior native ranking outcomes.",
+    "Unequal graph producer versions and emitted-language coverage remain disclosed; this probe is only within each preserved Compass typed graph."
+  ],
+  "method": {
+    "candidatePool": "Every stored typed graph node with kind exactly class, a nonempty source file, and inclusive startLine/endLine with endLine >= startLine. No generated/test filter; exclude non-class kinds explicitly.",
+    "cutoffs": [
+      10,
+      50,
+      100
+    ],
+    "identity": "For each annotated sample, require exact source file, exact simple Java class name (last codeName segment), and overlapping class/source line spans. Zero matches is unavailable; multiple matches are ambiguous. Never select nearest/best candidate.",
+    "outputs": "Retain every class candidate identity/score/rank, all 55 join outcomes, primary positive/none retrieval separately, and bound/truncation failures. Preserve existing native Graphify and Compass hub results as separate controls.",
+    "score": "Inclusive source span length = endLine - startLine + 1. Sort descending length, then ascending exact node ID. This is size, not responsibility/cohesion/defect severity."
+  },
+  "priorExternalInputsSha256": "663beb33e986c695ec4a6ae8864651f9838baa4c0d183a2da021d8d3197b951e",
+  "priorRegistrationSha256": "a08e6a0970c605154b329acbfebaa0d9684859f1fad2fa0ed8e8717772866ef1",
+  "priorReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "purpose": "Exploratory source-span ranking diagnostic for externally reviewed Blob classes; measure before considering a class-responsibility tool. This is not production behavior or a defect classifier.",
+  "samples": {
+    "count": 55,
+    "policy": "Retain all 55 reviewed classes in selected revisions; four consensus-positive and four consensus-none primary cases. Other ratings remain uncertain/secondary, never converted to positive or negative.",
+    "primarySampleIds": [
+      6374724,
+      6391534,
+      6406137,
+      6413795,
+      8528735,
+      8537138,
+      8538037,
+      8539645
+    ]
+  },
+  "schema": "compass.mlcq-class-span-probe-registration/1"
+}

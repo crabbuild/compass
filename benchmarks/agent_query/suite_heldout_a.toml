@@ -1,0 +1,834 @@
+# Held-out confirmation panel A. Product binaries are frozen before this panel.
+# Questions and source witnesses are committed before either tool builds or queries these repositories.
+# Purposively chosen small libraries, one per existing language; not a random or representative sample.
+# Primary verdicts are text recall proxies. Separate edge/path audits retain exact identities and source sites.
+# Callers/affected and callees/explain are corresponding public operations, not identical relation-filter interfaces.
+# Paths are undirected for both tools. All failures, ambiguities, and bound outcomes remain in the denominator.
+# Broad query pages start at 600 estimated tokens, with up to three documented follow-ups; ask rows request 2000.
+schema = "compass.agent-query-suite/1"
+
+[[repository]]
+name = "chi"
+language = "Go"
+url = "https://github.com/go-chi/chi.git"
+commit = "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc"
+
+[[repository.anchor]]
+file = "chi.go"
+line = 62
+symbol = "NewRouter"
+judgment = "Source declaration: func NewRouter() *Mux {"
+
+[[repository.anchor]]
+file = "context.go"
+line = 11
+symbol = "URLParam"
+judgment = "Source declaration: func URLParam(r *http.Request, key string) string {"
+
+[[repository.anchor]]
+file = "context.go"
+line = 16
+symbol = "URLParamFromCtx"
+judgment = "Source declaration: func URLParamFromCtx(ctx context.Context, key string) string {"
+
+[[repository.anchor]]
+file = "context.go"
+line = 25
+symbol = "RouteContext"
+judgment = "Source declaration: func RouteContext(ctx context.Context) *Context {"
+
+[[repository.anchor]]
+file = "context.go"
+line = 31
+symbol = "NewRouteContext"
+judgment = "Source declaration: func NewRouteContext() *Context {"
+
+[[repository.anchor]]
+file = "context.go"
+line = 124
+symbol = "URLParam"
+judgment = "Source declaration: func (x *Context) URLParam(key string) string {"
+
+[[repository.anchor]]
+file = "mux.go"
+line = 52
+symbol = "NewMux"
+judgment = "Source declaration: func NewMux() *Mux {"
+
+[[repository.question]]
+id = "chi-holdout-explain-primary"
+kind = "explain"
+subject = "Locate NewRouter declaration"
+compass = ["explain", "NewRouter"]
+graphify = ["explain", "NewRouter"]
+expect = "answer"
+required = ["chi.go", "62"]
+judgment = "chi.go:62: func NewRouter() *Mux {"
+
+[[repository.question]]
+id = "chi-holdout-explain-target"
+kind = "explain"
+subject = "Locate NewMux declaration"
+compass = ["explain", "NewMux"]
+graphify = ["explain", "NewMux"]
+expect = "answer"
+required = ["mux.go", "52"]
+judgment = "mux.go:52: func NewMux() *Mux {"
+
+[[repository.question]]
+id = "chi-holdout-callers"
+kind = "callers"
+subject = "Direct callers of NewMux"
+compass = ["callers", "NewMux"]
+graphify = ["affected", "NewMux", "--depth", "1"]
+expect = "answer"
+required = ["NewRouter", "chi.go"]
+judgment = "NewRouter directly calls NewMux; source occurrences are recorded separately."
+
+[[repository.question]]
+id = "chi-holdout-callees"
+kind = "callees"
+subject = "Direct internal callees of NewRouter"
+compass = ["callees", "NewRouter"]
+graphify = ["explain", "NewRouter"]
+expect = "answer"
+required = ["NewMux"]
+judgment = "Reviewed lexical body calls; source witnesses disambiguate selected endpoints."
+
+[[repository.question]]
+id = "chi-holdout-path-forward"
+kind = "path"
+subject = "Undirected navigation from NewRouter to NewMux"
+compass = ["path", "NewRouter", "NewMux"]
+graphify = ["path", "NewRouter", "NewMux", "--undirected"]
+expect = "answer"
+required = ["NewRouter", "NewMux"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at chi.go:63; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "chi-holdout-path-reverse"
+kind = "path"
+subject = "Undirected navigation from NewMux to NewRouter"
+compass = ["path", "NewMux", "NewRouter"]
+graphify = ["path", "NewMux", "NewRouter", "--undirected"]
+expect = "answer"
+required = ["NewMux", "NewRouter"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at chi.go:63; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "chi-holdout-file-path"
+kind = "file_path"
+subject = "Connect chi.go and mux.go"
+compass = ["path", "chi.go", "mux.go"]
+graphify = ["path", "chi.go", "mux.go", "--undirected"]
+expect = "answer"
+required = ["chi.go", "mux.go"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "The reviewed files contain a direct internal call/import or re-export relationship; no particular intermediate file route is prescribed."
+
+[[repository.question]]
+id = "chi-holdout-ambiguity"
+kind = "ambiguity"
+subject = "Distinguish same-named URLParam declarations"
+compass = ["search", "URLParam"]
+graphify = ["explain", "URLParam"]
+expect = "pick_list"
+required_one_of = ["context.go"]
+min_one_of = 1
+min_candidates = 2
+judgment = "Distinct declaration anchors are recorded for this unqualified name; require candidates rather than silently choosing."
+
+[[repository.question]]
+id = "chi-holdout-negative"
+kind = "negative"
+subject = "Reject absent exact symbol HeldoutAbsentChiSymbol8197"
+compass = ["search", "HeldoutAbsentChiSymbol8197"]
+graphify = ["explain", "HeldoutAbsentChiSymbol8197"]
+expect = "no_match"
+judgment = "The exact sentinel is absent from the pinned checkout; a convenient fuzzy substitute is not a correct answer."
+
+[[repository.question]]
+id = "chi-holdout-broad"
+kind = "broad"
+subject = "how is a new router created"
+compass = ["query", "how is a new router created"]
+graphify = ["query", "how is a new router created"]
+expect = "answer"
+required = ["NewRouter"]
+budget_tokens = 600
+max_follow_ups = 3
+judgment = "The reviewed primary declaration implements this task. Required name presence is only a recall proxy, not whole-answer correctness."
+
+[[repository.question]]
+id = "chi-holdout-ask-callers"
+kind = "callers"
+subject = "who calls NewMux"
+compass = ["ask", "who calls NewMux", "--text-budget", "2000"]
+graphify = ["query", "who calls NewMux", "--budget", "2000"]
+expect = "answer"
+required = ["NewRouter", "chi.go"]
+judgment = "Same incoming-call task as direct callers, through each product natural-language entry point; separately inspect subject and direction before a correctness claim."
+
+[[repository]]
+name = "click"
+language = "Python"
+url = "https://github.com/pallets/click.git"
+commit = "06b2a678741131fd577ce170e23e5ca0aeba0309"
+
+[[repository.anchor]]
+file = "src/click/_compat.py"
+line = 361
+symbol = "_wrap_io_open"
+judgment = "Source declaration: def _wrap_io_open("
+
+[[repository.anchor]]
+file = "src/click/_compat.py"
+line = 374
+symbol = "open_stream"
+judgment = "Source declaration: def open_stream("
+
+[[repository.anchor]]
+file = "src/click/_compat.py"
+line = 466
+symbol = "close"
+judgment = "Source declaration: def close(self, delete: bool = False) -> None:"
+
+[[repository.anchor]]
+file = "src/click/utils.py"
+line = 153
+symbol = "open"
+judgment = "Source declaration: def open(self) -> t.IO[t.Any]:"
+
+[[repository.anchor]]
+file = "src/click/utils.py"
+line = 171
+symbol = "close"
+judgment = "Source declaration: def close(self) -> None:"
+
+[[repository.anchor]]
+file = "src/click/utils.py"
+line = 381
+symbol = "open_file"
+judgment = "Source declaration: def open_file("
+
+[[repository.anchor]]
+file = "src/click/utils.py"
+line = 430
+symbol = "format_filename"
+judgment = "Source declaration: def format_filename("
+
+[[repository.question]]
+id = "click-holdout-explain-primary"
+kind = "explain"
+subject = "Locate open_file declaration"
+compass = ["explain", "open_file"]
+graphify = ["explain", "open_file"]
+expect = "answer"
+required = ["src/click/utils.py", "381"]
+judgment = "src/click/utils.py:381: def open_file("
+
+[[repository.question]]
+id = "click-holdout-explain-target"
+kind = "explain"
+subject = "Locate open_stream declaration"
+compass = ["explain", "open_stream"]
+graphify = ["explain", "open_stream"]
+expect = "answer"
+required = ["src/click/_compat.py", "374"]
+judgment = "src/click/_compat.py:374: def open_stream("
+
+[[repository.question]]
+id = "click-holdout-callers"
+kind = "callers"
+subject = "Direct callers of open_stream"
+compass = ["callers", "open_stream"]
+graphify = ["affected", "open_stream", "--depth", "1"]
+expect = "answer"
+required = ["open_file", "utils.py"]
+judgment = "open_file directly calls open_stream; source occurrences are recorded separately."
+
+[[repository.question]]
+id = "click-holdout-callees"
+kind = "callees"
+subject = "Direct internal callees of open_file"
+compass = ["callees", "open_file"]
+graphify = ["explain", "open_file"]
+expect = "answer"
+required = ["open_stream"]
+judgment = "Reviewed lexical body calls; source witnesses disambiguate selected endpoints."
+
+[[repository.question]]
+id = "click-holdout-path-forward"
+kind = "path"
+subject = "Undirected navigation from open_file to open_stream"
+compass = ["path", "open_file", "open_stream"]
+graphify = ["path", "open_file", "open_stream", "--undirected"]
+expect = "answer"
+required = ["open_file", "open_stream"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/click/utils.py:422; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "click-holdout-path-reverse"
+kind = "path"
+subject = "Undirected navigation from open_stream to open_file"
+compass = ["path", "open_stream", "open_file"]
+graphify = ["path", "open_stream", "open_file", "--undirected"]
+expect = "answer"
+required = ["open_stream", "open_file"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/click/utils.py:422; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "click-holdout-file-path"
+kind = "file_path"
+subject = "Connect src/click/utils.py and src/click/_compat.py"
+compass = ["path", "src/click/utils.py", "src/click/_compat.py"]
+graphify = ["path", "src/click/utils.py", "src/click/_compat.py", "--undirected"]
+expect = "answer"
+required = ["utils.py", "_compat.py"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "The reviewed files contain a direct internal call/import or re-export relationship; no particular intermediate file route is prescribed."
+
+[[repository.question]]
+id = "click-holdout-ambiguity"
+kind = "ambiguity"
+subject = "Distinguish same-named close declarations"
+compass = ["search", "close"]
+graphify = ["explain", "close"]
+expect = "pick_list"
+required_one_of = ["utils.py", "_compat.py"]
+min_one_of = 1
+min_candidates = 2
+judgment = "Distinct declaration anchors are recorded for this unqualified name; require candidates rather than silently choosing."
+
+[[repository.question]]
+id = "click-holdout-negative"
+kind = "negative"
+subject = "Reject absent exact symbol HeldoutAbsentClickSymbol8197"
+compass = ["search", "HeldoutAbsentClickSymbol8197"]
+graphify = ["explain", "HeldoutAbsentClickSymbol8197"]
+expect = "no_match"
+judgment = "The exact sentinel is absent from the pinned checkout; a convenient fuzzy substitute is not a correct answer."
+
+[[repository.question]]
+id = "click-holdout-broad"
+kind = "broad"
+subject = "how are files opened with lazy or atomic writes"
+compass = ["query", "how are files opened with lazy or atomic writes"]
+graphify = ["query", "how are files opened with lazy or atomic writes"]
+expect = "answer"
+required = ["open_file"]
+budget_tokens = 600
+max_follow_ups = 3
+judgment = "The reviewed primary declaration implements this task. Required name presence is only a recall proxy, not whole-answer correctness."
+
+[[repository.question]]
+id = "click-holdout-ask-callers"
+kind = "callers"
+subject = "who calls open_stream"
+compass = ["ask", "who calls open_stream", "--text-budget", "2000"]
+graphify = ["query", "who calls open_stream", "--budget", "2000"]
+expect = "answer"
+required = ["open_file", "utils.py"]
+judgment = "Same incoming-call task as direct callers, through each product natural-language entry point; separately inspect subject and direction before a correctness claim."
+
+[[repository]]
+name = "jsoup"
+language = "Java"
+url = "https://github.com/jhy/jsoup.git"
+commit = "37aea49902972cec9a53dc2c65023729f1c3715b"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/Jsoup.java"
+line = 434
+symbol = "isValid"
+judgment = "Source declaration: public static boolean isValid(String bodyHtml, Safelist safelist) {"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/nodes/Document.java"
+line = 65
+symbol = "createShell"
+judgment = "Source declaration: public static Document createShell(String baseUri) {"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/safety/Cleaner.java"
+line = 62
+symbol = "clean"
+judgment = "Source declaration: public Document clean(Document dirtyDocument) {"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/safety/Cleaner.java"
+line = 94
+symbol = "isValid"
+judgment = "Source declaration: public boolean isValid(Document dirtyDocument) {"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/safety/Cleaner.java"
+line = 124
+symbol = "isValidBodyHtml"
+judgment = "Source declaration: public boolean isValidBodyHtml(String bodyHtml) {"
+
+[[repository.anchor]]
+file = "src/main/java/org/jsoup/safety/Cleaner.java"
+line = 182
+symbol = "copySafeNodes"
+judgment = "Source declaration: private int copySafeNodes(Element source, Element dest) {"
+
+[[repository.question]]
+id = "jsoup-holdout-explain-primary"
+kind = "explain"
+subject = "Locate isValidBodyHtml declaration"
+compass = ["explain", "isValidBodyHtml"]
+graphify = ["explain", "isValidBodyHtml"]
+expect = "answer"
+required = ["src/main/java/org/jsoup/safety/Cleaner.java", "124"]
+judgment = "src/main/java/org/jsoup/safety/Cleaner.java:124: public boolean isValidBodyHtml(String bodyHtml) {"
+
+[[repository.question]]
+id = "jsoup-holdout-explain-target"
+kind = "explain"
+subject = "Locate copySafeNodes declaration"
+compass = ["explain", "copySafeNodes"]
+graphify = ["explain", "copySafeNodes"]
+expect = "answer"
+required = ["src/main/java/org/jsoup/safety/Cleaner.java", "182"]
+judgment = "src/main/java/org/jsoup/safety/Cleaner.java:182: private int copySafeNodes(Element source, Element dest) {"
+
+[[repository.question]]
+id = "jsoup-holdout-callers"
+kind = "callers"
+subject = "Direct callers of copySafeNodes"
+compass = ["callers", "copySafeNodes"]
+graphify = ["affected", "copySafeNodes", "--depth", "1"]
+expect = "answer"
+required = ["isValidBodyHtml", "Cleaner.java"]
+judgment = "isValidBodyHtml directly calls copySafeNodes; source occurrences are recorded separately."
+
+[[repository.question]]
+id = "jsoup-holdout-callees"
+kind = "callees"
+subject = "Direct internal callees of isValidBodyHtml"
+compass = ["callees", "isValidBodyHtml"]
+graphify = ["explain", "isValidBodyHtml"]
+expect = "answer"
+required = ["copySafeNodes", "createShell"]
+judgment = "Reviewed lexical body calls; source witnesses disambiguate selected endpoints."
+
+[[repository.question]]
+id = "jsoup-holdout-path-forward"
+kind = "path"
+subject = "Undirected navigation from isValidBodyHtml to copySafeNodes"
+compass = ["path", "isValidBodyHtml", "copySafeNodes"]
+graphify = ["path", "isValidBodyHtml", "copySafeNodes", "--undirected"]
+expect = "answer"
+required = ["isValidBodyHtml", "copySafeNodes"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/main/java/org/jsoup/safety/Cleaner.java:131; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "jsoup-holdout-path-reverse"
+kind = "path"
+subject = "Undirected navigation from copySafeNodes to isValidBodyHtml"
+compass = ["path", "copySafeNodes", "isValidBodyHtml"]
+graphify = ["path", "copySafeNodes", "isValidBodyHtml", "--undirected"]
+expect = "answer"
+required = ["copySafeNodes", "isValidBodyHtml"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/main/java/org/jsoup/safety/Cleaner.java:131; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "jsoup-holdout-file-path"
+kind = "file_path"
+subject = "Connect src/main/java/org/jsoup/safety/Cleaner.java and src/main/java/org/jsoup/parser/Parser.java"
+compass = ["path", "src/main/java/org/jsoup/safety/Cleaner.java", "src/main/java/org/jsoup/parser/Parser.java"]
+graphify = ["path", "src/main/java/org/jsoup/safety/Cleaner.java", "src/main/java/org/jsoup/parser/Parser.java", "--undirected"]
+expect = "answer"
+required = ["Cleaner.java", "Parser.java"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "The reviewed files contain a direct internal call/import or re-export relationship; no particular intermediate file route is prescribed."
+
+[[repository.question]]
+id = "jsoup-holdout-ambiguity"
+kind = "ambiguity"
+subject = "Distinguish same-named isValid declarations"
+compass = ["search", "isValid"]
+graphify = ["explain", "isValid"]
+expect = "pick_list"
+required_one_of = ["Cleaner.java", "Jsoup.java"]
+min_one_of = 1
+min_candidates = 2
+judgment = "Distinct declaration anchors are recorded for this unqualified name; require candidates rather than silently choosing."
+
+[[repository.question]]
+id = "jsoup-holdout-negative"
+kind = "negative"
+subject = "Reject absent exact symbol HeldoutAbsentJsoupSymbol8197"
+compass = ["search", "HeldoutAbsentJsoupSymbol8197"]
+graphify = ["explain", "HeldoutAbsentJsoupSymbol8197"]
+expect = "no_match"
+judgment = "The exact sentinel is absent from the pinned checkout; a convenient fuzzy substitute is not a correct answer."
+
+[[repository.question]]
+id = "jsoup-holdout-broad"
+kind = "broad"
+subject = "how is body HTML validated against a safelist"
+compass = ["query", "how is body HTML validated against a safelist"]
+graphify = ["query", "how is body HTML validated against a safelist"]
+expect = "answer"
+required = ["isValidBodyHtml"]
+budget_tokens = 600
+max_follow_ups = 3
+judgment = "The reviewed primary declaration implements this task. Required name presence is only a recall proxy, not whole-answer correctness."
+
+[[repository.question]]
+id = "jsoup-holdout-ask-callers"
+kind = "callers"
+subject = "who calls copySafeNodes"
+compass = ["ask", "who calls copySafeNodes", "--text-budget", "2000"]
+graphify = ["query", "who calls copySafeNodes", "--budget", "2000"]
+expect = "answer"
+required = ["isValidBodyHtml", "Cleaner.java"]
+judgment = "Same incoming-call task as direct callers, through each product natural-language entry point; separately inspect subject and direction before a correctness claim."
+
+[[repository]]
+name = "redux"
+language = "TypeScript"
+url = "https://github.com/reduxjs/redux.git"
+commit = "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e"
+
+[[repository.anchor]]
+file = "src/createStore.ts"
+line = 201
+symbol = "subscribe"
+judgment = "Source declaration: function subscribe(listener: () => void) {"
+
+[[repository.anchor]]
+file = "src/createStore.ts"
+line = 355
+symbol = "subscribe"
+judgment = "Source declaration: subscribe(observer: unknown) {"
+
+[[repository.anchor]]
+file = "src/utils/isAction.ts"
+line = 4
+symbol = "isAction"
+judgment = "Source declaration: export default function isAction(action: unknown): action is Action<string> {"
+
+[[repository.anchor]]
+file = "src/utils/isPlainObject.ts"
+line = 5
+symbol = "isPlainObject"
+judgment = "Source declaration: export default function isPlainObject(obj: any): obj is object {"
+
+[[repository.anchor]]
+file = "src/utils/kindOf.ts"
+line = 2
+symbol = "miniKindOf"
+judgment = "Source declaration: export function miniKindOf(val: any): string {"
+
+[[repository.anchor]]
+file = "src/utils/kindOf.ts"
+line = 40
+symbol = "ctorName"
+judgment = "Source declaration: function ctorName(val: any): string | null {"
+
+[[repository.anchor]]
+file = "src/utils/kindOf.ts"
+line = 44
+symbol = "isError"
+judgment = "Source declaration: function isError(val: any) {"
+
+[[repository.anchor]]
+file = "src/utils/kindOf.ts"
+line = 53
+symbol = "isDate"
+judgment = "Source declaration: function isDate(val: any) {"
+
+[[repository.anchor]]
+file = "src/utils/kindOf.ts"
+line = 62
+symbol = "kindOf"
+judgment = "Source declaration: export function kindOf(val: any) {"
+
+[[repository.question]]
+id = "redux-holdout-explain-primary"
+kind = "explain"
+subject = "Locate miniKindOf declaration"
+compass = ["explain", "miniKindOf"]
+graphify = ["explain", "miniKindOf"]
+expect = "answer"
+required = ["src/utils/kindOf.ts", "2"]
+judgment = "src/utils/kindOf.ts:2: export function miniKindOf(val: any): string {"
+
+[[repository.question]]
+id = "redux-holdout-explain-target"
+kind = "explain"
+subject = "Locate ctorName declaration"
+compass = ["explain", "ctorName"]
+graphify = ["explain", "ctorName"]
+expect = "answer"
+required = ["src/utils/kindOf.ts", "40"]
+judgment = "src/utils/kindOf.ts:40: function ctorName(val: any): string | null {"
+
+[[repository.question]]
+id = "redux-holdout-callers"
+kind = "callers"
+subject = "Direct callers of ctorName"
+compass = ["callers", "ctorName"]
+graphify = ["affected", "ctorName", "--depth", "1"]
+expect = "answer"
+required = ["miniKindOf", "kindOf.ts"]
+judgment = "miniKindOf directly calls ctorName; source occurrences are recorded separately."
+
+[[repository.question]]
+id = "redux-holdout-callees"
+kind = "callees"
+subject = "Direct internal callees of miniKindOf"
+compass = ["callees", "miniKindOf"]
+graphify = ["explain", "miniKindOf"]
+expect = "answer"
+required = ["isDate", "isError", "ctorName"]
+judgment = "Reviewed lexical body calls; source witnesses disambiguate selected endpoints."
+
+[[repository.question]]
+id = "redux-holdout-path-forward"
+kind = "path"
+subject = "Undirected navigation from miniKindOf to ctorName"
+compass = ["path", "miniKindOf", "ctorName"]
+graphify = ["path", "miniKindOf", "ctorName", "--undirected"]
+expect = "answer"
+required = ["miniKindOf", "ctorName"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/utils/kindOf.ts:21; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "redux-holdout-path-reverse"
+kind = "path"
+subject = "Undirected navigation from ctorName to miniKindOf"
+compass = ["path", "ctorName", "miniKindOf"]
+graphify = ["path", "ctorName", "miniKindOf", "--undirected"]
+expect = "answer"
+required = ["ctorName", "miniKindOf"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/utils/kindOf.ts:21; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "redux-holdout-file-path"
+kind = "file_path"
+subject = "Connect src/utils/isAction.ts and src/utils/isPlainObject.ts"
+compass = ["path", "src/utils/isAction.ts", "src/utils/isPlainObject.ts"]
+graphify = ["path", "src/utils/isAction.ts", "src/utils/isPlainObject.ts", "--undirected"]
+expect = "answer"
+required = ["isAction.ts", "isPlainObject.ts"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "The reviewed files contain a direct internal call/import or re-export relationship; no particular intermediate file route is prescribed."
+
+[[repository.question]]
+id = "redux-holdout-ambiguity"
+kind = "ambiguity"
+subject = "Distinguish same-named subscribe declarations"
+compass = ["search", "subscribe"]
+graphify = ["explain", "subscribe"]
+expect = "pick_list"
+required_one_of = ["createStore.ts"]
+min_one_of = 1
+min_candidates = 2
+judgment = "Distinct declaration anchors are recorded for this unqualified name; require candidates rather than silently choosing."
+
+[[repository.question]]
+id = "redux-holdout-negative"
+kind = "negative"
+subject = "Reject absent exact symbol HeldoutAbsentReduxSymbol8197"
+compass = ["search", "HeldoutAbsentReduxSymbol8197"]
+graphify = ["explain", "HeldoutAbsentReduxSymbol8197"]
+expect = "no_match"
+judgment = "The exact sentinel is absent from the pinned checkout; a convenient fuzzy substitute is not a correct answer."
+
+[[repository.question]]
+id = "redux-holdout-broad"
+kind = "broad"
+subject = "how is the kind of a value detected"
+compass = ["query", "how is the kind of a value detected"]
+graphify = ["query", "how is the kind of a value detected"]
+expect = "answer"
+required = ["miniKindOf"]
+budget_tokens = 600
+max_follow_ups = 3
+judgment = "The reviewed primary declaration implements this task. Required name presence is only a recall proxy, not whole-answer correctness."
+
+[[repository.question]]
+id = "redux-holdout-ask-callers"
+kind = "callers"
+subject = "who calls ctorName"
+compass = ["ask", "who calls ctorName", "--text-budget", "2000"]
+graphify = ["query", "who calls ctorName", "--budget", "2000"]
+expect = "answer"
+required = ["miniKindOf", "kindOf.ts"]
+judgment = "Same incoming-call task as direct callers, through each product natural-language entry point; separately inspect subject and direction before a correctness claim."
+
+[[repository]]
+name = "walkdir"
+language = "Rust"
+url = "https://github.com/BurntSushi/walkdir.git"
+commit = "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec"
+
+[[repository.anchor]]
+file = "src/dent.rs"
+line = 77
+symbol = "path"
+judgment = "Source declaration: pub fn path(&self) -> &Path {"
+
+[[repository.anchor]]
+file = "src/error.rs"
+line = 46
+symbol = "path"
+judgment = "Source declaration: pub fn path(&self) -> Option<&Path> {"
+
+[[repository.anchor]]
+file = "src/lib.rs"
+line = 417
+symbol = "sort_by"
+judgment = "Source declaration: pub fn sort_by<F>(mut self, cmp: F) -> Self"
+
+[[repository.anchor]]
+file = "src/lib.rs"
+line = 439
+symbol = "sort_by_key"
+judgment = "Source declaration: pub fn sort_by_key<K, F>(self, mut cmp: F) -> Self"
+
+[[repository.anchor]]
+file = "src/lib.rs"
+line = 456
+symbol = "sort_by_file_name"
+judgment = "Source declaration: pub fn sort_by_file_name(self) -> Self {"
+
+[[repository.anchor]]
+file = "src/lib.rs"
+line = 687
+symbol = "next"
+judgment = "Source declaration: fn next(&mut self) -> Option<Result<DirEntry>> {"
+
+[[repository.anchor]]
+file = "src/lib.rs"
+line = 950
+symbol = "pop"
+judgment = "Source declaration: fn pop(&mut self) {"
+
+[[repository.question]]
+id = "walkdir-holdout-explain-primary"
+kind = "explain"
+subject = "Locate sort_by_file_name declaration"
+compass = ["explain", "sort_by_file_name"]
+graphify = ["explain", "sort_by_file_name"]
+expect = "answer"
+required = ["src/lib.rs", "456"]
+judgment = "src/lib.rs:456: pub fn sort_by_file_name(self) -> Self {"
+
+[[repository.question]]
+id = "walkdir-holdout-explain-target"
+kind = "explain"
+subject = "Locate sort_by declaration"
+compass = ["explain", "sort_by"]
+graphify = ["explain", "sort_by"]
+expect = "answer"
+required = ["src/lib.rs", "417"]
+judgment = "src/lib.rs:417: pub fn sort_by<F>(mut self, cmp: F) -> Self"
+
+[[repository.question]]
+id = "walkdir-holdout-callers"
+kind = "callers"
+subject = "Direct callers of sort_by"
+compass = ["callers", "sort_by"]
+graphify = ["affected", "sort_by", "--depth", "1"]
+expect = "answer"
+required = ["sort_by_file_name", "lib.rs"]
+judgment = "sort_by_file_name directly calls sort_by; source occurrences are recorded separately."
+
+[[repository.question]]
+id = "walkdir-holdout-callees"
+kind = "callees"
+subject = "Direct internal callees of sort_by_file_name"
+compass = ["callees", "sort_by_file_name"]
+graphify = ["explain", "sort_by_file_name"]
+expect = "answer"
+required = ["sort_by"]
+judgment = "Reviewed lexical body calls; source witnesses disambiguate selected endpoints."
+
+[[repository.question]]
+id = "walkdir-holdout-path-forward"
+kind = "path"
+subject = "Undirected navigation from sort_by_file_name to sort_by"
+compass = ["path", "sort_by_file_name", "sort_by"]
+graphify = ["path", "sort_by_file_name", "sort_by", "--undirected"]
+expect = "answer"
+required = ["sort_by_file_name", "sort_by"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/lib.rs:457; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "walkdir-holdout-path-reverse"
+kind = "path"
+subject = "Undirected navigation from sort_by to sort_by_file_name"
+compass = ["path", "sort_by", "sort_by_file_name"]
+graphify = ["path", "sort_by", "sort_by_file_name", "--undirected"]
+expect = "answer"
+required = ["sort_by", "sort_by_file_name"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "A direct call occurs at src/lib.rs:457; reverse traversal must preserve the stored call direction."
+
+[[repository.question]]
+id = "walkdir-holdout-file-path"
+kind = "file_path"
+subject = "Connect src/lib.rs and src/dent.rs"
+compass = ["path", "src/lib.rs", "src/dent.rs"]
+graphify = ["path", "src/lib.rs", "src/dent.rs", "--undirected"]
+expect = "answer"
+required = ["lib.rs", "dent.rs"]
+forbidden = ["NO PATH FOUND", "No path found", "No directed path found"]
+judgment = "The reviewed files contain a direct internal call/import or re-export relationship; no particular intermediate file route is prescribed."
+
+[[repository.question]]
+id = "walkdir-holdout-ambiguity"
+kind = "ambiguity"
+subject = "Distinguish same-named path declarations"
+compass = ["search", "path"]
+graphify = ["explain", "path"]
+expect = "pick_list"
+required_one_of = ["dent.rs", "error.rs"]
+min_one_of = 1
+min_candidates = 2
+judgment = "Distinct declaration anchors are recorded for this unqualified name; require candidates rather than silently choosing."
+
+[[repository.question]]
+id = "walkdir-holdout-negative"
+kind = "negative"
+subject = "Reject absent exact symbol HeldoutAbsentWalkdirSymbol8197"
+compass = ["search", "HeldoutAbsentWalkdirSymbol8197"]
+graphify = ["explain", "HeldoutAbsentWalkdirSymbol8197"]
+expect = "no_match"
+judgment = "The exact sentinel is absent from the pinned checkout; a convenient fuzzy substitute is not a correct answer."
+
+[[repository.question]]
+id = "walkdir-holdout-broad"
+kind = "broad"
+subject = "how are directory entries sorted by file name"
+compass = ["query", "how are directory entries sorted by file name"]
+graphify = ["query", "how are directory entries sorted by file name"]
+expect = "answer"
+required = ["sort_by_file_name"]
+budget_tokens = 600
+max_follow_ups = 3
+judgment = "The reviewed primary declaration implements this task. Required name presence is only a recall proxy, not whole-answer correctness."
+
+[[repository.question]]
+id = "walkdir-holdout-ask-callers"
+kind = "callers"
+subject = "who calls sort_by"
+compass = ["ask", "who calls sort_by", "--text-budget", "2000"]
+graphify = ["query", "who calls sort_by", "--budget", "2000"]
+expect = "answer"
+required = ["sort_by_file_name", "lib.rs"]
+judgment = "Same incoming-call task as direct callers, through each product natural-language entry point; separately inspect subject and direction before a correctness claim."

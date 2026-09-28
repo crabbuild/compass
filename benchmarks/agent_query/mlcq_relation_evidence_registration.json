@@ -1,0 +1,52 @@
+{
+  "bounds": {
+    "graphBytes": 1073741824,
+    "maxClasses": 100000,
+    "maxDistinctRelationshipTargets": 1000000,
+    "maxEdges": 1000000,
+    "maxNodes": 1000000,
+    "maxOwnerCandidates": 1000000,
+    "maxSecondsPerGraph": 300,
+    "recordBytes": 8388608
+  },
+  "declaredBeforeExecution": true,
+  "graphArtifacts": [
+    {
+      "graphBytes": 671502979,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "producerBinarySha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+      "producerNote": "CloudStack is the 9df5dcf3 release extraction, not a new candidate build.",
+      "repository": "apache/cloudstack"
+    },
+    {
+      "graphBytes": 477211091,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "producerBinarySha256": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+      "producerNote": "CloudStack is the 9df5dcf3 release result; Eclipse is the earlier development extraction. Query this existing artifact without rerunning extraction.",
+      "repository": "eclipse/eclipse.platform.ui"
+    }
+  ],
+  "interpretation": [
+    "This is a known Java development cohort and no independent holdout.",
+    "A relation in the graph is a stored observation, not independently verified source truth.",
+    "Unique class ownership is required before class-level attribution; ambiguous and unresolved relations remain explicit.",
+    "Cross-language graph/query ability and authored explanations require separate evaluation.",
+    "Do not change or rerun Graphify, source repositories or frozen graph producers for this inventory."
+  ],
+  "outputs": "Preserve every class ID and its method/field/relationship coverage counts, aggregate distributions across all classes, relation/evidence totals, all 55 sample joins, ambiguity and limit outcomes, raw graph/source hashes, and repeated verification. Keep prior Graphify/Compass native hub rankings unchanged.",
+  "ownership": {
+    "provenance": "Count source-anchor, exact AST, inferred and other evidence separately. Record class-member relation multiplicity and missing endpoints.",
+    "rule": "A direct directed typed contains edge from a node of kind class to a node of kind method or field creates an owner candidate. Deduplicate the owner IDs per member. If zero or multiple distinct class owners, member ownership is unavailable or ambiguous; never choose the first."
+  },
+  "priorNativeHubReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "priorSpanProbeReviewSha256": "27bef64838d9068c9d3a5298f59a0750c99e8950d8e5539a1f1dc31436e8f45f",
+  "purpose": "Inventory source-backed class ownership and method/field relationships across every class in both frozen Java graphs before designing any responsibility or cohesion score. This is not a defect classifier.",
+  "relationships": {
+    "cohesionLimit": "Do not infer low cohesion from methods without field references: extraction coverage and dynamic dispatch may be incomplete. Do not compute TCC, WMC, ATFD or a god-object score from this inventory.",
+    "fieldReferences": "For each directed references edge from a uniquely class-owned method to a field node, count own-class, foreign-class and unresolved field targets. Track methods with observed own/foreign field references, distinct targets and exact anchored occurrences.",
+    "methodCalls": "For each directed calls edge from a uniquely class-owned method, count distinct internal, foreign and unresolved method targets and exact anchored occurrences. Preserve repeated edge records separately."
+  },
+  "samplePolicy": "Retain all 55 external Blob reviews; eight consensus primary cases and all 47 secondary cases. Never tune thresholds on the eight known cases or reinterpret missing facts as a negative label.",
+  "schema": "compass.mlcq-relation-evidence-registration/1",
+  "sourceLabelRegistrationSha256": "a08e6a0970c605154b329acbfebaa0d9684859f1fad2fa0ed8e8717772866ef1"
+}

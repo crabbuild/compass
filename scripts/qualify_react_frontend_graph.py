@@ -880,6 +880,23 @@ def match_source_facts(graph: dict[str, Any], oracle: dict[str, Any]) -> dict[st
     }
 
 
+def assert_fixture_route_hierarchy(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    """Hand-reviewed Next layout composition in the checked-in fixture source."""
+    index = {node["id"]: node for node in nodes}
+    actual = {
+        (value(index[edge["source"]], "framework"), source_file(index[edge["source"]]), source_file(index[edge["target"]]))
+        for edge in edges
+    }
+    expected = {
+        ("next", "src/app/layout.tsx", "src/app/page.tsx"),
+        ("next", "src/app/layout.tsx", "src/app/admin/layout.tsx"),
+        ("next", "src/app/admin/layout.tsx", "src/app/admin/page.tsx"),
+        ("next", "src/app/admin/layout.tsx", "src/app/admin/settings/page.tsx"),
+    }
+    if actual != expected or len(edges) != len(expected):
+        fail(f"fixture route hierarchy differs from source layout roles: missing={sorted(expected - actual)} unexpected={sorted(actual - expected)} records={len(edges)} expectedRecords={len(expected)}")
+
+
 def load_expectations(path: Path | None = None) -> dict[str, Any]:
     expectations = load(path or EXPECTATIONS)
     if expectations.get("schema") != "compass.framework-evidence/1":
@@ -978,8 +995,7 @@ def check_positive(graph: dict[str, Any], expectations: dict[str, Any]) -> dict[
         and edge.get("source") in route_ids
         and edge.get("target") in route_ids
     ]
-    if not hierarchy_edges:
-        fail("frontend route hierarchy did not publish a route-to-route contains edge")
+    assert_fixture_route_hierarchy(nodes, hierarchy_edges)
     if not all(
         value(edge, "_origin") == "convention"
         or any(

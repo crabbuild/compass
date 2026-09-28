@@ -1,0 +1,19 @@
+{
+  "schema": "compass.member-source-development-registration/1",
+  "baselineCommit": "bf7bca6ea88f04febddf6253b9a2dcf93d54de2a",
+  "scope": "Known five-language responsibility subjects and 20 facts; source and prior outputs inspected. Evaluate a new opt-in member-source capability and a separate symmetric public-neighbor/source-window control. No held-out, synthesized explanation, or god-object quality claim.",
+  "parentRegistrationSha256": "374dfefbe715ed1a238b46d3b071c8177881e12d3687dbeaa0939fc86dd51b0b",
+  "graphRun": "rust-index-receiver-03/run.json",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "endpointPolicy": "Reuse the ten resolver responses captured under native-explanation-02/final. Apply the same unique file/startLine/symbol selector without changes. Compass Redux remains unavailable after bounded recall; no oracle-ID or kind substitution.",
+  "nativeMemberArm": "For each uniquely resolved Compass subject, run explain ID --source-members --budget 2000 --max-source-bytes 8000 with the frozen graph and source root. Member mode returns recorded callable implementations through directed containment, including nested type containers, under a shared source-byte budget. Order by source file/start byte/end byte/ID; no question-fact or post-output selection. Missing subjects remain in the denominator. Compare with the existing declaration-only native output; Graphify has no equivalent source-members flag, so do not present this feature delta as a new paired win.",
+  "symmetricControl": "For both tools, make one public get_neighbors call with the same previously selected root ID, no relation filter. Retain outgoing contains or method rows with source file/start-line anchors. Compass uses explicit returned target anchors; Graphify uses the displayed relation source site, checked afterward against the source declaration. Keep all ambiguities visible; source windows are not identity resolution. Source reads may only use returned anchors.",
+  "windowPolicy": "Group returned membership anchors by repository-relative file and start line, retaining every matching member row. Sort files and lines. For each group, read from its line start up to the next returned membership anchor in that file, or at most 4096 bytes for the last anchor, whichever comes first. A global 8000-byte payload budget applies, in that order. No next-page requests, retries, fact-guided ranking, end-line advantage or extra source reads. Record partial windows and groups omitted by the byte limit. This is one reproducible agent policy, not a best-possible workflow.",
+  "bounds": "MCP 60 seconds and 1 MiB per response. CLI 120 seconds and 16 MiB per stdout/stderr. Source files at most 4 MiB, confined beneath pinned read-only repository roots; verify whole-file/source/graph digests before and after. Report response, source payload and command bytes separately, not latency or equal-I/O efficiency.",
+  "scoring": "Review all 20 complete implementation facts against returned evidence. Exact witness coverage and any separately justified semantic sufficiency are distinct; no partial-fact credit by convenience. Check node identity, membership direction, actual source windows, all errors, ambiguous responses and explicit omissions. Keep the original native 7/20 versus 0/20 and previous symmetric source-read 11/20 versus 13/20 results separate; never construct a best-of-arms score.",
+  "limitations": [
+    "Member source exposes code evidence; it does not itself author a responsibility explanation or diagnose a god object.",
+    "Full relationship precision, longer paths and fresh confirmation remain outstanding.",
+    "Same-agent review is not independent human adjudication."
+  ]
+}

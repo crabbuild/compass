@@ -3,59 +3,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::{EdgeRecord, GraphDocument, NodeRecord, code_graph::NodeKind};
 use rayon::prelude::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::cluster::{Communities, PythonRandom, score_communities};
-
-const BUILTIN_NOISE_LABELS: &[&str] = &[
-    "str",
-    "int",
-    "float",
-    "bool",
-    "bytes",
-    "bytearray",
-    "complex",
-    "object",
-    "True",
-    "False",
-    "MagicMock",
-    "Mock",
-    "AsyncMock",
-    "NonCallableMock",
-    "NonCallableMagicMock",
-    "PropertyMock",
-    "patch",
-    "sentinel",
-    "Path",
-    "Any",
-    "Optional",
-    "List",
-    "Dict",
-    "Set",
-    "Tuple",
-    "Union",
-    "Callable",
-    "Type",
-    "ClassVar",
-    "Final",
-    "Literal",
-    "Protocol",
-    "Counter",
-    "defaultdict",
-    "OrderedDict",
-    "datetime",
-    "Enum",
-    "os",
-    "sys",
-    "re",
-    "json",
-    "io",
-    "abc",
-    "typing",
-];
 
 const JSON_NOISE_LABELS: &[&str] = &[
     "start",
@@ -105,6 +58,57 @@ pub struct GodNode {
     pub id: String,
     pub label: String,
     pub degree: usize,
+}
+
+/// Stored incident records, separate from the distinct-pair hub ranking.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubRelation {
+    pub relation: String,
+    pub edge_records: usize,
+    pub incoming_records: usize,
+    pub outgoing_records: usize,
+    pub undirected_records: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubConnectivity {
+    pub schema: &'static str,
+    pub directed: bool,
+    pub edge_records: usize,
+    pub self_loop_records: usize,
+    pub relations: Vec<HubRelation>,
+    pub omitted_relation_kinds: usize,
+    pub omitted_relation_records: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubEvidence {
+    pub hub: GodNode,
+    pub connectivity: HubConnectivity,
+    /// Stored direct-member evidence for a directed, typed class or struct.
+    pub members: Option<HubMembers>,
+}
+
+pub const MAX_HUB_RELATIONS: usize = 16;
+pub const HUB_CONNECTIVITY_SCHEMA: &str = "compass.hub-connectivity/1";
+pub const HUB_MEMBERS_SCHEMA: &str = "compass.hub-members/1";
+
+/// Counts of uniquely owned stored members and their own-field references.
+/// Missing or unresolved source facts must not be interpreted as absent work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubMembers {
+    pub schema: &'static str,
+    pub source_coverage: &'static str,
+    pub direct_methods: usize,
+    pub direct_fields: usize,
+    pub ambiguous_direct_members: usize,
+    pub own_field_reference_records: usize,
+    pub distinct_own_field_pairs: usize,
+    pub methods_touching_own_fields: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -255,9 +259,224 @@ pub struct ImportCycle {
 }
 
 #[must_use]
+/// Return connected, source-located hub candidates, ordered by degree then ID.
+///
+/// This is a topology ranking, not proof of a god-object design problem. A
+/// project's declaration must not be discarded just because its name is also
+/// used by a standard library or test framework.
 pub fn god_nodes(document: &GraphDocument, top_n: usize) -> Vec<GodNode> {
     let graph = AnalysisGraph::new(document);
     god_nodes_in(&graph, top_n)
+}
+
+/// Explain the unchanged hub ranking using all valid incident edge records.
+///
+/// Parallel records are retained. A directed self-loop contributes once to
+/// `edge_records` and once to each direction; undirected records have no
+/// inferred direction. Relation rows are bounded, with explicit omissions.
+/// These graph observations do not establish source precision or design defects.
+pub fn god_nodes_with_evidence(document: &GraphDocument, top_n: usize) -> Vec<HubEvidence> {
+    let graph = AnalysisGraph::new(document);
+    let ranked = god_nodes_in(&graph, top_n);
+    let members = hub_members_in(&graph, &ranked);
+    let selected = ranked
+        .iter()
+        .enumerate()
+        .map(|(index, hub)| (hub.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut relations = vec![BTreeMap::<String, HubRelation>::new(); ranked.len()];
+    let mut loops = vec![0; ranked.len()];
+    for edge in &graph.relation_edges {
+        let record = edge.record;
+        for (endpoint, id) in [&record.source, &record.target].into_iter().enumerate() {
+            // Each self-loop is one incident record, not two records.
+            if endpoint == 1 && record.source == record.target {
+                continue;
+            }
+            if let Some(&index) = selected.get(id.as_str()) {
+                add_hub_relation(&mut relations[index], record, id, document.directed);
+                loops[index] += usize::from(record.source == record.target);
+            }
+        }
+    }
+    ranked
+        .into_iter()
+        .zip(relations)
+        .zip(loops)
+        .zip(members)
+        .map(|(((hub, relations), self_loop_records), members)| {
+            let mut relations = relations.into_values().collect::<Vec<_>>();
+            relations.sort_by(|left, right| {
+                right
+                    .edge_records
+                    .cmp(&left.edge_records)
+                    .then_with(|| left.relation.cmp(&right.relation))
+            });
+            let edge_records = relations.iter().map(|row| row.edge_records).sum();
+            let omitted_relation_kinds = relations.len().saturating_sub(MAX_HUB_RELATIONS);
+            let omitted_relation_records = relations
+                .iter()
+                .skip(MAX_HUB_RELATIONS)
+                .map(|row| row.edge_records)
+                .sum();
+            relations.truncate(MAX_HUB_RELATIONS);
+            HubEvidence {
+                hub,
+                members,
+                connectivity: HubConnectivity {
+                    schema: HUB_CONNECTIVITY_SCHEMA,
+                    directed: document.directed,
+                    edge_records,
+                    self_loop_records,
+                    relations,
+                    omitted_relation_kinds,
+                    omitted_relation_records,
+                },
+            }
+        })
+        .collect()
+}
+
+fn hub_members_in(graph: &AnalysisGraph<'_>, ranked: &[GodNode]) -> Vec<Option<HubMembers>> {
+    let mut result = vec![None; ranked.len()];
+    if !graph.directed || ranked.is_empty() {
+        return result;
+    }
+    let selected = ranked
+        .iter()
+        .enumerate()
+        .filter_map(|(rank, hub)| {
+            let position = *graph.positions.get(hub.id.as_str())?;
+            is_member_container(graph.nodes[position]).then_some((position, rank))
+        })
+        .collect::<HashMap<_, _>>();
+    if selected.is_empty() {
+        return result;
+    }
+    let mut direct = vec![BTreeSet::<usize>::new(); ranked.len()];
+    for edge in &graph.relation_edges {
+        if edge_string(edge.record, "relation") == "contains"
+            && let Some(&rank) = selected.get(&edge.left)
+            && is_hub_member(graph.nodes[edge.right])
+        {
+            direct[rank].insert(edge.right);
+        }
+    }
+    let selected_members = direct
+        .iter()
+        .flat_map(|members| members.iter().copied())
+        .collect::<HashSet<_>>();
+    let mut first_owner = HashMap::<usize, usize>::new();
+    let mut ambiguous = HashSet::<usize>::new();
+    for edge in &graph.relation_edges {
+        if edge_string(edge.record, "relation") == "contains"
+            && selected_members.contains(&edge.right)
+            && is_member_container(graph.nodes[edge.left])
+        {
+            match first_owner.entry(edge.right) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(edge.left);
+                }
+                std::collections::hash_map::Entry::Occupied(entry) if *entry.get() != edge.left => {
+                    ambiguous.insert(edge.right);
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+            }
+        }
+    }
+    let mut method_owner = HashMap::<usize, usize>::new();
+    let mut field_owner = HashMap::<usize, usize>::new();
+    for (position, &rank) in &selected {
+        let mut counts = HubMembers {
+            schema: HUB_MEMBERS_SCHEMA,
+            source_coverage: "unverified",
+            direct_methods: 0,
+            direct_fields: 0,
+            ambiguous_direct_members: 0,
+            own_field_reference_records: 0,
+            distinct_own_field_pairs: 0,
+            methods_touching_own_fields: 0,
+        };
+        for &member in &direct[rank] {
+            if ambiguous.contains(&member) || first_owner.get(&member) != Some(position) {
+                counts.ambiguous_direct_members += 1;
+                continue;
+            }
+            match explicit_node_kind(graph.nodes[member]) {
+                Some(NodeKind::Method | NodeKind::Constructor) => {
+                    counts.direct_methods += 1;
+                    method_owner.insert(member, rank);
+                }
+                Some(NodeKind::Field | NodeKind::Property) => {
+                    counts.direct_fields += 1;
+                    field_owner.insert(member, rank);
+                }
+                _ => {}
+            }
+        }
+        result[rank] = Some(counts);
+    }
+    let mut pairs = vec![BTreeSet::<(usize, usize)>::new(); ranked.len()];
+    let mut touching = vec![BTreeSet::<usize>::new(); ranked.len()];
+    for edge in &graph.relation_edges {
+        if edge_string(edge.record, "relation") == "references"
+            && let (Some(&method_rank), Some(&field_rank)) =
+                (method_owner.get(&edge.left), field_owner.get(&edge.right))
+            && method_rank == field_rank
+        {
+            if let Some(counts) = &mut result[method_rank] {
+                counts.own_field_reference_records += 1;
+            }
+            pairs[method_rank].insert((edge.left, edge.right));
+            touching[method_rank].insert(edge.left);
+        }
+    }
+    for (rank, counts) in result.iter_mut().enumerate() {
+        if let Some(counts) = counts {
+            counts.distinct_own_field_pairs = pairs[rank].len();
+            counts.methods_touching_own_fields = touching[rank].len();
+        }
+    }
+    result
+}
+
+fn is_member_container(node: &NodeRecord) -> bool {
+    matches!(
+        explicit_node_kind(node),
+        Some(NodeKind::Class | NodeKind::Struct)
+    )
+}
+
+fn is_hub_member(node: &NodeRecord) -> bool {
+    matches!(
+        explicit_node_kind(node),
+        Some(NodeKind::Method | NodeKind::Constructor | NodeKind::Field | NodeKind::Property)
+    )
+}
+
+fn add_hub_relation(
+    relations: &mut BTreeMap<String, HubRelation>,
+    record: &EdgeRecord,
+    id: &str,
+    directed: bool,
+) {
+    let relation = record.string("relation");
+    let row = relations
+        .entry(relation.clone())
+        .or_insert_with(|| HubRelation {
+            relation,
+            edge_records: 0,
+            incoming_records: 0,
+            outgoing_records: 0,
+            undirected_records: 0,
+        });
+    row.edge_records += 1;
+    if directed {
+        row.incoming_records += usize::from(record.target == id);
+        row.outgoing_records += usize::from(record.source == id);
+    } else {
+        row.undirected_records += 1;
+    }
 }
 
 fn god_nodes_in(graph: &AnalysisGraph<'_>, top_n: usize) -> Vec<GodNode> {
@@ -267,14 +486,19 @@ fn god_nodes_in(graph: &AnalysisGraph<'_>, top_n: usize) -> Vec<GodNode> {
         .enumerate()
         .map(|(position, node)| (position, node, graph.degree(position)))
         .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
+    ranked.sort_by(|left, right| {
+        right
+            .2
+            .cmp(&left.2)
+            .then_with(|| left.1.id.cmp(&right.1.id))
+    });
     ranked
         .into_iter()
-        .filter(|(position, node, _)| {
-            !graph.is_file_node(*position)
+        .filter(|(position, node, degree)| {
+            *degree > 0
+                && !graph.is_file_node(*position)
                 && !is_concept_node(node)
                 && !is_json_key_node(node)
-                && !BUILTIN_NOISE_LABELS.contains(&node.label())
         })
         .take(top_n)
         .map(|(_, node, degree)| GodNode {
@@ -1773,6 +1997,11 @@ impl<'a> AnalysisGraph<'a> {
     }
     fn is_file_node(&self, node: usize) -> bool {
         let record = self.nodes[node];
+        // Canonical kinds are stronger evidence than display labels. In
+        // particular, `.method()` is a callable label, not a file identity.
+        if let Some(kind) = explicit_node_kind(record) {
+            return kind == NodeKind::File;
+        }
         let label = record.label();
         if label.is_empty() {
             return false;
@@ -1827,9 +2056,21 @@ fn invert_communities(communities: &Communities) -> HashMap<String, usize> {
         .collect()
 }
 
+fn explicit_node_kind(node: &NodeRecord) -> Option<NodeKind> {
+    serde::Deserialize::deserialize(
+        serde::de::value::StrDeserializer::<serde::de::value::Error>::new(node.kind_name()),
+    )
+    .ok()
+}
+
 fn is_concept_node(node: &NodeRecord) -> bool {
     let source = attribute(node, "source_file").unwrap_or_default();
-    source.is_empty() || !source.rsplit('/').next().unwrap_or_default().contains('.')
+    // Canonical structural records can come from extensionless scripts or
+    // configuration files. Retain the filename heuristic for legacy records
+    // without a recognized kind, and still exclude nodes lacking a source.
+    source.is_empty()
+        || (explicit_node_kind(node).is_none()
+            && !source.rsplit('/').next().unwrap_or_default().contains('.'))
 }
 fn is_json_key_node(node: &NodeRecord) -> bool {
     attribute(node, "source_file").is_some_and(|source| source.to_lowercase().ends_with(".json"))

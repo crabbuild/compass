@@ -1,0 +1,121 @@
+{
+  "binarySha256": "668fd1c8c145241387d04a35eb319eec09825e3d5bd9c031c2cc6863a45c1d04",
+  "compilerFieldReviewSha256": "0072926565aa09100246f47722d009082d4c5d646d92e5f3dcdb55a7892a8f24",
+  "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+  "independentSourceChecks": [
+    {
+      "compilerBoundOwnFieldSites": 0,
+      "graphRank": 599,
+      "matchesSelectedSourceCounts": true,
+      "sampleId": 6391534,
+      "sourceFields": 0,
+      "sourceMethodsAndConstructors": 7,
+      "storedMemberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 0,
+        "directMethods": 7,
+        "distinctOwnFieldPairs": 0,
+        "methodsTouchingOwnFields": 0,
+        "ownFieldReferenceRecords": 0,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      }
+    },
+    {
+      "compilerBoundOwnFieldSites": 55,
+      "graphRank": 1173,
+      "matchesSelectedSourceCounts": true,
+      "sampleId": 6374724,
+      "sourceFields": 11,
+      "sourceMethodsAndConstructors": 15,
+      "storedMemberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 11,
+        "directMethods": 15,
+        "distinctOwnFieldPairs": 31,
+        "methodsTouchingOwnFields": 11,
+        "ownFieldReferenceRecords": 55,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      }
+    },
+    {
+      "compilerBoundOwnFieldSites": 15,
+      "graphRank": 2641,
+      "matchesSelectedSourceCounts": true,
+      "sampleId": 6413795,
+      "sourceFields": 5,
+      "sourceMethodsAndConstructors": 15,
+      "storedMemberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 5,
+        "directMethods": 15,
+        "distinctOwnFieldPairs": 13,
+        "methodsTouchingOwnFields": 7,
+        "ownFieldReferenceRecords": 15,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      }
+    }
+  ],
+  "isError": false,
+  "limitations": [
+    "Only three of four rated Eclipse classes occur in the requested top 5,000; no alternative identity or rank was assigned to the fourth.",
+    "The compiler-own-field census is selected and incomplete under missing project dependencies. Equality of selected counts does not validate all source field accesses.",
+    "This is a post-change development replay, not a preregistered god-object classifier or a new Graphify comparison."
+  ],
+  "memberSourceReviewSha256": "edff7c60649a6d85389d94b04bfe805f0b046d0667603135e00b56b61c001756",
+  "ratedClassesFound": [
+    {
+      "class": "SimpleValueProperty",
+      "memberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 0,
+        "directMethods": 7,
+        "distinctOwnFieldPairs": 0,
+        "methodsTouchingOwnFields": 0,
+        "ownFieldReferenceRecords": 0,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      },
+      "rank": 599,
+      "sampleId": 6391534
+    },
+    {
+      "class": "BindingModel",
+      "memberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 11,
+        "directMethods": 15,
+        "distinctOwnFieldPairs": 31,
+        "methodsTouchingOwnFields": 11,
+        "ownFieldReferenceRecords": 55,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      },
+      "rank": 1173,
+      "sampleId": 6374724
+    },
+    {
+      "class": "DeprecatedUIWizardsAuto",
+      "memberEvidence": {
+        "ambiguousDirectMembers": 0,
+        "directFields": 5,
+        "directMethods": 15,
+        "distinctOwnFieldPairs": 13,
+        "methodsTouchingOwnFields": 7,
+        "ownFieldReferenceRecords": 15,
+        "schema": "compass.hub-members/1",
+        "sourceCoverage": "unverified"
+      },
+      "rank": 2641,
+      "sampleId": 6413795
+    }
+  ],
+  "rawHubResponseSha256": "8637abebcf32f760450d9aff5b5f7d2f39699e4d58502043307f4cad51747c60",
+  "requested": 5000,
+  "responseError": null,
+  "returned": 5000,
+  "schema": "compass.hub-members-eclipse-diagnostic/1",
+  "scope": "Post-change public MCP read on frozen Eclipse graph; no classifier or comparison score."
+}

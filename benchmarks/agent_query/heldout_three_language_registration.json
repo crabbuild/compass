@@ -1,0 +1,21 @@
+{
+  "schema": "compass.heldout-three-language-registration/1",
+  "registeredBeforeToolGraphBuilds": true,
+  "selection": "Twelve source-first declaration, direct-callee, direct-caller, and one-hop-path questions in three repositories absent from the prior Compass/Graphify audit. The repositories and facts were selected by an investigator from source, not randomly sampled or blinded from source; no claim of population accuracy follows.",
+  "suite": "benchmarks/agent_query/heldout_three_language_suite.toml",
+  "suiteSha256": "8e661da8cd6ebe12bfdb76dc182f417275a1f62803d70cf585f5b714e7c42c5b",
+  "runner": "benchmarks/agent_query/runner.py",
+  "runnerSha256": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "tools": {
+    "compass": {"version": "0.3.30", "sourceRevision": "bfe9068cfb9fd03cf40e402f6de685ab204c2ab8", "debugBinarySha256": "31deec65b70a815a8c1b9a65161c515f6295f3b9bc23fa4ee1f5217d48414638"},
+    "graphify": {"package": "graphifyy", "version": "0.9.67", "launcherSha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3", "installedRecordSha256": "862db9249ac0cfcbb947dff9391854bde191c86d0250de87739902906731ba4e"}
+  },
+  "repositories": [
+    {"name": "anyhow-heldout", "sourceCommit": "c63b279f3f4af2b02ca6267d9eb47d6d10497f69", "trackedFiles": 54, "reviewedSourceSha256": {"src/error.rs": "2a78ee4e5f8d6b4476c761f77473362b9ed12f5402e4701001e7d04d628ba030", "src/chain.rs": "85af447405f075633fab186b7f1c94d7f33a36474f239c50a961b2d6197d5426"}},
+    {"name": "markitdown-heldout", "sourceCommit": "945314a45ddbe02935f2fd287b797dc0ba4a01e4", "trackedFiles": 200, "reviewedSourceSha256": {"packages/markitdown/src/markitdown/_markitdown.py": "11f251f2a3bb67d9d4be55d12970c6c8438112a6a2f841f3e94bcac74001afb0"}},
+    {"name": "vue-heldout", "sourceCommit": "9e88707940088cb1f4cd7dd210c9168a50dc347c", "trackedFiles": 508, "reviewedSourceSha256": {"src/compiler/index.ts": "5ed6a2ec2b8544f2a28b30c8a3b7871d2adc8324b3fc07101b6abc5362cef0cb", "src/compiler/create-compiler.ts": "099d4dc2ab5c2bee55ab06591c104dc29c3190bd57d63ef9f270b091cd127509", "src/compiler/parser/index.ts": "beb950459eb34bd85eec37a7922d5a39f6d4dae8bd63e7c8a3910cd6fb100cb8", "src/compiler/optimizer.ts": "d07689d98ad9b24e1d9b4708dbfa07e9bbca93f866b3d67c86e499f5f10b95df", "src/compiler/codegen/index.ts": "56e3739c7de441ef3c0a3a9edca3acac51b272a32a878300715264630ff4ec9d"}}
+  ],
+  "capture": "Use fresh output roots under /Volumes/Workspace/CrabData/compass-evaluations and the pinned runner. Both tools receive the same clean source commit. Retain complete argv, stdout, stderr, timing, graph SHA-256, tool identities, and all failures. Never edit an input checkout. Bound build to 1800 seconds and each query to 60 seconds. Keep the fixed source facts and failed questions in the denominator.",
+  "review": "The runner's text-required verdict is a preliminary recall proxy only. Independently inspect each answer and graph path against the pinned source call sites, exact owner/declaration identity, direction and one-hop requirement; an indirect structural route, coincidental name, source excerpt without the requested relationship, or ambiguous selection does not receive direct-call credit. Report tool-specific graph omissions, token/response bytes, and competitor advantages. Do not tune questions after seeing outputs or pool this selected panel with earlier development scores.",
+  "limits": "This source-first held-out-from-development panel covers three languages and four task kinds, not community quality, god-object diagnosis, all programming languages, whole-graph precision, or broad superiority. Those remain separate open requirements."
+}

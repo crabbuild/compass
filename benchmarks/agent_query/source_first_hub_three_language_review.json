@@ -1,0 +1,246 @@
+{
+  "registrationSha256": "da554737c494f51eb15f4b7a8cce8a455382df2c228b97754a88dc46105fb586",
+  "results": [
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 100,
+      "matchingSourceAnchors": 100,
+      "repository": "litestream",
+      "returned": 100,
+      "tool": "compass",
+      "verifiedIdentities": 100,
+      "witnesses": [
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:bdf24f8e667b4136921ec5e2e635f1fe317198550929d7dea374613f112cd960",
+          "returnedDegree": 67,
+          "returnedRank": 10,
+          "sourceAnchorMatches": true,
+          "sourceFile": "store.go",
+          "sourceLine": 87,
+          "sourceRole": "Coordinates database lifecycle, compaction, retention, validation and heartbeat work.",
+          "storedDegree": 67,
+          "symbol": "Store",
+          "top10": true,
+          "top100": true,
+          "top50": true
+        },
+        {
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:4be04503638287425cbca5db6dd992be9980bd7d11eee27fa9fc6f80d97083a8",
+          "sourceFile": "heartbeat.go",
+          "sourceLine": 17,
+          "sourceRole": "Stores heartbeat HTTP timing and ping state.",
+          "storedDegree": 11,
+          "symbol": "HeartbeatClient",
+          "top10": false,
+          "top100": false,
+          "top50": false
+        }
+      ]
+    },
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 75,
+      "matchingSourceAnchors": 0,
+      "repository": "litestream",
+      "returned": 100,
+      "tool": "graphify",
+      "verifiedIdentities": 75,
+      "witnesses": [
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "store_go_litestream_store",
+          "returnedDegree": 45,
+          "returnedRank": 13,
+          "sourceAnchorMatches": null,
+          "sourceFile": "store.go",
+          "sourceLine": 87,
+          "sourceRole": "Coordinates database lifecycle, compaction, retention, validation and heartbeat work.",
+          "storedDegree": 45,
+          "symbol": "Store",
+          "top10": false,
+          "top100": true,
+          "top50": true
+        },
+        {
+          "graphDeclarationMatches": 1,
+          "graphId": "litestream_heartbeatclient",
+          "sourceFile": "heartbeat.go",
+          "sourceLine": 17,
+          "sourceRole": "Stores heartbeat HTTP timing and ping state.",
+          "storedDegree": 11,
+          "symbol": "HeartbeatClient",
+          "top10": false,
+          "top100": false,
+          "top50": false
+        }
+      ]
+    },
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 100,
+      "matchingSourceAnchors": 100,
+      "repository": "fastapi",
+      "returned": 100,
+      "tool": "compass",
+      "verifiedIdentities": 100,
+      "witnesses": [
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:5c091923f867f766b802854f05750412a14072f3be1b5650c0b238b7efd8cefa",
+          "returnedDegree": 1401,
+          "returnedRank": 1,
+          "sourceAnchorMatches": true,
+          "sourceFile": "fastapi/applications.py",
+          "sourceLine": 42,
+          "sourceRole": "Framework application facade for initialization, middleware, OpenAPI and route registration.",
+          "storedDegree": 1401,
+          "symbol": "FastAPI",
+          "top10": true,
+          "top100": true,
+          "top50": true
+        },
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:eb50794f2e4694e41014bf1b89a51f5652e0c85f3c1a73b9860e310011d53874",
+          "returnedDegree": 42,
+          "returnedRank": 31,
+          "sourceAnchorMatches": true,
+          "sourceFile": "fastapi/datastructures.py",
+          "sourceLine": 153,
+          "sourceRole": "Tracks whether a default value was overwritten, including truthy values.",
+          "storedDegree": 42,
+          "symbol": "DefaultPlaceholder",
+          "top10": false,
+          "top100": true,
+          "top50": true
+        }
+      ]
+    },
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 86,
+      "matchingSourceAnchors": 0,
+      "repository": "fastapi",
+      "returned": 100,
+      "tool": "graphify",
+      "verifiedIdentities": 86,
+      "witnesses": [
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "fastapi_applications_fastapi",
+          "returnedDegree": 830,
+          "returnedRank": 1,
+          "sourceAnchorMatches": null,
+          "sourceFile": "fastapi/applications.py",
+          "sourceLine": 42,
+          "sourceRole": "Framework application facade for initialization, middleware, OpenAPI and route registration.",
+          "storedDegree": 830,
+          "symbol": "FastAPI",
+          "top10": true,
+          "top100": true,
+          "top50": true
+        },
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "fastapi_datastructures_defaultplaceholder",
+          "returnedDegree": 26,
+          "returnedRank": 31,
+          "sourceAnchorMatches": null,
+          "sourceFile": "fastapi/datastructures.py",
+          "sourceLine": 153,
+          "sourceRole": "Tracks whether a default value was overwritten, including truthy values.",
+          "storedDegree": 26,
+          "symbol": "DefaultPlaceholder",
+          "top10": false,
+          "top100": true,
+          "top50": true
+        }
+      ]
+    },
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 100,
+      "matchingSourceAnchors": 100,
+      "repository": "celld",
+      "returned": 100,
+      "tool": "compass",
+      "verifiedIdentities": 100,
+      "witnesses": [
+        {
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:7ee2e00c0b938771dc2fe1219d8c9f78497b8db04e38ee16dacb34c103b38b2f",
+          "sourceFile": "crates/celld/peer_auth.rs",
+          "sourceLine": 60,
+          "sourceRole": "Signs and verifies peer requests and tracks replay state.",
+          "storedDegree": 27,
+          "symbol": "PeerAuth",
+          "top10": false,
+          "top100": false,
+          "top50": false
+        },
+        {
+          "graphDeclarationMatches": 1,
+          "graphId": "sha256:1f821ef235bb5a09a7723afb766cdc3b8a52532f3f49a7f59d48ea7db7ed79eb",
+          "sourceFile": "crates/celld/lib.rs",
+          "sourceLine": 439,
+          "sourceRole": "Completion token that releases a cell activity reservation on drop.",
+          "storedDegree": 6,
+          "symbol": "CellActivityGuard",
+          "top10": false,
+          "top100": false,
+          "top50": false
+        }
+      ]
+    },
+    {
+      "executionSucceeded": true,
+      "matchingDegrees": 86,
+      "matchingSourceAnchors": 0,
+      "repository": "celld",
+      "returned": 100,
+      "tool": "graphify",
+      "verifiedIdentities": 86,
+      "witnesses": [
+        {
+          "degreeMatches": true,
+          "graphDeclarationMatches": 1,
+          "graphId": "crates_celld_peer_auth_peerauth",
+          "returnedDegree": 26,
+          "returnedRank": 55,
+          "sourceAnchorMatches": null,
+          "sourceFile": "crates/celld/peer_auth.rs",
+          "sourceLine": 60,
+          "sourceRole": "Signs and verifies peer requests and tracks replay state.",
+          "storedDegree": 26,
+          "symbol": "PeerAuth",
+          "top10": false,
+          "top100": true,
+          "top50": false
+        },
+        {
+          "graphDeclarationMatches": 1,
+          "graphId": "crates_celld_lib_cellactivityguard",
+          "sourceFile": "crates/celld/lib.rs",
+          "sourceLine": 439,
+          "sourceRole": "Completion token that releases a cell activity reservation on drop.",
+          "storedDegree": 9,
+          "symbol": "CellActivityGuard",
+          "top10": false,
+          "top100": false,
+          "top50": false
+        }
+      ]
+    }
+  ],
+  "runJsonSha256": "4ce35f4a7dbd7218cfc6ee9e6120b5f75e712bd920d29501c70c5ed5bc6c7a0b",
+  "schema": "compass.source-first-hub-three-language-review/1",
+  "scope": "Review registered source witnesses against captured public hub responses.\n\nThis checks retrieval and consistency on each tool's own stored graph. Source\nroles are not independent labels for god-object defects.\n"
+}

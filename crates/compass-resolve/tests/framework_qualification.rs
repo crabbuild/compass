@@ -75,15 +75,14 @@ fn qualification_rejects_unresolved_or_missing_framework_routes()
         "missing-route",
         vec![FrameworkRouteExpectation::new("express", "GET", "/missing")],
     );
-    let error = qualify_framework_case(
+    let result = qualify_framework_case(
         &extraction,
         compass_languages::FrameworkLimits::default(),
         &case,
-    )
-    .expect_err("a missing framework route must fail qualification");
+    );
     assert!(matches!(
-        error,
-        FrameworkQualificationError::MissingRoute { .. }
+        result,
+        Err(FrameworkQualificationError::MissingRoute { .. })
     ));
     Ok(())
 }

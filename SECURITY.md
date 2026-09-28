@@ -85,6 +85,11 @@ to a public issue: it can disclose repository names, paths, source anchors,
 and graph structure. Share a sanitized `compass store status --format json`
 response instead.
 
+Standalone graph reads bind derived caches and MCP graph views to the digest
+of one size-bounded byte snapshot. Digest equality establishes content identity,
+not authenticity or semantic correctness. Disposable cache decoding is also
+byte-bounded; caches do not authorize access to their source graph.
+
 ## Document and OCR boundary
 
 PDF and OOXML files, XML relationships, compressed members, embedded images,
@@ -105,3 +110,20 @@ Inspection, extraction, listing, verification, cache replay, and historical
 materialization never silently fetch or invoke an arbitrary executable. Model
 and document cache paths can contain sensitive derived content and should not
 be attached to public issues.
+
+## Explanation source verification
+
+`compass explain` verifies a declaration excerpt against its stored symbol digest
+when that digest is present. Verification covers the complete recorded byte span,
+including bytes omitted from a truncated excerpt. A missing digest yields an
+explicitly unverified current excerpt; a malformed or mismatching digest prevents
+source output. File containment, symlink checks and bounded reads apply in both
+cases. Digest agreement establishes agreement with the graph's recorded bytes;
+it does not authenticate the graph or establish that its semantic claims are true.
+
+Member-source explanations use the same contained source reader for every
+excerpt. Discovery, metadata, retained source bytes and verification attempts
+have independent bounds. Membership comes from recorded directed structural
+relationships; inferred/deferred records, calls and references are excluded.
+Source failures and budget exhaustion remain explicit. Missing digests never
+become verified merely because an owner-to-member relationship is present.

@@ -1,0 +1,177 @@
+{
+  "schema": "compass.sql-regex-cache-whole-review/1",
+  "scope": "Declared complete-source release follow-up on pinned CloudStack; one fixed-order observation per version, not a timing qualification or Graphify speed comparison.",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "registrationSha256": "085d9148f4beb624a69f140fc103c7c18248d5b404be436177606332216c110b",
+  "fourFileReviewSha256": "1704cc9cae290c39bceb75c93bc086b63095a37eace09a99afc5ffec1add47bd",
+  "binaries": {
+    "baseline": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+    "candidate": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4"
+  },
+  "limits": {
+    "order": [
+      "baseline",
+      "candidate"
+    ],
+    "repetitions": 1,
+    "scope": "Entire clean pinned apache/cloudstack checkout, with default native discovery. No language or path exclusions added.",
+    "arguments": [
+      "extract",
+      "<source-root>",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<fresh-output>"
+    ],
+    "timeoutSeconds": 1200,
+    "streamLimitBytes": 16777216,
+    "graphLimitBytes": 1073741824,
+    "originalGraphLimitBytes": 268435456,
+    "timing": "Record wall time, UTC timestamps and host load as operational observations. One fixed-order run per version cannot establish a speedup or release-performance qualification.",
+    "isolation": "No compilation or other extraction by this task during either run. Unrelated host work is disclosed; ordinary OS caches are not flushed."
+  },
+  "wholeArtifactByteEquality": true,
+  "verificationRepeat": {
+    "byteIdentical": true,
+    "sha256": "40bf61a2d565f0c5855e8660df8f9b56c5f7eb9bb6a6ff0c24bac045b10365b6"
+  },
+  "results": [
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 193966,
+      "stdout_bytes": 496,
+      "stderr_bytes": 115,
+      "output_limited": false,
+      "tool": "baseline",
+      "startedAtUtc": "2026-09-27T18:54:15.039171+00:00",
+      "loadAverageBefore": [
+        14.185546875,
+        14.94775390625,
+        13.8720703125
+      ],
+      "loadAverageAfter": [
+        13.20849609375,
+        14.01171875,
+        13.7080078125
+      ],
+      "stdoutSha256": "dce2b6f1308be12b4bd073bd3261291c1c3fb21e054d21dfe78193fba200db41",
+      "stderrSha256": "f719d69e7e891cf28c504abc2549344578307ca0870075b9e80740539ab79929",
+      "graphBytes": 671502979,
+      "withinOriginalGraphBound": false,
+      "withinFollowupGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "verification": {
+        "admitted": true,
+        "diagnosticLinesOmitted": 0,
+        "diagnostics": [
+          {
+            "line": "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined.",
+            "stream": "stderr"
+          }
+        ],
+        "graphBytes": 671502979,
+        "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+        "outputLimited": false,
+        "successful": true,
+        "timedOut": false,
+        "tool": "baseline",
+        "wallMs": 193966,
+        "withinOriginalGraphBound": false
+      },
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 280053,
+      "stdout_bytes": 497,
+      "stderr_bytes": 115,
+      "output_limited": false,
+      "tool": "candidate",
+      "startedAtUtc": "2026-09-27T18:57:30.322832+00:00",
+      "loadAverageBefore": [
+        13.20849609375,
+        14.01171875,
+        13.7080078125
+      ],
+      "loadAverageAfter": [
+        6.72021484375,
+        9.140625,
+        11.5185546875
+      ],
+      "stdoutSha256": "b4a2605210e0f515fd2d77b4524adf1a9c24aeca9f91f5c8720abbf04476857c",
+      "stderrSha256": "f719d69e7e891cf28c504abc2549344578307ca0870075b9e80740539ab79929",
+      "graphBytes": 671502979,
+      "withinOriginalGraphBound": false,
+      "withinFollowupGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "verification": {
+        "admitted": true,
+        "diagnosticLinesOmitted": 0,
+        "diagnostics": [
+          {
+            "line": "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined.",
+            "stream": "stderr"
+          }
+        ],
+        "graphBytes": 671502979,
+        "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+        "outputLimited": false,
+        "successful": true,
+        "timedOut": false,
+        "tool": "candidate",
+        "wallMs": 280053,
+        "withinOriginalGraphBound": false
+      },
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    }
+  ],
+  "externalRun": "sql-regex-cache-01/whole",
+  "artifacts": {
+    "run_whole.py": "3d2bc46cf375b97e294242f290f3d68caf1b901c4812449970abab5e52618c90",
+    "whole/run.json": "901a0cdbaaec86d0aa6ef6bb2379c29badd3845fad3776ab6949ffd97c2fba97",
+    "verify_whole.py": "fc67d394be59c9c8438037db4e5a1a4f7dec59f4bbb29a7aa09a323e7b2d28b6",
+    "verified-whole.json": "40bf61a2d565f0c5855e8660df8f9b56c5f7eb9bb6a6ff0c24bac045b10365b6",
+    "verified-whole-repeat.json": "40bf61a2d565f0c5855e8660df8f9b56c5f7eb9bb6a6ff0c24bac045b10365b6",
+    "write_whole_report.py": "f9c210346d1c9f5afa9cd7fe8424af08a3be2ffde6bfd8262b691b149663a9bf"
+  },
+  "interpretation": [
+    "The candidate took longer in this single full-repository observation. Do not generalize the four-file SQL improvement to the whole repository; the cause of the longer observation is unproven.",
+    "The pre-cache release baseline already completes the whole repository. Recovery cannot be attributed solely to the regex cache; both earlier timeout attempts used unoptimized binaries.",
+    "Admission under the follow-up 1 GiB bound does not turn an oversized graph into a success under the original 256 MiB bound. Both outcomes remain explicit.",
+    "One observation per version, in fixed order with unrelated host work and ordinary OS caches, does not establish a speedup ratio or a general latency comparison.",
+    "Identical published graph bytes establish preservation for these two observations, not source-edge correctness, complete extraction coverage, useful communities or god-object classification.",
+    "Do not replace previous failures or any Graphify artifacts. The frozen Graphify CloudStack extraction skipped all 119 SQL files because its optional parser was absent."
+  ]
+}

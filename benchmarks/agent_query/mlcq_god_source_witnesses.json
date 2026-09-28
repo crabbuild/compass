@@ -1,0 +1,139 @@
+{
+  "schema": "compass.mlcq-source-witnesses/1",
+  "registrationCommit": "630b3cd2",
+  "sources": [
+    {
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "trackedFiles": 7764,
+      "trackedJavaFiles": 5474
+    },
+    {
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "trackedFiles": 8964,
+      "trackedJavaFiles": 6060
+    }
+  ],
+  "sourceRecovery": {
+    "repository": "eclipse/eclipse.platform.ui",
+    "originalUrl": "https://github.com/eclipse/eclipse.platform.ui",
+    "retrievalUrl": "https://github.com/eclipse-platform/eclipse.platform.ui",
+    "commitUnchanged": true,
+    "originalFailure": "Repository not found; retained in external logs."
+  },
+  "witnesses": [
+    {
+      "sampleId": 6374724,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "fileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "symbol": "BindingModel",
+      "line": 41,
+      "text": "public class BindingModel extends CommonModel {",
+      "annotatedEndLine": 462,
+      "annotatedSpanSha256": "44caa70ca94cd2c16e4d3e88c57e87a931d3c5aa5c892a109e225d4ed4ddcb23",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 6391534,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/SimpleValueProperty.java",
+      "fileSha256": "50407d33afc5ee8283f1022f5bf38278aa20b4cd82db4cd909eb5ee0e2e22b64",
+      "symbol": "SimpleValueProperty",
+      "line": 54,
+      "text": "public abstract class SimpleValueProperty<S, T> extends ValueProperty<S, T> {",
+      "annotatedEndLine": 99,
+      "annotatedSpanSha256": "41d9c06501c385b332f4bca06c824bbdc59d85cafbe4712ccb9240358496da03",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 6406137,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSSValueListImpl.java",
+      "fileSha256": "b45eedb84f09f0a8a258ff2eaa4327dae60fa2e7365ec4046fd3ca53dd9b4d69",
+      "symbol": "CSSValueListImpl",
+      "line": 24,
+      "text": "public class CSSValueListImpl extends AbstractCSSNode implements CSSValueList {",
+      "annotatedEndLine": 77,
+      "annotatedSpanSha256": "3fcdd11d287627416dcbb7f76f58aac5ffa3562bf7958d72693a4221e40c8023",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 6413795,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/dialogs/DeprecatedUIWizardsAuto.java",
+      "fileSha256": "9a70d77d824154488332a1dcced6c6cf50af5943b1f601ef376832edc73202c7",
+      "symbol": "DeprecatedUIWizardsAuto",
+      "line": 45,
+      "text": "public class DeprecatedUIWizardsAuto extends TestCase {",
+      "annotatedEndLine": 340,
+      "annotatedSpanSha256": "22b7ed775db7a8098a78fbe0d99ac9aa91cd50253dc75de099bbe291099c6290",
+      "sourceRole": "test-class",
+      "roleBasis": "JUnit TestCase under the project test source tree"
+    },
+    {
+      "sampleId": 8528735,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+      "fileSha256": "411ae1dbbd20a532d38af6c39c2fbaf0ece284d758c175be6c6f97618aba19bf",
+      "symbol": "ExternalLoadBalancerDeviceManagerImpl",
+      "line": 141,
+      "text": "public abstract class ExternalLoadBalancerDeviceManagerImpl extends AdapterBase implements ExternalLoadBalancerDeviceManager, ResourceStateAdapter {",
+      "annotatedEndLine": 1311,
+      "annotatedSpanSha256": "8c628b31e0df0062051daf3a8898a7a1b7de82b24b5540f9ab1a1cd009335ff3",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 8537138,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "fileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "symbol": "HandleConfigDriveIsoCommand",
+      "line": 24,
+      "text": "public class HandleConfigDriveIsoCommand extends Command {",
+      "annotatedEndLine": 60,
+      "annotatedSpanSha256": "1192a692b4ccf5bafd1bad1091074a11c7148099cc23f5b3b6e40554e6a488fd",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 8538037,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/network-elements/brocade-vcs/src/main/java/com/cloud/network/brocade/BrocadeVcsApi.java",
+      "fileSha256": "c6999596499204d035357bd6862badaa4d3dcd809d064b9934254917bb6407c9",
+      "symbol": "BrocadeVcsApi",
+      "line": 63,
+      "text": "public class BrocadeVcsApi {",
+      "annotatedEndLine": 542,
+      "annotatedSpanSha256": "03537a504701be2adcb209efa479b005977aa98a8ccdddf9148b204fccef5e0b",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    },
+    {
+      "sampleId": 8539645,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+      "fileSha256": "af541c9ae7f6f630462a6aaf61239482ac485188d1837f28888637edd145bea2",
+      "symbol": "DeploymentPlannersResponse",
+      "line": 26,
+      "text": "public class DeploymentPlannersResponse extends BaseResponse {",
+      "annotatedEndLine": 38,
+      "annotatedSpanSha256": "986a0188cad5fe5a7b1ca1a8af8c0305d93da98c0b58d657f3599e7dfbd7dc43",
+      "sourceRole": "production-class",
+      "roleBasis": "Class under a production source bundle/module"
+    }
+  ]
+}

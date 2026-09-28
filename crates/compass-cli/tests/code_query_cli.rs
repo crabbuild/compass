@@ -12,6 +12,144 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn ask_preserves_typed_operands_in_agent_and_text_answers() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    for (question, command, operands) in [
+        ("who calls Target?", "callers", vec!["Target"]),
+        ("who calls Missing?", "callers", vec!["Missing"]),
+        ("what does Caller call?", "callees", vec!["Caller"]),
+        ("what is impacted by Target?", "impact", vec!["Target"]),
+        (
+            "path from Caller to Target",
+            "node",
+            vec!["Caller", "Target"],
+        ),
+        ("where is Target defined?", "search", vec!["Target"]),
+    ] {
+        for format in ["agent-json", "text"] {
+            let execute = |command: &str, operands: &[&str]| {
+                let mut args = vec![OsString::from(command)];
+                args.extend(operands.iter().map(OsString::from));
+                args.extend([
+                    OsString::from("--graph"),
+                    graph.as_os_str().to_owned(),
+                    OsString::from("--format"),
+                    OsString::from(format),
+                ]);
+                run(Frontend::Compass, args)
+            };
+            let asked = execute("ask", &[question]);
+            let direct = execute(command, &operands);
+            assert_eq!(asked.code, 0, "{question}: {}", asked.stderr);
+            assert_eq!(direct.code, 0, "{}", direct.stderr);
+            if format == "agent-json" {
+                let asked = AgentQueryView::from_json(asked.stdout.as_bytes())?;
+                let direct = AgentQueryView::from_json(direct.stdout.as_bytes())?;
+                assert_eq!(asked.answer, direct.answer, "{question}");
+                assert_eq!(
+                    asked.request.operands, direct.request.operands,
+                    "{question}"
+                );
+                assert_eq!(asked.primary_results, direct.primary_results, "{question}");
+                assert_eq!(asked.paths, direct.paths, "{question}");
+                assert_eq!(asked.next_actions, direct.next_actions, "{question}");
+                assert_eq!(asked.request.question.as_deref(), Some(question));
+            } else {
+                // Compare the answer separately from pagination metadata.
+                let headline = direct
+                    .stdout
+                    .lines()
+                    .skip_while(|line| *line != "ANSWER")
+                    .nth(1)
+                    .ok_or("missing direct answer")?;
+                assert!(
+                    asked.stdout.contains(headline),
+                    "{question}: {}",
+                    asked.stdout
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn ask_resolves_a_unique_owner_suffix_without_guessing_a_short_name() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let caller = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "n:caller")
+        .ok_or("caller fixture node missing")?;
+    caller.qualified_name = "pkg.Controller::Caller".to_owned();
+    let mut other = caller.clone();
+    other.id = "n:other-caller".to_owned();
+    other.qualified_name = "pkg.Other::Caller".to_owned();
+    graph.nodes.push(other);
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+
+    for (question, expected_code, expected_edges) in [
+        ("what does Controller.Caller call?", None, 1),
+        ("what does Controller::Caller call?", None, 1),
+        ("what does Caller call?", Some("ambiguous_match"), 0),
+        ("what does Missing.Caller call?", Some("no_match"), 0),
+        ("what does Missing::Caller call?", Some("no_match"), 0),
+    ] {
+        let output = support::compass_command()
+            .args(["ask", question, "--graph"])
+            .arg(&graph_path)
+            .args(["--format", "json"])
+            .current_dir(directory.path())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{question}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(response["operation"], "callees", "{question}");
+        assert_eq!(
+            response["edges"].as_array().ok_or("edges missing")?.len(),
+            expected_edges,
+            "{question}"
+        );
+        if expected_edges == 1 {
+            assert_eq!(response["edges"][0]["source"], "n:caller");
+            assert_eq!(response["edges"][0]["target"], "n:target");
+        }
+        if let Some(code) = expected_code {
+            assert!(
+                response["diagnostics"]
+                    .as_array()
+                    .ok_or("diagnostics missing")?
+                    .iter()
+                    .any(|diagnostic| diagnostic["code"] == code)
+            );
+        }
+    }
+    let explained = support::compass_command()
+        .args(["explain", "Controller.Caller", "--graph"])
+        .arg(&graph_path)
+        .current_dir(directory.path())
+        .output()?;
+    assert!(explained.status.success());
+    assert!(String::from_utf8_lossy(&explained.stdout).contains("ID:        n:caller"));
+
+    let path = support::compass_command()
+        .args(["path", "Controller.Caller", "Target", "--graph"])
+        .arg(&graph_path)
+        .current_dir(directory.path())
+        .output()?;
+    assert!(path.status.success());
+    assert!(String::from_utf8_lossy(&path.stdout).contains("Caller --calls [EXTRACTED]--> Target"));
+    Ok(())
+}
+
+#[test]
 fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
@@ -98,6 +236,148 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
     );
     assert_ne!(invalid_projection.code, 0);
     assert!(invalid_projection.stderr.contains("text-only"));
+    Ok(())
+}
+
+#[test]
+fn node_and_path_commands_retain_the_route_that_fits_the_requested_depth()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let node = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("missing node template")?;
+    let edge = graph
+        .links
+        .first()
+        .cloned()
+        .ok_or("missing edge template")?;
+    graph.nodes = ["s", "a", "b", "t"]
+        .into_iter()
+        .map(|name| {
+            let mut record = node.clone();
+            record.id = format!("n:{name}");
+            record.name = name.to_owned();
+            record.qualified_name = name.to_owned();
+            record
+        })
+        .collect();
+    graph.links = [
+        ("n:s", EdgeKind::Calls, "n:a"),
+        ("n:a", EdgeKind::Calls, "n:b"),
+        ("n:s", EdgeKind::References, "n:b"),
+        ("n:b", EdgeKind::Calls, "n:t"),
+    ]
+    .into_iter()
+    .map(|(source, kind, target)| {
+        let mut record = edge.clone();
+        record.source = source.to_owned();
+        record.target = target.to_owned();
+        record.kind = kind;
+        record.id = compass_model::identity::edge_id(
+            source,
+            kind,
+            target,
+            record.relationship_site.as_ref(),
+            None,
+        );
+        record.key.clone_from(&record.id);
+        record
+    })
+    .collect();
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("node"),
+            OsString::from("n:s"),
+            OsString::from("n:t"),
+            OsString::from("--graph"),
+            graph_path.clone().into_os_string(),
+            OsString::from("--cache"),
+            directory.path().join("cache").into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("2"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    let response: compass_model::query_contract::CodeQueryResponse =
+        serde_json::from_str(&outcome.stdout)?;
+    assert_eq!(response.paths.len(), 1);
+    assert_eq!(response.paths[0].node_ids, ["n:s", "n:b", "n:t"]);
+    let legacy = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("n:s"),
+            OsString::from("n:t"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("2"),
+        ],
+    );
+    assert_eq!(legacy.code, 0, "{}", legacy.stderr);
+    assert!(
+        legacy
+            .stdout
+            .contains("Best path (weighted, 2 hops, weight 5)"),
+        "{}",
+        legacy.stdout
+    );
+    assert!(!legacy.stdout.contains("NO PATH FOUND"));
+    Ok(())
+}
+
+#[test]
+fn path_work_limit_is_a_failed_command_not_a_no_path_answer() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let ids = (0..96)
+        .map(|index| format!("node-{index}-{}", "x".repeat(4096)))
+        .collect::<Vec<_>>();
+    let nodes = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            serde_json::json!({
+                "id": id, "label": format!("Node{index}")
+            })
+        })
+        .collect::<Vec<_>>();
+    let links = ids.windows(2).enumerate().map(|(index, pair)| serde_json::json!({
+        "id": format!("edge-{index}"), "source": pair[0], "target": pair[1], "relation": "calls"
+    })).collect::<Vec<_>>();
+    std::fs::write(
+        &graph_path,
+        serde_json::to_vec(&serde_json::json!({
+            "directed":true, "nodes": nodes, "links": links
+        }))?,
+    )?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("Node0"),
+            OsString::from("Node95"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("95"),
+        ],
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(
+        outcome.stderr.contains("path search work limit exceeded"),
+        "{}",
+        outcome.stderr
+    );
+    assert!(outcome.stdout.is_empty(), "{}", outcome.stdout);
     Ok(())
 }
 
@@ -424,6 +704,61 @@ fn discovery_cursor_survives_budget_alias_and_scope_order_but_rejects_graph_chan
     );
     assert_ne!(changed.code, 0);
     assert!(changed.stderr.contains("selected graph generation"));
+    Ok(())
+}
+
+#[test]
+fn natural_discovery_preserves_literal_subjects_in_prose() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let mut document = GraphDocument::load(&graph)?;
+    let subject = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "n:target")
+        .ok_or("missing target fixture")?;
+    subject.name = "_BufferedSink".to_owned();
+    subject.qualified_name = "Fixture._BufferedSink".to_owned();
+    let mut duplicate = subject.clone();
+    duplicate.id = "n:duplicate".to_owned();
+    duplicate.qualified_name = "Other._BufferedSink".to_owned();
+    duplicate.kind = NodeKind::Struct;
+    for ambiguous in [false, true] {
+        if ambiguous {
+            document.nodes.push(duplicate.clone());
+        }
+        std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([
+                "query",
+                "Explain _BufferedSink ownership and close behavior",
+                "--format=json",
+                "--graph",
+            ])
+            .arg(&graph)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let response: compass_model::query_contract::DiscoveryQueryResponse =
+            serde_json::from_slice(&output.stdout)?;
+        let seed = response.seeds.first().ok_or("missing subject seed")?;
+        assert_eq!(
+            seed.candidate_source,
+            compass_model::query_contract::DiscoverySeedSource::ExactName
+        );
+        assert_eq!(seed.ambiguous, ambiguous);
+        assert!(["n:target", "n:duplicate"].contains(&seed.node_id.as_str()));
+        if ambiguous {
+            assert!(seed.alternatives.iter().any(|other| {
+                ["n:target", "n:duplicate"].contains(&other.node_id.as_str())
+                    && other.node_id != seed.node_id
+            }));
+        }
+    }
     Ok(())
 }
 
@@ -1434,6 +1769,13 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
     let view: Value = serde_json::from_str(&outcome.stdout)?;
     assert_eq!(view["status"]["resultState"], "needs_resolution");
     assert_eq!(view["status"]["matchState"], "ambiguous");
+    assert!(
+        view["answer"]["headline"]
+            .as_str()
+            .is_some_and(|headline| headline.contains("multiple candidates")
+                && headline.contains("exact node ID"))
+    );
+    assert_eq!(view["answer"]["basis"][0]["kind"], "operation");
     let results = view["primaryResults"]
         .as_array()
         .ok_or("primaryResults must be an array")?;
@@ -1450,6 +1792,29 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
         "{}",
         outcome.stdout
     );
+    for argv in [
+        vec!["callers", "run"],
+        vec!["callees", "run"],
+        vec!["ask", "who calls run"],
+    ] {
+        let mut args = argv.into_iter().map(OsString::from).collect::<Vec<_>>();
+        args.extend([OsString::from("--graph"), graph.as_os_str().to_owned()]);
+        let text = run(Frontend::Compass, args);
+        assert_eq!(text.code, 0, "{}", text.stderr);
+        assert!(
+            text.stdout.contains("multiple candidates"),
+            "{}",
+            text.stdout
+        );
+        assert!(text.stdout.contains("id: n:alpha-run"), "{}", text.stdout);
+        assert!(text.stdout.contains("id: n:beta-run"), "{}", text.stdout);
+        assert!(
+            !text.stdout.contains("fallback candidate"),
+            "{}",
+            text.stdout
+        );
+        assert!(!text.stdout.contains("No exact match"), "{}", text.stdout);
+    }
     Ok(())
 }
 
@@ -1868,5 +2233,484 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
     );
     assert_ne!(out_of_range.code, 0);
     assert!(out_of_range.stderr.contains("last available page"));
+    Ok(())
+}
+
+#[test]
+fn node_command_reports_depth_exhaustion_without_claiming_wrong_direction()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let template = graph.nodes.first().cloned().ok_or("node template")?;
+    graph.nodes = ["n:s", "n:a", "n:b", "n:t"]
+        .into_iter()
+        .map(|id| {
+            let mut node = template.clone();
+            node.id = id.into();
+            node.name = id.into();
+            node.qualified_name = id.into();
+            node.kind = NodeKind::Function;
+            node
+        })
+        .collect();
+    let template = graph
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Calls)
+        .cloned()
+        .ok_or("edge template")?;
+    graph.links = [
+        ("n:s", "n:a"),
+        ("n:a", "n:b"),
+        ("n:b", "n:t"),
+        ("n:t", "n:s"),
+    ]
+    .into_iter()
+    .map(|(source, target)| {
+        let mut edge = template.clone();
+        edge.source = source.into();
+        edge.target = target.into();
+        edge.occurrence_rule = None;
+        edge.id = compass_model::identity::edge_id(
+            source,
+            EdgeKind::Calls,
+            target,
+            edge.relationship_site.as_ref(),
+            None,
+        );
+        edge.key.clone_from(&edge.id);
+        edge
+    })
+    .collect();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    for depth in ["2", "3"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([
+                "node",
+                "n:s",
+                "n:t",
+                "--max-depth",
+                depth,
+                "--format",
+                "json",
+                "--graph",
+            ])
+            .arg(&path)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(result["schema"], "compass.query/1");
+        if depth == "2" {
+            assert_eq!(result["truncated"], true);
+            assert_eq!(result["paths"], serde_json::json!([]));
+            let diagnostics = result["diagnostics"].as_array().ok_or("diagnostics")?;
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "bounded_truncation")
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "direction_mismatch" || d["code"] == "no_match")
+            );
+        } else {
+            assert_eq!(result["truncated"], false);
+            assert_eq!(
+                result["paths"][0]["nodeIds"],
+                serde_json::json!(["n:s", "n:a", "n:b", "n:t"])
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn explain_without_a_stored_digest_never_claims_source_verification() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let source = "fn run() {\n    body();\n}\n";
+    let source_path = directory.path().join("lib.rs");
+    let graph_path = directory.path().join("graph.json");
+    std::fs::write(
+        &graph_path,
+        serde_json::json!({
+            "directed": true,
+            "multigraph": true,
+            "nodes": [{
+                "id": "n:run",
+                "kind": "function",
+                "name": "run",
+                "source": {
+                    "file": "lib.rs", "startByte": 0, "endByte": source.len(),
+                    "startLine": 1, "endLine": 3, "startColumn": 0, "endColumn": 1
+                },
+                "details": {"type": "symbol", "data": {"signature": "fn run()"}}
+            }],
+            "links": []
+        })
+        .to_string(),
+    )?;
+    // A same-length edit cannot be detected from an anchor alone.
+    for body in [source.to_owned(), source.replace("body", "next")] {
+        std::fs::write(&source_path, &body)?;
+        for format in ["text", "agent-json", "json"] {
+            let result = run(
+                Frontend::Compass,
+                [
+                    OsString::from("explain"),
+                    OsString::from("n:run"),
+                    OsString::from("--root"),
+                    directory.path().as_os_str().to_owned(),
+                    OsString::from("--graph"),
+                    graph_path.as_os_str().to_owned(),
+                    OsString::from("--format"),
+                    OsString::from(format),
+                ],
+            );
+            assert_eq!(result.code, 0, "{}", result.stderr);
+            assert!(
+                !result.stdout.contains("(digest-verified)"),
+                "a missing digest cannot verify even a plausible source range: {}",
+                result.stdout
+            );
+            assert!(
+                result
+                    .stdout
+                    .contains("unverified: no recorded source digest"),
+                "{}",
+                result.stdout
+            );
+            assert!(
+                result.stdout.contains(if body.contains("next") {
+                    "next();"
+                } else {
+                    "body();"
+                }),
+                "{}",
+                result.stdout
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn explain_member_source_reaches_implementations_outside_type_declarations()
+-> Result<(), Box<dyn Error>> {
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir()?;
+    let owner = "struct Owner {}\n";
+    let method = "fn work() {\n    perform();\n}\n";
+    std::fs::write(directory.path().join("lib.rs"), format!("{owner}{method}"))?;
+    let graph = directory.path().join("graph.json");
+    let nodes = [("owner", "Owner", "struct", owner, 0, 1, 1), ("method", "work", "method", method, owner.len(), 2, 4)]
+        .into_iter().map(|(id, name, kind, text, start, first, last)| serde_json::json!({
+            "id": id, "name": name, "kind": kind,
+            "source": {"file": "lib.rs", "startByte": start, "endByte": start + text.len(), "startLine": first, "endLine": last, "startColumn": 0, "endColumn": 1},
+            "details": {"type": "symbol", "data": {"sourceDigest": format!("{:x}", Sha256::digest(text.as_bytes()))}}
+        })).collect::<Vec<_>>();
+    std::fs::write(&graph, serde_json::json!({"directed":true,"multigraph":true,"nodes":nodes,"links":[{"source":"owner","target":"method","relation":"contains","confidence":"EXTRACTED"}]}).to_string())?;
+    let run_command = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("explain"),
+            OsString::from("owner"),
+            OsString::from("--root"),
+            directory.path().as_os_str().to_owned(),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let declaration = run_command(&[]);
+    assert_eq!(declaration.code, 0, "{}", declaration.stderr);
+    assert!(!declaration.stdout.contains("perform();"));
+    for format in ["text", "agent-json", "json"] {
+        let members = run_command(&["--source-members", "--format", format]);
+        assert_eq!(members.code, 0, "{}", members.stderr);
+        assert!(members.stdout.contains("MEMBER SOURCES"));
+        assert!(members.stdout.contains("perform();"));
+        assert!(members.stdout.contains("L2-L4 (digest-verified)"));
+        assert!(!members.stdout.contains("L1-L1 (digest-verified)"));
+    }
+    let bounded = run_command(&["--source-members", "--max-source-bytes", "5"]);
+    assert_eq!(bounded.code, 0, "{}", bounded.stderr);
+    assert!(bounded.stdout.contains("source_bytes=5 truncated=true"));
+    assert!(!bounded.stdout.contains("perform();"));
+    assert_ne!(run_command(&["--source-members", "--no-source"]).code, 0);
+    assert_ne!(
+        run_command(&["--source-members", "--max-source-bytes", "1048577"]).code,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn explain_member_focus_prioritizes_names_and_validates_its_options() -> Result<(), Box<dyn Error>>
+{
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir()?;
+    let parts = [
+        "struct Owner {}\n",
+        "fn early() { first(); }\n",
+        "fn check_loop() { later(); }\n",
+    ];
+    std::fs::write(directory.path().join("lib.rs"), parts.concat())?;
+    let mut offset = 0;
+    let nodes = [("owner", "Owner", "struct"), ("early", "early", "method"), ("loop", "check_loop", "method")]
+        .into_iter().enumerate().map(|(index, (id, name, kind))| {
+            let text = parts[index];
+            let start = offset;
+            offset += text.len();
+            serde_json::json!({"id": id, "name": name, "kind": kind,
+                "source": {"file": "lib.rs", "startByte": start, "endByte": offset, "startLine": index+1, "endLine": index+1, "startColumn": 0, "endColumn": text.len()-1},
+                "details": {"type": "symbol", "data": {"sourceDigest": format!("{:x}", Sha256::digest(text.as_bytes()))}}
+            })
+        }).collect::<Vec<_>>();
+    let graph = directory.path().join("graph.json");
+    std::fs::write(
+        &graph,
+        serde_json::json!({"directed":true,"multigraph":true,"nodes":nodes,"links":[
+            {"source":"owner","target":"early","relation":"contains","confidence":"EXTRACTED"},
+            {"source":"owner","target":"loop","relation":"contains","confidence":"EXTRACTED"}
+        ]})
+        .to_string(),
+    )?;
+    let invoke = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("explain"),
+            OsString::from("owner"),
+            OsString::from("--root"),
+            directory.path().as_os_str().to_owned(),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let budget = parts[2].len().to_string();
+    let baseline = invoke(&["--source-members", "--max-source-bytes", &budget]);
+    assert_eq!(baseline.code, 0, "{}", baseline.stderr);
+    assert!(baseline.stdout.contains("first();"));
+    assert!(!baseline.stdout.contains("later();"));
+    for format in ["text", "json", "agent-json"] {
+        let focused = invoke(&[
+            "--source-members",
+            "--member-focus",
+            "loops",
+            "--max-source-bytes",
+            &budget,
+            "--format",
+            format,
+        ]);
+        assert_eq!(focused.code, 0, "{}", focused.stderr);
+        assert!(focused.stdout.contains("later();"));
+        assert!(!focused.stdout.contains("first();"));
+        assert!(
+            focused
+                .stdout
+                .contains("member-name focus, then source order")
+        );
+        assert!(focused.stdout.contains("Matched focus terms:"));
+        assert!(
+            focused
+                .stdout
+                .contains("retained=1 omitted=1 unavailable=0")
+        );
+    }
+    let equals = invoke(&["--source-members", "--member-focus=loops"]);
+    let spaced = invoke(&["--source-members", "--member-focus", "loops"]);
+    assert_eq!(equals.stdout, spaced.stdout);
+    for args in [
+        vec!["--member-focus", "loops"],
+        vec!["--source-members", "--member-focus"],
+        vec!["--source-members", "--member-focus="],
+        vec!["--source-members", "--member-focus", "!!!"],
+        vec!["--source-members", "--no-source", "--member-focus", "loops"],
+        vec![
+            "--source-members",
+            "--member-focus=loops",
+            "--member-focus=early",
+        ],
+    ] {
+        assert_ne!(invoke(&args).code, 0, "{args:?}");
+    }
+    assert_ne!(
+        invoke(&["--source-members", "--member-focus", &"x".repeat(4097)]).code,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn exact_search_cli_filters_explicitly_and_preserves_bounded_ambiguity()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let target = graph
+        .nodes
+        .iter()
+        .find(|n| n.name == "Target")
+        .ok_or("target")?
+        .clone();
+    let source = target.source.as_ref().ok_or("target source")?;
+    let mut export = target.clone();
+    export.id = "duplicate:export".to_owned();
+    export.kind = NodeKind::Export;
+    graph.nodes.push(export);
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let execute = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let line = source.start_line.to_string();
+    let result = execute(&[
+        "--exact",
+        "--file",
+        &source.file,
+        "--line",
+        &line,
+        "--kind",
+        "function",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    let body: Value = serde_json::from_str(&result.stdout)?;
+    assert_eq!(body["truncated"], false);
+    assert_eq!(body["results"].as_array().ok_or("results")?.len(), 1);
+    assert_eq!(body["results"][0]["nodeId"], target.id);
+    let ambiguous = execute(&["--exact", "--format", "json"]);
+    let body: Value = serde_json::from_str(&ambiguous.stdout)?;
+    assert_eq!(body["results"].as_array().ok_or("results")?.len(), 2);
+    for format in ["text", "agent-json"] {
+        let bounded = execute(&["--exact", "--max-candidates", "1", "--format", format]);
+        assert_eq!(bounded.code, 0, "{}", bounded.stderr);
+        assert!(
+            bounded.stdout.contains("bounded_truncation"),
+            "{}",
+            bounded.stdout
+        );
+    }
+    for args in [
+        vec!["--file", &source.file],
+        vec!["--exact", "--file"],
+        vec!["--exact", "--kind", "unknown"],
+        vec!["--exact", "--line", "0"],
+        vec!["--exact", "--line", "1"],
+        vec!["--exact", "--file", "--kind", "function"],
+    ] {
+        assert_ne!(execute(&args).code, 0, "{args:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn calls_only_cli_and_ask_reject_structural_routes_and_invalid_flags() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = support::write_typed_graph(directory.path())?;
+    let invoke = |args: &[&str]| -> Result<std::process::Output, Box<dyn Error>> {
+        Ok(support::compass_command()
+            .args(args)
+            .arg("--graph")
+            .arg(&path)
+            .output()?)
+    };
+    for args in [
+        vec!["node", "Caller", "Target", "--calls-only", "--format=json"],
+        vec!["ask", "call path from Caller to Target", "--format=json"],
+    ] {
+        let output = invoke(&args)?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let body: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(body["paths"].as_array().ok_or("paths")?.len(), 1);
+        assert_eq!(body["edges"][0]["kind"], "calls");
+    }
+    let mut graph = GraphDocument::load(&path)?;
+    let edge = graph.links.first_mut().ok_or("edge")?;
+    edge.kind = EdgeKind::Contains;
+    edge.id = compass_model::identity::edge_id(
+        &edge.source,
+        edge.kind,
+        &edge.target,
+        edge.relationship_site.as_ref(),
+        None,
+    );
+    edge.key.clone_from(&edge.id);
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let default = invoke(&["node", "Caller", "Target", "--format=json"])?;
+    assert!(default.status.success());
+    let body: Value = serde_json::from_slice(&default.stdout)?;
+    assert_eq!(body["paths"].as_array().ok_or("paths")?.len(), 1);
+    for format in ["json", "agent-json", "text"] {
+        for args in [
+            vec![
+                "node",
+                "Caller",
+                "Target",
+                "--calls-only",
+                "--format",
+                format,
+            ],
+            vec![
+                "ask",
+                "call chain from Caller to Target",
+                "--format",
+                format,
+            ],
+        ] {
+            let output = invoke(&args)?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if format == "json" {
+                let body: Value = serde_json::from_slice(&output.stdout)?;
+                assert_eq!(body["paths"], serde_json::json!([]));
+                assert!(
+                    body["diagnostics"]
+                        .to_string()
+                        .contains("No bounded directed call trail")
+                );
+            } else {
+                assert!(String::from_utf8(output.stdout)?.contains("call "));
+            }
+        }
+    }
+    for args in [
+        vec!["node", "Caller", "Target", "--calls-only=true"],
+        vec!["node", "Caller", "Target", "--calls-only", "--calls-only"],
+        vec!["node", "Caller", "Target", "--calls-only", "true"],
+        vec!["search", "Caller", "--calls-only"],
+    ] {
+        let mut args = args;
+        args.push("--format=json");
+        let output = invoke(&args)?;
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8(output.stderr)?.contains("calls-only"));
+    }
+    let help = support::compass_command().args(["help", "node"]).output()?;
+    assert!(help.status.success());
+    assert!(String::from_utf8(help.stdout)?.contains("--calls-only"));
     Ok(())
 }

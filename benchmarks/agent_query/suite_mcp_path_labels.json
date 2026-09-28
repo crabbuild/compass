@@ -1,0 +1,916 @@
+{
+  "schema": "compass.mcp-comparison-inputs/1",
+  "scope": "Development label-input path arm added after the exact-ID diagnostic exposed Graphify endpoint substitution. Uses the same source-reviewed positive endpoint pairs and bounds, with each graph display label as input. This separates public label behavior from the exact-ID defect; not held-out evidence.",
+  "policy": {
+    "positive": "Verify actual ordered node chain, stored edge relation and displayed direction, and minimum hop distance. Ambiguous display labels leave identity unverified. Separately compare the reviewed source witness.",
+    "hop-limit": "No positive path beyond max_hops; an explicit bound outcome is not global disconnection.",
+    "missing": "Unknown endpoint must remain unresolved, not match a convenient fuzzy node.",
+    "ambiguous": "At least two exact terminal-label declarations match. Refuse to choose; a warning followed by a path is not preserved ambiguity.",
+    "disconnected": "A symmetrically selected source-anchored pair lies in different undirected components in each graph. Require no path; no graph modification or synthetic fixture.",
+    "bounds": "Same 60-second/16-MiB-RPC and 64-MiB-session limits. max_hops=8 for positives, ambiguity, missing, and disconnected; one fewer than the shorter stored distance for the bound case. Graphify gets undirected=true; Compass currently exposes undirected navigation only."
+  },
+  "repositories": [
+    {
+      "name": "cobra",
+      "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "file": "command.go",
+      "line": 757,
+      "sourceText": "func (c *Command) Find(",
+      "graphSha256": {
+        "compass": "6f862024bd68b88b734a43421a21cc2074a94ab7d68cc8857d59609112c9c7db",
+        "graphify": "218aa21e02fad4506206c34acfc6d9ff58a2a0052615d92e4377c74bf977a937"
+      },
+      "anchors": [
+        {
+          "file": "command.go",
+          "line": 757,
+          "text": "func (c *Command) Find(",
+          "labels": [
+            ".Find()"
+          ]
+        },
+        {
+          "file": "args.go",
+          "line": 28,
+          "text": "func legacyArgs(",
+          "labels": [
+            "legacyArgs()"
+          ]
+        }
+      ],
+      "pathQuestions": [
+        {
+          "id": "path-label-forward",
+          "arguments": {
+            "compass": {
+              "source": ".Find()",
+              "target": "legacyArgs()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": ".Find()",
+              "target": "legacyArgs()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "sourceWitness": {
+              "repository": "cobra",
+              "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+              "question": "cobra2-path-find-legacyargs",
+              "category": "call",
+              "nodes": [
+                {
+                  "file": "command.go",
+                  "line": 757,
+                  "text": "func (c *Command) Find(",
+                  "labels": [
+                    ".Find()"
+                  ]
+                },
+                {
+                  "file": "args.go",
+                  "line": 28,
+                  "text": "func legacyArgs(",
+                  "labels": [
+                    "legacyArgs()"
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "relations": [
+                    "calls"
+                  ],
+                  "direction": "forward",
+                  "site": {
+                    "file": "command.go",
+                    "line": 776,
+                    "text": "legacyArgs(commandFound, stripFlags(a, commandFound))"
+                  }
+                }
+              ]
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:caa6cf6216cb2dae7b47b44982140343a1204532221f6c393aabb4db55e9e1d8",
+                "sha256:77f4b61d6489e81ebd6fa1c0b0cce4fe02802d648c0b872c3d0d7c4b970e8de5"
+              ],
+              "graphify": [
+                "cobra_command_find",
+                "args_legacyargs"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-reverse",
+          "arguments": {
+            "compass": {
+              "source": "legacyArgs()",
+              "target": ".Find()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "legacyArgs()",
+              "target": ".Find()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:77f4b61d6489e81ebd6fa1c0b0cce4fe02802d648c0b872c3d0d7c4b970e8de5",
+                "sha256:caa6cf6216cb2dae7b47b44982140343a1204532221f6c393aabb4db55e9e1d8"
+              ],
+              "graphify": [
+                "args_legacyargs",
+                "cobra_command_find"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-hop-limit",
+          "arguments": {
+            "compass": {
+              "source": ".Find()",
+              "target": "legacyArgs()",
+              "max_hops": 0
+            },
+            "graphify": {
+              "source": ".Find()",
+              "target": "legacyArgs()",
+              "max_hops": 0,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "depth-limit",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:caa6cf6216cb2dae7b47b44982140343a1204532221f6c393aabb4db55e9e1d8",
+                "sha256:77f4b61d6489e81ebd6fa1c0b0cce4fe02802d648c0b872c3d0d7c4b970e8de5"
+              ],
+              "graphify": [
+                "cobra_command_find",
+                "args_legacyargs"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "flask",
+      "commit": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+      "file": "src/flask/app.py",
+      "line": 995,
+      "sourceText": "def full_dispatch_request(",
+      "graphSha256": {
+        "compass": "227fe2d1f74cf835caa3ec15897f05544832fbf7f394e1c02e5134101a07c3ad",
+        "graphify": "ca35435af286c5c565fc66f55de569c2e3235f75c902182290ee15603ff103cc"
+      },
+      "anchors": [
+        {
+          "file": "src/flask/app.py",
+          "line": 995,
+          "text": "def full_dispatch_request(",
+          "labels": [
+            ".full_dispatch_request()"
+          ]
+        },
+        {
+          "file": "src/flask/app.py",
+          "line": 1024,
+          "text": "def finalize_request(",
+          "labels": [
+            ".finalize_request()"
+          ]
+        },
+        {
+          "file": "docs/conf.py",
+          "line": 1,
+          "text": "import packaging.version"
+        },
+        {
+          "file": "examples/celery/make_celery.py",
+          "line": 1,
+          "text": "from task_app import create_app"
+        }
+      ],
+      "pathQuestions": [
+        {
+          "id": "path-label-forward",
+          "arguments": {
+            "compass": {
+              "source": ".full_dispatch_request()",
+              "target": ".finalize_request()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": ".full_dispatch_request()",
+              "target": ".finalize_request()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "sourceWitness": {
+              "repository": "flask",
+              "commit": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+              "question": "flask2-path-fulldispatch-finalize",
+              "category": "call",
+              "nodes": [
+                {
+                  "file": "src/flask/app.py",
+                  "line": 995,
+                  "text": "def full_dispatch_request(",
+                  "labels": [
+                    ".full_dispatch_request()"
+                  ]
+                },
+                {
+                  "file": "src/flask/app.py",
+                  "line": 1024,
+                  "text": "def finalize_request(",
+                  "labels": [
+                    ".finalize_request()"
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "relations": [
+                    "calls"
+                  ],
+                  "direction": "forward",
+                  "site": {
+                    "file": "src/flask/app.py",
+                    "line": 1022,
+                    "text": "self.finalize_request(ctx, rv)"
+                  }
+                }
+              ]
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:afb60b148d2acb75824b381e59be62fa72cdb6443730e29b942ce2d8a4ead0d5",
+                "sha256:4fee624450db1903a6292eeba05c2ae2932efb632a554d032f01926c6a909baf"
+              ],
+              "graphify": [
+                "src_flask_app_flask_full_dispatch_request",
+                "src_flask_app_flask_finalize_request"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-reverse",
+          "arguments": {
+            "compass": {
+              "source": ".finalize_request()",
+              "target": ".full_dispatch_request()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": ".finalize_request()",
+              "target": ".full_dispatch_request()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:4fee624450db1903a6292eeba05c2ae2932efb632a554d032f01926c6a909baf",
+                "sha256:afb60b148d2acb75824b381e59be62fa72cdb6443730e29b942ce2d8a4ead0d5"
+              ],
+              "graphify": [
+                "src_flask_app_flask_finalize_request",
+                "src_flask_app_flask_full_dispatch_request"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-hop-limit",
+          "arguments": {
+            "compass": {
+              "source": ".full_dispatch_request()",
+              "target": ".finalize_request()",
+              "max_hops": 0
+            },
+            "graphify": {
+              "source": ".full_dispatch_request()",
+              "target": ".finalize_request()",
+              "max_hops": 0,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "depth-limit",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:afb60b148d2acb75824b381e59be62fa72cdb6443730e29b942ce2d8a4ead0d5",
+                "sha256:4fee624450db1903a6292eeba05c2ae2932efb632a554d032f01926c6a909baf"
+              ],
+              "graphify": [
+                "src_flask_app_flask_full_dispatch_request",
+                "src_flask_app_flask_finalize_request"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "gson",
+      "commit": "15ca7360379cf3c1502b59981569050489f2d73e",
+      "file": "gson/src/main/java/com/google/gson/Gson.java",
+      "line": 797,
+      "sourceText": "public JsonWriter newJsonWriter(",
+      "graphSha256": {
+        "compass": "5856ddc99ec4025c9e36d128783e6e7393f45af76f617caa38fd6938aca23ea7",
+        "graphify": "92471ab8f5bb5d34aedddd2263fa24a43ae4ed31b34d06c8d433fe0f0dada447"
+      },
+      "anchors": [
+        {
+          "file": "gson/src/main/java/com/google/gson/Gson.java",
+          "line": 797,
+          "text": "public JsonWriter newJsonWriter(",
+          "labels": [
+            ".newJsonWriter()"
+          ]
+        },
+        {
+          "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+          "line": 162,
+          "text": "public class JsonWriter",
+          "labels": [
+            "JsonWriter"
+          ]
+        },
+        {
+          "file": "extras/src/main/java/com/google/gson/extras/examples/rawcollections/RawCollectionsExample.java",
+          "line": 1,
+          "text": "/*"
+        },
+        {
+          "file": "gson/src/main/java/com/google/gson/annotations/package-info.java",
+          "line": 1,
+          "text": "/*"
+        }
+      ],
+      "pathQuestions": [
+        {
+          "id": "path-label-forward",
+          "arguments": {
+            "compass": {
+              "source": ".newJsonWriter()",
+              "target": "JsonWriter",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": ".newJsonWriter()",
+              "target": "JsonWriter",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "sourceWitness": {
+              "repository": "gson",
+              "commit": "15ca7360379cf3c1502b59981569050489f2d73e",
+              "question": "gson2-path-newjsonwriter-jsonwriter",
+              "category": "construction-reference",
+              "nodes": [
+                {
+                  "file": "gson/src/main/java/com/google/gson/Gson.java",
+                  "line": 797,
+                  "text": "public JsonWriter newJsonWriter(",
+                  "labels": [
+                    ".newJsonWriter()"
+                  ]
+                },
+                {
+                  "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+                  "line": 162,
+                  "text": "public class JsonWriter",
+                  "labels": [
+                    "JsonWriter"
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "relations": [
+                    "instantiates",
+                    "references"
+                  ],
+                  "direction": "forward",
+                  "sitesByRelation": {
+                    "instantiates": {
+                      "file": "gson/src/main/java/com/google/gson/Gson.java",
+                      "line": 801,
+                      "text": "new JsonWriter(writer)"
+                    },
+                    "references": {
+                      "file": "gson/src/main/java/com/google/gson/Gson.java",
+                      "line": 797,
+                      "text": "public JsonWriter newJsonWriter("
+                    }
+                  }
+                }
+              ]
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:64e3ea7fc1f10444bca6ebed48973575a302fb826ba05905c6fe904323930fb1",
+                "sha256:2222e85b9b69a13e38de1c9654b1ce8a86e75815310c570ee793038eab5017b8"
+              ],
+              "graphify": [
+                "gson_src_main_java_com_google_gson_gson_gson_newjsonwriter",
+                "gson_src_main_java_com_google_gson_stream_jsonwriter_jsonwriter"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-reverse",
+          "arguments": {
+            "compass": {
+              "source": "JsonWriter",
+              "target": ".newJsonWriter()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "JsonWriter",
+              "target": ".newJsonWriter()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:2222e85b9b69a13e38de1c9654b1ce8a86e75815310c570ee793038eab5017b8",
+                "sha256:64e3ea7fc1f10444bca6ebed48973575a302fb826ba05905c6fe904323930fb1"
+              ],
+              "graphify": [
+                "gson_src_main_java_com_google_gson_stream_jsonwriter_jsonwriter",
+                "gson_src_main_java_com_google_gson_gson_gson_newjsonwriter"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-hop-limit",
+          "arguments": {
+            "compass": {
+              "source": ".newJsonWriter()",
+              "target": "JsonWriter",
+              "max_hops": 0
+            },
+            "graphify": {
+              "source": ".newJsonWriter()",
+              "target": "JsonWriter",
+              "max_hops": 0,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "depth-limit",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:64e3ea7fc1f10444bca6ebed48973575a302fb826ba05905c6fe904323930fb1",
+                "sha256:2222e85b9b69a13e38de1c9654b1ce8a86e75815310c570ee793038eab5017b8"
+              ],
+              "graphify": [
+                "gson_src_main_java_com_google_gson_gson_gson_newjsonwriter",
+                "gson_src_main_java_com_google_gson_stream_jsonwriter_jsonwriter"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "zod",
+      "commit": "d2b135cfb7a3582b9eb515756b9166bcb9521f4a",
+      "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+      "line": 105,
+      "sourceText": "function detectVersion(",
+      "graphSha256": {
+        "compass": "e33192de01f403cfde6c0030ba219c8e24fd26b561b984b6b710a46b3cc981e8",
+        "graphify": "c0f6d021616326da6b7daf5105b3b996c0bb4ba17c0bf54a062f2e692147b01a"
+      },
+      "anchors": [
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 105,
+          "text": "function detectVersion(",
+          "labels": [
+            "detectVersion()"
+          ]
+        },
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 1,
+          "text": "",
+          "labels": [
+            "from-json-schema",
+            "from-json-schema.ts"
+          ]
+        },
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 808,
+          "text": "function convertSchema(",
+          "labels": [
+            "convertSchema()"
+          ]
+        },
+        {
+          "file": ".claude/skills/triage/scripts/reindex.mjs",
+          "line": 17,
+          "text": "const dir = join(root, \".triage\", kind);"
+        },
+        {
+          "file": ".configs/tsconfig.base.json",
+          "line": 1,
+          "text": "{"
+        }
+      ],
+      "pathQuestions": [
+        {
+          "id": "path-label-forward",
+          "arguments": {
+            "compass": {
+              "source": "detectVersion()",
+              "target": "convertSchema()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "detectVersion()",
+              "target": "convertSchema()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 2,
+              "graphify": 2
+            },
+            "sourceWitness": {
+              "repository": "zod",
+              "commit": "d2b135cfb7a3582b9eb515756b9166bcb9521f4a",
+              "question": "zod2-path-detectversion-convertschema",
+              "category": "file-containment",
+              "nodes": [
+                {
+                  "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+                  "line": 105,
+                  "text": "function detectVersion(",
+                  "labels": [
+                    "detectVersion()"
+                  ]
+                },
+                {
+                  "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+                  "line": 1,
+                  "text": "",
+                  "labels": [
+                    "from-json-schema",
+                    "from-json-schema.ts"
+                  ]
+                },
+                {
+                  "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+                  "line": 808,
+                  "text": "function convertSchema(",
+                  "labels": [
+                    "convertSchema()"
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "relations": [
+                    "contains"
+                  ],
+                  "direction": "reverse"
+                },
+                {
+                  "relations": [
+                    "contains"
+                  ],
+                  "direction": "forward"
+                }
+              ]
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:a2ac366671d620c9721b85a975ca31e89ac2d076ceeb83b2aa9071a6611f7843",
+                "sha256:c24727f300fe1110afad52b8dae8fa5921e84d5471f2e144ce6724af95d3f674"
+              ],
+              "graphify": [
+                "packages_zod_src_v4_classic_from_json_schema_detectversion",
+                "packages_zod_src_v4_classic_from_json_schema_convertschema"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-reverse",
+          "arguments": {
+            "compass": {
+              "source": "convertSchema()",
+              "target": "detectVersion()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "convertSchema()",
+              "target": "detectVersion()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 2,
+              "graphify": 2
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:c24727f300fe1110afad52b8dae8fa5921e84d5471f2e144ce6724af95d3f674",
+                "sha256:a2ac366671d620c9721b85a975ca31e89ac2d076ceeb83b2aa9071a6611f7843"
+              ],
+              "graphify": [
+                "packages_zod_src_v4_classic_from_json_schema_convertschema",
+                "packages_zod_src_v4_classic_from_json_schema_detectversion"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-hop-limit",
+          "arguments": {
+            "compass": {
+              "source": "detectVersion()",
+              "target": "convertSchema()",
+              "max_hops": 1
+            },
+            "graphify": {
+              "source": "detectVersion()",
+              "target": "convertSchema()",
+              "max_hops": 1,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "depth-limit",
+            "hops": {
+              "compass": 2,
+              "graphify": 2
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:a2ac366671d620c9721b85a975ca31e89ac2d076ceeb83b2aa9071a6611f7843",
+                "sha256:c24727f300fe1110afad52b8dae8fa5921e84d5471f2e144ce6724af95d3f674"
+              ],
+              "graphify": [
+                "packages_zod_src_v4_classic_from_json_schema_detectversion",
+                "packages_zod_src_v4_classic_from_json_schema_convertschema"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "axum",
+      "commit": "af1345b53a259b0990be1ff853f9b56c05040ef7",
+      "file": "src/routing/path_router.rs",
+      "line": 22,
+      "sourceText": "fn validate_path(",
+      "graphSha256": {
+        "compass": "2cc12d5060c83389c077e4eade892991fa8f7021b59d8f6f1dc98c14c2109812",
+        "graphify": "6ed791a771190e98ba2905e08480a9fa6ed733f46d56212ae3a4c90018d79b52"
+      },
+      "anchors": [
+        {
+          "file": "src/routing/path_router.rs",
+          "line": 22,
+          "text": "fn validate_path(",
+          "labels": [
+            "validate_path()"
+          ]
+        },
+        {
+          "file": "src/routing/path_router.rs",
+          "line": 36,
+          "text": "fn validate_v07_paths(",
+          "labels": [
+            "validate_v07_paths()"
+          ]
+        },
+        {
+          "file": "benches/benches.rs",
+          "line": 1,
+          "text": "#![allow(missing_docs)]"
+        },
+        {
+          "file": "src/macros.rs",
+          "line": 1,
+          "text": "//! Internal macros"
+        }
+      ],
+      "pathQuestions": [
+        {
+          "id": "path-label-forward",
+          "arguments": {
+            "compass": {
+              "source": "validate_path()",
+              "target": "validate_v07_paths()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "validate_path()",
+              "target": "validate_v07_paths()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "sourceWitness": {
+              "repository": "axum",
+              "commit": "af1345b53a259b0990be1ff853f9b56c05040ef7",
+              "question": "axum2-path-validate-v07",
+              "category": "call",
+              "nodes": [
+                {
+                  "file": "src/routing/path_router.rs",
+                  "line": 22,
+                  "text": "fn validate_path(",
+                  "labels": [
+                    "validate_path()"
+                  ]
+                },
+                {
+                  "file": "src/routing/path_router.rs",
+                  "line": 36,
+                  "text": "fn validate_v07_paths(",
+                  "labels": [
+                    "validate_v07_paths()"
+                  ]
+                }
+              ],
+              "steps": [
+                {
+                  "relations": [
+                    "calls"
+                  ],
+                  "direction": "forward",
+                  "site": {
+                    "file": "src/routing/path_router.rs",
+                    "line": 30,
+                    "text": "validate_v07_paths(path)?"
+                  }
+                }
+              ]
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:cbc027447c34fee567bd17fffd9fcdf6375504bf7590e421c97bf1be9d0f8efb",
+                "sha256:85ede979be9c1d48d63310ebfc8ab0785c71b64b196ce83430ada74f3ad0654b"
+              ],
+              "graphify": [
+                "src_routing_path_router_validate_path",
+                "src_routing_path_router_validate_v07_paths"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-reverse",
+          "arguments": {
+            "compass": {
+              "source": "validate_v07_paths()",
+              "target": "validate_path()",
+              "max_hops": 8
+            },
+            "graphify": {
+              "source": "validate_v07_paths()",
+              "target": "validate_path()",
+              "max_hops": 8,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "path",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:85ede979be9c1d48d63310ebfc8ab0785c71b64b196ce83430ada74f3ad0654b",
+                "sha256:cbc027447c34fee567bd17fffd9fcdf6375504bf7590e421c97bf1be9d0f8efb"
+              ],
+              "graphify": [
+                "src_routing_path_router_validate_v07_paths",
+                "src_routing_path_router_validate_path"
+              ]
+            }
+          }
+        },
+        {
+          "id": "path-label-hop-limit",
+          "arguments": {
+            "compass": {
+              "source": "validate_path()",
+              "target": "validate_v07_paths()",
+              "max_hops": 0
+            },
+            "graphify": {
+              "source": "validate_path()",
+              "target": "validate_v07_paths()",
+              "max_hops": 0,
+              "undirected": true
+            }
+          },
+          "expected": {
+            "outcome": "depth-limit",
+            "hops": {
+              "compass": 1,
+              "graphify": 1
+            },
+            "endpointIds": {
+              "compass": [
+                "sha256:cbc027447c34fee567bd17fffd9fcdf6375504bf7590e421c97bf1be9d0f8efb",
+                "sha256:85ede979be9c1d48d63310ebfc8ab0785c71b64b196ce83430ada74f3ad0654b"
+              ],
+              "graphify": [
+                "src_routing_path_router_validate_path",
+                "src_routing_path_router_validate_v07_paths"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

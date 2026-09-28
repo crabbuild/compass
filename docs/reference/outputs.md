@@ -35,7 +35,7 @@ compass-out/
 │   │   ├── graph.json.query-v1.cache
 │   │   ├── graph.json.affected-v1.cache
 │   │   ├── graph.json.traversal-v1.cache
-│   │   └── graph.json.<digest>.content-v1.cache
+│   │   └── graph.json.<digest>.content-v2.cache
 │   └── source-root.txt
 ├── store/
 │   └── store.sqlite3   # with the default SQLite query index
@@ -396,7 +396,8 @@ The report can include:
 
 - corpus and graph summary;
 - freshness/build metadata;
-- god nodes;
+- god nodes (connected source-located hub candidates, ordered by degree and
+  then stable node ID; a high rank is not proof of a god-object design defect);
 - communities;
 - surprising connections;
 - cycles/diagnostics;
@@ -821,6 +822,149 @@ When exact automation is required, use:
 - diff JSON;
 - direct graph JSON.
 
+### MCP navigation paths
+
+After uniquely resolving two distinct endpoints, MCP `shortest_path` adds
+`structuredContent.result` with schema `compass.mcp.path/1` inside the existing
+`compass.mcp.tool-result/1` transport envelope. Common fields are `source` and
+`target` (exact IDs), `direction: "undirected"`, `maxHops`, and
+`ranking: "hops-then-structural-cost"`.
+
+- `status: "found"` adds `hops`, ordered `nodes`, and ordered `steps`.
+  Nodes carry `id`, `label`, `sourceFile`, `startLine`, and `sourceLocation`.
+  Each step retains traversal `from`/`to`, stored `source`/`target`, `edgeId`
+  (null for legacy edges without an ID), `relation`, `confidence`, and
+  `direction` (`forward` or `reverse`). An absent relation is displayed as
+  `related`, not invented as a call.
+- `status: "depth_limit"` means no path was found before the hop bound left
+  part of the search unexpanded. `visitedNodes` reports explored identities.
+- `status: "disconnected"` means the reachable component was exhausted without
+  reaching the target; it also includes `visitedNodes`.
+
+Unresolved, ambiguous, and same-node endpoint diagnostics retain their text
+form. No positive path is produced by guessing an endpoint. Work or transport
+exhaustion is an explicit error, not a disconnected result. Numeric source
+fields and source files can be null; absent textual source locations are empty.
+This tool explores undirected graph navigation across stored relation kinds;
+it does not establish directed call flow or execution feasibility.
+
+### MCP hub results
+
+Each node's additive `connectivity` object uses `compass.hub-connectivity/1`:
+
+- `directed` reports the stored graph's direction mode.
+- `edgeRecords` counts all valid incident records once each, retaining parallel
+  records. It can differ from the distinct-pair ranking degree. This includes
+  valid document containment records excluded from topology weighting.
+- `selfLoopRecords` counts incident records whose endpoints are the hub itself.
+- `relations` contains at most 16 rows, ordered by descending `edgeRecords`
+  then lexical `relation`. Each row carries `edgeRecords`, `incomingRecords`,
+  `outgoingRecords`, and `undirectedRecords`. Directed self-loops count once
+  in each direction but once in the total. An undirected graph contributes
+  only undirected counts. An absent relation remains an empty string.
+- `omittedRelationKinds` and `omittedRelationRecords` account for excluded
+  relation rows; displayed record counts plus omitted records equal the total.
+
+Text includes the stored node kind and this breakdown. These observations help
+distinguish containment, incoming use, and outgoing dependencies. They do not
+infer responsibility count, source correctness, or a god-object design defect.
+No test/production role is inferred automatically from a path or label.
+
+For a typed `class` or `struct` in a directed graph, the additive
+`memberEvidence` object uses `compass.hub-members/1`. It reports
+`sourceCoverage: "unverified"` because this projection does not compare the
+stored graph with current source. It reports
+`directMethods` (methods plus constructors), `directFields` (fields plus
+properties), and `ambiguousDirectMembers` for direct `contains` targets owned
+by more than one typed class or struct. Only uniquely owned members contribute
+to the direct counts. `ownFieldReferenceRecords` counts stored directed
+`references` records from one uniquely owned method to one uniquely owned
+field of that same class; `distinctOwnFieldPairs` collapses parallel records,
+and `methodsTouchingOwnFields` counts the participating methods. These are
+stored graph observations across all reference confidence states, not a
+validation of reference targets, a complete source access census or a cohesion
+score. A zero does not prove that source code lacks members or field accesses.
+The object is null for other hub kinds and undirected graphs, where ownership
+direction is unavailable.
+
+MCP `god_nodes` returns human-readable text and a structured projection in
+`structuredContent.result`, inside `compass.mcp.tool-result/1`:
+
+```json
+{
+  "schema": "compass.mcp.hubs/1",
+  "ranking": "distinct-directed-endpoint-degree",
+  "interpretation": "topology-candidates",
+  "requested": 10,
+  "nodes": [{
+    "rank": 1,
+    "id": "exact-node-id",
+    "label": "dispatch()",
+    "degree": 12,
+    "kind": "method",
+    "sourceFile": "src/service.rs",
+    "sourceLocation": "L5",
+    "startLine": 5,
+    "endLine": null,
+    "memberEvidence": null
+  }]
+}
+```
+
+Ranks are one-based. Degree counts distinct stored directed endpoint pairs;
+parallel occurrences collapse and a self-loop contributes two. Eligible hubs
+are ordered by descending degree, then exact ID. Eligibility remains the
+existing hub-analysis policy; file/concept/JSON-key nodes and isolates are
+excluded. This is a topology ranking, not a diagnosis of excessive
+responsibility. Review source responsibilities and relationship evidence
+before making a design judgment.
+
+Use `id` as the next `get_neighbors.label` input. Source fields are null when
+not present in the graph. A legacy textual location can exist without numeric
+line fields; the result preserves it without inventing a line number. The
+existing 16 MiB structured-response bound applies and fails explicitly rather
+than silently dropping entries. Consumers must check the schema version.
+
+### MCP neighbor lookup
+
+`get_neighbors.label` accepts an exact node ID, normalized symbol or qualified
+name. Exact IDs preserve case and select that identity directly. Symbol lookup
+uses the same exact lookup and evidence-gated export-binding handling as MCP
+paths. A unique exact symbol takes precedence over broader names: `term_len()`
+resolves independently of `test_term_len()`. If no exact candidate exists, the
+legacy prefix/substring lookup remains available.
+
+Multiple exact candidates produce an ambiguity list instead of neighbors.
+Candidates are sorted by exact ID, with at most 20 displayed and an explicit
+omission count. Retry using an exact ID to choose a declaration. Multiple fuzzy
+candidates are also ambiguous. Input arguments are unchanged.
+A successful result keeps the compact incoming/outgoing neighbor text and adds
+escaped identity/source lines. Machine consumers use the additive structured
+result `compass.query.neighbors/1` in `compass.mcp.tool-result/1`:
+
+- `seed`: the full node record for the resolved identity;
+- `neighbors`: groups ordered by direction (`outgoing`, then `incoming`) and
+  node ID; each group has `direction`, the full `node` record and all matching
+  `edges`, ordered by canonical JSON;
+- `directionBasis: "stored-endpoints"` and `graphDirected`: distinguish stored
+  endpoint orientation from the artifact's directed/undirected interpretation;
+- `relationFilter`: the case-folded substring filter; `truncated: false` means
+  the complete filtered adjacency fit all bounds.
+
+Node records retain their graph source fields; relationship records retain IDs,
+occurrence anchors, provenance and unknown attributes. Legacy absent IDs or
+anchors are not invented. Parallel records survive; a self loop is represented
+in both directions. The text line uses the first canonical edge for its relation
+and confidence; consult `edges` for every record. An exact destination ID can be
+used as the next `get_neighbors.label` without resolving a display name.
+
+Hard bounds are 1,000,000 examined adjacency entries, 10,000 matching incident
+records (self loops counted once), a 4,096-byte filter and a 1 MiB structured
+result. Limit exhaustion returns an error with no partial adjacency. A successful
+empty `neighbors` array means no matching records, not a limit failure. Graph
+loading and the outer MCP transport retain their existing bounds. This projection
+uses one full snapshot rather than the compact traversal cache.
+
 ### Agent Query View
 
 The focused query commands and MCP query tools also expose the strict,
@@ -854,6 +998,13 @@ anchors, reports `status.matchState = ambiguous`, and emits
 `retry_with_exact_id` actions. Callers therefore disambiguate in one follow-up
 instead of issuing a broad search. Primary results are deduplicated by node ID,
 including when a real self-edge names the same node twice.
+
+Ambiguous typed answers explicitly ask for an exact node ID and use the query
+operation as their answer basis. They do not attribute an answer to the first
+candidate, claim the symbol is missing, or infer that a path does not exist.
+Text pages include IDs for every retained ambiguity candidate, even when their
+qualified labels differ. Select the intended declaration by its source anchor
+and retry with its ID.
 
 Typed text output is paged. Each page carries a
 `Pagination: page=N range=A-B of T next=<CURSOR>` footer; `--cursor` continues
@@ -1215,3 +1366,70 @@ allocating an unbounded JSON graph.
 
 **Next step:** identify the most structured available output for your consumer
 and validate its major version/direction/multiplicity before reading values.
+
+### Calls-only directed trails
+
+`node --calls-only` and MCP `get_node` with `calls_only: true` return the same
+`compass.query/1` response schema, restricted to directed `calls` edges. Typed
+`NodeTrailRequest` accepts optional `callsOnly: true`; omission preserves the
+structural default. CLI Agent View and MCP metadata retain a call-path question.
+The `ask` forms `call path from SOURCE to TARGET` and `call chain from SOURCE to
+TARGET` select the same policy. Unknown/nonboolean policy values fail explicitly.
+
+Direction-mismatch and depth-frontier checks use the same call restriction.
+Provenance, parallel occurrence identity, ambiguity and incomplete graph/work
+status remain explicit. A structural connection cannot prove a call connection;
+a static call chain is not a runtime trace.
+
+### Directed trail depth limits
+
+For typed `node` and MCP `get_node`, an unsuccessful search that leaves an open
+depth frontier returns `truncated: true` and `bounded_truncation`. An undirected
+shortcut is not proof that no longer directed route exists. Frontier checks use
+the same edge budget and run after the search for a bounded positive path.
+Closed dead ends and cycles can return complete negative results; increasing
+`max_depth` may resolve an incomplete result. The machine schema remains
+`compass.query/1`.
+
+`explore` / `explore_code` also retain incomplete-search status when no connecting
+path was found; previously that status could be lost with the absent path.
+
+### Explanation source verification status
+
+An `explain` source header says `digest-verified` only after the complete recorded
+symbol span matches a stored digest. Without a stored digest it says
+`unverified: no recorded source digest`; the excerpt is current file content at
+the recorded anchor, whose freshness cannot be established. Malformed or
+mismatching digests produce `SOURCE unavailable` without source text. Truncating
+the returned excerpt does not truncate digest verification. The same status
+appears in text carried by shared JSON output envelopes.
+
+### Member implementation excerpts
+
+Use `compass explain OWNER --source-members --max-source-bytes 8000` to inspect
+recorded callable implementations, including methods defined outside a type's
+declaration span. The optional mode replaces the declaration excerpt. It follows
+outgoing containment through nested types and orders members by source location;
+it does not choose members based on an inferred responsibility.
+
+To prioritize a topic within that recorded membership, add
+`--member-focus "symlink loops"`. Members whose names contain more distinct
+normalized query terms appear first; source order breaks ties. Unmatched members
+remain eligible and source reads still share one byte budget. This is a lexical
+name hint, not a synthesized answer. The text reports the normalized focus and
+matches per retained member. Focus requires `--source-members`, accepts at most
+4,096 bytes / 32 distinct searchable terms, and never disambiguates an owner.
+Without focus, the existing source order and output remain unchanged.
+
+`MEMBER SOURCES` reports retained, omitted and unavailable members, total source
+bytes, and truncation. Each `MEMBER` has an exact ID followed by its source and
+verification status, or an explicit source error. The byte budget is shared
+across excerpts; it is not a separate allowance for each member. Discovery and
+verification-work limits can also make source unavailable or incomplete. A
+complete membership listing establishes what the selected graph records, not
+that the source has excessive responsibilities or that every graph edge is true.
+
+Excerpts use the graph's recorded callable spans. An annotation or decorator
+outside those spans, such as Python's `@property`, may be absent even when a
+member is fully returned. Use the declaration excerpt when that surrounding
+context is needed; member mode does not guarantee more evidence for every fact.

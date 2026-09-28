@@ -1,0 +1,807 @@
+{
+  "schema": "compass.responsibility-source-followup-review/1",
+  "scope": "Development agent workflow over frozen native query outputs, with one source window selected only from returned subject anchors. This scores evidence coverage, not a synthesized explanation or native-only capability.",
+  "protocolCommit": "62f60b29",
+  "questionCommit": "232608ee",
+  "protocolSha256": "c5d87cf360d18dc8406b4308ae0e767399332f1ed2c23fbe77813a84d7807e85",
+  "questionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "captureSha256": "34b67bc4046b387e51d6cbe098f0a232e930ba14bfc64e7789a92dbb3729eb8d",
+  "collectorSha256": "c718e82c0d726c36d920d5791fe705a93a715c5aec6cfb6dd56cf22c0fa7010e",
+  "reviewerScriptSha256": "c067cbb4f3936b0fe048d63d2018f9f1f7a75f0cb3d8764ad6f7b840b920ba88",
+  "artifactRoot": "responsibility-source-followup-01",
+  "metrics": {
+    "compass": {
+      "requests": 5,
+      "successfulReads": 5,
+      "totalFacts": 20,
+      "sufficientCombinedEvidenceFacts": 11,
+      "fullFrozenWitnessContainmentFacts": 10,
+      "sourceBytes": 35692,
+      "queryBytes": 39740,
+      "combinedBytes": 75432
+    },
+    "graphify": {
+      "requests": 5,
+      "successfulReads": 5,
+      "totalFacts": 20,
+      "sufficientCombinedEvidenceFacts": 13,
+      "fullFrozenWitnessContainmentFacts": 12,
+      "sourceBytes": 35692,
+      "queryBytes": 53306,
+      "combinedBytes": 88998
+    }
+  },
+  "reviews": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "sourceFile": "mux.go",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "sourceSha256": "f5eb1cd7b656cc6b9aba3fc9960085e33c03bb100cf91babb273c23ca62f9f60",
+      "querySha256": "37657db8665dda901e0e3befbd557c0987c833bc18c6e6722ae004b7c4e27bbf",
+      "queryBytes": 7949,
+      "sourceBytes": 8000,
+      "startLine": 21,
+      "lastCompleteLine": 258,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        21
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "chi-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": false,
+          "reason": "Middleware slice construction and the inline Mux pool/tree assignments are visible through line 258. The full frozen witness extends to the return at 262, but that return is not required by this fact.",
+          "witnesses": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "chi-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The computed-handler guard and panic are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "chi-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The Route construct/configure/mount sequence lies outside the window.",
+          "witnesses": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "chi-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The routeHTTP lookup and handler invocation lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "sourceFile": "mux.go",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "sourceSha256": "f5eb1cd7b656cc6b9aba3fc9960085e33c03bb100cf91babb273c23ca62f9f60",
+      "querySha256": "1bf6c1ffd510f5a1183367edaba6fb6a7a66764cd9a658fdaa9cfa3eeff6b52f",
+      "queryBytes": 6571,
+      "sourceBytes": 8000,
+      "startLine": 21,
+      "lastCompleteLine": 258,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        21
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "chi-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": false,
+          "reason": "Middleware slice construction and the inline Mux pool/tree assignments are visible through line 258. The full frozen witness extends to the return at 262, but that return is not required by this fact.",
+          "witnesses": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "chi-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The computed-handler guard and panic are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "chi-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The Route construct/configure/mount sequence lies outside the window.",
+          "witnesses": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "chi-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The routeHTTP lookup and handler invocation lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "sourceFile": "src/click/_compat.py",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "sourceSha256": "4224d55c98fa278ba766260c4a781363ce4ad082ca7f0e0c981dbdf2e1bd6ba8",
+      "querySha256": "09d1dab6c20017246f8e36ffe47f45c995cdf3b8f9d2e4fa9717f843769cdaf3",
+      "queryBytes": 7868,
+      "sourceBytes": 3692,
+      "startLine": 455,
+      "lastCompleteLine": 590,
+      "partialLastLine": false,
+      "truncated": false,
+      "declarationLines": [
+        455
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "click-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The wrapper assignments and name property are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The closed guard, wrapped close, replace and final closed assignment are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-3",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The __getattr__ forwarding body is fully visible.",
+          "witnesses": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-4",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "Both __exit__ and close are fully visible. The delete argument is passed but not inspected; no rollback is inferred.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "fullyContained": true
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "fullyContained": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "sourceFile": "src/click/_compat.py",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "sourceSha256": "4224d55c98fa278ba766260c4a781363ce4ad082ca7f0e0c981dbdf2e1bd6ba8",
+      "querySha256": "f8e7ae3aae06a943c686f3cd5f94cc7c7ea1f7da243ef8aa1ff35b5984564da5",
+      "queryBytes": 6850,
+      "sourceBytes": 3692,
+      "startLine": 455,
+      "lastCompleteLine": 590,
+      "partialLastLine": false,
+      "truncated": false,
+      "declarationLines": [
+        455
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "click-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The wrapper assignments and name property are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The closed guard, wrapped close, replace and final closed assignment are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-3",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The __getattr__ forwarding body is fully visible.",
+          "witnesses": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "click-4",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "Both __exit__ and close are fully visible. The delete argument is passed but not inspected; no rollback is inferred.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "fullyContained": true
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "fullyContained": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "sourceFile": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "sourceSha256": "78894b0c859a7e9de0ee6f7fb6d1c84bfff8a23e22e00247c8dd65f3b22a20a7",
+      "querySha256": "51bcb6e5217ff0bb974a18fb07a6b636d7a2b67c2ed5641c5da5ad1acf6c5a94",
+      "queryBytes": 7938,
+      "sourceBytes": 8000,
+      "startLine": 43,
+      "lastCompleteLine": 205,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        43
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "jsoup-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The constructor validation and reference assignment are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "jsoup-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The separate shell, safe-node copy and cloned output settings are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "jsoup-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The safe-tag predicate and beginning of attribute processing are visible, but the window stops before the destination attribute write and rejection branch. Partial evidence is not full credit.",
+          "witnesses": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "fullyContained": true
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "jsoup-4",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The fragment parse, discarded-count check and error-list condition are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "fullyContained": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "sourceFile": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "sourceSha256": "78894b0c859a7e9de0ee6f7fb6d1c84bfff8a23e22e00247c8dd65f3b22a20a7",
+      "querySha256": "21db49e7171f06bfa3b36559f63a622705673ca94869932c49389803f09829c2",
+      "queryBytes": 6667,
+      "sourceBytes": 8000,
+      "startLine": 43,
+      "lastCompleteLine": 205,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        43
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "jsoup-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The constructor validation and reference assignment are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "jsoup-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The separate shell, safe-node copy and cloned output settings are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "jsoup-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The safe-tag predicate and beginning of attribute processing are visible, but the window stops before the destination attribute write and rejection branch. Partial evidence is not full credit.",
+          "witnesses": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "fullyContained": true
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "jsoup-4",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The fragment parse, discarded-count check and error-list condition are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "fullyContained": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "sourceFile": "src/createStore.ts",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "sourceSha256": "99c188e06d6c029273e0f8184ea284b31093e5d76f4d0ccf648c1527272b37d7",
+      "querySha256": "d30483e834045767618774140ade72fac87144bd43938a2360ab005ba9681235",
+      "queryBytes": 7997,
+      "sourceBytes": 8000,
+      "startLine": 41,
+      "lastCompleteLine": 264,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        41,
+        75,
+        86
+      ],
+      "declarationAmbiguityRetained": true,
+      "factReviews": [
+        {
+          "id": "redux-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The enhancer validation and delegation sequence are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "redux-2",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The reducer update and finally-reset sequence are visible only in the Graphify-selected window.",
+          "witnesses": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "redux-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "Copy-on-write listener mutation is visible in both windows; the captured-map iteration is visible only in the Graphify-selected window.",
+          "witnesses": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "fullyContained": true
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "fullyContained": true
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "redux-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The returned store and observable adapter lie outside both windows.",
+          "witnesses": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "sourceFile": "src/createStore.ts",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "sourceSha256": "8899477008d515644d77990476a8191d2bb5cd271be011fdbc7aae20560e9418",
+      "querySha256": "ba6c21a04ee4f7d720ee74726dd4551ce982429d97ade961ce50db31ef9a58da",
+      "queryBytes": 6609,
+      "sourceBytes": 8000,
+      "startLine": 86,
+      "lastCompleteLine": 307,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        86
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "redux-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The enhancer validation and delegation sequence are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "redux-2",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The reducer update and finally-reset sequence are visible only in the Graphify-selected window.",
+          "witnesses": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "redux-3",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "Copy-on-write listener mutation is visible in both windows; the captured-map iteration is visible only in the Graphify-selected window.",
+          "witnesses": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "fullyContained": true
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "fullyContained": true
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "redux-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The returned store and observable adapter lie outside both windows.",
+          "witnesses": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "sourceFile": "src/lib.rs",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "sourceSha256": "d986270e959ecf66d941cbf9f5e7f0f35a657ad9dbe599f12e0857544bb270f3",
+      "querySha256": "4e0658ae31900521385690c31083b617977c322a9af823faf5f17505ad63be49",
+      "queryBytes": 7988,
+      "sourceBytes": 8000,
+      "startLine": 538,
+      "lastCompleteLine": 744,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        538,
+        566
+      ],
+      "declarationAmbiguityRetained": true,
+      "factReviews": [
+        {
+          "id": "walkdir-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The iterator stack, depth pruning and error return are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "walkdir-2",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The max_open close-before-open implementation lies outside the window.",
+          "witnesses": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "walkdir-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The symlink directory guard and ancestor-handle loop check lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "walkdir-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The deferred-directory implementation and depth filtering lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "sourceFile": "src/lib.rs",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "sourceSha256": "570c63a0958c223231fa862b28bb71d3d1ea276e68f1cd18c7cd8289a441789c",
+      "querySha256": "729cd0be188021d0e815f4167dd547728feb812a8a497f638f9164f86f3028be",
+      "queryBytes": 26609,
+      "sourceBytes": 8000,
+      "startLine": 566,
+      "lastCompleteLine": 772,
+      "partialLastLine": true,
+      "truncated": true,
+      "declarationLines": [
+        566
+      ],
+      "declarationAmbiguityRetained": false,
+      "factReviews": [
+        {
+          "id": "walkdir-1",
+          "sufficientCombinedEvidence": true,
+          "fullFrozenWitnessContainment": true,
+          "reason": "The iterator stack, depth pruning and error return are fully visible.",
+          "witnesses": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "fullyContained": true
+            }
+          ]
+        },
+        {
+          "id": "walkdir-2",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The max_open close-before-open implementation lies outside the window.",
+          "witnesses": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "walkdir-3",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The symlink directory guard and ancestor-handle loop check lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "fullyContained": false
+            }
+          ]
+        },
+        {
+          "id": "walkdir-4",
+          "sufficientCombinedEvidence": false,
+          "fullFrozenWitnessContainment": false,
+          "reason": "The deferred-directory implementation and depth filtering lie outside the window.",
+          "witnesses": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "fullyContained": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "interpretation": [
+    "All 40 tool/fact evidence judgments were reviewed. Manual semantic sufficiency credits Chi fact 1 from complete assignments before the partial line, while literal full-witness containment does not. Both measures are reported separately.",
+    "Graphify covers two additional Redux facts because its sole returned createStore anchor begins at implementation line 86. Compass retains overload lines 41 and 75 as well as implementation line 86, so the frozen earliest-anchor policy starts at 41. This is an observed workflow advantage under this policy, not a claim that dropping overload declarations is universally correct.",
+    "Compass WalkDir retains the associated type alias at line 538 and struct at 566. Neither declaration ambiguity was silently resolved. The policy selects a source window, not a winning declaration.",
+    "Each side returns 35692 source bytes. Initial query bytes differ, including Graphify WalkDir over-budget output, so combined payloads are 75432 and 88998 bytes. Actual disk reads also include bounded whole source files for validation and hashing; source payload bytes are not disk IO.",
+    "No synthesized prose answer or agent model was run. Source windows establish evidence available to an agent, not that either native query explained the facts.",
+    "One contiguous read is not a best-possible agent policy. Further source selection, disambiguation and native explain/get_node workflows remain unmeasured. This reused-repository panel is not held-out; graph precision, god-object diagnosis, functional community quality, latency and overall superiority remain unproven."
+  ]
+}

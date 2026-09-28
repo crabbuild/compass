@@ -1,0 +1,38 @@
+{
+  "schema": "compass.go-field-access-development-review/1",
+  "scope": "Pinned Litestream 6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa, all 146 tracked Go files; development qualification, not a held-out result",
+  "registration": "go_field_access_registration.json",
+  "postCaptureAmendment": "Candidate graph is 16902487 bytes, so the audit read cap was raised from 16777216 to 25165824 bytes after observing the output. No source, oracle or graph records were filtered.",
+  "sourceOracleSha256": "c44eaa86cee1b0faa73a0ff4f18aa8961825939b102ba985f2eb7bd057168b10",
+  "probeSourceSha256": "5fe2767ea6166eb4bbc22d202b406621cf68d668555c6ac9135199ab657de820",
+  "candidateBinarySha256": "05352621dfe9238f4d32cf328a35d17b559cd26dc6d811989c4c01e219cd0098",
+  "baselineCompassGraphSha256": "3aed3fe0dab1fec6e1a9e197474ae3727f4c74dd6f3b68ff7cd91462cb4d29e4",
+  "candidateCompassGraphSha256": "d6bbc036d3cf6d294995ba734be7e70f02763fe273aa87597f40d3113f82e732",
+  "frozenGraphifyGraphSha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e",
+  "rawProbeSha256": "f6e9916dc323b03b89496b066b5cfd4936d7cbc82902b866d905b40804454c0e",
+  "rawRun": "go-field-access-02 in the external code-graph audit runs directory",
+  "sourceDirectReceiverFieldContacts": 2742,
+  "candidateExactContacts": 2742,
+  "baselineCompassExactContacts": 0,
+  "frozenGraphifyExactContacts": 0,
+  "candidateNodes": 3801,
+  "oldNodeIdsRemoved": 0,
+  "newNodeIds": 0,
+  "candidateLinks": 15471,
+  "oldLinksRemovedOrChanged": 0,
+  "newMemberAccessReferenceLinks": 4650,
+  "newMemberAccessNonFieldTargets": 0,
+  "newAccessLinksOutsideCreditedOracle": {
+    "total": 1908,
+    "otherReceiver": 719,
+    "nonIdentifierReceiver": 225,
+    "outsideOracleScope": 964,
+    "interpretation": "Retained for inspection; this direct self-field oracle cannot establish their precision."
+  },
+  "repeatability": "Two probe runs were byte identical; cold extraction processed 199 files, warm extraction reused all 199 and produced byte-identical graph JSON.",
+  "publicMcpWitnesses": {
+    "Store": {"rank": 8, "directFields": 21, "ownFieldReferenceRecords": 113, "methodsTouchingOwnFields": 23},
+    "HeartbeatClient": {"rank": 164, "directFields": 6, "ownFieldReferenceRecords": 13, "methodsTouchingOwnFields": 4}
+  },
+  "limits": "One known Go repository and one direct receiver-field source oracle. Other added edges, broad graph precision, god-object diagnosis, community quality, and overall superiority remain unproven."
+}

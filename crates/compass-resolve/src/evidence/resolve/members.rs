@@ -780,7 +780,7 @@ impl ResolutionDb<'_> {
         }
         let argument_types = &candidate.constraints.argument_types;
         if target.language != "java"
-            || argument_types.is_empty()
+            || candidate.constraints.argument_count != u32::try_from(argument_types.len()).ok()
             || argument_types.iter().any(Option::is_none)
         {
             return true;
@@ -802,7 +802,10 @@ impl ResolutionDb<'_> {
             .iter()
             .copied()
             .filter(|declaration| {
-                declaration.parameter_types.len() == argument_types.len()
+                // An absent optional type vector does not prove an empty
+                // parameter list, especially for zero-argument varargs.
+                declaration.parameter_count == u32::try_from(declaration.parameter_types.len()).ok()
+                    && declaration.parameter_types.len() == argument_types.len()
                     && declaration
                         .parameter_types
                         .iter()

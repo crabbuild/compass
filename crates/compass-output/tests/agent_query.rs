@@ -64,6 +64,58 @@ fn context(operation: AgentOperation) -> AgentQueryContext {
 }
 
 #[test]
+fn relationship_subject_uses_the_query_engines_symbol_normalization() -> Result<(), Box<dyn Error>>
+{
+    let source = anchor("src/lib.rs", 1);
+    for (operation, agent_operation) in [
+        (CodeQueryOperation::Callers, AgentOperation::Callers),
+        (CodeQueryOperation::Callees, AgentOperation::Callees),
+    ] {
+        let mut response = response(operation);
+        response.nodes = vec![
+            node("a:neighbor", "Neighbor", &source),
+            node("z:subject", ".Subject()", &source),
+        ];
+        response.nodes[1].qualified_name = "Fixture.Subject".to_owned();
+        let (from, to) = if operation == CodeQueryOperation::Callers {
+            ("a:neighbor", "z:subject")
+        } else {
+            ("z:subject", "a:neighbor")
+        };
+        response.edges.push(QueryEdge {
+            id: "e:call".to_owned(),
+            source: from.to_owned(),
+            target: to.to_owned(),
+            kind: EdgeKind::Calls,
+            relationship_site: Some(source.clone()),
+            details: None,
+            evidence: vec![evidence(&source)],
+        });
+        for query in [
+            "Subject",
+            "subject()",
+            ".SUBJECT()",
+            " Fixture.Subject ",
+            "z:subject",
+        ] {
+            let view = build_code_query_view(
+                &response,
+                context(agent_operation)
+                    .with_operand(compass_output::AgentOperandRole::Symbol, query),
+            )?;
+            assert!(
+                view.answer.headline.ends_with("for Fixture.Subject."),
+                "{query}: {}",
+                view.answer.headline
+            );
+            assert_eq!(view.answer.basis[0].id, "z:subject");
+            assert_eq!(view.primary_results[0].id, "z:subject");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn direct_usage_survives_the_projection_bound_ahead_of_owner_references()
 -> Result<(), Box<dyn Error>> {
     let target_anchor = anchor("src/target.rs", 20);
@@ -790,12 +842,65 @@ fn legacy_page_cursor_encoding_is_rejected_with_a_version_error() -> Result<(), 
         let checksum = format!("{:x}", Sha256::digest(payload.as_bytes()));
         let cursor = format!("{payload}.{checksum}");
         let error = compass_output::decode_agent_text_page_cursor(&cursor)
-            .expect_err("a legacy cursor must not be reinterpreted");
+            .err()
+            .ok_or("a legacy cursor must not be reinterpreted")?;
         let message = error.to_string();
         assert!(
             message.contains("cursor"),
             "the failure names the cursor: {message}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn ambiguity_never_selects_a_headline_subject_or_claims_no_path() -> Result<(), Box<dyn Error>> {
+    for (operation, agent_operation) in [
+        (CodeQueryOperation::Callers, AgentOperation::Callers),
+        (CodeQueryOperation::Callees, AgentOperation::Callees),
+        (CodeQueryOperation::Impact, AgentOperation::Impact),
+        (CodeQueryOperation::NodeTrail, AgentOperation::NodeTrail),
+    ] {
+        let mut response = response(operation);
+        response.nodes = vec![
+            node("n:library", "Library.run", &anchor("src/lib.rs", 10)),
+            node("n:test", "Tests.run", &anchor("tests/run.rs", 20)),
+        ];
+        response.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::AmbiguousMatch,
+            message: "run matched two declarations".to_owned(),
+            node_id: None,
+            path: None,
+        });
+        let query_context =
+            context(agent_operation).with_operand(compass_output::AgentOperandRole::Symbol, "run");
+        for reverse in [false, true] {
+            if reverse {
+                response.nodes.reverse();
+            }
+            let view = build_code_query_view(&response, query_context.clone())?;
+            assert_eq!(view.status.result_state, AgentResultState::NeedsResolution);
+            assert!(view.answer.headline.contains("multiple candidates"));
+            assert!(view.answer.headline.contains("exact node ID"));
+            assert_eq!(view.answer.basis.len(), 1);
+            assert_eq!(view.answer.basis[0].kind, "operation");
+            let page = render_code_query_text_page(
+                &response,
+                query_context.clone(),
+                AgentTextPageOptions {
+                    token_budget: 2_000,
+                    cursor: None,
+                },
+            )?;
+            for text in [render_agent_query_text(&view)?, page.text] {
+                for id in ["n:library", "n:test"] {
+                    assert!(text.contains(&format!("id: {id}")), "{text}");
+                }
+                assert!(!text.contains("fallback candidate"), "{text}");
+                assert!(!text.contains("No directed path"), "{text}");
+                assert!(!text.contains("No exact match"), "{text}");
+            }
+        }
     }
     Ok(())
 }
@@ -865,5 +970,53 @@ fn unresolved_relationship_answers_never_speak_for_another_symbol() -> Result<()
         "a fallback's evidence must not be attributed to the request: {}",
         unresolved.answer.headline
     );
+    Ok(())
+}
+
+#[test]
+fn bounded_empty_search_is_unknown_instead_of_a_no_match_claim() -> Result<(), Box<dyn Error>> {
+    for diagnostic_only in [false, true] {
+        let mut result = response(CodeQueryOperation::Search);
+        result.truncated = !diagnostic_only;
+        result.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::BoundedTruncation,
+            message: "Exact lookup stopped before filtering was complete".to_owned(),
+            node_id: None,
+            path: None,
+        });
+        let view = build_code_query_view(
+            &result,
+            context(AgentOperation::Search)
+                .with_operand(compass_output::AgentOperandRole::Query, "Subject"),
+        )?;
+        assert_eq!(view.status.match_state, AgentMatch::Unknown);
+        assert_eq!(view.status.result_state, AgentResultState::Candidates);
+        assert_eq!(view.status.source_execution, AgentExecution::Partial);
+        assert!(view.primary_results.is_empty());
+        let text = render_agent_query_text(&view)?;
+        assert!(text.contains("before a match or absence could be established"));
+        assert!(!view.caveats.iter().any(|c| c.code == "no_match"));
+    }
+    Ok(())
+}
+
+#[test]
+fn search_exact_match_display_uses_typed_name_normalization() -> Result<(), Box<dyn Error>> {
+    let mut result = response(CodeQueryOperation::Search);
+    result
+        .nodes
+        .push(node("id:subject", ".Subject()", &anchor("src/lib.rs", 1)));
+    result.results.push(SearchHit {
+        node_id: "id:subject".to_owned(),
+        score: 1.0,
+        matched_fields: vec!["name".to_owned()],
+    });
+    let view = build_code_query_view(
+        &result,
+        context(AgentOperation::Search)
+            .with_operand(compass_output::AgentOperandRole::Query, " SUBJECT "),
+    )?;
+    assert_eq!(view.status.match_state, AgentMatch::Exact);
+    assert_eq!(view.status.result_state, AgentResultState::Answered);
     Ok(())
 }

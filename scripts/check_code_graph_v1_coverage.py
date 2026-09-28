@@ -88,6 +88,7 @@ def main() -> int:
             "fixtureManifestFingerprint": fingerprint,
             "flows": len(manifest["flows"]),
             "negatives": len(manifest["negatives"]),
+            "routeContainmentNegatives": len(manifest["routeContainmentNegatives"]),
             "nodeKinds": len(manifest["nodeProducers"]),
             "edgeKinds": len(manifest["edgeProducers"]),
             "languages": len(manifest["_languageExpectations"]),

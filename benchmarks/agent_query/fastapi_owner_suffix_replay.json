@@ -1,0 +1,101 @@
+{
+  "callSite": "fastapi/routing.py:1232",
+  "calleeId": "sha256:42b62dabbde5a02228214591292b7c6a4b23a1c5093d5c336fcbf8b7d008effd",
+  "callerId": "sha256:f96627f0b6942549af09703f30f4b20cc8b16cf26058d77f785ab5307b760f1d",
+  "candidateBinarySha256": "17620181b2ca2fb051b234fa022c1fe1bd03913fad2246f48b643603fe85c623",
+  "classification": "Post-registration development replay on a known failing source; not a new scored or held-out result",
+  "graphSha256": "1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a",
+  "interpretation": "Owner-qualified typed ask, legacy explain and path recover the frozen direct call; nonexistent owner fails. The registered short-name protocol still failed and is not rescored.",
+  "questions": [
+    {
+      "argv": [
+        "compass",
+        "ask",
+        "what does APIRoute.get_route_handler call?",
+        "--format",
+        "json",
+        "--graph",
+        "<frozen-fastapi-graph>"
+      ],
+      "exitCode": 0,
+      "id": "ask-callees",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "d84f348f73d22ae483925dcb4384d4ca62206f00b3fcd4be3b9e5c8039041905"
+    },
+    {
+      "argv": [
+        "compass",
+        "ask",
+        "call path from APIRoute.get_route_handler to get_request_handler",
+        "--format",
+        "json",
+        "--graph",
+        "<frozen-fastapi-graph>"
+      ],
+      "exitCode": 0,
+      "id": "ask-call-path",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "bdc359bcd0fc2a4b06160d60791bad7c2180abe3b5949c83a63aa8bcf85bc924"
+    },
+    {
+      "argv": [
+        "compass",
+        "explain",
+        "APIRoute.get_route_handler",
+        "--graph",
+        "<frozen-fastapi-graph>"
+      ],
+      "exitCode": 0,
+      "id": "explain",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "6bcaa2af1c6c56bb8a2a9ed286bd9a3615c951018d82a60c87e33c9c16dfb32e"
+    },
+    {
+      "argv": [
+        "compass",
+        "path",
+        "APIRoute.get_route_handler",
+        "get_request_handler",
+        "--graph",
+        "<frozen-fastapi-graph>"
+      ],
+      "exitCode": 0,
+      "id": "path",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "d764b53096b6b9153b8804e349bf8c8811504236f2a7ee7a44aa95434a15e685"
+    },
+    {
+      "argv": [
+        "compass",
+        "path",
+        "MissingRoute.get_route_handler",
+        "get_request_handler",
+        "--graph",
+        "<frozen-fastapi-graph>"
+      ],
+      "exitCode": 1,
+      "id": "missing-path",
+      "stderrSha256": "7af006b515a12e70563f693252489acd3f4b67ebabadbe6347cfd5555aaef956",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "registeredRunJsonSha256": "f28a92dd08363607f534632471e15f61e7f3d6cd3ce34e479ab04ff09ebdba4c",
+  "registeredScoresUnchanged": {
+    "registeredText": {
+      "compass": 9,
+      "graphify": 8
+    },
+    "sourceSupported": {
+      "compass": 9,
+      "graphify": 6
+    }
+  },
+  "registeredSuiteSha256": "13338a37b219b82d6b0a99f5a8b884cc27efa8043b1a38d5a32dcfa88a53da0e",
+  "schema": "compass.fastapi-owner-suffix-replay/1",
+  "source": {
+    "commit": "0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4",
+    "file": "fastapi/routing.py",
+    "repository": "fastapi/fastapi",
+    "sha256": "7b1ef65fb6b209445dc43be070a23324b7879aef9c6b9f63e6968234b7723b55"
+  }
+}

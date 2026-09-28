@@ -5,7 +5,7 @@ mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio, serve_stdio_configured};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read as _, Write as _};
@@ -21,7 +21,8 @@ use compass_agent_graph::{
 };
 use compass_core::{AgentGraphContext, LoadedGraph};
 use compass_graph::{
-    Communities, blind_spot_report, god_nodes, suggest_questions, surprising_connections,
+    Communities, blind_spot_report, god_nodes_with_evidence, suggest_questions,
+    surprising_connections,
 };
 use compass_model::code_graph::GraphDocument as CodeGraphDocument;
 use compass_model::query_contract::{
@@ -30,7 +31,7 @@ use compass_model::query_contract::{
     MAX_DISCOVERY_NODES, MAX_DISCOVERY_QUESTION_BYTES, MAX_DISCOVERY_RESPONSE_BYTES,
     MAX_DISCOVERY_SEEDS, MAX_DISCOVERY_TIMEOUT_MS,
 };
-use compass_model::{Graph, GraphDocument, NodeIndex};
+use compass_model::{Graph, GraphArtifact, GraphDocument, GraphError, NodeIndex};
 use compass_output::{
     AgentOperandRole, AgentOperation, AgentOrientation, AgentQueryContext,
     ORIENTATION_JSON_MAX_BYTES, build_code_query_view, build_discovery_query_view,
@@ -43,7 +44,8 @@ use compass_prs::{
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
-    TraversalMode, find_node, pick_scored_endpoint, query_graph_text, sanitize_label, score_nodes,
+    HopPathResult, NeighborDirection, TraversalMode, direct_neighbors, find_exact_nodes, find_node,
+    query_graph_text, sanitize_label, shortest_hop_path,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
@@ -121,15 +123,10 @@ impl From<String> for InvocationError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FileKey {
-    modified: Option<SystemTime>,
-    size: u64,
-}
-
 #[derive(Debug)]
 struct GraphContext {
     path: PathBuf,
+    document: GraphDocument,
     graph: Graph,
     overlay: HashMap<String, Map<String, Value>>,
     communities: BTreeMap<usize, Vec<NodeIndex>>,
@@ -139,13 +136,15 @@ struct GraphContext {
 }
 
 impl GraphContext {
-    fn load(path: &Path) -> Result<Self, String> {
-        let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
-        let (typed_document, typed_graph_identity) =
-            match CodeGraphDocument::load_with_artifact_digest(path) {
-                Ok((document, identity)) => (Some(document), Some(identity)),
-                Err(_) => (None, None),
-            };
+    fn load(artifact: &GraphArtifact) -> Result<Self, String> {
+        let loaded =
+            LoadedGraph::from_artifact_directed(artifact).map_err(|error| error.to_string())?;
+        let document = artifact.document().map_err(|error| error.to_string())?;
+        let (typed_document, typed_graph_identity) = match artifact.typed_document() {
+            Ok(document) => (Some(document), Some(artifact.artifact_digest())),
+            Err(GraphError::UnsupportedGraphSchema { found: None }) => (None, None),
+            Err(error) => return Err(error.to_string()),
+        };
         let typed_query_supported = typed_document.is_some();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
@@ -158,7 +157,8 @@ impl GraphContext {
             }
         }
         Ok(Self {
-            path: path.to_path_buf(),
+            path: artifact.path().to_path_buf(),
+            document,
             graph: loaded.graph,
             overlay: loaded.overlay,
             communities,
@@ -168,8 +168,8 @@ impl GraphContext {
         })
     }
 
-    fn document(&self) -> Result<GraphDocument, String> {
-        GraphDocument::load(&self.path).map_err(|error| error.to_string())
+    fn document(&self) -> &GraphDocument {
+        &self.document
     }
 
     fn community_ids(&self) -> Communities {
@@ -190,7 +190,7 @@ impl GraphContext {
 
 #[derive(Debug)]
 struct CacheEntry {
-    key: FileKey,
+    key: String,
     context: Arc<GraphContext>,
 }
 
@@ -254,12 +254,11 @@ impl GraphStore {
 
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
         let path = self.resolve(project_path)?;
-        let metadata =
-            fs::metadata(&path).map_err(|_| format!("graph.json not found: {}", path.display()))?;
-        let key = FileKey {
-            modified: metadata.modified().ok(),
-            size: metadata.len(),
-        };
+        let artifact = GraphArtifact::load(&path).map_err(|error| match error {
+            GraphError::NotFound(_) => format!("graph.json not found: {}", path.display()),
+            other => other.to_string(),
+        })?;
+        let key = artifact.artifact_digest();
         if let Some(context) = self
             .inner
             .cache
@@ -271,7 +270,7 @@ impl GraphStore {
         {
             return Ok(context);
         }
-        let context = Arc::new(GraphContext::load(&path)?);
+        let context = Arc::new(GraphContext::load(&artifact)?);
         self.inner
             .cache
             .lock()
@@ -369,6 +368,10 @@ impl CompassMcp {
     pub fn invoke(&self, name: &str, mut arguments: Map<String, Value>) -> String {
         self.invoke_result(name, &mut arguments)
             .map(|result| {
+                // Keep this legacy text helper stable; MCP carries both projections.
+                if matches!(name, "god_nodes" | "shortest_path" | "get_neighbors") {
+                    return result.text;
+                }
                 result
                     .structured_content
                     .map_or(result.text, |value| value.to_string())
@@ -580,6 +583,15 @@ impl CompassMcp {
         }
         if typed_query {
             return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
+        }
+        if name == "get_neighbors" {
+            return invoke_neighbor_tool(arguments, &context);
+        }
+        if name == "god_nodes" {
+            return invoke_hub_tool(arguments, &context);
+        }
+        if name == "shortest_path" {
+            return invoke_path_tool(arguments, &context);
         }
         Ok(ToolInvocation {
             text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
@@ -1098,7 +1110,22 @@ fn typed_agent_query_context(
         }
         "get_node" => {
             let context = operand(AgentOperandRole::Source, "source", context);
-            operand(AgentOperandRole::Target, "target", context)
+            let context = operand(AgentOperandRole::Target, "target", context);
+            if arguments.get("calls_only").and_then(Value::as_bool) == Some(true) {
+                context.with_question(format!(
+                    "call path from {} to {}",
+                    arguments
+                        .get("source")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    arguments
+                        .get("target")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ))
+            } else {
+                context
+            }
         }
         "explore_code" => {
             let mut context = context;
@@ -1296,8 +1323,8 @@ fn tool_specs() -> Vec<Tool> {
     let mut specs = vec![
         tool(
             "search_symbols",
-            "Search Compass code symbols with the trusted FTS5 index.",
-            code_query::schema(&["query"]),
+            "Search Compass code symbols. Set exact=true for bounded exact ID/name candidates with optional source_file, start_line and kind filters; all matching records and truncation remain visible.",
+            code_query::search_schema(),
         ),
         tool(
             "get_callers",
@@ -1322,7 +1349,7 @@ fn tool_specs() -> Vec<Tool> {
         tool(
             "get_node",
             "Return the trusted evidence trail between two code-graph nodes.",
-            code_query::schema(&["source", "target"]),
+            code_query::trail_schema(),
         ),
         tool(
             "query_graph",
@@ -1350,7 +1377,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "get_neighbors",
-            "Get all direct neighbors of a node with edge details.",
+            "Get bounded direct neighbors with exact destination IDs, definition anchors and all matching relationship records. Directions describe stored endpoints; limit exhaustion fails explicitly.",
             json!({"type":"object","properties":{"label":{"type":"string"},"relation_filter":{"type":"string","description":"Optional: filter by relation type"}},"required":["label"]}),
         ),
         tool(
@@ -1360,7 +1387,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "god_nodes",
-            "Return the most connected nodes - the core abstractions of the knowledge graph.",
+            "Return connected hub candidates with exact IDs, source anchors, degree, node kind, and bounded incoming/outgoing relation-record counts. Connectivity is a topology observation, not proof of excessive responsibility.",
             json!({"type":"object","properties":{"top_n":{"type":"integer","default":10}}}),
         ),
         tool(
@@ -1370,8 +1397,8 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "shortest_path",
-            "Find the shortest path between two concepts in the knowledge graph.",
-            json!({"type":"object","properties":{"source":{"type":"string","description":"Source concept label or keyword"},"target":{"type":"string","description":"Target concept label or keyword"},"max_hops":{"type":"integer","default":8,"description":"Maximum hops to consider"}},"required":["source","target"]}),
+            "Find a bounded minimum-hop undirected navigation path between exact node identities. Ambiguous names require disambiguation. Structured results retain node and edge identities; equal-hop routes prefer structural relations.",
+            json!({"type":"object","properties":{"source":{"type":"string","description":"Source exact node ID, symbol, or qualified name"},"target":{"type":"string","description":"Target exact node ID, symbol, or qualified name"},"max_hops":{"type":"integer","minimum":0,"maximum":64,"default":8,"description":"Maximum hops explored"}},"required":["source","target"]}),
         ),
         tool(
             "list_prs",
@@ -2209,58 +2236,105 @@ fn tool_get_neighbors(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
-    let query = string_argument(arguments, "label")?.to_lowercase();
+    invoke_neighbor_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_neighbor_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
+    // The compact traversal cache omits identities, occurrence anchors and
+    // provenance. Resolve and project against one full snapshot instead.
+    let mut document = context.document().clone();
+    // Retain every persisted record even for legacy non-multigraph metadata.
+    document.multigraph = true;
+    let graph = Graph::from_traversal_document(document)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let query = string_argument(arguments, "label")?;
     let filter = optional_string(arguments, "relation_filter")
         .unwrap_or_default()
         .to_lowercase();
-    let Some(&index) = find_node(&context.graph, &query).first() else {
-        return Ok(format!("No node matching '{query}' found."));
+    let exact = find_exact_nodes(&graph, query);
+    let matches = if exact.is_empty() {
+        find_node(&graph, query)
+    } else {
+        exact
     };
+    let Some(&index) = matches.first() else {
+        return Ok(ToolInvocation {
+            text: format!("No node matching '{}' found.", sanitize_label(query)),
+            structured_content: None,
+        });
+    };
+    if matches.len() > 1 {
+        const MAX_CANDIDATES: usize = 20;
+        let mut candidates = matches
+            .iter()
+            .map(|index| graph.node(*index))
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut lines = vec![format!(
+            "Ambiguous: '{}' matches {} nodes. Retry with an exact node ID.",
+            sanitize_label(query),
+            candidates.len()
+        )];
+        lines.extend(candidates.iter().take(MAX_CANDIDATES).map(|node| {
+            format!(
+                "  {} [{}] id: {}",
+                sanitize_label(node.label()),
+                sanitize_label(&node.string("source_file")),
+                sanitize_label(&node.id)
+            )
+        }));
+        if candidates.len() > MAX_CANDIDATES {
+            lines.push(format!(
+                "{} additional candidates omitted; narrow the symbol or source path.",
+                candidates.len() - MAX_CANDIDATES
+            ));
+        }
+        return Ok(ToolInvocation {
+            text: lines.join("\n"),
+            structured_content: None,
+        });
+    }
+    let report = direct_neighbors(&graph, index, &filter)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
     let mut lines = vec![format!(
         "Neighbors of {}:",
-        sanitize_label(context.graph.node(index).label())
+        sanitize_label(report.seed.label())
     )];
-    let mut outgoing = HashSet::new();
-    for edge_index in context.graph.outgoing_edges(index) {
-        let edge = context.graph.edge(edge_index);
-        let Some(neighbor) = context.graph.node_index(&edge.target) else {
+    lines.push(format!("  seed id: {}", json!(report.seed.id)));
+    for group in &report.neighbors {
+        let Some(edge) = group.edges.first() else {
             continue;
         };
-        if !outgoing.insert(neighbor) {
-            continue;
-        }
-        let relation = edge.string("relation");
-        if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
-            continue;
-        }
-        lines.push(format!(
-            "  --> {} [{}] [{}]",
-            sanitize_label(context.graph.node(neighbor).label()),
-            sanitize_label(&relation),
-            sanitize_label(&edge.string("confidence"))
-        ));
-    }
-    let mut incoming = HashSet::new();
-    for edge_index in context.graph.incoming_edges(index) {
-        let edge = context.graph.edge(edge_index);
-        let Some(neighbor) = context.graph.node_index(&edge.source) else {
-            continue;
+        let arrow = match group.direction {
+            NeighborDirection::Outgoing => "-->",
+            NeighborDirection::Incoming => "<--",
         };
-        if !incoming.insert(neighbor) {
-            continue;
-        }
-        let relation = edge.string("relation");
-        if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
-            continue;
-        }
         lines.push(format!(
-            "  <-- {} [{}] [{}]",
-            sanitize_label(context.graph.node(neighbor).label()),
-            sanitize_label(&relation),
+            "  {arrow} {} [{}] [{}]",
+            sanitize_label(group.node.label()),
+            sanitize_label(&edge.string("relation")),
             sanitize_label(&edge.string("confidence"))
         ));
+        lines.push(format!(
+            "    id: {} | source: {} | location: {} | records: {}",
+            json!(group.node.id),
+            json!(group.node.source_file()),
+            json!(group.node.string("source_location")),
+            group.edges.len()
+        ));
     }
-    Ok(lines.join("\n"))
+    let mut value = serde_json::to_value(&report)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    value.sort_all_objects();
+    Ok(ToolInvocation {
+        text: lines.join("\n"),
+        structured_content: Some(transport_envelope(value)?),
+    })
 }
 
 fn tool_get_community(
@@ -2302,16 +2376,103 @@ fn tool_god_nodes(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    invoke_hub_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_hub_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
     let top_n =
         usize::try_from(integer_argument(arguments, "top_n", 10).max(0)).unwrap_or_default();
-    let nodes = god_nodes(&context.document()?, top_n);
+    let document = context.document();
+    let nodes = god_nodes_with_evidence(document, top_n);
+    let records = document
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
     let mut lines = vec!["God nodes (most connected):".to_owned()];
-    lines.extend(
-        nodes.iter().enumerate().map(|(index, node)| {
-            format!("  {}. {} - {} edges", index + 1, node.label, node.degree)
-        }),
-    );
-    Ok(lines.join("\n"))
+    let mut identities = Vec::with_capacity(nodes.len());
+    for (index, evidence) in nodes.iter().enumerate() {
+        let node = &evidence.hub;
+        let connectivity = &evidence.connectivity;
+        let record = records.get(node.id.as_str()).ok_or_else(|| {
+            InvocationError::Internal("hub identity is absent from the selected graph".to_owned())
+        })?;
+        let location = record.string("source_location");
+        let source_location = (!location.is_empty()).then_some(location.as_str());
+        lines.push(format!(
+            "  {}. {} - {} edges",
+            index + 1,
+            sanitize_label(&node.label),
+            node.degree
+        ));
+        lines.push(format!(
+            "    id: {} | source: {} | location: {}",
+            json!(node.id),
+            json!(record.source_file()),
+            json!(source_location)
+        ));
+        let kind = record.kind_name();
+        lines.push(format!(
+            "    kind: {} | incident records: {} | self-loops: {}",
+            if kind.is_empty() {
+                "unknown".to_owned()
+            } else {
+                sanitize_label(kind)
+            },
+            connectivity.edge_records,
+            connectivity.self_loop_records
+        ));
+        for relation in &connectivity.relations {
+            lines.push(format!(
+                "    relation {}: incoming {}, outgoing {}, undirected {}",
+                json!(relation.relation),
+                relation.incoming_records,
+                relation.outgoing_records,
+                relation.undirected_records
+            ));
+        }
+        if connectivity.omitted_relation_kinds > 0 {
+            lines.push(format!(
+                "    {} additional relation kinds ({} records) omitted",
+                connectivity.omitted_relation_kinds, connectivity.omitted_relation_records
+            ));
+        }
+        if let Some(members) = &evidence.members {
+            lines.push(format!(
+                "    stored members (source coverage unverified): {} methods, {} fields, {} ambiguous | own-field references: {} records, {} method-field pairs, {} methods",
+                members.direct_methods,
+                members.direct_fields,
+                members.ambiguous_direct_members,
+                members.own_field_reference_records,
+                members.distinct_own_field_pairs,
+                members.methods_touching_own_fields
+            ));
+        }
+        identities.push(json!({
+            "rank":index + 1, "id":node.id, "label":node.label, "degree":node.degree,
+            "kind":record.kind_name(), "sourceFile":record.source_file(),
+            "sourceLocation":source_location, "startLine":record.unsigned("line_start"),
+            "endLine":record.unsigned("line_end"), "connectivity": connectivity,
+            "memberEvidence":evidence.members
+        }));
+    }
+    let structured = transport_envelope(json!({
+        "schema":"compass.mcp.hubs/1", "ranking":if document.directed {
+            "distinct-directed-endpoint-degree"
+        } else {
+            "distinct-undirected-endpoint-degree"
+        },
+        "interpretation":"topology-candidates", "requested":top_n, "nodes":identities
+    }))?;
+    Ok(ToolInvocation {
+        text: lines.join("\n"),
+        structured_content: Some(structured),
+    })
 }
 
 fn tool_graph_stats(context: &GraphContext) -> String {
@@ -2349,159 +2510,173 @@ fn python_percent(count: usize, total: usize) -> usize {
     }
 }
 
+fn resolve_mcp_path_endpoint(graph: &Graph, query: &str, role: &str) -> Result<NodeIndex, String> {
+    let matches = find_exact_nodes(graph, query);
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(format!(
+            "No node matching {role} '{}' found.",
+            sanitize_label(query)
+        )),
+        _ => {
+            let mut candidates = matches
+                .iter()
+                .map(|index| graph.node(*index))
+                .collect::<Vec<_>>();
+            candidates.sort_by(|left, right| left.id.cmp(&right.id));
+            let mut lines = vec![format!(
+                "Ambiguous {role}: {} matches {} nodes. Retry with an exact node ID.",
+                json!(query),
+                candidates.len()
+            )];
+            lines.extend(candidates.iter().take(20).map(|node| {
+                format!(
+                    "  {} [{}] id: {}",
+                    sanitize_label(node.label()),
+                    sanitize_label(&node.string("source_file")),
+                    json!(node.id)
+                )
+            }));
+            if candidates.len() > 20 {
+                lines.push(format!(
+                    "{} additional candidates omitted.",
+                    candidates.len() - 20
+                ));
+            }
+            Err(lines.join("\n"))
+        }
+    }
+}
+
 fn tool_shortest_path(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    invoke_path_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_path_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
     let source_query = string_argument(arguments, "source")?;
     let target_query = string_argument(arguments, "target")?;
-    let source_scores = score_nodes(
-        &context.graph,
-        &source_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    let target_scores = score_nodes(
-        &context.graph,
-        &target_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    if source_scores.ranked.is_empty() {
-        return Ok(format!("No node matching source '{source_query}' found."));
-    }
-    if target_scores.ranked.is_empty() {
-        return Ok(format!("No node matching target '{target_query}' found."));
-    }
-    let source = pick_scored_endpoint(&context.graph, &source_scores.ranked, source_query);
-    let target = pick_scored_endpoint(&context.graph, &target_scores.ranked, target_query);
+    let max_hops = match arguments.get("max_hops") {
+        None => 8,
+        Some(value) => value
+            .as_u64()
+            .or_else(|| value.as_str()?.parse().ok())
+            .filter(|value| *value <= 64)
+            .ok_or_else(|| "max_hops must be between 0 and 64".to_owned())?,
+    };
+    let max_hops = usize::try_from(max_hops).map_err(|error| error.to_string())?;
+    // Select and project from one full snapshot: the compact traversal cache
+    // omits source lines and edge IDs, including parallel-edge identities.
+    let mut document = context.document().clone();
+    document.directed = true;
+    let graph = Graph::from_traversal_document(document)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let source = match resolve_mcp_path_endpoint(&graph, source_query, "source") {
+        Ok(index) => index,
+        Err(text) => {
+            return Ok(ToolInvocation {
+                text,
+                structured_content: None,
+            });
+        }
+    };
+    let target = match resolve_mcp_path_endpoint(&graph, target_query, "target") {
+        Ok(index) => index,
+        Err(text) => {
+            return Ok(ToolInvocation {
+                text,
+                structured_content: None,
+            });
+        }
+    };
     if source == target {
-        return Ok(format!(
-            "'{source_query}' and '{target_query}' both resolved to the same node '{}'. Use a more specific label or the exact node ID.",
-            context.graph.node(source).id
-        ));
+        return Ok(ToolInvocation {
+            text: format!(
+                "'{}' and '{}' both resolved to the same node {}. Use a more specific label or the exact node ID.",
+                sanitize_label(source_query),
+                sanitize_label(target_query),
+                json!(graph.node(source).id)
+            ),
+            structured_content: None,
+        });
     }
-    let Some(path) = shortest_path(&context.graph, source, target) else {
-        return Ok(format!(
-            "No path found between '{}' and '{}'.",
-            context.graph.node(source).label(),
-            context.graph.node(target).label()
-        ));
-    };
-    let hops = path.len().saturating_sub(1);
-    let max_hops =
-        usize::try_from(integer_argument(arguments, "max_hops", 8).max(0)).unwrap_or_default();
-    if hops > max_hops {
-        return Ok(format!(
-            "Path exceeds max_hops={max_hops} ({hops} hops found)."
-        ));
-    }
-    let mut warnings = Vec::new();
-    ambiguity_warning("source", &source_scores.ranked, source, &mut warnings);
-    ambiguity_warning("target", &target_scores.ranked, target, &mut warnings);
-    let mut segments = vec![context.graph.node(path[0]).label().to_owned()];
-    for pair in path.windows(2) {
-        let left = pair[0];
-        let right = pair[1];
-        if let Some(edge_index) = context.graph.edge_between(left, right) {
-            let edge = context.graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
+    let mut result = json!({"schema":"compass.mcp.path/1", "direction":"undirected",
+        "ranking":"hops-then-structural-cost", "maxHops":max_hops,
+        "source":graph.node(source).id, "target":graph.node(target).id});
+    let text = match shortest_hop_path(&graph, source, target, max_hops)? {
+        HopPathResult::NoPath {
+            visited_nodes,
+            depth_limited,
+        } => {
+            result["status"] = json!(if depth_limited {
+                "depth_limit"
             } else {
-                format!(" [{confidence}]")
-            };
-            segments.push(format!(
-                "--{}{suffix}--> {}",
-                edge.string("relation"),
-                context.graph.node(right).label()
-            ));
-        } else if let Some(edge_index) = context.graph.edge_between(right, left) {
-            let edge = context.graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
+                "disconnected"
+            });
+            result["visitedNodes"] = json!(visited_nodes);
+            if depth_limited {
+                format!(
+                    "No path found within max_hops={max_hops}; search stopped at the hop bound."
+                )
             } else {
-                format!(" [{confidence}]")
-            };
-            segments.push(format!(
-                "<--{}{suffix}-- {}",
-                edge.string("relation"),
-                context.graph.node(right).label()
-            ));
-        }
-    }
-    let prefix = if warnings.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", warnings.join("\n"))
-    };
-    Ok(format!(
-        "{prefix}Shortest path ({hops} hops):\n  {}",
-        segments.join(" ")
-    ))
-}
-
-fn ambiguity_warning(
-    name: &str,
-    scores: &[compass_query::ScoredNode],
-    chosen: NodeIndex,
-    warnings: &mut Vec<String>,
-) {
-    if scores.len() < 2 || scores[0].node != chosen || scores[0].score <= 0.0 {
-        return;
-    }
-    let top = scores[0].score;
-    let runner = scores[1].score;
-    if (top - runner) / top < 0.10 {
-        warnings.push(format!(
-            "warning: {name} match was ambiguous (top score {}, runner-up {})",
-            format_score(top),
-            format_score(runner)
-        ));
-    }
-}
-
-fn format_score(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.6}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_owned()
-    }
-}
-
-fn shortest_path(graph: &Graph, source: NodeIndex, target: NodeIndex) -> Option<Vec<NodeIndex>> {
-    let mut queue = VecDeque::from([source]);
-    let mut parent = HashMap::<NodeIndex, NodeIndex>::new();
-    parent.insert(source, source);
-    while let Some(node) = queue.pop_front() {
-        if node == target {
-            break;
-        }
-        for neighbor in graph.successors(node).chain(graph.predecessors(node)) {
-            if let std::collections::hash_map::Entry::Vacant(entry) = parent.entry(neighbor) {
-                entry.insert(node);
-                queue.push_back(neighbor);
+                format!(
+                    "No path found between '{}' and '{}'.",
+                    sanitize_label(graph.node(source).label()),
+                    sanitize_label(graph.node(target).label())
+                )
             }
         }
-    }
-    if !parent.contains_key(&target) {
-        return None;
-    }
-    let mut path = vec![target];
-    while path.last().copied() != Some(source) {
-        let next = parent.get(path.last()?).copied()?;
-        path.push(next);
-    }
-    path.reverse();
-    Some(path)
+        HopPathResult::Found { nodes, edges } => {
+            let hops = edges.len();
+            result["status"] = json!("found");
+            result["hops"] = json!(hops);
+            result["nodes"] = json!(nodes.iter().map(|index| {
+                let node = graph.node(*index);
+                json!({"id":node.id,"label":node.label(),"sourceFile":node.source_file(),
+                    "startLine":node.unsigned("line_start"),"sourceLocation":node.string("source_location")})
+            }).collect::<Vec<_>>());
+            let mut steps = Vec::with_capacity(edges.len());
+            let mut segments = vec![sanitize_label(graph.node(source).label())];
+            for (pair, edge_index) in nodes.windows(2).zip(edges) {
+                let edge = graph.edge(edge_index);
+                let forward = edge.source == graph.node(pair[0]).id;
+                let relation = edge.string("relation");
+                let relation = if relation.is_empty() {
+                    "related"
+                } else {
+                    &relation
+                };
+                let confidence = edge.string("confidence");
+                let suffix = if confidence.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", sanitize_label(&confidence))
+                };
+                let next = sanitize_label(graph.node(pair[1]).label());
+                segments.push(if forward {
+                    format!("--{}{suffix}--> {next}", sanitize_label(relation))
+                } else {
+                    format!("<--{}{suffix}-- {next}", sanitize_label(relation))
+                });
+                steps.push(json!({"from":graph.node(pair[0]).id,"to":graph.node(pair[1]).id,
+                    "source":edge.source,"target":edge.target,"edgeId":edge.attributes.get("id"),
+                    "relation":relation,"confidence":confidence,"direction":if forward {"forward"} else {"reverse"}}));
+            }
+            result["steps"] = json!(steps);
+            format!("Shortest path ({hops} hops):\n  {}", segments.join(" "))
+        }
+    };
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope(result)?),
+    })
 }
 
 fn tool_list_prs(arguments: &Map<String, Value>) -> Result<String, String> {
@@ -2553,8 +2728,8 @@ fn tool_get_pr_impact(
             "PR #{number}: no changed files found (may require gh auth)."
         ));
     }
-    let document = context.document()?;
-    let (communities, nodes) = compute_pr_impact(&files, &document);
+    let document = context.document();
+    let (communities, nodes) = compute_pr_impact(&files, document);
     let ci = parse_ci(
         data.get("statusCheckRollup")
             .and_then(Value::as_array)
@@ -2620,11 +2795,11 @@ fn tool_triage_prs(
     if actionable.is_empty() {
         return Ok(format!("No actionable PRs targeting {base}."));
     }
-    let document = context.document()?;
+    let document = context.document();
     for pr in &mut actionable {
         let files = fetch_pr_files(&runner, pr.number, repo);
         if !files.is_empty() {
-            (pr.communities_touched, pr.nodes_affected) = compute_pr_impact(&files, &document);
+            (pr.communities_touched, pr.nodes_affected) = compute_pr_impact(&files, document);
             pr.files_changed = files;
         }
     }
@@ -2695,8 +2870,8 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             tool_god_nodes(&Map::new(), context).map_err(InvocationError::InvalidParams)
         }
         "compass://surprises" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
-            let surprises = surprising_connections(&document, &context.community_ids(), 10);
+            let document = context.document();
+            let surprises = surprising_connections(document, &context.community_ids(), 10);
             if surprises.is_empty() {
                 return Ok("No surprising connections found.".to_owned());
             }
@@ -2728,7 +2903,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             ))
         }
         "compass://questions" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
+            let document = context.document();
             let labels_path = context
                 .path
                 .parent()
@@ -2744,7 +2919,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
                         .map(|community| (*community, format!("Community {community}")))
                         .collect()
                 });
-            let questions = suggest_questions(&document, &context.community_ids(), &labels, 10);
+            let questions = suggest_questions(document, &context.community_ids(), &labels, 10);
             if questions.is_empty() {
                 return Ok("No suggested questions available.".to_owned());
             }
@@ -2759,7 +2934,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             Ok(lines.join("\n"))
         }
         "compass://graph-insights" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
+            let document = context.document();
             let labels_path = context
                 .path
                 .parent()
@@ -2775,7 +2950,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
                         .map(|community| (*community, format!("Community {community}")))
                         .collect()
                 });
-            let report = blind_spot_report(&document, &context.community_ids(), &labels);
+            let report = blind_spot_report(document, &context.community_ids(), &labels);
             serde_json::to_string_pretty(&report)
                 .map_err(|error| InvocationError::Internal(error.to_string()))
         }
@@ -2854,6 +3029,555 @@ fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_paths_require_unique_exact_endpoints() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,"multigraph":true,
+                "nodes":[
+                    {"id":"MiXeD","label":"run()","qualified_name":"First.run","source":{"file":"a.rs","startLine":9}},
+                    {"id":"b","label":"run()","qualified_name":"Second.run","source_file":"b.rs"},
+                    {"id":"target","label":"Finish","source_file":"target.rs"}
+                ],
+                "links":[
+                    {"id":"edge-b","source":"MiXeD","target":"target","relation":"calls"},
+                    {"id":"edge-a","source":"MiXeD","target":"target","relation":"calls"}
+                ]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        for (source, target, role) in [("run", "target", "source"), ("target", "run", "target")] {
+            let text = server.invoke(
+                "shortest_path",
+                Map::from_iter([
+                    ("source".into(), json!(source)),
+                    ("target".into(), json!(target)),
+                ]),
+            );
+            assert!(text.contains(&format!("Ambiguous {role}")), "{text}");
+            assert!(text.contains("MiXeD") && text.contains("b.rs"), "{text}");
+            assert!(!text.contains("Shortest path"), "{text}");
+        }
+        for source in ["MiXeD", "First.run"] {
+            let text = server.invoke(
+                "shortest_path",
+                Map::from_iter([
+                    ("source".into(), json!(source)),
+                    ("target".into(), json!("target")),
+                ]),
+            );
+            assert!(text.contains("Shortest path (1 hops)"), "{text}");
+        }
+        let missing = server.invoke(
+            "shortest_path",
+            Map::from_iter([
+                ("source".into(), json!("ru")),
+                ("target".into(), json!("target")),
+            ]),
+        );
+        assert!(missing.contains("No node matching source"), "{missing}");
+        for (hops, status) in [(0, "depth_limit"), (1, "found")] {
+            let result = server
+                .invoke_result(
+                    "shortest_path",
+                    &mut Map::from_iter([
+                        ("source".into(), json!("MiXeD")),
+                        ("target".into(), json!("target")),
+                        ("max_hops".into(), json!(hops)),
+                    ]),
+                )
+                .map_err(|error| error.to_string())?;
+            let content = result.structured_content.ok_or("missing path identity")?;
+            assert_eq!(content["result"]["status"], status);
+            assert_eq!(content["result"]["source"], "MiXeD");
+            if hops == 1 {
+                assert_eq!(content["result"]["nodes"][0]["id"], "MiXeD");
+                assert_eq!(content["result"]["nodes"][0]["startLine"], 9);
+                assert_eq!(content["result"]["steps"][0]["target"], "target");
+                assert_eq!(content["result"]["steps"][0]["edgeId"], "edge-a");
+            }
+        }
+        let invalid = server.invoke_result(
+            "shortest_path",
+            &mut Map::from_iter([
+                ("source".into(), json!("MiXeD")),
+                ("target".into(), json!("target")),
+                ("max_hops".into(), json!(65)),
+            ]),
+        );
+        assert!(invalid.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn hub_evidence_does_not_invent_direction_for_undirected_graphs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({"directed":false,
+            "nodes":[{"id":"a","label":"A","source_file":"a.rs"},
+                {"id":"b","label":"B","source_file":"b.rs"}],
+            "links":[{"source":"a","target":"b","relation":"calls"}]}))?,
+        )?;
+        let result = CompassMcp::new(path)
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = result.structured_content.ok_or("missing hubs")?;
+        assert_eq!(
+            content["result"]["ranking"],
+            "distinct-undirected-endpoint-degree"
+        );
+        let row = &content["result"]["nodes"][0]["connectivity"]["relations"][0];
+        assert_eq!(row["incomingRecords"], 0);
+        assert_eq!(row["outgoingRecords"], 0);
+        assert_eq!(row["undirectedRecords"], 1);
+        Ok(())
+    }
+
+    #[test]
+    fn hub_results_preserve_exact_identity_and_source_anchors()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        let unusual_id = "A\"\\\n";
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,
+                "nodes":[
+                    {"id":unusual_id,"name":"run()","kind":"function",
+                        "source":{"file":"src/a.rs","startLine":7,"endLine":9}},
+                    {"id":"b","name":"run()","kind":"function",
+                        "source":{"file":"src/b.rs","startLine":12}},
+                    {"id":"legacy","label":"Legacy","source_file":"legacy.rs",
+                        "source_location":"L20"}
+                ],
+                "links":[{"source":unusual_id,"target":"b","kind":"calls"},
+                    {"source":"legacy","target":"b","relation":"calls"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        let output = server
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = output
+            .structured_content
+            .ok_or("missing structured hub identities")?;
+        assert_eq!(content["schema"], MCP_TOOL_RESULT_SCHEMA);
+        assert_eq!(content["transportTruncation"]["truncated"], false);
+        assert_eq!(content["result"]["schema"], "compass.mcp.hubs/1");
+        let nodes = content["result"]["nodes"]
+            .as_array()
+            .ok_or("missing hub nodes")?;
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0]["id"], "b");
+        assert_eq!(nodes[0]["degree"], 2);
+        assert_eq!(
+            nodes[0]["connectivity"]["schema"],
+            "compass.hub-connectivity/1"
+        );
+        assert_eq!(nodes[0]["connectivity"]["edgeRecords"], 2);
+        assert_eq!(
+            nodes[0]["connectivity"]["relations"][0]["incomingRecords"],
+            2
+        );
+        assert_eq!(
+            nodes[0]["connectivity"]["relations"][0]["outgoingRecords"],
+            0
+        );
+        let unusual = nodes
+            .iter()
+            .find(|node| node["id"] == unusual_id)
+            .ok_or("lost exact ID")?;
+        assert_eq!(unusual["sourceFile"], "src/a.rs");
+        assert_eq!(unusual["startLine"], 7);
+        assert_eq!(unusual["endLine"], 9);
+        let legacy = nodes
+            .iter()
+            .find(|node| node["id"] == "legacy")
+            .ok_or("lost legacy hub")?;
+        assert_eq!(legacy["sourceLocation"], "L20");
+        assert_eq!(legacy["startLine"], Value::Null);
+        assert!(output.text.contains(&format!("id: {}", json!(unusual_id))));
+        assert!(!output.text.contains(unusual_id));
+        for node in nodes {
+            let id = node["id"].as_str().ok_or("ID not a string")?;
+            let neighbors = server.invoke(
+                "get_neighbors",
+                Map::from_iter([("label".into(), json!(id))]),
+            );
+            assert!(neighbors.starts_with("Neighbors of "), "{neighbors}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn hub_results_expose_stored_class_members_without_changing_ranks()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,
+                "nodes":[
+                    {"id":"class","kind":"class","name":"Service",
+                     "source":{"file":"src/service.rs","startLine":1}},
+                    {"id":"method","kind":"method","name":".run()",
+                     "source":{"file":"src/service.rs","startLine":2}},
+                    {"id":"field","kind":"field","name":"value",
+                     "source":{"file":"src/service.rs","startLine":3}}
+                ],
+                "links":[
+                    {"source":"class","target":"method","kind":"contains"},
+                    {"source":"class","target":"field","kind":"contains"},
+                    {"source":"method","target":"field","kind":"references"}
+                ]
+            }))?,
+        )?;
+        let output = CompassMcp::new(path)
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = output.structured_content.ok_or("missing hub result")?;
+        let rows = content["result"]["nodes"]
+            .as_array()
+            .ok_or("missing hub rows")?;
+        let class = rows
+            .iter()
+            .find(|row| row["id"] == "class")
+            .ok_or("missing class")?;
+        assert_eq!(class["rank"], 1);
+        assert_eq!(class["degree"], 2);
+        assert_eq!(class["memberEvidence"]["schema"], "compass.hub-members/1");
+        assert_eq!(class["memberEvidence"]["sourceCoverage"], "unverified");
+        assert_eq!(class["memberEvidence"]["directMethods"], 1);
+        assert_eq!(class["memberEvidence"]["directFields"], 1);
+        assert_eq!(class["memberEvidence"]["ownFieldReferenceRecords"], 1);
+        assert_eq!(class["memberEvidence"]["distinctOwnFieldPairs"], 1);
+        assert_eq!(class["memberEvidence"]["methodsTouchingOwnFields"], 1);
+        let method = rows
+            .iter()
+            .find(|row| row["id"] == "method")
+            .ok_or("missing method")?;
+        assert!(method["memberEvidence"].is_null());
+        assert!(
+            output
+                .text
+                .contains("stored members (source coverage unverified): 1 methods, 1 fields")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_expose_exact_destinations_and_full_relationship_records()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("neighbors.json");
+        let unusual_id = "close\n\"second\"";
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true, "multigraph":false,
+                "nodes":[
+                    {"id":"seed","label":"run()"},
+                    {"id":"first","label":"close()","source":{"file":"a.rs","startLine":10}},
+                    {"id":unusual_id,"label":"close()","source_file":"b.rs","source_location":"L20"}
+                ],
+                "links":[
+                    {"id":"call-1","source":"seed","target":"first","relation":"calls","relationshipSite":{"file":"caller.rs","startLine":3},"evidence":[{"origin":"ast","rule":"fixture"}]},
+                    {"id":"call-2","source":"seed","target":"first","relation":"calls","relationshipSite":{"file":"caller.rs","startLine":4}},
+                    {"source":"seed","target":unusual_id,"relation":"calls"},
+                    {"source":"seed","target":"first","relation":"contains"}
+                ]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        let result = server
+            .invoke_result(
+                "get_neighbors",
+                &mut json!({"label":"seed","relation_filter":"calls"})
+                    .as_object()
+                    .ok_or("args")?
+                    .clone(),
+            )
+            .map_err(|e| e.to_string())?;
+        assert!(result.text.starts_with("Neighbors of run():\n"));
+        assert_eq!(result.text.matches("--> close() [calls]").count(), 2);
+        assert!(result.text.contains(&format!("id: {}", json!(unusual_id))));
+        assert!(!result.text.contains(unusual_id));
+        let body = result.structured_content.ok_or("missing identity")?["result"].clone();
+        assert_eq!(body["schema"], "compass.query.neighbors/1");
+        assert_eq!(body["seed"]["id"], "seed");
+        assert_eq!(body["truncated"], false);
+        let rows = body["neighbors"].as_array().ok_or("neighbors")?;
+        assert_eq!(rows.len(), 2);
+        let first = rows
+            .iter()
+            .find(|r| r["node"]["id"] == "first")
+            .ok_or("first")?;
+        assert_eq!(first["direction"], "outgoing");
+        assert_eq!(first["node"]["source"]["startLine"], 10);
+        assert_eq!(first["edges"].as_array().ok_or("edges")?.len(), 2);
+        assert_eq!(first["edges"][0]["evidence"][0]["rule"], "fixture");
+        assert_eq!(first["edges"][1]["relationshipSite"]["startLine"], 4);
+        let other = rows
+            .iter()
+            .find(|r| r["node"]["id"] == unusual_id)
+            .ok_or("other")?;
+        assert!(other["edges"][0].get("id").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbor_limit_is_an_error_not_empty_success() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("bounded.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(
+                &json!({"nodes":[{"id":"a","label":"Alpha","extra":"x".repeat(compass_query::MAX_NEIGHBOR_RESPONSE_BYTES)}],"links":[]}),
+            )?,
+        )?;
+        let result = CompassMcp::new(&path).invoke_result(
+            "get_neighbors",
+            &mut json!({"label":"a"}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(
+            matches!(result,Err(InvocationError::InvalidParams(message)) if message.contains("byte limit"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbor_filter_precedes_neighbor_grouping() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for reverse in [false, true] {
+            let path = temp.path().join(format!("graph-{reverse}.json"));
+            let mut links = vec![
+                json!({"source":"a","target":"b","relation":"contains"}),
+                json!({"source":"a","target":"b","relation":"calls"}),
+                json!({"source":"a","target":"b","relation":"calls"}),
+            ];
+            if reverse {
+                links.reverse();
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({
+                    "directed":true,"multigraph":true,
+                    "nodes":[{"id":"a","label":"Alpha"},{"id":"b","label":"Beta"}],
+                    "links":links
+                }))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            for (id, expected) in [("a", "--> Beta [calls]"), ("b", "<-- Alpha [calls]")] {
+                let output = server.invoke(
+                    "get_neighbors",
+                    json!({"label":id,"relation_filter":"calls"})
+                        .as_object()
+                        .ok_or("args")?
+                        .clone(),
+                );
+                assert_eq!(output.matches(expected).count(), 1, "{output}");
+                assert!(!output.contains("[contains]"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_reports_stored_typed_communities() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            r#"{"nodes":[
+            {"id":"a","name":"Alpha","kind":"function","community":{"id":2,"label":"Core"},"source":{"file":"a.rs","startLine":1}},
+            {"id":"b","name":"Beta","kind":"function","community":{"id":2,"label":"Core"},"source":{"file":"b.rs","startLine":1}}],"links":[]}"#,
+        )?;
+        let server = CompassMcp::new(&path);
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Communities: 1")
+        );
+        let members = server.invoke(
+            "get_community",
+            json!({"community_id":2}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(members.contains("Core (2 nodes)"), "{members}");
+        assert!(members.contains("Alpha [a.rs]"));
+        assert!(members.contains("Beta [b.rs]"));
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_prefer_exact_symbols_to_broader_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for typed in [false, true] {
+            let path = temp.path().join(format!("exact-{typed}.json"));
+            let mut nodes = vec![
+                json!({"id":"WidthID","label":"term_len()","qualifiedName":"Compat.term_len"}),
+                json!({"id":"width-test","label":"test_term_len()"}),
+                json!({"id":"request","label":"RequestID()"}),
+                json!({"id":"next-request","label":"NextRequestID()"}),
+                json!({"id":"follow","label":".follow()"}),
+                json!({"id":"follow-links","label":".follow_links()"}),
+                json!({"id":"callee","label":"Collaborator"}),
+            ];
+            if typed {
+                for node in &mut nodes {
+                    node["name"] = node["label"].clone();
+                    node.as_object_mut().ok_or("node")?.remove("label");
+                    node["kind"] = json!("function");
+                    node["source"] = json!({"file":"lib.rs","startLine":1});
+                }
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({
+                    "directed":true,"nodes":nodes,"links":[
+                        {"source":"WidthID","target":"callee","relation":"calls"},
+                        {"source":"request","target":"callee","relation":"calls"},
+                        {"source":"follow","target":"callee","relation":"calls"}
+                    ]
+                }))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            for query in [
+                "term_len()",
+                "term_len",
+                "Compat.term_len",
+                "WidthID",
+                " WidthID ",
+                "REQUESTID()",
+                ".follow()",
+            ] {
+                let output = server.invoke(
+                    "get_neighbors",
+                    json!({"label":query,"relation_filter":"calls"})
+                        .as_object()
+                        .ok_or("args")?
+                        .clone(),
+                );
+                assert!(
+                    output.starts_with("Neighbors of "),
+                    "typed={typed} {query}: {output}"
+                );
+                assert!(output.contains("--> Collaborator [calls]"), "{output}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_preserve_all_exact_collisions_before_fuzzy_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for reverse in [false, true] {
+            let path = temp.path().join(format!("collisions-{reverse}.json"));
+            let mut nodes = (0..22)
+                .map(|n| {
+                    json!({"id":format!("exact-{n:02}"),
+                "label":"run()","source_file":format!("src/{n}.rs")})
+                })
+                .collect::<Vec<_>>();
+            nodes.push(json!({"id":"fuzzy","label":"runLater()"}));
+            if reverse {
+                nodes.reverse();
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({"nodes":nodes,"links":[]}))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":"run"}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(
+                output.starts_with("Ambiguous: 'run' matches 22 nodes."),
+                "{output}"
+            );
+            assert!(
+                output.contains("2 additional candidates omitted"),
+                "{output}"
+            );
+            assert!(!output.contains("fuzzy") && !output.contains("Neighbors of"));
+            let candidates = output
+                .lines()
+                .filter(|line| line.starts_with("  "))
+                .collect::<Vec<_>>();
+            assert_eq!(candidates.len(), 20);
+            for (n, line) in candidates.iter().enumerate() {
+                assert!(line.ends_with(&format!("id: exact-{n:02}")), "{line}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_keep_unique_and_ambiguous_fuzzy_fallbacks()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("fallback.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({"nodes":[
+            {"id":"a","label":"UniqueHandle()"},{"id":"b","label":"SharedAlpha()"},
+            {"id":"c","label":"SharedBeta()"}],"links":[]}))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        for (query, expected) in [
+            ("Unique", "Neighbors of UniqueHandle():"),
+            ("Shared", "Ambiguous: 'Shared' matches 2 nodes."),
+            ("Missing", "No node matching 'Missing' found."),
+        ] {
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":query}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(output.starts_with(expected), "{output}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_require_unique_identity() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            r#"{"directed":true,"nodes":[
+            {"id":"A","label":"run()","qualifiedName":"First.run","source_file":"first.rs"},
+            {"id":"b","label":"run()","qualifiedName":"Second.run","source_file":"second.rs"},
+            {"id":"c","label":"OnlyFirst"}],"links":[{"source":"A","target":"c","relation":"calls"}]}"#,
+        )?;
+        let server = CompassMcp::new(&path);
+        let ambiguous = server.invoke(
+            "get_neighbors",
+            json!({"label":"run"}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(ambiguous.contains("Ambiguous"), "{ambiguous}");
+        assert!(!ambiguous.contains("-->"));
+        assert!(ambiguous.contains("first.rs") && ambiguous.contains("second.rs"));
+        for exact in ["A", "First.run"] {
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":exact}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(output.contains("--> OnlyFirst"), "{exact}: {output}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn invocation_errors_preserve_json_rpc_taxonomy() {
@@ -3186,6 +3910,88 @@ mod tests {
     }
 
     #[test]
+    fn god_nodes_tool_keeps_project_names_and_orders_equal_degrees_by_id()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"z", "label":"Path", "source_file":"src/path.rs"},
+                    {"id":"a", "label":"Counter", "source_file":"src/counter.rs"},
+                    {"id":"isolated", "label":"Unused", "source_file":"src/unused.rs"}
+                ],
+                "links": [{"source":"z", "target":"a", "relation":"uses"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 1, outgoing 0, undirected 0\n  2. Path - 1 edges\n    id: \"z\" | source: \"src/path.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 0, outgoing 1, undirected 0"
+        );
+        let arguments = Map::from_iter([("top_n".to_owned(), json!(1))]);
+        assert_eq!(
+            server.invoke("god_nodes", arguments),
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n    kind: symbol | incident records: 1 | self-loops: 0\n    relation \"uses\": incoming 1, outgoing 0, undirected 0"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn god_nodes_tool_respects_explicit_method_and_file_kinds()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"method", "kind":"method", "name":".dispatch()",
+                        "source":{"file":"src/service.rs", "startLine":5}},
+                    {"id":"file", "kind":"file", "name":"Service implementation",
+                        "source":{"file":"src/service.rs", "startLine":1}}
+                ],
+                "links": [{"source":"file", "target":"method", "relation":"contains"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. .dispatch() - 1 edges\n    id: \"method\" | source: \"src/service.rs\" | location: \"L5\"\n    kind: method | incident records: 1 | self-loops: 0\n    relation \"contains\": incoming 1, outgoing 0, undirected 0"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn god_nodes_tool_retains_extensionless_typed_source() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"prepare", "kind":"function", "name":"prepare()",
+                        "source":{"file":"bin/launch", "startLine":2}},
+                    {"id":"helper", "kind":"function", "name":"helper()",
+                        "source":{"file":"src/support.sh", "startLine":1}}
+                ],
+                "links": [{"source":"prepare", "target":"helper", "relation":"calls"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. helper() - 1 edges\n    id: \"helper\" | source: \"src/support.sh\" | location: \"L1\"\n    kind: function | incident records: 1 | self-loops: 0\n    relation \"calls\": incoming 1, outgoing 0, undirected 0\n  2. prepare() - 1 edges\n    id: \"prepare\" | source: \"bin/launch\" | location: \"L2\"\n    kind: function | incident records: 1 | self-loops: 0\n    relation \"calls\": incoming 0, outgoing 1, undirected 0"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn every_local_tool_and_resource_handles_success_missing_and_filter_shapes()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
@@ -3252,7 +4058,7 @@ mod tests {
                 "shortest_path",
                 json!({"source":"Alpha","target":"Gamma","max_hops":0})
             )
-            .contains("exceeds max_hops")
+            .contains("within max_hops")
         );
         assert!(
             invoke("shortest_path", json!({"source":"Delta","target":"Alpha"}))
@@ -3274,6 +4080,62 @@ mod tests {
             assert!(!server.read(uri)?.is_empty(), "{uri}");
         }
         assert!(server.read("compass://unknown").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn graph_store_reloads_preserved_metadata_and_keeps_each_context_coherent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for disk_cache in [false, true] {
+            for atomic in [false, true] {
+                let temp = tempfile::tempdir()?;
+                let path = temp.path().join("graph.json");
+                if disk_cache {
+                    fs::create_dir(temp.path().join("cache"))?;
+                }
+                let before = r#"{"directed":true,"nodes":[{"id":"a","label":"Alpha","kind":"function","source_file":"a.rs","community":1},{"id":"b","label":"Beta","kind":"function","source_file":"b.rs","community":1}],"links":[{"source":"a","target":"b","relation":"calls"}]}"#;
+                let after = before.replace("Alpha", "Omega").replace("Beta", "Zeta");
+                assert_eq!(before.len(), after.len());
+                fs::write(&path, before)?;
+                let modified = path.metadata()?.modified()?;
+                let store = GraphStore::new(&path);
+                let first = store.load(None)?;
+                assert_eq!(first.document().nodes[0].label(), "Alpha");
+                if atomic {
+                    let mut replacement = tempfile::NamedTempFile::new_in(temp.path())?;
+                    replacement.write_all(after.as_bytes())?;
+                    replacement
+                        .as_file()
+                        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                    replacement.persist(&path)?;
+                } else {
+                    fs::write(&path, &after)?;
+                    fs::File::options()
+                        .write(true)
+                        .open(&path)?
+                        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                }
+                assert_eq!(path.metadata()?.modified()?, modified);
+                let changed = store.load(None)?;
+                assert!(
+                    !Arc::ptr_eq(&first, &changed),
+                    "disk_cache={disk_cache}, atomic={atomic}"
+                );
+                assert_eq!(changed.document().nodes[0].label(), "Omega");
+                assert_eq!(changed.graph.node(0).label(), "Omega");
+                assert!(tool_god_nodes(&Map::new(), &changed)?.contains("Omega"));
+                let fresh = GraphStore::new(&path).load(None)?;
+                assert_eq!(fresh.graph.node(0).label(), "Omega");
+                // A request already holding a context keeps one immutable graph view.
+                assert_eq!(first.document().nodes[0].label(), "Alpha");
+                fs::write(&path, vec![b'!'; before.len()])?;
+                fs::File::options()
+                    .write(true)
+                    .open(&path)?
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                assert!(store.load(None).is_err());
+            }
+        }
         Ok(())
     }
 
@@ -3325,8 +4187,6 @@ mod tests {
             expand_home(Path::new("plain/path")),
             PathBuf::from("plain/path")
         );
-        assert_eq!(format_score(2.0), "2");
-        assert_eq!(format_score(1.234_567_89), "1.234568");
         assert_eq!(python_percent(1, 3), 33);
         assert_eq!(python_percent(2, 3), 67);
         for (index, status) in [
@@ -3389,39 +4249,6 @@ mod tests {
             "Unknown tool: not-real"
         );
 
-        let a = context.graph.node_index("a").ok_or("node a")?;
-        let b = context.graph.node_index("b").ok_or("node b")?;
-        let c = context.graph.node_index("c").ok_or("node c")?;
-        assert_eq!(shortest_path(&context.graph, a, a), Some(vec![a]));
-        assert_eq!(shortest_path(&context.graph, c, a), Some(vec![c, b, a]));
-        let mut warnings = Vec::new();
-        ambiguity_warning(
-            "source",
-            &[
-                compass_query::ScoredNode {
-                    score: 10.0,
-                    node: a,
-                },
-                compass_query::ScoredNode {
-                    score: 9.5,
-                    node: b,
-                },
-            ],
-            a,
-            &mut warnings,
-        );
-        assert_eq!(warnings.len(), 1);
-        ambiguity_warning(
-            "source",
-            &[compass_query::ScoredNode {
-                score: 0.0,
-                node: a,
-            }],
-            a,
-            &mut warnings,
-        );
-        assert_eq!(warnings.len(), 1);
-
         let reverse = tool_shortest_path(
             json!({"source":"Tail","target":"Twin"})
                 .as_object()
@@ -3429,12 +4256,13 @@ mod tests {
             &context,
         )?;
         assert!(reverse.contains("<--uses"));
-        assert!(reverse.contains("<----"));
+        assert!(reverse.contains("<--related--"));
         assert!(expand_home(Path::new("~/compass-cache")).ends_with("compass-cache"));
 
         fs::write(&graph_path, "not json")?;
-        assert!(context.document().is_err());
-        assert!(tool_god_nodes(&Map::new(), &context).is_err());
+        assert!(store.load(None).is_err());
+        assert_eq!(context.document().nodes.len(), 3);
+        assert!(tool_god_nodes(&Map::new(), &context).is_ok());
         Ok(())
     }
 }

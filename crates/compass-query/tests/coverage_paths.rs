@@ -5,7 +5,8 @@ use compass_model::{Graph, GraphDocument};
 use compass_query::{
     TraversalMode, affected_nodes, find_node, format_affected, format_benchmark,
     normalize_context_filters, query_graph_text, query_terms, render_explanation,
-    render_shortest_path, resolve_seed, run_benchmark, sanitize_label, score_nodes, search_tokens,
+    render_shortest_path, render_shortest_path_with_limit, resolve_seed, run_benchmark,
+    sanitize_label, score_nodes, search_tokens,
 };
 use serde_json::{Map, Value, json};
 
@@ -35,6 +36,36 @@ const FIXTURE: &str = r#"{
     {"source":"other","target":"caller","relation":"imports","context":"import","confidence":"INFERRED"}
   ]
 }"#;
+
+#[test]
+fn weighted_path_retains_shorter_prefixes_within_the_hop_limit() -> Result<(), Box<dyn Error>> {
+    let graph = graph(
+        r#"{
+        "directed":true,
+        "nodes":[{"id":"s","label":"Start"},{"id":"a","label":"First"},
+                 {"id":"b","label":"Join"},{"id":"t","label":"Target"}],
+        "links":[{"source":"s","target":"a","relation":"calls"},
+                 {"source":"a","target":"b","relation":"calls"},
+                 {"source":"s","target":"b","relation":"references"},
+                 {"source":"b","target":"t","relation":"calls"}]
+    }"#,
+    )?;
+    let shallow = render_shortest_path_with_limit(&graph, "s", "t", 2)?;
+    assert!(
+        shallow.contains("Best path (weighted, 2 hops, weight 5)"),
+        "{shallow}"
+    );
+    assert!(
+        shallow.contains("Start --references--> Join --calls--> Target"),
+        "{shallow}"
+    );
+    let deep = render_shortest_path_with_limit(&graph, "s", "t", 3)?;
+    assert!(
+        deep.contains("Best path (weighted, 3 hops, weight 3)"),
+        "{deep}"
+    );
+    Ok(())
+}
 
 #[test]
 fn affected_resolution_covers_ids_labels_sources_members_and_misses() -> Result<(), Box<dyn Error>>

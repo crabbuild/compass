@@ -66,6 +66,13 @@ pub(super) struct CSharpIndexes {
 }
 
 #[derive(Default)]
+pub(super) struct JavaIndexes {
+    /// Source spelling keeps dots for both packages and nested types. Preserve
+    /// every matching nominal owner; member availability must not select one.
+    pub(super) receivers_by_source_name: AHashMap<String, Vec<DeclarationSlot>>,
+}
+
+#[derive(Default)]
 pub(super) struct PhpIndexes {
     pub(super) members_by_owner_folded: AHashMap<(String, String), Vec<DeclarationSlot>>,
 }
@@ -79,5 +86,6 @@ pub(super) struct ResolutionIndexes {
     pub(super) typescript: TypeScriptIndexes,
     pub(super) rust: RustIndexes,
     pub(super) csharp: CSharpIndexes,
+    pub(super) java: JavaIndexes,
     pub(super) php: PhpIndexes,
 }

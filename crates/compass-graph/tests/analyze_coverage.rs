@@ -43,6 +43,133 @@ fn edge(source: &str, target: &str, relation: &str, confidence: &str) -> Value {
 }
 
 #[test]
+fn god_nodes_preserve_project_declarations_named_like_builtins() {
+    let graph = document(
+        vec![
+            node("path", "Path", "src/path.rs"),
+            node("counter", "Counter", "src/counter.py"),
+            node("service", "Service", "src/service.rs"),
+            node("external", "Path", ""),
+        ],
+        vec![
+            edge("path", "counter", "uses", "EXTRACTED"),
+            edge("path", "service", "calls", "EXTRACTED"),
+            edge("path", "external", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["path", "counter", "service"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+    assert!(god_nodes(&graph, 0).is_empty());
+}
+
+#[test]
+fn god_nodes_use_explicit_kinds_instead_of_method_label_heuristics() {
+    let graph = document(
+        vec![
+            json!({"id":"method", "kind":"method", "name":".dispatch()",
+                "source":{"file":"src/service.rs", "startLine":5}}),
+            json!({"id":"function", "kind":"function", "name":"helper()",
+                "source":{"file":"src/service.rs", "startLine":20}}),
+            json!({"id":"file", "kind":"file", "name":"Service implementation",
+                "source":{"file":"src/service.rs", "startLine":1}}),
+            json!({"id":"caller", "kind":"class", "name":"Caller",
+                "source":{"file":"src/caller.rs", "startLine":1}}),
+        ],
+        vec![
+            edge("method", "function", "calls", "EXTRACTED"),
+            edge("method", "caller", "references", "EXTRACTED"),
+            edge("file", "method", "contains", "EXTRACTED"),
+            edge("file", "caller", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["method", "caller", "function"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+}
+
+#[test]
+fn god_nodes_preserve_typed_declarations_in_extensionless_sources() {
+    let graph = document(
+        vec![
+            json!({"id":"prepare", "kind":"function", "name":"prepare()",
+                "source":{"file":"bin/launch", "startLine":2}}),
+            json!({"id":"helper", "kind":"function", "name":"helper()",
+                "source":{"file":"src/support.sh", "startLine":1}}),
+            json!({"id":"external", "kind":"function", "name":"external()"}),
+            json!({"id":"concept", "label":"Idea", "source_file":"conversation"}),
+        ],
+        vec![
+            edge("prepare", "helper", "calls", "EXTRACTED"),
+            edge("prepare", "external", "calls", "EXTRACTED"),
+            edge("prepare", "concept", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["prepare", "helper"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+}
+
+#[test]
+fn god_nodes_do_not_label_isolated_declarations_as_hubs() {
+    let graph = document(
+        vec![node("isolated", "Service", "src/service.rs")],
+        Vec::new(),
+        true,
+    );
+    assert!(god_nodes(&graph, 10).is_empty());
+}
+
+#[test]
+fn god_nodes_ties_are_stable_under_graph_record_permutations() {
+    let mut graph = document(
+        vec![
+            node("z", "Zulu", "src/z.rs"),
+            node("a", "Alpha", "src/a.rs"),
+            node("b", "Beta", "src/b.rs"),
+        ],
+        vec![
+            edge("z", "a", "calls", "EXTRACTED"),
+            edge("a", "b", "calls", "EXTRACTED"),
+            edge("b", "z", "calls", "EXTRACTED"),
+        ],
+        true,
+    );
+    let first = god_nodes(&graph, 2);
+    graph.nodes.reverse();
+    graph.links.reverse();
+    assert_eq!(first, god_nodes(&graph, 2));
+    assert_eq!(
+        first
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+}
+
+#[test]
 fn questions_cover_no_signal_isolation_inference_ambiguity_bridge_and_low_cohesion()
 -> Result<(), Box<dyn Error>> {
     let empty = document(Vec::new(), Vec::new(), true);
@@ -472,4 +599,155 @@ fn diff_and_cycle_analysis_cover_add_remove_direction_deferred_and_rotation() {
     assert_eq!(cycles[0].cycle, ["a.py", "b.py", "c.py"]);
     assert!(find_import_cycles(&cycle_graph, 2, 10).is_empty());
     assert!(find_import_cycles(&document(Vec::new(), Vec::new(), true), 5, 10).is_empty());
+}
+
+#[test]
+fn hub_evidence_preserves_parallel_records_directions_and_self_loops() {
+    for directed in [true, false] {
+        let mut graph = document_with_multigraph(
+            vec![
+                node("hub", "Hub", "src/hub.rs"),
+                node("peer", "Peer", "src/peer.rs"),
+            ],
+            vec![
+                edge("hub", "peer", "calls", "EXTRACTED"),
+                edge("hub", "peer", "calls", "EXTRACTED"),
+                edge("peer", "hub", "references", "EXTRACTED"),
+                edge("hub", "hub", "calls", "EXTRACTED"),
+                edge("hub", "missing", "calls", "EXTRACTED"),
+            ],
+            directed,
+            true,
+        );
+        let evidence = compass_graph::god_nodes_with_evidence(&graph, 10);
+        assert_eq!(
+            evidence.iter().map(|e| &e.hub).collect::<Vec<_>>(),
+            god_nodes(&graph, 10).iter().collect::<Vec<_>>()
+        );
+        let hub = &evidence[0];
+        assert_eq!(hub.hub.id, "hub");
+        assert_eq!(hub.hub.degree, if directed { 4 } else { 3 });
+        let c = &hub.connectivity;
+        assert_eq!(c.edge_records, 4);
+        assert_eq!(c.self_loop_records, 1);
+        assert_eq!(c.omitted_relation_records, 0);
+        assert_eq!(c.relations[0].relation, "calls");
+        assert_eq!(c.relations[0].edge_records, 3);
+        assert_eq!(c.relations[0].incoming_records, usize::from(directed));
+        assert_eq!(
+            c.relations[0].outgoing_records,
+            if directed { 3 } else { 0 }
+        );
+        assert_eq!(
+            c.relations[0].undirected_records,
+            if directed { 0 } else { 3 }
+        );
+        graph.links.reverse();
+        graph.nodes.reverse();
+        assert_eq!(evidence, compass_graph::god_nodes_with_evidence(&graph, 10));
+        assert!(compass_graph::god_nodes_with_evidence(&graph, 0).is_empty());
+    }
+}
+
+#[test]
+fn hub_evidence_bounds_relation_rows_without_hiding_omitted_records() {
+    let mut graph = document_with_multigraph(
+        vec![
+            node("hub", "Hub", "src/hub.rs"),
+            node("peer", "Peer", "src/peer.rs"),
+        ],
+        (0..20)
+            .map(|i| edge("hub", "peer", &format!("r{i:02}"), "EXTRACTED"))
+            .collect(),
+        true,
+        true,
+    );
+    graph.links.push(graph.links[19].clone());
+    let evidence = compass_graph::god_nodes_with_evidence(&graph, 1);
+    let c = &evidence[0].connectivity;
+    assert_eq!(c.edge_records, 21);
+    assert_eq!(c.relations.len(), compass_graph::MAX_HUB_RELATIONS);
+    assert_eq!(c.relations[0].relation, "r19");
+    assert_eq!(c.relations[1].relation, "r00");
+    assert_eq!(c.omitted_relation_kinds, 4);
+    assert_eq!(c.omitted_relation_records, 4);
+    assert_eq!(
+        c.relations.iter().map(|r| r.edge_records).sum::<usize>() + c.omitted_relation_records,
+        c.edge_records
+    );
+}
+
+#[test]
+fn hub_members_require_unique_direct_ownership_and_preserve_parallel_contacts()
+-> Result<(), Box<dyn Error>> {
+    let mut graph = document_with_multigraph(
+        vec![
+            json!({"id":"a","kind":"class","name":"A","source":{"file":"a.rs","startLine":1}}),
+            json!({"id":"b","kind":"class","name":"B","source":{"file":"b.rs","startLine":1}}),
+            json!({"id":"m","kind":"method","name":".run()","source":{"file":"a.rs","startLine":2}}),
+            json!({"id":"shared","kind":"method","name":".shared()","source":{"file":"a.rs","startLine":3}}),
+            json!({"id":"f","kind":"field","name":"value","source":{"file":"a.rs","startLine":4}}),
+            json!({"id":"ambiguous","kind":"field","name":"other","source":{"file":"a.rs","startLine":5}}),
+            json!({"id":"helper","kind":"method","name":".help()","source":{"file":"a.rs","startLine":6}}),
+        ],
+        vec![
+            edge("a", "m", "contains", "EXTRACTED"),
+            edge("a", "shared", "contains", "EXTRACTED"),
+            edge("b", "shared", "contains", "EXTRACTED"),
+            edge("a", "f", "contains", "EXTRACTED"),
+            edge("a", "ambiguous", "contains", "EXTRACTED"),
+            edge("b", "ambiguous", "contains", "EXTRACTED"),
+            edge("m", "f", "references", "EXTRACTED"),
+            edge("m", "f", "references", "EXTRACTED"),
+            edge("m", "ambiguous", "references", "EXTRACTED"),
+            edge("shared", "f", "references", "EXTRACTED"),
+            edge("helper", "f", "references", "EXTRACTED"),
+        ],
+        true,
+        true,
+    );
+    let first = compass_graph::god_nodes_with_evidence(&graph, 10);
+    let a = first
+        .iter()
+        .find(|row| row.hub.id == "a")
+        .and_then(|row| row.members.as_ref());
+    let a = a.ok_or("class member evidence missing")?;
+    assert_eq!(a.schema, compass_graph::HUB_MEMBERS_SCHEMA);
+    assert_eq!(
+        (
+            a.direct_methods,
+            a.direct_fields,
+            a.ambiguous_direct_members
+        ),
+        (1, 1, 2)
+    );
+    assert_eq!(
+        (
+            a.own_field_reference_records,
+            a.distinct_own_field_pairs,
+            a.methods_touching_own_fields
+        ),
+        (2, 1, 1)
+    );
+    let b = first
+        .iter()
+        .find(|row| row.hub.id == "b")
+        .and_then(|row| row.members.as_ref());
+    assert_eq!(b.map(|row| row.ambiguous_direct_members), Some(2));
+    assert!(
+        first
+            .iter()
+            .find(|row| row.hub.id == "m")
+            .is_some_and(|row| row.members.is_none())
+    );
+    graph.nodes.reverse();
+    graph.links.reverse();
+    assert_eq!(first, compass_graph::god_nodes_with_evidence(&graph, 10));
+    graph.directed = false;
+    assert!(
+        compass_graph::god_nodes_with_evidence(&graph, 10)
+            .iter()
+            .all(|row| row.members.is_none())
+    );
+    Ok(())
 }

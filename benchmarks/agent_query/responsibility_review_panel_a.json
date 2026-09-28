@@ -1,0 +1,491 @@
+{
+  "schema": "compass.responsibility-review/1",
+  "scope": "Manual review of completeness for 20 frozen source facts across five native natural-query responses per tool. It is not a complete precision audit of every returned node/edge, a held-out result, or a god-object diagnosis evaluation.",
+  "questionCommit": "232608ee",
+  "questionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "captureSha256": "99ac02e229d30b34d7bf3256ef4b9e46084e14b65efbdaa88b47160690c48d6f",
+  "collectorSha256": "18089c5b11461f2f4d9ba38b16d369ae7c02d5e38dc8f2b1e0f4e8ba92bfdc63",
+  "runnerSha256": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "artifactRoot": "responsibility-explanation-01",
+  "metrics": {
+    "compass": {
+      "requests": 5,
+      "successfulExecutions": 5,
+      "explicitCorrectFacts": 0,
+      "sufficientEvidenceFacts": 0,
+      "totalFacts": 20,
+      "stdoutBytes": 39740,
+      "requestedTokensPerRequest": 2000
+    },
+    "graphify": {
+      "requests": 5,
+      "successfulExecutions": 5,
+      "explicitCorrectFacts": 0,
+      "sufficientEvidenceFacts": 0,
+      "totalFacts": 20,
+      "stdoutBytes": 53306,
+      "requestedTokensPerRequest": 2000
+    }
+  },
+  "reviews": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "stdoutSha256": "37657db8665dda901e0e3befbd557c0987c833bc18c6e6722ae004b7c4e27bbf",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutBytes": 7949,
+      "byteDivFourTokenEstimate": 1988,
+      "responseStatus": "RESULT needs_resolution \u00b7 match=ambiguous \u00b7 execution=partial \u00b7 coverage=unknown",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 64,
+      "edgeRows": 44,
+      "factReviews": [
+        {
+          "id": "chi-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Names and call edges do not show shared pool/tree fields or middleware slice construction."
+        },
+        {
+          "id": "chi-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No handler guard or rejection behavior is shown."
+        },
+        {
+          "id": "chi-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete construct/configure/mount sequence is shown."
+        },
+        {
+          "id": "chi-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No conditional route lookup and matched-handler invocation is shown."
+        }
+      ]
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "stdoutSha256": "1bf6c1ffd510f5a1183367edaba6fb6a7a66764cd9a658fdaa9cfa3eeff6b52f",
+      "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+      "stdoutBytes": 6571,
+      "byteDivFourTokenEstimate": 1643,
+      "responseStatus": "graph traversal context",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 101,
+      "edgeRows": 0,
+      "factReviews": [
+        {
+          "id": "chi-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Names and call edges do not show shared pool/tree fields or middleware slice construction."
+        },
+        {
+          "id": "chi-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No handler guard or rejection behavior is shown."
+        },
+        {
+          "id": "chi-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete construct/configure/mount sequence is shown."
+        },
+        {
+          "id": "chi-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No conditional route lookup and matched-handler invocation is shown."
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "stdoutSha256": "09d1dab6c20017246f8e36ffe47f45c995cdf3b8f9d2e4fa9717f843769cdaf3",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutBytes": 7868,
+      "byteDivFourTokenEstimate": 1967,
+      "responseStatus": "RESULT candidates \u00b7 match=fuzzy \u00b7 execution=partial \u00b7 coverage=unknown",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 64,
+      "edgeRows": 10,
+      "factReviews": [
+        {
+          "id": "click-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No stored filenames or name property body is shown."
+        },
+        {
+          "id": "click-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No close guard, stream close, replace and closed-state sequence is shown."
+        },
+        {
+          "id": "click-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No __getattr__ forwarding implementation is shown."
+        },
+        {
+          "id": "click-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete close/__exit__ bodies establish the ignored delete flag."
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "stdoutSha256": "f8e7ae3aae06a943c686f3cd5f94cc7c7ea1f7da243ef8aa1ff35b5984564da5",
+      "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+      "stdoutBytes": 6850,
+      "byteDivFourTokenEstimate": 1713,
+      "responseStatus": "graph traversal context",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 87,
+      "edgeRows": 0,
+      "factReviews": [
+        {
+          "id": "click-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No stored filenames or name property body is shown."
+        },
+        {
+          "id": "click-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No close guard, stream close, replace and closed-state sequence is shown."
+        },
+        {
+          "id": "click-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No __getattr__ forwarding implementation is shown."
+        },
+        {
+          "id": "click-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete close/__exit__ bodies establish the ignored delete flag."
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "stdoutSha256": "51bcb6e5217ff0bb974a18fb07a6b636d7a2b67c2ed5641c5da5ad1acf6c5a94",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutBytes": 7938,
+      "byteDivFourTokenEstimate": 1985,
+      "responseStatus": "RESULT needs_resolution \u00b7 match=ambiguous \u00b7 execution=partial \u00b7 coverage=incomplete",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 61,
+      "edgeRows": 0,
+      "factReviews": [
+        {
+          "id": "jsoup-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No constructor assignment establishes reference sharing."
+        },
+        {
+          "id": "jsoup-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete new-shell/copy/output-settings-clone sequence is shown."
+        },
+        {
+          "id": "jsoup-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No safe-tag and safe-attribute predicates are shown."
+        },
+        {
+          "id": "jsoup-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No parsing and combined discarded-count/error-list condition is shown."
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "stdoutSha256": "21db49e7171f06bfa3b36559f63a622705673ca94869932c49389803f09829c2",
+      "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+      "stdoutBytes": 6667,
+      "byteDivFourTokenEstimate": 1667,
+      "responseStatus": "graph traversal context",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 65,
+      "edgeRows": 0,
+      "factReviews": [
+        {
+          "id": "jsoup-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No constructor assignment establishes reference sharing."
+        },
+        {
+          "id": "jsoup-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete new-shell/copy/output-settings-clone sequence is shown."
+        },
+        {
+          "id": "jsoup-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No safe-tag and safe-attribute predicates are shown."
+        },
+        {
+          "id": "jsoup-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No parsing and combined discarded-count/error-list condition is shown."
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "stdoutSha256": "d30483e834045767618774140ade72fac87144bd43938a2360ab005ba9681235",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutBytes": 7997,
+      "byteDivFourTokenEstimate": 2000,
+      "responseStatus": "RESULT needs_resolution \u00b7 match=ambiguous \u00b7 execution=partial \u00b7 coverage=incomplete",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 64,
+      "edgeRows": 16,
+      "factReviews": [
+        {
+          "id": "redux-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No enhancer validation and invocation chain is shown."
+        },
+        {
+          "id": "redux-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No reducer update and finally-reset sequence is shown."
+        },
+        {
+          "id": "redux-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No copy-on-write plus captured listener iteration is shown."
+        },
+        {
+          "id": "redux-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete returned store and observable adapter implementation is shown."
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "stdoutSha256": "ba6c21a04ee4f7d720ee74726dd4551ce982429d97ade961ce50db31ef9a58da",
+      "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+      "stdoutBytes": 6609,
+      "byteDivFourTokenEstimate": 1653,
+      "responseStatus": "graph traversal context",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 81,
+      "edgeRows": 0,
+      "factReviews": [
+        {
+          "id": "redux-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No enhancer validation and invocation chain is shown."
+        },
+        {
+          "id": "redux-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No reducer update and finally-reset sequence is shown."
+        },
+        {
+          "id": "redux-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No copy-on-write plus captured listener iteration is shown."
+        },
+        {
+          "id": "redux-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "No complete returned store and observable adapter implementation is shown."
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "stdoutSha256": "4e0658ae31900521385690c31083b617977c322a9af823faf5f17505ad63be49",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutBytes": 7988,
+      "byteDivFourTokenEstimate": 1997,
+      "responseStatus": "RESULT needs_resolution \u00b7 match=ambiguous \u00b7 execution=partial \u00b7 coverage=unknown",
+      "truncationDisclosed": true,
+      "overBudgetDisclosed": false,
+      "nodeRows": 64,
+      "edgeRows": 20,
+      "factReviews": [
+        {
+          "id": "walkdir-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Types and method edges do not establish stack iteration, depth guard and error-return behavior."
+        },
+        {
+          "id": "walkdir-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "A push-to-close edge does not establish max_open, oldest-stream selection or close-before-open ordering."
+        },
+        {
+          "id": "walkdir-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Call edges do not establish the directory-only guard, ancestor comparison or error condition."
+        },
+        {
+          "id": "walkdir-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Method edges do not establish contents_first and depth predicates or deferred-entry ordering."
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "stdoutSha256": "729cd0be188021d0e815f4167dd547728feb812a8a497f638f9164f86f3028be",
+      "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+      "stdoutBytes": 26609,
+      "byteDivFourTokenEstimate": 6653,
+      "responseStatus": "graph traversal context",
+      "truncationDisclosed": false,
+      "overBudgetDisclosed": true,
+      "nodeRows": 111,
+      "edgeRows": 244,
+      "factReviews": [
+        {
+          "id": "walkdir-1",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Types and method edges do not establish stack iteration, depth guard and error-return behavior."
+        },
+        {
+          "id": "walkdir-2",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "A push-to-close edge does not establish max_open, oldest-stream selection or close-before-open ordering."
+        },
+        {
+          "id": "walkdir-3",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Call edges do not establish the directory-only guard, ancestor comparison or error condition."
+        },
+        {
+          "id": "walkdir-4",
+          "explicitCorrectAnswer": false,
+          "sufficientReturnedEvidence": false,
+          "reason": "Method edges do not establish contents_first and depth predicates or deferred-entry ordering."
+        }
+      ]
+    }
+  ],
+  "interpretation": [
+    "Both products primarily return graph context in this arm. Omitted full facts are not fabricated answers; useful declaration locations and partial graph evidence remain present.",
+    "The single-request 2000-token arm does not evaluate source-reading or disambiguation follow-ups. Compass explain advertises digest-verified source; Graphify explain/get_node or an agent source-reading workflow must be assessed separately rather than ruled out from query output.",
+    "Graphify WalkDir explicitly reports a complete answer over budget. Its full 26609-byte response is retained and reviewed, not silently clipped. Equal requested budgets did not produce equal output size. Byte-divided-by-four estimates are evaluator accounting, not a claim about either tool internal estimator.",
+    "Four Compass responses request resolution; the Click response reports candidates. This is incomplete task evidence, not a successful guess.",
+    "No wrong task-level prose assertion was identified because these responses do not assert the 20 implementation mechanisms. Extra node and edge assertions are not exhaustively source-reviewed; precision remains unmeasured."
+  ],
+  "postOutputDiagnostics": [
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "classification": "wrong internal call target",
+      "source": "src_lib_intoiter_get_deferred_dir",
+      "target": "src_lib_intoiter_pop",
+      "reportedSite": "src/lib.rs:L889",
+      "actualReceiver": "self.deferred_dirs, declared Vec<DirEntry> at src/lib.rs:598",
+      "targetDefinition": "IntoIter::pop at src/lib.rs:950 mutates IntoIter stacks; it is not Vec::pop",
+      "explanation": "The displayed edge assigns the Vec receiver call inside get_deferred_dir to a same-named method on the enclosing IntoIter. The source declares the receiver field as Vec<DirEntry>.",
+      "compassObservation": "No corresponding edge to IntoIter::pop; Compass retains the source-supported get_deferred_dir -> skippable call. Absence of the wrong internal edge does not recover or score the external Vec call.",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "graphSha256": {
+        "compass": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+        "graphify": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+      },
+      "scope": "Selected after output inspection; one diagnosed false target, not a comparative precision estimate.",
+      "sourceWitnesses": [
+        {
+          "file": "src/lib.rs",
+          "startLine": 598,
+          "endLine": 598,
+          "text": "    deferred_dirs: Vec<DirEntry>,"
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 884,
+          "endLine": 898,
+          "text": "    fn get_deferred_dir(&mut self) -> Option<DirEntry> {\n        if self.opts.contents_first {\n            if self.depth < self.deferred_dirs.len() {\n                // Unwrap is safe here because we've guaranteed that\n                // `self.deferred_dirs.len()` can never be less than 1\n                let deferred: DirEntry = self\n                    .deferred_dirs\n                    .pop()\n                    .expect(\"BUG: deferred_dirs should be non-empty\");\n                if !self.skippable() {\n                    return Some(deferred);\n                }\n            }\n        }\n        None"
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 950,
+          "endLine": 959,
+          "text": "    fn pop(&mut self) {\n        self.stack_list.pop().expect(\"BUG: cannot pop from empty stack\");\n        if self.opts.follow_links {\n            self.stack_path.pop().expect(\"BUG: list/path stacks out of sync\");\n        }\n        // If everything in the stack is already closed, then there is\n        // room for at least one more open descriptor and it will\n        // always be at the top of the stack.\n        self.oldest_opened = min(self.oldest_opened, self.stack_list.len());\n    }"
+        }
+      ],
+      "wrongStoredEdge": {
+        "source": "src_lib_intoiter_get_deferred_dir",
+        "target": "src_lib_intoiter_pop",
+        "relation": "calls",
+        "_origin": "ast",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "context": "call",
+        "source_file": "src/lib.rs",
+        "source_location": "L889",
+        "weight": 1.0
+      }
+    }
+  ],
+  "remainingWork": [
+    "Review additional graph assertions, starting with the complete 244-edge WalkDir response, before any precision claim.",
+    "Evaluate a symmetric bounded source-reading/disambiguation workflow using only information returned by each tool.",
+    "Diagnose Compass owner specificity and answer-budget allocation against independent positive and negative cases.",
+    "Extend actual responsibility and community judgments beyond the small Chi pilot and include plausible positive cases and independent review."
+  ],
+  "limitations": [
+    "The 20 frozen fact judgments are complete. Full source precision over every returned graph assertion is incomplete; the extra WalkDir diagnosis is a post-output case.",
+    "Top-level CLI help and installed Graphify get_node/explain implementation were inspected after the first query capture. This review does not claim that native query is intended to synthesize a prose explanation."
+  ]
+}

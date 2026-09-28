@@ -1,0 +1,326 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "fd",
+  "commit": "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5",
+  "scope": "Source-first selected direct-call witnesses recorded before extracting or querying either tool on this checkout. Covers named declarations and line-level occurrences, not whole-repository recall, runtime execution, column accuracy, or representative held-out accuracy.",
+  "witnesses": [
+    {
+      "id": "execute-commands",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 76,
+        "symbol": "execute",
+        "text": "pub fn execute("
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 87,
+          "text": "execute_commands(commands,"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "command-error",
+      "source": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 101,
+        "symbol": "handle_cmd_error",
+        "text": "pub fn handle_cmd_error("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/command.rs",
+          "line": 68,
+          "text": "handle_cmd_error(None, e)"
+        },
+        {
+          "file": "src/exec/command.rs",
+          "line": 93,
+          "text": "handle_cmd_error(Some(&cmd), why)"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "batch-error",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 101,
+        "symbol": "handle_cmd_error",
+        "text": "pub fn handle_cmd_error("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 105,
+          "text": "handle_cmd_error(Some(&builder.cmd), e)"
+        },
+        {
+          "file": "src/exec/mod.rs",
+          "line": 112,
+          "text": "handle_cmd_error(Some(&builder.cmd), e)"
+        },
+        {
+          "file": "src/exec/mod.rs",
+          "line": 118,
+          "text": "handle_cmd_error(None, e)"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "batch-exitcodes",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exit_codes.rs",
+        "line": 46,
+        "symbol": "merge_exitcodes",
+        "text": "pub fn merge_exitcodes("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 116,
+          "text": "merge_exitcodes(builders.iter()"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "builder-push-finish",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 173,
+        "symbol": "push",
+        "text": "fn push("
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 191,
+        "symbol": "finish",
+        "text": "fn finish("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 175,
+          "text": "self.finish()?"
+        },
+        {
+          "file": "src/exec/mod.rs",
+          "line": 183,
+          "text": "self.finish()?"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "builder-finish-new-command",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 191,
+        "symbol": "finish",
+        "text": "fn finish("
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 164,
+        "symbol": "new_command",
+        "text": "fn new_command("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 198,
+          "text": "Self::new_command(&self.pre_args)?"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "size-parse",
+      "source": {
+        "file": "src/filter/size.rs",
+        "line": 28,
+        "symbol": "from_string",
+        "text": "pub fn from_string("
+      },
+      "target": {
+        "file": "src/filter/size.rs",
+        "line": 33,
+        "symbol": "parse_opt",
+        "text": "fn parse_opt("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/filter/size.rs",
+          "line": 29,
+          "text": "SizeFilter::parse_opt(s)"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "time-before-parse",
+      "source": {
+        "file": "src/filter/time.rs",
+        "line": 49,
+        "symbol": "before",
+        "text": "pub fn before("
+      },
+      "target": {
+        "file": "src/filter/time.rs",
+        "line": 29,
+        "symbol": "from_str",
+        "text": "fn from_str("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/filter/time.rs",
+          "line": 50,
+          "text": "TimeFilter::from_str(s)"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "command-buffer-write",
+      "source": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 30,
+        "symbol": "write",
+        "text": "fn write("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/command.rs",
+          "line": 87,
+          "text": "output_buffer.write();"
+        },
+        {
+          "file": "src/exec/command.rs",
+          "line": 92,
+          "text": "output_buffer.write();"
+        },
+        {
+          "file": "src/exec/command.rs",
+          "line": 97,
+          "text": "output_buffer.write();"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "command-buffer-push",
+      "source": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 26,
+        "symbol": "push",
+        "text": "fn push("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/command.rs",
+          "line": 84,
+          "text": "output_buffer.push(output.stdout, output.stderr);"
+        }
+      ],
+      "judgment": "Each listed line is an explicit call in the reviewed caller body."
+    },
+    {
+      "id": "wrong-push-owner",
+      "source": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 173,
+        "symbol": "push",
+        "text": "fn push("
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "The caller body at command.rs:60-99 invokes OutputBuffer::push, not CommandBuilder::push."
+    },
+    {
+      "id": "finish-not-executor",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 191,
+        "symbol": "finish",
+        "text": "fn finish("
+      },
+      "target": {
+        "file": "src/exec/command.rs",
+        "line": 60,
+        "symbol": "execute_commands",
+        "text": "pub fn execute_commands<"
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "The complete body at mod.rs:191-203 contains no direct execute_commands call."
+    }
+  ]
+}

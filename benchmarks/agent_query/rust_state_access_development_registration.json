@@ -1,0 +1,26 @@
+{
+  "schema": "compass.rust-state-access-development-registration/1",
+  "baselineCommit": "9cdeab6a1b0ba1d75179453145dff0b2b48e0aa7",
+  "sourceRegistration": "benchmarks/agent_query/state_access_development_registration.json",
+  "sourceRegistrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "scope": "Fix missing Rust field-access evidence discovered on known development subjects. Existing Members capability and member-access representation; no new language cutover, read/write classification, LCOM or god-object diagnosis.",
+  "productContract": "Emit exact field occurrence candidates for source-proven nominal receivers. Restrict targets to fields; resolve through existing qualified universal lookup. Preserve unsupported and shadowed receivers as unresolved. Skip method-selector syntax while retaining its receiver field accesses. Reuse bounded source-type inference; do not invent external field nodes or choose a same-named field.",
+  "evaluation": "Rebuild Compass graphs from the same five pinned read-only repositories. Reuse the unchanged frozen Graphify graphs. Replay all 20 registered state sites with the same full-graph auditor and retain all original results. Record full graph deltas and unchanged/non-Rust controls; report any changed existing records/community assignments, not just recovered sites. This is not a build-time comparison, independent confirmation or public-query benchmark.",
+  "verification": [
+    "Fail-before native field-access regression and negative receiver/scope tests",
+    "Source-anchor, multiplicity, deterministic resolution and cross-file qualification regressions",
+    "AST cache invalidation test and native baseline",
+    "Production fixture qualification",
+    "Pinned source/graph/binary hashes; replayable 20-site comparison and graph deltas"
+  ],
+  "publicFollowup": {
+    "scope": "Known-ID-assisted retrieval control, not natural-language discovery or identity resolution. Registered before rebuilt graphs or follow-up outputs are inspected.",
+    "tasks": [
+      "WalkDir IntoIter::handle_entry -> deferred_dirs at src/lib.rs:875",
+      "WalkDir IntoIter::get_deferred_dir -> deferred_dirs at src/lib.rs:886",
+      "WalkDir IntoIter::push -> oldest_opened at src/lib.rs:945",
+      "WalkDir IntoIter::pop -> oldest_opened at src/lib.rs:958"
+    ],
+    "policy": "For each source-validated callable, provide each tool its own exact graph ID as an explicit task input and issue one public MCP get_neighbors call with no relation filter. Preserve native defaults, all errors, truncation and response bytes; no retries or source follow-ups. Score field-neighbor identity separately from occurrence anchoring and report graph consistency, not authored explanations. Use unchanged baseline Graphify graphs and new Compass graphs."
+  }
+}

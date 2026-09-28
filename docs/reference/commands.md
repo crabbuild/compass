@@ -421,6 +421,49 @@ compass explore "<symbol>" ... [--format text|agent-json|json]
 compass node "<source>" "<target>" [--format text|agent-json|json]
 ```
 
+When the symbol name and source location are known, use exact lookup:
+
+```bash
+compass search createStore --exact --file src/createStore.ts --line 86 --kind function --format json
+```
+
+The file, line and kind constraints are optional and conjunctive. A line requires
+a file; all three filters require `--exact`. File paths match the stored
+repository-relative spelling. Exact IDs take precedence; names use Compass's
+normalized exact comparison. Every matching record is returned, including
+overloads and export bindings, with no lexical fallback or guessed winner.
+The candidate bound applies before filtering: a truncated one-result response
+does not prove uniqueness, and a truncated empty response does not prove
+absence. Exact text requests keep the supplied bounds without automatic widening.
+
+MCP exposes the same operation through `search_symbols` with `exact: true` and
+optional `source_file`, `start_line` and `kind` fields. The raw response stays
+`compass.query/1`; ordinary ranked search remains the default.
+
+For typed relationship and trail questions, an owner-qualified operand such as
+`APIRoute.get_route_handler` or `APIRoute::get_route_handler` can identify a stored
+`fastapi.routing.APIRoute::get_route_handler` without the module prefix.
+Compass verifies the suffix against the bounded exact method-name candidates.
+If several declarations share that owner/member suffix, retry with the full
+qualified name or an exact ID; a truncated candidate set never proves a unique
+match. A nonexistent owner does not select another class's same-named method.
+This also applies to `ask` questions that route to a typed operation; it does
+not change the separate `search --exact` contract.
+
+Use `compass node SOURCE TARGET --calls-only` to find a directed call chain.
+The equivalent natural forms are `compass ask "call path from SOURCE to TARGET"`
+and `compass ask "call chain from SOURCE to TARGET"`. MCP `get_node` accepts
+boolean `calls_only` (default false). Only stored `calls` relationships qualify;
+containment, instantiation, return-type and other structural edges cannot form
+shortcuts. All existing limits, ambiguity and heuristic policies still apply.
+Call chains may be conditional; their existence does not guarantee execution.
+The CLI flag takes no value, may appear once, and is valid only for `node`.
+
+`node` searches directed, weighted trails within `--max-depth`. It retains
+shorter and cheaper prefixes when either can affect reachability within that
+hop limit. Node and edge work limits still apply: a truncated result is not
+proof that no path exists.
+
 `explore --format text` closes its bounded page with a `SOURCE` section: the
 recorded line range of each primary anchor, rendered from the digest-verified
 file the command already reads below `--root`. Blocks are bounded per anchor
@@ -540,16 +583,24 @@ compass path "<source>" "<target>" [--max-depth N]
   [--format text|json|agent-json] [--graph PATH | --at REV]
 ```
 
-Resolves both endpoints by exact node ID, name, or qualified name before doing
-any graph search; missing and ambiguous endpoints fail explicitly. The text path
-search is bounded to eight hops by default and ranks structural relationships
+Resolves both endpoints by exact node ID, name, full qualified name, or a
+unique owner/member suffix before doing any graph search; missing and ambiguous
+endpoints fail explicitly. The text path search is bounded to eight hops by
+default and ranks structural relationships
 such as calls, containment, imports, and dependencies ahead of weak references
 or documentation links. When a meaningfully weaker route is up to two hops
-shorter, Compass shows it separately. Output names the resolved target ID, and
+shorter, Compass shows it separately. Output names the resolved target, and
 an unreachable target is reported as `NO PATH FOUND` with the depth bound and
 visited-node count. Relationship arrows always preserve their stored direction.
 Traversal may follow a relationship in either direction; the arrows make that
 choice visible rather than rewriting the graph.
+
+Costlier, shorter prefixes are retained when they can reach the target within
+`--max-depth`. Each weighted or alternative search permits at most 1,000,000
+adjacency entries and 16 MiB of cumulative path-key bytes. Work exhaustion
+returns a nonzero error; it is not reported as `NO PATH FOUND`. Retry with a
+smaller depth or graph. A depth-bounded no-path result does not prove that no
+longer path exists.
 
 Both endpoints accept a file path as well as a symbol. When a language
 publishes an isolated metadata `file` node beside the `module` node that
@@ -578,10 +629,11 @@ compass explain "<node>"
   [--graph PATH | --at REV]
 ```
 
-Shows one node and incoming/outgoing connections. An exact node ID or unique
-exact qualified name resolves directly. When a label or qualified name names
-multiple source-backed declarations, Compass lists the candidates and their
-source ranges and asks for the full node ID instead of silently selecting one.
+Shows one node and incoming/outgoing connections. An exact node ID, unique
+full qualified name, or unique owner/member suffix resolves directly. When a
+label or qualified name names multiple source-backed declarations, Compass
+lists the candidates and their source ranges and asks for the full node ID
+instead of silently selecting one.
 Connection lines include the stored relationship site; extraction is the
 graph's default provenance, so `[EXTRACTED]` is stated once in the
 `Connections (N, extracted unless marked):` header and a line carries a

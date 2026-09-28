@@ -25,22 +25,23 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
 import signal
 import subprocess
 import sys
 import time
+import threading
 import tomllib
 
 SUITE_SCHEMA = "compass.agent-query-suite/1"
-RUN_SCHEMA = "compass.agent-query-run/1"
+RUN_SCHEMA = "compass.agent-query-run/2"
+GRAPH_ANCHOR_POLICY = "exact-file-start-terminal-symbol/1"
 TOKEN_BYTES = 4
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
-_CURSOR = re.compile(r"next=([^\s]+)")
+_CURSOR = re.compile(r"^Pagination:[^\r\n]*[ \t]next=([^\s]+)[ \t]*\r?$", re.MULTILINE)
 _GRAPHIFY_NODE = re.compile(r"^NODE (.+?) \[src=(\S+) loc=L(\d+)", re.MULTILINE)
 _GRAPHIFY_CANDIDATE = re.compile(r"^\s+id: (\S+)", re.MULTILINE)
 _COMPASS_ENTITY = re.compile(r"^- (\S+) \[[a-z_]+\] \S+:\d", re.MULTILINE)
@@ -314,6 +315,7 @@ class CommandResult:
     stderr_bytes: int
     stdout: str
     stderr: str
+    output_limited: bool = False
 
 
 def run_bounded(
@@ -328,32 +330,52 @@ def run_bounded(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     timed_out = False
-    with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
-        process = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            stdout=stdout_stream,
-            stderr=stderr_stream,
-            start_new_session=True,
-        )
+    exceeded = threading.Event()
+    capture_errors: list[Exception] = []
+    process = subprocess.Popen(
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+
+    def capture(pipe, path: Path) -> None:
         try:
-            process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+            with pipe, path.open("wb") as stream:
+                remaining = MAX_OUTPUT_BYTES
+                while chunk := pipe.read1(64 * 1024):
+                    stream.write(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        exceeded.set()
+                        return
+                    remaining -= len(chunk)
+        except Exception as error:
+            capture_errors.append(error)
+            exceeded.set()
+
+    readers = [
+        threading.Thread(target=capture, args=(process.stdout, stdout_path), daemon=True),
+        threading.Thread(target=capture, args=(process.stderr, stderr_path), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+    while process.poll() is None or any(reader.is_alive() for reader in readers):
+        if exceeded.is_set() or time.monotonic() - started >= timeout_seconds:
+            timed_out = not exceeded.is_set()
             try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try:
-                    os.killpg(process.pid, subprocess.signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            break
+        time.sleep(0.01)
+    process.wait(timeout=5)
+    for reader in readers:
+        reader.join(timeout=5)
+    if capture_errors or any(reader.is_alive() for reader in readers):
+        raise RuntimeError(f"incomplete subprocess output capture: {capture_errors}")
     wall_ms = int((time.monotonic() - started) * 1000)
     stdout_bytes = stdout_path.stat().st_size
     stderr_bytes = stderr_path.stat().st_size
-    stdout = stdout_path.read_bytes()[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
-    stderr = stderr_path.read_bytes()[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    stdout = stdout_path.read_bytes().decode("utf-8", errors="replace")
+    stderr = stderr_path.read_bytes().decode("utf-8", errors="replace")
     return CommandResult(
         argv=argv,
         exit_code=process.returncode,
@@ -363,6 +385,7 @@ def run_bounded(
         stderr_bytes=stderr_bytes,
         stdout=stdout,
         stderr=stderr,
+        output_limited=exceeded.is_set(),
     )
 
 
@@ -483,6 +506,22 @@ def _tool_argv(
     return tuple(base)
 
 
+def _accepted_exit(question: Question, tool: str, result: CommandResult) -> bool:
+    if result.exit_code == 0:
+        return True
+    # Graphify 0.9.67's explain command explicitly exits 1 for an ambiguity
+    # list. This is a valid pick-list outcome, not an execution failure. The
+    # independent candidate/anchor oracle must still pass before crediting it.
+    return (
+        result.exit_code == 1
+        and tool == "graphify"
+        and question.expect == "pick_list"
+        and question.graphify[:1] == ("explain",)
+        and result.stdout.startswith("Ambiguous:")
+        and _candidate_count(tool, result.stdout) >= 2
+    )
+
+
 def run_question(
     repository: Repository,
     question: Question,
@@ -508,6 +547,7 @@ def run_question(
     failures: tuple[str, ...] = ("not executed",)
     passed = False
     pages: list[str] = []
+    seen_cursors: set[str] = set()
     for attempt in range(question.max_follow_ups + 1):
         argv = (str(binary), *_tool_argv(tool, question, graph, budget=budget, cursor=cursor))
         stem = f"{question.identifier}.{tool}.{attempt}"
@@ -527,6 +567,15 @@ def run_question(
         pages.append(result.stdout)
         aggregate = "\n".join(pages)
         attempt_pass, attempt_failures = judge(question, tool, aggregate)
+        if result.output_limited:
+            attempt_pass = False
+            attempt_failures += ("command output limit exceeded",)
+        elif result.timed_out:
+            attempt_pass = False
+            attempt_failures += ("command timed out",)
+        elif not _accepted_exit(question, tool, result):
+            attempt_pass = False
+            attempt_failures += (f"command exited {result.exit_code}",)
         if attempt == 0:
             first_page_tokens = tokens
             first_page_pass = attempt_pass
@@ -537,13 +586,16 @@ def run_question(
         failures = attempt_failures
         if attempt == question.max_follow_ups:
             break
-        if result.timed_out or result.exit_code != 0:
+        if result.output_limited or result.timed_out or result.exit_code != 0:
             break
         if tool == "compass":
-            match = _CURSOR.search(result.stdout)
-            if match is None:
+            # A source excerpt can contain `next=...`; only one actual footer
+            # can authorize continuation. `none` is the end marker, not a token.
+            matches = _CURSOR.findall(result.stdout)
+            if len(matches) != 1 or matches[0] == "none" or matches[0] in seen_cursors:
                 break
-            cursor = match.group(1)
+            cursor = matches[0]
+            seen_cursors.add(cursor)
         else:
             if question.kind != "broad":
                 # Graphify documents a continuation for `query` only: it re-runs
@@ -579,10 +631,7 @@ def _compass_graph(artifact_root: Path) -> Path:
         graph = output / "snapshots" / snapshot / "graph.json"
         if graph.is_file():
             return graph
-    candidates = sorted(output.glob("snapshots/*/graph.json"))
-    if not candidates:
-        raise RuntimeError(f"no Compass graph under {output}")
-    return candidates[-1]
+    raise RuntimeError(f"invalid or missing published Compass snapshot under {output}")
 
 
 def _graphify_graph(artifact_root: Path) -> Path:
@@ -599,62 +648,60 @@ def prepare_repository(
     *,
     compass_binary: Path,
     graphify_binary: Path,
-    force: bool,
     timeout_seconds: float,
 ) -> dict:
     root = artifacts / repository.name
     compass_root = root / "compass"
     graphify_root = root / "graphify"
     record: dict[str, object] = {"repository": repository.name, "source": str(source)}
-    if force:
-        for path in (compass_root, graphify_root):
-            if path.exists():
-                shutil.rmtree(path)
-    if not (compass_root / "compass-out").is_dir():
-        started = time.monotonic()
-        result = run_bounded(
-            (
-                str(compass_binary),
-                "extract",
-                str(source),
-                "--code-only",
-                "--no-viz",
-                "--store",
-                "sqlite",
-                "--out",
-                str(compass_root),
-            ),
-            cwd=source,
-            timeout_seconds=timeout_seconds,
-            stdout_path=root / "compass-build.stdout",
-            stderr_path=root / "compass-build.stderr",
-        )
-        record["compassBuildMs"] = int((time.monotonic() - started) * 1000)
-        record["compassBuildExit"] = result.exit_code
-        record["compassBuildReport"] = result.stdout.strip().splitlines()[-3:]
-        if result.exit_code != 0:
-            raise RuntimeError(f"Compass extract failed for {repository.name}: {result.stderr[-2000:]}")
-    if not (graphify_root / "graphify-out" / "graph.json").is_file():
-        started = time.monotonic()
-        result = run_bounded(
-            (
-                str(graphify_binary),
-                "extract",
-                str(source),
-                "--code-only",
-                "--out",
-                str(graphify_root),
-            ),
-            cwd=source,
-            timeout_seconds=timeout_seconds,
-            stdout_path=root / "graphify-build.stdout",
-            stderr_path=root / "graphify-build.stderr",
-        )
-        record["graphifyBuildMs"] = int((time.monotonic() - started) * 1000)
-        record["graphifyBuildExit"] = result.exit_code
-        record["graphifyBuildReport"] = result.stdout.strip().splitlines()[-3:]
-        if result.exit_code != 0:
-            raise RuntimeError(f"Graphify extract failed for {repository.name}: {result.stderr[-2000:]}")
+    # Every run owns fresh artifacts. Never infer build provenance from a path.
+    root.mkdir(parents=True, exist_ok=False)
+    record["commit"] = repository.commit
+    started = time.monotonic()
+    result = run_bounded(
+        (
+            str(compass_binary),
+            "extract",
+            str(source),
+            "--code-only",
+            "--no-viz",
+            "--store",
+            "sqlite",
+            "--out",
+            str(compass_root),
+        ),
+        cwd=source,
+        timeout_seconds=timeout_seconds,
+        stdout_path=root / "compass-build.stdout",
+        stderr_path=root / "compass-build.stderr",
+    )
+    record["compassBuildMs"] = int((time.monotonic() - started) * 1000)
+    record["compassBuildExit"] = result.exit_code
+    record["compassBuildArgv"] = list(result.argv)
+    record["compassBuildReport"] = result.stdout.strip().splitlines()[-3:]
+    if result.output_limited or result.timed_out or result.exit_code != 0:
+        raise RuntimeError(f"Compass extract failed for {repository.name}: {result.stderr[-2000:]}")
+    started = time.monotonic()
+    result = run_bounded(
+        (
+            str(graphify_binary),
+            "extract",
+            str(source),
+            "--code-only",
+            "--out",
+            str(graphify_root),
+        ),
+        cwd=source,
+        timeout_seconds=timeout_seconds,
+        stdout_path=root / "graphify-build.stdout",
+        stderr_path=root / "graphify-build.stderr",
+    )
+    record["graphifyBuildMs"] = int((time.monotonic() - started) * 1000)
+    record["graphifyBuildExit"] = result.exit_code
+    record["graphifyBuildArgv"] = list(result.argv)
+    record["graphifyBuildReport"] = result.stdout.strip().splitlines()[-3:]
+    if result.output_limited or result.timed_out or result.exit_code != 0:
+        raise RuntimeError(f"Graphify extract failed for {repository.name}: {result.stderr[-2000:]}")
     compass_graph = _compass_graph(compass_root)
     graphify_graph = _graphify_graph(graphify_root)
     record["compassGraph"] = str(compass_graph)
@@ -664,35 +711,47 @@ def prepare_repository(
     return record
 
 
+def _terminal_symbol(value: object) -> str:
+    """Compare declaration names, not substrings or enclosing source spans.
+
+    A pinned file and exact declaration start distinguish overloads. Both tools
+    may omit qualification or parameter text, so those are not scored as proof
+    of owner identity or signature accuracy.
+    """
+    if not isinstance(value, str):
+        return ""
+    name = value.split("(", 1)[0].strip()
+    return name.replace("::", ".").rsplit(".", 1)[-1]
+
+
+def _node_anchor(node: dict, tool: str) -> tuple[str | None, int | None, set[str]]:
+    if tool == "compass":
+        source = node.get("source")
+        source = source if isinstance(source, dict) else {}
+        file = source.get("file")
+        line = source.get("startLine")
+        names = (node.get("name"), node.get("qualifiedName"), node.get("label"))
+    elif tool == "graphify":
+        file = node.get("source_file")
+        location = node.get("source_location")
+        match = re.fullmatch(r"L([0-9]+)", location) if isinstance(location, str) else None
+        line = int(match[1]) if match else None
+        names = (node.get("label"), node.get("name"), node.get("qualifiedName"))
+    else:
+        raise ValueError(f"unsupported graph metric tool {tool!r}")
+    # bool is an int subclass in Python; it is never a valid source line.
+    line = line if type(line) is int and line > 0 else None
+    file = file if isinstance(file, str) and file else None
+    return file, line, {name for value in names if (name := _terminal_symbol(value))}
+
+
 def graph_metrics(repository: Repository, tool: str, graph: Path) -> dict:
     document = json.loads(graph.read_text(encoding="utf-8"))
     nodes = document.get("nodes", [])
     edges = document.get("edges") or document.get("links") or []
-    if tool == "compass":
-        identifiers = [node.get("id") for node in nodes]
-        sourced = sum(1 for node in nodes if (node.get("source") or {}).get("file"))
-        locations = [
-            (
-                (node.get("source") or {}).get("file"),
-                (node.get("source") or {}).get("startLine"),
-                (node.get("source") or {}).get("endLine"),
-            )
-            for node in nodes
-        ]
-    else:
-        identifiers = [node.get("id") for node in nodes]
-        sourced = sum(1 for node in nodes if node.get("source_file"))
-        locations = []
-        for node in nodes:
-            file = node.get("source_file")
-            location = node.get("source_location")
-            line = None
-            if isinstance(location, str) and location.startswith("L"):
-                try:
-                    line = int(location[1:])
-                except ValueError:
-                    line = None
-            locations.append((file, line, line))
+    identifiers = [node.get("id") for node in nodes]
+    locations = [_node_anchor(node, tool) for node in nodes]
+    sourced = sum(1 for file, _, _ in locations if file)
     known = {identifier for identifier in identifiers if isinstance(identifier, str)}
     dangling = 0
     for edge in edges:
@@ -702,17 +761,21 @@ def graph_metrics(repository: Repository, tool: str, graph: Path) -> dict:
             dangling += 1
     duplicates = len(identifiers) - len(known)
     anchor_hits = 0
+    missing_anchors = []
     for anchor in repository.anchors:
-        for file, start, end in locations:
-            if file != anchor.file or start is None:
-                continue
-            stop = end if isinstance(end, int) else start
-            if isinstance(start, int) and start <= anchor.line <= stop:
-                anchor_hits += 1
-                break
+        symbol = _terminal_symbol(anchor.symbol)
+        matched = bool(symbol) and any(
+            file == anchor.file and line == anchor.line and symbol in names
+            for file, line, names in locations
+        )
+        if matched:
+            anchor_hits += 1
+        else:
+            missing_anchors.append({"file": anchor.file, "line": anchor.line, "symbol": anchor.symbol})
     return {
         "tool": tool,
         "graph": str(graph),
+        "anchorPolicy": GRAPH_ANCHOR_POLICY,
         "nodes": len(nodes),
         "edges": len(edges),
         "sourceBackedNodes": sourced,
@@ -721,6 +784,7 @@ def graph_metrics(repository: Repository, tool: str, graph: Path) -> dict:
         "duplicateIds": duplicates,
         "anchorHits": anchor_hits,
         "anchorTotal": len(repository.anchors),
+        "missingAnchors": missing_anchors,
     }
 
 
@@ -753,9 +817,18 @@ def render_report(run: dict) -> str:
     lines.append("document for their text budgets; `answer tokens` sums every response the")
     lines.append("reviewed workflow needed, including documented follow-up pages.")
     lines.append("")
-    lines.append("## Graph quality")
+    lines.append("## Graph coverage metadata")
     lines.append("")
-    lines.append("| Repository | Language | Tool | Nodes | Edges | Source-backed | Dangling | Duplicate IDs | Reviewed anchors |")
+    policies = sorted({m.get("anchorPolicy", "legacy-file-line-coverage") for m in run["graphMetrics"]})
+    lines.append("Graph anchor policies: " + ", ".join(f"`{policy}`" for policy in policies) + ".")
+    if policies == [GRAPH_ANCHOR_POLICY]:
+        lines.append("A reviewed graph anchor requires the exact file, declaration start line,")
+        lines.append("and terminal symbol name on both tools. Enclosing file/module spans do not count.")
+    else:
+        lines.append("Legacy graph-anchor scores did not check symbol names and are not comparable to the new policy.")
+    lines.append("Source-located counts describe metadata presence, not verified source correctness.")
+    lines.append("")
+    lines.append("| Repository | Language | Tool | Nodes | Edges | Source-located | Dangling | Duplicate IDs | Reviewed anchors |")
     lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for metrics in run["graphMetrics"]:
         lines.append(
@@ -773,7 +846,7 @@ def render_report(run: dict) -> str:
             )
         )
     lines.append("")
-    lines.append("## Query results")
+    lines.append("## Query text-oracle results")
     lines.append("")
     lines.append("| Repository | Question | Kind | Compass | C tokens | G tokens | Compass ms | Graphify ms |")
     lines.append("| --- | --- | --- | --- | ---: | ---: | ---: | ---: |")
@@ -835,7 +908,7 @@ def render_report(run: dict) -> str:
     lines.append(f"- Token efficiency (median answer tokens): {verdict['tokens']}")
     lines.append(f"- Token efficiency (paired answers only): {verdict['pairedTokens']}")
     lines.append(f"- Oracle split: {verdict['split']}")
-    lines.append(f"- Graph quality (source-backed ratio and reviewed anchors): {verdict['graphQuality']}")
+    lines.append(f"- Graph coverage metadata (source locations and reviewed anchors): {verdict['graphQuality']}")
     lines.append("")
     lines.append("## Limits")
     lines.append("")
@@ -843,7 +916,9 @@ def render_report(run: dict) -> str:
     lines.append("  not an independent precision oracle.")
     lines.append("- `graphify` prints an installation warning on stderr; the report counts stdout")
     lines.append("  only and records stderr separately in `run.json`.")
-    lines.append("- The suite is a focused sample of five repositories and does not estimate")
+    count = len(run["repositories"])
+    noun = "repository" if count == 1 else "repositories"
+    lines.append(f"- The suite is a focused sample of {count} {noun} and does not estimate")
     lines.append("  population-wide accuracy.")
     lines.append("")
     return "\n".join(lines)
@@ -896,28 +971,17 @@ def _aggregate(run: dict) -> None:
             f"Graphify leads ({graphify['passed']}/{graphify['questions']} vs "
             f"{compass['passed']}/{compass['questions']})"
         )
-    if graphify["medianAnswerTokens"] and compass["medianAnswerTokens"]:
-        ratio = graphify["medianAnswerTokens"] / compass["medianAnswerTokens"]
-        if compass["medianAnswerTokens"] <= graphify["medianAnswerTokens"]:
-            verdict["tokens"] = (
-                f"Compass is cheaper per answered question "
-                f"({compass['medianAnswerTokens']:.0f} vs {graphify['medianAnswerTokens']:.0f} tokens, "
-                f"{ratio:.2f}x)"
-            )
-        else:
-            verdict["tokens"] = (
-                f"Graphify is cheaper per answered question "
-                f"({graphify['medianAnswerTokens']:.0f} vs {compass['medianAnswerTokens']:.0f} tokens, "
-                f"{1 / ratio:.2f}x)"
-            )
-    else:
-        verdict["tokens"] = "Not comparable: one tool has no passing answers"
+    verdict["tokens"] = (
+        f"Unpaired medians: Compass {compass['medianAnswerTokens']:.0f}, "
+        f"Graphify {graphify['medianAnswerTokens']:.0f} estimated tokens; "
+        "these can cover different passing questions and do not establish a cost advantage"
+    )
     both = paired["all"]
     if both["bothPassed"]:
         verdict["pairedTokens"] = (
-            f"On the {both['bothPassed']} questions both tools answered, Compass costs "
+            f"On the {both['bothPassed']} questions both tools passed, Compass uses "
             f"{both['medianCompassTokens']:.0f} tokens and Graphify "
-            f"{both['medianGraphifyTokens']:.0f} tokens (median)"
+            f"{both['medianGraphifyTokens']:.0f} estimated tokens (median)"
         )
     else:
         verdict["pairedTokens"] = "No question was answered by both tools"
@@ -935,7 +999,7 @@ def _aggregate(run: dict) -> None:
     compass_ratio = compass_sourced / compass_nodes if compass_nodes else 0.0
     graphify_ratio = graphify_sourced / graphify_nodes if graphify_nodes else 0.0
     verdict["graphQuality"] = (
-        f"Compass {compass_ratio:.1%} source-backed and {compass_anchors} reviewed anchors vs "
+        f"Compass {compass_ratio:.1%} source-located and {compass_anchors} reviewed anchors vs "
         f"Graphify {graphify_ratio:.1%} and {graphify_anchors}"
     )
     run["verdict"] = verdict
@@ -1017,7 +1081,9 @@ def _tool_identity(name: str, binary: Path) -> dict:
     return {
         "name": name,
         "binary": str(binary),
+        # For a script this identifies the launcher, not its imported packages.
         "binarySha256": _sha256_file(binary),
+        "digestScope": "executable-file-only",
         "version": version_text,
     }
 
@@ -1028,8 +1094,37 @@ def _parse_sources(values: list[str] | None) -> dict[str, Path]:
         name, separator, path = value.partition("=")
         if not separator or not name or not path:
             raise SystemExit(f"--source must be NAME=PATH, got {value!r}")
-        sources[name] = Path(path)
+        sources[name] = Path(path).resolve()
     return sources
+
+
+def _verify_source(repository: Repository, source: Path) -> None:
+    bare = subprocess.run(
+        ("git", "rev-parse", "--is-bare-repository"), cwd=source, check=True,
+        stdout=subprocess.PIPE, text=True, timeout=30,
+    ).stdout.strip()
+    if bare != "false":
+        raise RuntimeError(f"{repository.name}: source must be a working checkout, not a bare repository")
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=source, check=True,
+        stdout=subprocess.PIPE, text=True, timeout=30,
+    ).stdout.strip()
+    if head != repository.commit:
+        raise RuntimeError(
+            f"{repository.name}: checkout HEAD {head} does not match pinned {repository.commit}"
+        )
+    status = subprocess.run(
+        ("git", "status", "--porcelain", "--untracked-files=normal"),
+        cwd=source, check=True, stdout=subprocess.PIPE, text=True, timeout=30,
+    ).stdout
+    if status:
+        raise RuntimeError(f"{repository.name}: evaluation requires a clean pinned checkout")
+    for anchor in repository.anchors:
+        if not (source / anchor.file).is_file():
+            raise RuntimeError(
+                f"{repository.name}: source root lacks reviewed source file {anchor.file}; "
+                "choose the suite's package root"
+            )
 
 
 def execute(args: argparse.Namespace) -> int:
@@ -1042,12 +1137,28 @@ def execute(args: argparse.Namespace) -> int:
     if not repositories:
         raise SystemExit("no repositories selected")
     sources = _parse_sources(args.source)
+    for repository in repositories:
+        if repository.name not in sources and args.corpus_root is not None:
+            sources[repository.name] = (args.corpus_root / repository.name).resolve()
+        source = sources.get(repository.name)
+        if source is None or not source.is_dir():
+            raise SystemExit(f"{repository.name}: pass --source {repository.name}=PATH or --corpus-root")
+        _verify_source(repository, source)
     workspace = args.workspace.resolve()
-    artifacts = workspace / "artifacts"
     stamp = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", stamp):
+        raise SystemExit("--run-id must be a single safe directory name")
     run_root = workspace / "runs" / stamp
+    artifacts = run_root / "artifacts"
     raw_root = run_root / "raw"
-    run_root.mkdir(parents=True, exist_ok=True)
+    run_root.mkdir(parents=True, exist_ok=False)
+    runner_digest = _sha256_file(Path(__file__))
+    (run_root / "runner.py").write_bytes(Path(__file__).read_bytes())
+    (run_root / "suite.toml").write_bytes(suite.path.read_bytes())
+    tools = [
+        _tool_identity("compass", args.compass_binary),
+        _tool_identity("graphify", args.graphify_binary),
+    ]
     started = datetime.now(timezone.utc).isoformat()
     prepared: list[dict] = []
     metrics: list[dict] = []
@@ -1058,24 +1169,13 @@ def execute(args: argparse.Namespace) -> int:
             source = args.corpus_root / repository.name
         if source is None or not source.is_dir():
             raise SystemExit(f"{repository.name}: pass --source {repository.name}=PATH or --corpus-root")
-        head = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
-            cwd=source,
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        ).stdout.strip()
-        if head != repository.commit:
-            raise SystemExit(
-                f"{repository.name}: checkout HEAD {head} does not match pinned {repository.commit}"
-            )
+        _verify_source(repository, source)
         record = prepare_repository(
             repository,
             source,
             artifacts,
             compass_binary=args.compass_binary,
             graphify_binary=args.graphify_binary,
-            force=args.force,
             timeout_seconds=args.build_timeout,
         )
         prepared.append(record)
@@ -1109,16 +1209,23 @@ def execute(args: argparse.Namespace) -> int:
                     + (f" {list(observation.failures)}" if not observation.passed else ""),
                     flush=True,
                 )
+        _verify_source(repository, source)
+    current_tools = [
+        _tool_identity("compass", args.compass_binary),
+        _tool_identity("graphify", args.graphify_binary),
+    ]
+    if _sha256_file(Path(__file__)) != runner_digest:
+        raise RuntimeError("runner changed during evaluation; refusing to publish scores")
+    if current_tools != tools:
+        raise RuntimeError("tool identity changed during evaluation; refusing to publish scores")
     run = {
         "schema": RUN_SCHEMA,
         "runId": stamp,
         "startedAt": started,
         "completedAt": datetime.now(timezone.utc).isoformat(),
         "suiteDigest": suite.digest,
-        "tools": [
-            _tool_identity("compass", args.compass_binary),
-            _tool_identity("graphify", args.graphify_binary),
-        ],
+        "runnerDigest": runner_digest,
+        "tools": tools,
         "repositories": prepared,
         "graphMetrics": metrics,
         "questions": [
@@ -1158,12 +1265,11 @@ def doctor(args: argparse.Namespace) -> int:
             print(f"{repository.name}: missing source (pass --source {repository.name}=PATH)")
             failures += 1
             continue
-        head = subprocess.run(
-            ("git", "rev-parse", "HEAD"), cwd=source, check=True, stdout=subprocess.PIPE, text=True
-        ).stdout.strip()
-        status = "pinned" if head == repository.commit else f"HEAD {head} != {repository.commit}"
-        print(f"{repository.name}: {source} ({status})")
-        if head != repository.commit:
+        try:
+            _verify_source(repository, source)
+            print(f"{repository.name}: {source} (clean and pinned)")
+        except (RuntimeError, subprocess.SubprocessError) as error:
+            print(f"{repository.name}: {error}")
             failures += 1
     return 1 if failures else 0
 
@@ -1202,7 +1308,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--workspace", type=Path, required=True)
     run_parser.add_argument("--run-id")
     run_parser.add_argument("--repository", action="append")
-    run_parser.add_argument("--force", action="store_true", help="rebuild both graphs")
+    run_parser.add_argument("--force", action="store_true", help="deprecated compatibility flag; every run builds fresh graphs")
     run_parser.add_argument("--build-timeout", type=float, default=1800.0)
     run_parser.add_argument("--query-timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     run_parser.set_defaults(handler=execute)

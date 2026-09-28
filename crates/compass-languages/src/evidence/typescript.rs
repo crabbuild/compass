@@ -9182,16 +9182,6 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let function = call
             .child_by_field_name("function")
             .or_else(|| first_named_child(call))?;
-        let callee_receiver = if matches!(
-            function.kind(),
-            "member_expression" | "optional_member_expression" | "subscript_expression"
-        ) {
-            function
-                .child_by_field_name("object")
-                .and_then(|object| self.receiver_target(scope_id, object))
-        } else {
-            None
-        };
         let resolution = if matches!(
             function.kind(),
             "member_expression" | "optional_member_expression" | "subscript_expression"
@@ -9273,6 +9263,16 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             .or_else(|| self.variable_alias_return_type(&declaration, scope_id))?;
         let return_type = return_type.trim();
         if return_type == "this" {
+            let callee_receiver = if matches!(
+                function.kind(),
+                "member_expression" | "optional_member_expression" | "subscript_expression"
+            ) {
+                function
+                    .child_by_field_name("object")
+                    .and_then(|object| self.receiver_target(scope_id, object))
+            } else {
+                None
+            };
             return callee_receiver.or_else(|| self.this_receiver_target(scope_id));
         }
         self.resolve_declared_type_receiver(scope_id, return_type)

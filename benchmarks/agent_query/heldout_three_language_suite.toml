@@ -1,0 +1,187 @@
+# Source-first development panel registered before either tool builds these graphs.
+# The repositories were absent from the existing Compass/Graphify audit. These
+# selected facts are not a random sample or a population accuracy estimate.
+schema = "compass.agent-query-suite/1"
+
+[[repository]]
+name = "anyhow-heldout"
+language = "Rust"
+url = "https://github.com/dtolnay/anyhow.git"
+commit = "c63b279f3f4af2b02ca6267d9eb47d6d10497f69"
+
+[[repository.anchor]]
+file = "src/error.rs"
+line = 452
+symbol = "root_cause"
+judgment = "Error::root_cause starts at src/error.rs:452."
+
+[[repository.anchor]]
+file = "src/chain.rs"
+line = 28
+symbol = "new"
+judgment = "Chain::new starts at src/chain.rs:28."
+
+[[repository.question]]
+id = "anyhow-explain-root-cause"
+kind = "explain"
+subject = "Error::root_cause declaration"
+compass = ["explain", "root_cause"]
+graphify = ["explain", ".root_cause()"]
+expect = "answer"
+required = ["error.rs", "452"]
+judgment = "Error::root_cause starts at src/error.rs:452."
+
+[[repository.question]]
+id = "anyhow-callees-root-cause"
+kind = "callees"
+subject = "direct internal call of Error::root_cause"
+compass = ["callees", "root_cause"]
+graphify = ["explain", ".root_cause()"]
+expect = "answer"
+required = ["chain"]
+judgment = "Error::root_cause calls self.chain at src/error.rs:453; iterator last and unwrap are separate library calls."
+
+[[repository.question]]
+id = "anyhow-callers-chain-new"
+kind = "callers"
+subject = "direct local caller of Chain::new"
+compass = ["callers", "Chain::new"]
+graphify = ["affected", "Chain.new()", "--depth", "1"]
+expect = "answer"
+required = ["chain"]
+judgment = "ErrorImpl::chain calls Chain::new at src/error.rs:985; other same-named chain methods do not substitute for this caller."
+
+[[repository.question]]
+id = "anyhow-path-impl-chain-new"
+kind = "path"
+subject = "ErrorImpl::chain to Chain::new"
+compass = ["path", "ErrorImpl::chain", "Chain::new"]
+graphify = ["path", "ErrorImpl.chain()", "Chain.new()", "--undirected"]
+expect = "answer"
+required = ["chain", "new"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct source call from ErrorImpl::chain to Chain::new occurs at src/error.rs:985; indirect or unrelated-name paths receive no source-supported credit."
+
+[[repository]]
+name = "markitdown-heldout"
+language = "Python"
+url = "https://github.com/microsoft/markitdown.git"
+commit = "945314a45ddbe02935f2fd287b797dc0ba4a01e4"
+
+[[repository.anchor]]
+file = "packages/markitdown/src/markitdown/_markitdown.py"
+line = 141
+symbol = "MarkItDown"
+judgment = "MarkItDown starts at _markitdown.py:141."
+
+[[repository.anchor]]
+file = "packages/markitdown/src/markitdown/_markitdown.py"
+line = 322
+symbol = "convert"
+judgment = "MarkItDown.convert starts at _markitdown.py:322."
+
+[[repository.anchor]]
+file = "packages/markitdown/src/markitdown/_markitdown.py"
+line = 606
+symbol = "_convert"
+judgment = "MarkItDown._convert starts at _markitdown.py:606."
+
+[[repository.question]]
+id = "markitdown-explain-convert"
+kind = "explain"
+subject = "MarkItDown.convert declaration"
+compass = ["explain", "MarkItDown.convert"]
+graphify = ["explain", ".convert()"]
+expect = "answer"
+required = ["_markitdown.py", "322"]
+judgment = "The requested convert is MarkItDown.convert at _markitdown.py:322, not a converter subclass method."
+
+[[repository.question]]
+id = "markitdown-callees-convert"
+kind = "callees"
+subject = "direct local dispatch callees of MarkItDown.convert"
+compass = ["callees", "MarkItDown.convert"]
+graphify = ["explain", ".convert()"]
+expect = "answer"
+required = ["convert_uri", "convert_local", "convert_response", "convert_stream"]
+judgment = "MarkItDown.convert directly calls the four named dispatch methods at lines 347, 349/352, 355 and 362."
+
+[[repository.question]]
+id = "markitdown-callers-private-convert"
+kind = "callers"
+subject = "direct MarkItDown callers of _convert"
+compass = ["callers", "MarkItDown._convert"]
+graphify = ["affected", "._convert()", "--depth", "1"]
+expect = "answer"
+required = ["convert_local", "convert_stream", "convert_response"]
+judgment = "MarkItDown.convert_local, convert_stream and convert_response call self._convert at lines 403, 450 and 604."
+
+[[repository.question]]
+id = "markitdown-path-local-private"
+kind = "path"
+subject = "MarkItDown.convert_local to MarkItDown._convert"
+compass = ["path", "MarkItDown.convert_local", "MarkItDown._convert"]
+graphify = ["path", ".convert_local()", "._convert()", "--undirected"]
+expect = "answer"
+required = ["convert_local", "_convert"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct source call occurs at _markitdown.py:403; an indirect container route is not a direct-call answer."
+
+[[repository]]
+name = "vue-heldout"
+language = "TypeScript"
+url = "https://github.com/vuejs/vue.git"
+commit = "9e88707940088cb1f4cd7dd210c9168a50dc347c"
+
+[[repository.anchor]]
+file = "src/compiler/index.ts"
+line = 10
+symbol = "baseCompile"
+judgment = "The default compiler's baseCompile callback starts at src/compiler/index.ts:10."
+
+[[repository.anchor]]
+file = "src/compiler/codegen/index.ts"
+line = 57
+symbol = "generate"
+judgment = "The compiler code generator starts at src/compiler/codegen/index.ts:57."
+
+[[repository.question]]
+id = "vue-explain-base-compile"
+kind = "explain"
+subject = "default baseCompile callback declaration"
+compass = ["explain", "baseCompile"]
+graphify = ["explain", "baseCompile()"]
+expect = "answer"
+required = ["compiler/index.ts", "10"]
+judgment = "The callback passed to createCompilerCreator starts at src/compiler/index.ts:10."
+
+[[repository.question]]
+id = "vue-callees-base-compile"
+kind = "callees"
+subject = "direct compiler-stage calls of baseCompile"
+compass = ["callees", "baseCompile"]
+graphify = ["explain", "baseCompile()"]
+expect = "answer"
+required = ["parse", "optimize", "generate"]
+judgment = "baseCompile calls parse at line 14, optimize at 16 and generate at 18; optimize is conditional."
+
+[[repository.question]]
+id = "vue-callers-generate"
+kind = "callers"
+subject = "direct default compiler caller of generate"
+compass = ["callers", "generate"]
+graphify = ["affected", "generate()", "--depth", "1"]
+expect = "answer"
+required = ["baseCompile"]
+judgment = "baseCompile calls the imported codegen generate at src/compiler/index.ts:18. Other generate functions are not a substitute."
+
+[[repository.question]]
+id = "vue-path-base-generate"
+kind = "path"
+subject = "baseCompile to codegen generate"
+compass = ["path", "baseCompile", "generate"]
+graphify = ["path", "baseCompile()", "generate()", "--undirected"]
+expect = "answer"
+required = ["baseCompile", "generate"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct source call occurs at src/compiler/index.ts:18; a different generate name or indirect route is not a supported answer."

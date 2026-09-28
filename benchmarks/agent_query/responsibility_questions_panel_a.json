@@ -1,0 +1,333 @@
+{
+  "schema": "compass.responsibility-questions/1",
+  "scope": "Source-first questions for a new development arm on previously evaluated repositories and frozen graphs. Prior unrelated outputs were observed; this is not held-out or representative evidence.",
+  "sourceRun": "java-varargs-panel-a-02",
+  "sourceRunSha256": "c2bc04366343fbd32bbdf84ccfb1db7aaad2e2ed38b38f979065c6755432d792",
+  "protocol": {
+    "operation": "Both tools receive the identical natural-language query through their public query CLI.",
+    "budgetTokens": 2000,
+    "maxFollowUps": 0,
+    "timeoutSeconds": 120,
+    "sourceWorkingDirectory": true,
+    "nativeOnly": true,
+    "scoring": "Review all 20 facts for explicit correct answers and separately for sufficient returned source evidence. A symbol or neighbor name alone earns neither. Count omissions and unsupported asserted claims; raw source excerpts are evidence, not claims authored by the tool. Preserve ambiguity, truncation, errors and all failures. No score may establish god-object detection or functional community quality.",
+    "limitations": [
+      "Purposive five-case development selection, one per language; no population precision estimate.",
+      "Shared stored graphs from a prior run; no new extraction or build-time comparison.",
+      "No model-assisted answers or independent semantic reviewer.",
+      "Degree, method counts and responsibility lists do not prove a god-object defect."
+    ]
+  },
+  "cases": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "symbol": "Mux",
+      "question": "Explain how Mux coordinates routing, middleware and subrouters. What state is shared by With?",
+      "file": "mux.go",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "graphSha256": {
+        "compass": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "graphify": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+      },
+      "facts": [
+        {
+          "id": "chi-1",
+          "claim": "With creates an inline Mux that shares its parent pool and routing tree, while building a middleware slice for the inline router.",
+          "witnesses": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "text": "func (mx *Mux) With(middlewares ...func(http.Handler) http.Handler) Router {\n\t// Similarly as in handle(), we must build the mux handler once additional\n\t// middleware registration isn't allowed for this stack, like now.\n\tif !mx.inline && mx.handler == nil {\n\t\tmx.updateRouteHandler()\n\t}\n\n\t// Copy middlewares from parent inline muxs\n\tvar mws Middlewares\n\tif mx.inline {\n\t\tmws = make(Middlewares, len(mx.middlewares))\n\t\tcopy(mws, mx.middlewares)\n\t}\n\tmws = append(mws, middlewares...)\n\n\tim := &Mux{\n\t\tpool: mx.pool, inline: true, parent: mx, tree: mx.tree, middlewares: mws,\n\t\tnotFoundHandler: mx.notFoundHandler, methodNotAllowedHandler: mx.methodNotAllowedHandler,\n\t}\n\n\treturn im"
+            }
+          ]
+        },
+        {
+          "id": "chi-2",
+          "claim": "Use rejects middleware registration once the computed handler has been established.",
+          "witnesses": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "text": "func (mx *Mux) Use(middlewares ...func(http.Handler) http.Handler) {\n\tif mx.handler != nil {\n\t\tpanic(\"chi: all middlewares must be defined before routes on a mux\")\n\t}\n\tmx.middlewares = append(mx.middlewares, middlewares...)\n}\n"
+            }
+          ]
+        },
+        {
+          "id": "chi-3",
+          "claim": "Route constructs a new router, invokes the supplied configuration callback, and mounts that router at the pattern.",
+          "witnesses": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "text": "func (mx *Mux) Route(pattern string, fn func(r Router)) Router {\n\tif fn == nil {\n\t\tpanic(fmt.Sprintf(\"chi: attempting to Route() a nil subrouter on '%s'\", pattern))\n\t}\n\tsubRouter := NewRouter()\n\tfn(subRouter)\n\tmx.Mount(pattern, subRouter)\n\treturn subRouter\n}\n"
+            }
+          ]
+        },
+        {
+          "id": "chi-4",
+          "claim": "routeHTTP looks up the request method and path in the route tree and invokes the selected HTTP handler when one is found.",
+          "witnesses": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "text": "\tmethod, ok := methodMap[rctx.RouteMethod]\n\tif !ok {\n\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)\n\t\treturn\n\t}\n\n\t// Find the route\n\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {\n\t\t// Set http.Request path values from our request context\n\t\tfor i, key := range rctx.URLParams.Keys {\n\t\t\tvalue := rctx.URLParams.Values[i]\n\t\t\tr.SetPathValue(key, value)\n\t\t}\n\t\tr.Pattern = rctx.RoutePattern()\n\n\t\th.ServeHTTP(w, r)\n\t\treturn\n\t}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "symbol": "_AtomicFile",
+      "question": "Explain _AtomicFile ownership, close behavior and context manager cleanup on exceptions.",
+      "file": "src/click/_compat.py",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "graphSha256": {
+        "compass": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "graphify": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+      },
+      "facts": [
+        {
+          "id": "click-1",
+          "claim": "The wrapper stores the file object plus temporary and real filenames; its name property returns the real filename.",
+          "witnesses": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "text": "class _AtomicFile:\n    def __init__(self, f: t.IO[t.Any], tmp_filename: str, real_filename: str) -> None:\n        self._f = f\n        self._tmp_filename = tmp_filename\n        self._real_filename = real_filename\n        self.closed = False\n\n    @property\n    def name(self) -> str:\n        return self._real_filename"
+            }
+          ]
+        },
+        {
+          "id": "click-2",
+          "claim": "On its first successful close, it closes the wrapped stream, replaces the real filename with the temporary filename, and marks itself closed. Later close calls return immediately.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "text": "    def close(self, delete: bool = False) -> None:\n        if self.closed:\n            return\n        self._f.close()\n        os.replace(self._tmp_filename, self._real_filename)\n        self.closed = True"
+            }
+          ]
+        },
+        {
+          "id": "click-3",
+          "claim": "Unknown attribute access is forwarded to the wrapped stream.",
+          "witnesses": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "text": "    def __getattr__(self, name: str) -> t.Any:\n        return getattr(self._f, name)"
+            }
+          ]
+        },
+        {
+          "id": "click-4",
+          "claim": "For an as-yet-open wrapper, __exit__ passes whether an exception occurred as delete, but close does not inspect delete: it still attempts replacement on exception, unless an earlier operation fails. Do not infer rollback from the parameter name.",
+          "witnesses": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "text": "    def close(self, delete: bool = False) -> None:\n        if self.closed:\n            return\n        self._f.close()\n        os.replace(self._tmp_filename, self._real_filename)\n        self.closed = True"
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "text": "    def __exit__(\n        self,\n        exc_type: type[BaseException] | None,\n        exc_value: BaseException | None,\n        tb: TracebackType | None,\n    ) -> None:\n        self.close(delete=exc_type is not None)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "symbol": "Cleaner",
+      "question": "Explain Cleaner responsibilities, how it uses the supplied Safelist, and whether cleaning mutates the input document.",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "graphSha256": {
+        "compass": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+        "graphify": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+      },
+      "facts": [
+        {
+          "id": "jsoup-1",
+          "claim": "The constructor keeps the supplied Safelist reference directly after validating it, rather than making a copy.",
+          "witnesses": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "text": "    public Cleaner(Safelist safelist) {\n        Validate.notNull(safelist);\n        this.safelist = safelist;\n    }"
+            }
+          ]
+        },
+        {
+          "id": "jsoup-2",
+          "claim": "clean builds a separate document shell, copies safe body nodes into it and clones the input output settings.",
+          "witnesses": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "text": "    public Document clean(Document dirtyDocument) {\n        Validate.notNull(dirtyDocument);\n\n        Document clean = Document.createShell(dirtyDocument.baseUri());\n        copySafeNodes(dirtyDocument.body(), clean.body());\n        clean.outputSettings(dirtyDocument.outputSettings().clone());\n\n        return clean;\n    }"
+            }
+          ]
+        },
+        {
+          "id": "jsoup-3",
+          "claim": "The cleaning visitor gates element copying on safe tags, and createSafeElement filters source attributes through the Safelist.",
+          "witnesses": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "text": "        @Override public void head(Node source, int depth) {\n            if (source instanceof Element) {\n                Element sourceEl = (Element) source;\n\n                if (safelist.isSafeTag(sourceEl.normalName())) { // safe, clone and copy safe attrs\n                    ElementMeta meta = createSafeElement(sourceEl);\n                    Element destChild = meta.el;\n                    destination.appendChild(destChild);\n\n                    numDiscarded += meta.numAttribsDiscarded;\n                    destination = destChild;"
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "text": "    private ElementMeta createSafeElement(Element sourceEl) {\n        Element dest = sourceEl.shallowClone(); // reuses tag, clones attributes and preserves any user data\n        String sourceTag = sourceEl.tagName();\n        Attributes destAttrs = dest.attributes();\n        dest.clearAttributes(); // clear all non-internal attributes, ready for safe copy\n\n        int numDiscarded = 0;\n        Attributes sourceAttrs = sourceEl.attributes();\n        for (Attribute sourceAttr : sourceAttrs) {\n            if (safelist.isSafeAttribute(sourceTag, sourceEl, sourceAttr)) { // will keep this attr\n                String key = sourceAttr.getKey();\n                String value = sourceAttr.getValue();\n\n                if (safelist.shouldAbsUrl(sourceTag, key)) { // configured to make absolute urls for this key (href)\n                    value = sourceEl.absUrl(key);\n                    if (value.isEmpty()) // could not be made abs; leave as-is to allow custom unknown protocols\n                        value = sourceAttr.getValue();\n                }\n                Range.AttributeRange range = sourceAttrs.sourceRange(key);\n                destAttrs.put(key, value);\n                NodeInternals.attributeRange(destAttrs, key, range);\n            } else"
+            }
+          ]
+        },
+        {
+          "id": "jsoup-4",
+          "claim": "isValidBodyHtml parses a fragment and returns true only when no nodes or attributes were discarded and the tracked parse-error list is empty.",
+          "witnesses": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "text": "    public boolean isValidBodyHtml(String bodyHtml) {\n        String baseUri = (safelist.preserveRelativeLinks()) ? DummyUri : \"\"; // fake base URI to allow relative URLs to remain valid\n        Document clean = Document.createShell(baseUri);\n        Document dirty = Document.createShell(baseUri);\n        ParseErrorList errorList = ParseErrorList.tracking(1);\n        List<Node> nodes = Parser.parseFragment(bodyHtml, dirty.body(), baseUri, errorList);\n        dirty.body().insertChildren(0, nodes);\n        int numDiscarded = copySafeNodes(dirty.body(), clean.body());\n        return numDiscarded == 0 && errorList.isEmpty();\n    }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "symbol": "createStore",
+      "question": "Explain createStore responsibilities and how dispatch and subscriptions share state safely.",
+      "file": "src/createStore.ts",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "graphSha256": {
+        "compass": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "graphify": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+      },
+      "facts": [
+        {
+          "id": "redux-1",
+          "claim": "When an enhancer is supplied and validated, creation delegates to enhancer(createStore) with the reducer and preloaded state.",
+          "witnesses": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "text": "  if (typeof enhancer !== 'undefined') {\n    if (typeof enhancer !== 'function') {\n      throw new Error(\n        `Expected the enhancer to be a function. Instead, received: '${kindOf(\n          enhancer\n        )}'`\n      )\n    }\n\n    return enhancer(createStore)(\n      reducer,\n      preloadedState as PreloadedState | undefined\n    )\n  }"
+            }
+          ]
+        },
+        {
+          "id": "redux-2",
+          "claim": "dispatch runs the current reducer to update currentState while isDispatching is true, resetting the flag in finally.",
+          "witnesses": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "text": "    if (isDispatching) {\n      throw new Error('Reducers may not dispatch actions.')\n    }\n\n    try {\n      isDispatching = true\n      currentState = currentReducer(currentState, action)\n    } finally {\n      isDispatching = false\n    }"
+            }
+          ]
+        },
+        {
+          "id": "redux-3",
+          "claim": "Listener changes use a copy of currentListeners when needed; dispatch iterates its captured listener map, so mutations to nextListeners do not rewrite that in-progress snapshot.",
+          "witnesses": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "text": "  function ensureCanMutateNextListeners() {\n    if (nextListeners === currentListeners) {\n      nextListeners = new Map()\n      currentListeners.forEach((listener, key) => {\n        nextListeners.set(key, listener)\n      })\n    }\n  }"
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "text": "    ensureCanMutateNextListeners()\n    const listenerId = listenerIdCounter++\n    nextListeners.set(listenerId, listener)\n\n    return function unsubscribe() {\n      if (!isSubscribed) {\n        return\n      }\n\n      if (isDispatching) {\n        throw new Error(\n          'You may not unsubscribe from a store listener while the reducer is executing. ' +\n            'See https://redux.js.org/api/store#subscribelistener for more details.'\n        )\n      }\n\n      isSubscribed = false\n\n      ensureCanMutateNextListeners()\n      nextListeners.delete(listenerId)\n      currentListeners = null\n    }\n  }"
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "text": "    const listeners = (currentListeners = nextListeners)\n    listeners.forEach(listener => {\n      listener()\n    })"
+            }
+          ]
+        },
+        {
+          "id": "redux-4",
+          "claim": "The store exposes dispatch, subscribe, getState and replaceReducer, plus an observable adapter that reads state and uses the same subscription mechanism.",
+          "witnesses": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "text": "  function observable() {\n    const outerSubscribe = subscribe\n    return {\n      /**\n       * The minimal observable subscription method.\n       * @param observer Any object that can be used as an observer.\n       * The observer object should have a `next` method.\n       * @returns An object with an `unsubscribe` method that can\n       * be used to unsubscribe the observable from the store, and prevent further\n       * emission of values from the observable.\n       */\n      subscribe(observer: unknown) {\n        if (typeof observer !== 'object' || observer === null) {\n          throw new TypeError(\n            `Expected the observer to be an object. Instead, received: '${kindOf(\n              observer\n            )}'`\n          )\n        }\n\n        function observeState() {\n          const observerAsObserver = observer as Observer<S>\n          if (observerAsObserver.next) {\n            observerAsObserver.next(getState())\n          }\n        }\n\n        observeState()\n        const unsubscribe = outerSubscribe(observeState)\n        return { unsubscribe }\n      },\n\n      [$$observable]() {\n        return this\n      }\n    }\n  }\n\n  // When a store is created, an \"INIT\" action is dispatched so that every\n  // reducer returns their initial state. This effectively populates\n  // the initial state tree.\n  dispatch({ type: ActionTypes.INIT } as A)\n\n  const store = {\n    dispatch: dispatch as Dispatch<A>,\n    subscribe,\n    getState,\n    replaceReducer,\n    [$$observable]: observable\n  } as unknown as Store<S, A, StateExt> & Ext\n  return store"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "symbol": "IntoIter",
+      "question": "Explain IntoIter responsibilities, how it limits open directories, and how it detects symlink loops.",
+      "file": "src/lib.rs",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "graphSha256": {
+        "compass": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+        "graphify": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+      },
+      "facts": [
+        {
+          "id": "walkdir-1",
+          "claim": "IntoIter next traverses its directory stack, prunes beyond max_depth and returns individual directory-reading errors as Some(Err).",
+          "witnesses": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "text": "        while !self.stack_list.is_empty() {\n            self.depth = self.stack_list.len();\n            if let Some(dentry) = self.get_deferred_dir() {\n                return Some(Ok(dentry));\n            }\n            if self.depth > self.opts.max_depth {\n                // If we've exceeded the max depth, pop the current dir\n                // so that we don't descend.\n                self.pop();\n                continue;\n            }\n            // Unwrap is safe here because we've verified above that\n            // `self.stack_list` is not empty\n            let next = self\n                .stack_list\n                .last_mut()\n                .expect(\"BUG: stack should be non-empty\")\n                .next();\n            match next {\n                None => self.pop(),\n                Some(Err(err)) => return Some(Err(err)),\n                Some(Ok(dent)) => {\n                    if let Some(result) = self.handle_entry(dent) {\n                        return Some(result);\n                    }\n                }"
+            }
+          ]
+        },
+        {
+          "id": "walkdir-2",
+          "claim": "push closes the oldest open directory stream when max_open is reached before opening another directory.",
+          "witnesses": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "text": "    fn push(&mut self, dent: &DirEntry) -> Result<()> {\n        // Make room for another open file descriptor if we've hit the max.\n        let free =\n            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();\n        if free == self.opts.max_open {\n            self.stack_list[self.oldest_opened].close();\n        }\n        // Open a handle to reading the directory's entries.\n        let rd = fs::read_dir(dent.path()).map_err(|err| {\n            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))\n        });"
+            }
+          ]
+        },
+        {
+          "id": "walkdir-3",
+          "claim": "Following a symlink invokes loop checking for directory targets; check_loop compares the target handle with ancestor handles and returns a loop error on a match.",
+          "witnesses": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "text": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {\n        dent =\n            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;\n        // The only way a symlink can cause a loop is if it points\n        // to a directory. Otherwise, it always points to a leaf\n        // and we can omit any loop checks.\n        if dent.is_dir() {\n            self.check_loop(dent.path())?;\n        }\n        Ok(dent)\n    }\n\n    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {\n        let hchild = Handle::from_path(&child)\n            .map_err(|err| Error::from_io(self.depth, err))?;\n        for ancestor in self.stack_path.iter().rev() {\n            let is_same = ancestor\n                .is_same(&hchild)\n                .map_err(|err| Error::from_io(self.depth, err))?;\n            if is_same {\n                return Err(Error::from_loop(\n                    self.depth,\n                    &ancestor.path,\n                    child.as_ref(),\n                ));\n            }\n        }\n        Ok(())\n    }"
+            }
+          ]
+        },
+        {
+          "id": "walkdir-4",
+          "claim": "With contents_first enabled, directory entries are deferred and later returned after traversal of their contents, subject to depth filtering.",
+          "witnesses": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "text": "        }\n        if is_normal_dir && self.opts.contents_first {\n            self.deferred_dirs.push(dent);\n            None\n        } else if self.skippable() {\n            None\n        } else {\n            Some(Ok(dent))\n        }\n    }\n\n    fn get_deferred_dir(&mut self) -> Option<DirEntry> {\n        if self.opts.contents_first {\n            if self.depth < self.deferred_dirs.len() {\n                // Unwrap is safe here because we've guaranteed that\n                // `self.deferred_dirs.len()` can never be less than 1\n                let deferred: DirEntry = self\n                    .deferred_dirs\n                    .pop()\n                    .expect(\"BUG: deferred_dirs should be non-empty\");\n                if !self.skippable() {\n                    return Some(deferred);\n                }\n            }\n        }\n        None"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

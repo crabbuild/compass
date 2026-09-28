@@ -34,6 +34,9 @@ use crate::text::{canonical_query_token, query_recall_terms, strip_diacritics};
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
+// A cheaper arrival at a node may consume more hops. Retain separate states
+// so it cannot erase a costlier arrival that still fits the remaining depth.
+type TrailState = (String, usize);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
 const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 192;
 const MAX_RECALL_FUZZY_VARIANTS_TOTAL: usize = 256;
@@ -100,6 +103,7 @@ pub(crate) enum StructuralOperandRole {
     ImpactTarget,
     TrailSource,
     TrailTarget,
+    CallTrailTarget,
 }
 
 impl StructuralOperandRole {
@@ -110,6 +114,7 @@ impl StructuralOperandRole {
             Self::ImpactTarget => (true, IMPACT_KINDS),
             Self::TrailSource => (false, ALL_EDGE_KINDS),
             Self::TrailTarget => (true, ALL_EDGE_KINDS),
+            Self::CallTrailTarget => (true, &[EdgeKind::Calls]),
         }
     }
 }
@@ -231,6 +236,12 @@ impl CandidateReadBudget {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TrailPolicy {
+    directed: bool,
+    calls_only: bool,
+}
+
 struct TraversalBudget {
     remaining_nodes: usize,
     remaining_edges: usize,
@@ -303,6 +314,15 @@ const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::MapsTo,
     EdgeKind::Renders,
 ];
+
+/// Optional conjunctive filters for exact symbol lookup. Paths are compared to
+/// stored repository-relative paths; they are never opened or canonicalized.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExactSearchFilter {
+    pub source_file: Option<String>,
+    pub start_line: Option<u32>,
+    pub kind: Option<NodeKind>,
+}
 
 pub struct CodeQueryEngine {
     pub(crate) backend: CodeGraphBackend,
@@ -1563,6 +1583,104 @@ impl CodeQueryEngine {
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
         self.search_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    /// Return every bounded exact ID/name candidate satisfying explicit filters.
+    /// Name normalization matches typed symbol resolution. No lexical fallback,
+    /// ranking-based selection or export-binding elimination is performed.
+    /// The candidate bound applies before filtering: a filtered prefix never
+    /// establishes uniqueness or absence when exact lookup was truncated.
+    pub fn search_exact(
+        &self,
+        request: SearchRequest,
+        filter: ExactSearchFilter,
+    ) -> Result<CodeQueryResponse, QueryError> {
+        self.check_deadline()?;
+        validate_limits(&request.limits)?;
+        let valid_text = |value: &str| {
+            !value.trim().is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control)
+        };
+        if !valid_text(&request.query)
+            || filter
+                .source_file
+                .as_deref()
+                .is_some_and(|value| !valid_text(value))
+            || filter.start_line == Some(0)
+            || (filter.start_line.is_some() && filter.source_file.is_none())
+        {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "invalid_exact_search",
+                "exact search requires 1..4096 non-control selector/file bytes; start line must be positive and requires a source file",
+            ));
+        }
+        let bound = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
+        let exact_id = self.backend.node_by_id(&request.query)?;
+        let id_match = exact_id.is_some();
+        let (mut candidates, truncated) = if let Some(node) = exact_id {
+            (vec![node], false)
+        } else {
+            self.backend
+                .nodes_by_normalized_name(&normalize_symbol(&request.query), bound)?
+        };
+        self.check_deadline()?;
+        candidates.retain(|node| {
+            filter.kind.is_none_or(|kind| node.kind == kind)
+                && filter.source_file.as_deref().is_none_or(|file| {
+                    node.source
+                        .as_ref()
+                        .is_some_and(|source| source.file == file)
+                })
+                && filter.start_line.is_none_or(|line| {
+                    node.source
+                        .as_ref()
+                        .is_some_and(|source| source.start_line == line)
+                })
+        });
+        candidates.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut response = CodeQueryResponse::empty(CodeQueryOperation::Search, request.limits);
+        response.truncated = truncated;
+        if truncated {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: format!("Exact-name lookup exceeded {bound} candidates before filtering; returned matches do not establish uniqueness or absence"),
+                node_id: None,
+                path: None,
+            });
+        } else if candidates.is_empty() {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: "No exact symbol satisfies the supplied filters".to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
+        let max_nodes = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
+        if candidates.len() > max_nodes {
+            response.truncated = true;
+            candidates.truncate(max_nodes);
+        }
+        for node in candidates {
+            let matched_fields = if id_match {
+                vec!["id".to_owned()]
+            } else {
+                [
+                    ("name", &node.name),
+                    ("qualified_name", &node.qualified_name),
+                ]
+                .into_iter()
+                .filter(|(_, value)| normalize_symbol(value) == normalize_symbol(&request.query))
+                .map(|(field, _)| field.to_owned())
+                .collect()
+            };
+            response.results.push(SearchHit {
+                node_id: node.id.clone(),
+                score: 1.0,
+                matched_fields,
+            });
+            response.nodes.push(query_node(&node));
+        }
+        self.finish_response(&mut response)
     }
 
     pub(crate) fn search_instrumented(
@@ -3016,20 +3134,24 @@ impl CodeQueryEngine {
                 response.truncated = true;
                 break;
             }
-            if let [source, target] = pair
-                && let (Some((nodes, edges)), truncated) = self.shortest_path(
+            if let [source, target] = pair {
+                let (path, truncated) = self.shortest_path(
                     source,
                     target,
                     request.include_heuristic,
                     &request.limits,
                     &mut budget,
-                    false,
-                )?
-            {
+                    TrailPolicy {
+                        directed: false,
+                        calls_only: false,
+                    },
+                )?;
                 response.truncated |= truncated;
-                ids.extend(nodes.iter().cloned());
-                edge_ids.extend(edges.iter().cloned());
-                response.paths.push(self.path_record(&nodes, &edges)?);
+                if let Some((nodes, edges)) = path {
+                    ids.extend(nodes.iter().cloned());
+                    edge_ids.extend(edges.iter().cloned());
+                    response.paths.push(self.path_record(&nodes, &edges)?);
+                }
             }
         }
         self.add_nodes(&ids, &mut response)?;
@@ -3060,7 +3182,11 @@ impl CodeQueryEngine {
         let source = self.resolve_symbol(
             &request.source,
             &mut response,
-            Some(StructuralOperandRole::TrailSource),
+            Some(if request.calls_only {
+                StructuralOperandRole::CalleesSource
+            } else {
+                StructuralOperandRole::TrailSource
+            }),
             request.include_heuristic,
             instrumentation,
         )?;
@@ -3074,7 +3200,11 @@ impl CodeQueryEngine {
         let target = self.resolve_symbol(
             &request.target,
             &mut response,
-            Some(StructuralOperandRole::TrailTarget),
+            Some(if request.calls_only {
+                StructuralOperandRole::CallTrailTarget
+            } else {
+                StructuralOperandRole::TrailTarget
+            }),
             request.include_heuristic,
             instrumentation,
         )?;
@@ -3093,7 +3223,10 @@ impl CodeQueryEngine {
             request.include_heuristic,
             &request.limits,
             &mut budget,
-            true,
+            TrailPolicy {
+                directed: true,
+                calls_only: request.calls_only,
+            },
         )?;
         response.truncated |= truncated;
         let Some((nodes, edges)) = path else {
@@ -3109,15 +3242,19 @@ impl CodeQueryEngine {
                 request.include_heuristic,
                 &request.limits,
                 &mut budget,
-                false,
+                TrailPolicy {
+                    directed: false,
+                    calls_only: request.calls_only,
+                },
             )?;
             budget.record_work(instrumentation);
             response.truncated |= mismatch_truncated;
+            let qualifier = if request.calls_only { "call " } else { "" };
             if undirected_path.is_some() {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::DirectionMismatch,
                     message: format!(
-                        "A trail connects {source} and {target}, but not in the requested source-to-target direction"
+                        "A {qualifier}trail connects {source} and {target}, but not in the requested source-to-target direction"
                     ),
                     node_id: Some(source),
                     path: None,
@@ -3125,7 +3262,9 @@ impl CodeQueryEngine {
             } else if !mismatch_truncated {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::NoMatch,
-                    message: format!("No bounded directed trail connects {source} to {target}"),
+                    message: format!(
+                        "No bounded directed {qualifier}trail connects {source} to {target}"
+                    ),
                     node_id: Some(source),
                     path: None,
                 });
@@ -3187,25 +3326,130 @@ impl CodeQueryEngine {
         }
         let normalized = normalize_symbol(query);
         let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
-        let (exact_nodes, exact_truncated) = self
+        let (mut exact_nodes, exact_truncated) = self
             .backend
             .nodes_by_normalized_name(&normalized, candidate_limit)?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
             .saturating_add(u64::try_from(exact_nodes.len()).unwrap_or(u64::MAX));
+        // A question may name an owner and member without knowing the module
+        // prefix or the stored `::` separator. Verify that suffix against the
+        // complete bounded leaf-name posting, never against a ranked prefix.
+        // If the posting is truncated, uniqueness cannot be proved.
+        let qualified_query = normalized.replace("::", ".");
+        if exact_nodes.is_empty()
+            && !exact_truncated
+            && let Some((_, leaf)) = qualified_query.rsplit_once('.')
+            && !leaf.is_empty()
+        {
+            let (leaf_nodes, leaf_truncated) = self
+                .backend
+                .nodes_by_normalized_name(leaf, candidate_limit)?;
+            instrumentation.work.candidates_read = instrumentation
+                .work
+                .candidates_read
+                .saturating_add(u64::try_from(leaf_nodes.len()).unwrap_or(u64::MAX));
+            let leaf_has_exact_candidates = !leaf_nodes.is_empty();
+            let suffix = format!(".{qualified_query}");
+            let qualified = leaf_nodes
+                .into_iter()
+                .filter(|node| {
+                    let qualified_name = normalize_symbol(&node.qualified_name).replace("::", ".");
+                    qualified_name == qualified_query || qualified_name.ends_with(&suffix)
+                })
+                .collect::<Vec<_>>();
+            if leaf_truncated {
+                response.truncated = true;
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::AmbiguousMatch,
+                    message: format!(
+                        "Owner-qualified symbol {query:?} cannot be resolved within the {}-candidate leaf-name bound",
+                        response.limits.max_candidates
+                    ),
+                    node_id: None,
+                    path: None,
+                });
+                self.publish_exact_ambiguity(response, &qualified, candidate_limit)?;
+                return Ok(None);
+            }
+            match qualified.as_slice() {
+                [node] => return Ok(Some(node.id.clone())),
+                [] if leaf_has_exact_candidates => {
+                    response.diagnostics.push(QueryDiagnostic {
+                        code: QueryDiagnosticCode::NoMatch,
+                        message: format!("NO OWNER-QUALIFIED MATCH for {query:?}"),
+                        node_id: None,
+                        path: None,
+                    });
+                    return Ok(None);
+                }
+                [] => {}
+                _ => {
+                    response.diagnostics.push(QueryDiagnostic {
+                        code: QueryDiagnosticCode::AmbiguousMatch,
+                        message: format!(
+                            "Owner-qualified symbol {query:?} matched {} nodes",
+                            qualified.len()
+                        ),
+                        node_id: None,
+                        path: None,
+                    });
+                    self.publish_exact_ambiguity(response, &qualified, candidate_limit)?;
+                    return Ok(None);
+                }
+            }
+        }
+        let mut proof_truncated = false;
+        if !exact_truncated
+            && exact_nodes.len() > 1
+            && exact_nodes.len() <= crate::export_binding::MAX_EXPORT_PROOF_CANDIDATES
+            && exact_nodes.iter().any(|node| node.kind == NodeKind::Export)
+        {
+            use crate::export_binding::{
+                BindingEdge, BindingNode, ProofRead, redundant_export_bindings,
+            };
+            let candidates = exact_nodes
+                .iter()
+                .map(BindingNode::typed)
+                .collect::<Vec<_>>();
+            let pinned = self.backend.pin_discovery()?;
+            let proof = redundant_export_bindings(&candidates, |node, inbound, limit| {
+                let kinds = if inbound {
+                    &[EdgeKind::Contains]
+                } else {
+                    &[EdgeKind::Exports]
+                };
+                let (edges, truncated, examined) =
+                    pinned.matching_bounded_counted(node, inbound, kinds, true, limit)?;
+                Ok::<_, QueryError>(ProofRead {
+                    edges: edges.iter().map(BindingEdge::typed).collect(),
+                    truncated,
+                    examined,
+                })
+            })?;
+            instrumentation.work.edges_expanded = instrumentation
+                .work
+                .edges_expanded
+                .saturating_add(u64::try_from(proof.examined).unwrap_or(u64::MAX));
+            proof_truncated = proof.truncated;
+            response.truncated |= proof_truncated;
+            exact_nodes.retain(|node| !proof.redundant.contains(&node.id));
+        }
         let exact = exact_nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<Vec<_>>();
         response.truncated |= exact_truncated;
         match exact.as_slice() {
-            [node] if !exact_truncated => return Ok(Some(node.clone())),
+            [node] if !exact_truncated && !proof_truncated => return Ok(Some(node.clone())),
             [] => {}
             _ => {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::AmbiguousMatch,
-                    message: if exact_truncated {
+                    message: if proof_truncated {
+                        format!("Symbol {query:?} remains ambiguous because export evidence exceeded the {}-edge proof bound", crate::export_binding::MAX_EXPORT_PROOF_EDGES)
+                    } else if exact_truncated {
                         format!(
                             "Symbol {query:?} exceeded the {}-candidate resolution bound",
                             response.limits.max_candidates
@@ -3446,8 +3690,17 @@ impl CodeQueryEngine {
         include_heuristic: bool,
         limits: &compass_model::query_contract::CodeQueryLimits,
         budget: &mut TraversalBudget,
-        directed: bool,
+        policy: TrailPolicy,
     ) -> Result<BoundedPathResult, QueryError> {
+        let TrailPolicy {
+            directed,
+            calls_only,
+        } = policy;
+        let kinds = if calls_only {
+            &[EdgeKind::Calls][..]
+        } else {
+            ALL_EDGE_KINDS
+        };
         let max_depth = usize::try_from(limits.max_depth).unwrap_or(usize::MAX);
         if !budget.consume_node() {
             return Ok((None, true));
@@ -3458,34 +3711,45 @@ impl CodeQueryEngine {
             source.to_owned(),
             source.to_owned(),
         ))]);
-        let mut best = HashMap::from([(source.to_owned(), (0_u32, 0_usize, source.to_owned()))]);
+        let mut best = HashMap::from([(
+            source.to_owned(),
+            BTreeMap::from([(0_usize, (0_u32, source.to_owned()))]),
+        )]);
         let mut admitted = HashSet::from([source.to_owned()]);
-        let mut predecessor = HashMap::<String, (String, String)>::new();
+        let mut predecessor = HashMap::<TrailState, (TrailState, String)>::new();
         let mut truncated = false;
+        let mut depth_frontier = BTreeSet::new();
         while let Some(Reverse((cost, depth, path_key, node))) = queue.pop() {
             self.check_deadline()?;
-            if best.get(&node).is_none_or(|current| {
-                current.0 != cost || current.1 != depth || current.2 != path_key
-            }) {
+            let state = (node.clone(), depth);
+            let Some(labels) = best.get(&node) else {
+                continue;
+            };
+            if labels
+                .get(&depth)
+                .is_none_or(|current| current.0 != cost || current.1 != path_key)
+                || labels.range(..depth).any(|(_, current)| current.0 <= cost)
+            {
                 continue;
             }
             if node == target {
                 let mut nodes = vec![target.to_owned()];
                 let mut edges = Vec::new();
-                let mut cursor = target;
-                while cursor != source {
-                    let Some((previous, edge)) = predecessor.get(cursor) else {
+                let mut cursor = state;
+                while cursor.0 != source || cursor.1 != 0 {
+                    let Some((previous, edge)) = predecessor.get(&cursor) else {
                         return Ok((None, truncated));
                     };
                     edges.push(edge.clone());
-                    nodes.push(previous.clone());
-                    cursor = previous;
+                    nodes.push(previous.0.clone());
+                    cursor = previous.clone();
                 }
                 nodes.reverse();
                 edges.reverse();
                 return Ok((Some((nodes, edges)), truncated));
             }
             if depth >= max_depth {
+                depth_frontier.insert(node);
                 continue;
             }
             let mut adjacent = Vec::new();
@@ -3493,7 +3757,7 @@ impl CodeQueryEngine {
                 self.backend.matching_bounded(
                     &node,
                     false,
-                    ALL_EDGE_KINDS,
+                    kinds,
                     include_heuristic,
                     budget.remaining_edges,
                 )?
@@ -3506,6 +3770,11 @@ impl CodeQueryEngine {
                 if !budget.consume_edge() {
                     truncated = true;
                     break;
+                }
+                // The undirected diagnostic still charges every incident
+                // record it examines, including excluded structural edges.
+                if calls_only && edge.kind != EdgeKind::Calls {
+                    continue;
                 }
                 if edge.source == node {
                     adjacent.push((edge.target.clone(), edge));
@@ -3524,20 +3793,89 @@ impl CodeQueryEngine {
                 let next_depth = depth.saturating_add(1);
                 let next_cost = cost.saturating_add(code_relation_weight(edge.kind));
                 let next_key = format!("{path_key}\0{}\0{next}", edge.id);
-                let candidate = (next_cost, next_depth, next_key.clone());
+                let next_state = (next.clone(), next_depth);
+                let candidate = (next_cost, next_key.clone());
+                // A route can dominate another only if it is no deeper and
+                // no costlier. In particular, reject positive-cost cycles.
+                if best.get(&next).is_some_and(|labels| {
+                    labels.range(..=next_depth).any(|(known_depth, current)| {
+                        current.0 < next_cost
+                            || (current.0 == next_cost
+                                && (*known_depth < next_depth || current.1 <= next_key))
+                    })
+                }) {
+                    continue;
+                }
+                if !admitted.contains(&next) {
+                    if !budget.consume_node() {
+                        truncated = true;
+                        continue;
+                    }
+                    admitted.insert(next.clone());
+                }
+                // Every new state comes from an examined edge, so the shared
+                // edge budget also bounds the queue and predecessor storage.
+                best.entry(next.clone())
+                    .or_default()
+                    .insert(next_depth, candidate);
+                predecessor.insert(next_state, (state.clone(), edge.id.clone()));
+                queue.push(Reverse((next_cost, next_depth, next_key, next)));
+            }
+        }
+        // Probe the depth frontier only after the bounded search fails. Doing
+        // this while the queue still has viable states would spend their shared
+        // work budget and could hide a valid, costlier, shorter route.
+        if !truncated {
+            for node in depth_frontier {
+                self.check_deadline()?;
+                // A shallower arrival was fully expanded already. Its outgoing
+                // records therefore cannot hide an unexplored continuation.
                 if best
-                    .get(&next)
-                    .is_some_and(|current| candidate >= current.clone())
+                    .get(&node)
+                    .is_some_and(|labels| labels.keys().any(|depth| *depth < max_depth))
                 {
                     continue;
                 }
-                if admitted.insert(next.clone()) && !budget.consume_node() {
+                let (incident, incomplete) = if directed {
+                    self.backend.matching_bounded(
+                        &node,
+                        false,
+                        kinds,
+                        include_heuristic,
+                        budget.remaining_edges,
+                    )?
+                } else {
+                    self.backend.incident_bounded(
+                        &node,
+                        include_heuristic,
+                        budget.remaining_edges,
+                    )?
+                };
+                if incomplete {
                     truncated = true;
-                    continue;
+                    break;
                 }
-                best.insert(next.clone(), candidate);
-                predecessor.insert(next.clone(), (node.clone(), edge.id.clone()));
-                queue.push(Reverse((next_cost, next_depth, next_key, next)));
+                for edge in incident {
+                    if !budget.consume_edge() {
+                        truncated = true;
+                        break;
+                    }
+                    if calls_only && edge.kind != EdgeKind::Calls {
+                        continue;
+                    }
+                    let next = if edge.source == node {
+                        &edge.target
+                    } else {
+                        &edge.source
+                    };
+                    if !admitted.contains(next) {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if truncated {
+                    break;
+                }
             }
         }
         Ok((None, truncated))
@@ -3726,7 +4064,10 @@ fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> Q
     }
 }
 
-pub(crate) fn normalize_symbol(value: &str) -> String {
+/// Canonical name comparison shared by typed resolution and its projections.
+/// Node IDs are matched exactly before this normalization is applied to names.
+#[must_use]
+pub fn normalize_symbol(value: &str) -> String {
     value
         .trim()
         .trim_end_matches("()")

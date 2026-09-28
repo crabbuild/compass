@@ -1,10 +1,21 @@
 # Agent query evaluation: five repositories, five languages
 
+> Audit correction, 2026-09-26: the original `compass.agent-query-run/1`
+> graph-anchor scorer ignored the requested symbol and credited any Compass
+> node whose source span covered the requested line. A module could therefore
+> stand in for a missing declaration. The anchor counts below must not be used
+> as evidence of declaration coverage until replayed with the corrected v2
+> scorer. The source-backed ratios also measure metadata presence, not source
+> correctness. Historical query pass counts are text-oracle results on this
+> suite, not a current-release or population-wide accuracy claim. See the
+> [continuing audit](code-graph-intelligence-audit-2026-09-26.md).
+
 ## Result
 
-Compass answers the reviewed agent questions more accurately and publishes a
-better-anchored graph than Graphify on this suite, but it still spends more
-tokens per answered question. The evaluation ran on 2026-09-23 against Compass
+The historical text oracle credited more Compass responses on this suite,
+with higher token estimates per passing response. Its graph-anchor comparison
+is invalidated by the scorer defect described above; these results do not
+establish better graph correctness. The evaluation ran on 2026-09-23 against Compass
 commit `3fd246dc` plus the fixes in this change, and Graphify `0.9.36`.
 
 | Metric | Compass | Graphify |

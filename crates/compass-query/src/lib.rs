@@ -9,9 +9,12 @@ mod code_query;
 mod cql;
 mod discovery;
 mod discovery_text;
+mod explanation_members;
+mod export_binding;
 mod graph_engine;
 mod index;
 mod intent;
+mod neighbors;
 mod program_join;
 mod ranking;
 mod recall;
@@ -25,7 +28,9 @@ mod traversal;
 
 pub use affected::{DEFAULT_AFFECTED_RELATIONS, affected_nodes, format_affected, resolve_seed};
 pub use benchmark::{BenchmarkQuestion, BenchmarkResult, format_benchmark, run_benchmark};
-pub use code_query::CodeQueryEngine;
+pub use code_query::{
+    CodeQueryEngine, ExactSearchFilter, normalize_symbol as normalize_code_query_symbol,
+};
 pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
@@ -35,6 +40,10 @@ pub use discovery_text::{
     DiscoveryTextPageError, DiscoveryTextPageOptions, discovery_request_digest,
     discovery_response_digest, discovery_result_envelope, render_discovery_text_page,
     render_discovery_text_page_with_prefix,
+};
+pub use explanation_members::{
+    ExplainedMember, ExplainedMembers, ExplanationMemberFocus, explanation_member_sources,
+    explanation_member_sources_with_focus,
 };
 pub use graph_engine::{
     DirectGraphEngine, EffectiveGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine,
@@ -50,6 +59,10 @@ pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
     plan_natural_query,
 };
+pub use neighbors::{
+    MAX_NEIGHBOR_ADJACENCY_ENTRIES, MAX_NEIGHBOR_RECORDS, MAX_NEIGHBOR_RESPONSE_BYTES,
+    NeighborDirection, NeighborError, NeighborGroup, NeighborReport, direct_neighbors,
+};
 pub use program_join::join_program_evidence;
 pub use ranking::QUERY_RANKER_PROFILE_V1;
 pub use relevance::{
@@ -61,7 +74,8 @@ pub use relevance::{
 };
 pub use score::{
     ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
-    TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
+    TextRankProfile, find_exact_nodes, find_node, pick_scored_endpoint, score_nodes,
+    score_nodes_with_profile,
 };
 pub use telemetry::{
     ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
@@ -74,10 +88,10 @@ pub use text_cursor::{
 };
 pub use traversal::{
     DEFAULT_PATH_DEPTH_LIMIT, DEFAULT_TEXT_TOKEN_BUDGET, ExplainedSource, ExplanationSourceError,
-    ProfiledTextPageOptions, TextPageOptions, TextPaginationError, TraversalMode,
+    HopPathResult, ProfiledTextPageOptions, TextPageOptions, TextPaginationError, TraversalMode,
     explanation_source, query_graph_text, query_graph_text_page,
     query_graph_text_page_with_profile, render_explanation, render_explanation_page,
-    render_shortest_path, render_shortest_path_with_limit,
+    render_shortest_path, render_shortest_path_with_limit, shortest_hop_path,
 };
 
 /// Return the canonical semantic-result digest for a typed code query.

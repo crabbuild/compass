@@ -77,3 +77,39 @@ fn checked_in_contract_fingerprint_matches_the_enum_and_field_manifest()
     assert_eq!(response.schema, CODE_QUERY_SCHEMA_V1);
     Ok(())
 }
+
+#[test]
+fn calls_only_request_defaults_false_and_rejects_non_boolean_policy()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::query_contract::NodeTrailRequest;
+    let legacy = serde_json::json!({"source":"a","target":"b","includeHeuristic":false,
+        "limits": CodeQueryLimits::default()});
+    let request: NodeTrailRequest = serde_json::from_value(legacy.clone())?;
+    assert!(!request.calls_only);
+    assert_eq!(serde_json::to_value(&request)?, legacy);
+    let mut scoped = legacy;
+    scoped["callsOnly"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<NodeTrailRequest>(scoped.clone())?.calls_only);
+    for value in [
+        serde_json::json!("true"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        scoped["callsOnly"] = value;
+        assert!(serde_json::from_value::<NodeTrailRequest>(scoped.clone()).is_err());
+    }
+    for (question, expected) in [
+        ("path from a to b", false),
+        ("call path from a to b", true),
+        ("call chain from a to b", true),
+        ("find definition of a", false),
+    ] {
+        let plan = compass_query::plan_natural_query(question)?;
+        assert_eq!(plan.calls_only(), expected);
+        assert_eq!(
+            serde_json::to_value(&plan)?.get("callsOnly").is_some(),
+            expected
+        );
+    }
+    Ok(())
+}

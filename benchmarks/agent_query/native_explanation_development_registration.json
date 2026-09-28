@@ -1,0 +1,89 @@
+{
+  "schema": "compass.native-explanation-development-registration/1",
+  "scope": "Native explanation and source-coordinate-assisted explanation of five existing responsibility subjects across Go, Python, Java, TypeScript and Rust. Known development tasks; no held-out or population claim.",
+  "baselineCommit": "47ad5eba99ea2be915d2c786dd1a56597bfb2eb1",
+  "baselineBinary": "directed-identity-02/compass",
+  "baselineBinarySha256": "58199f5cfbbce9def3acb58bf019179218c8f6cbe379a3cd96ad9542e8f0b31f",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "graphRun": "rust-index-receiver-03/run.json",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "tasks": [
+    {
+      "repository": "chi",
+      "symbol": "Mux",
+      "file": "mux.go",
+      "startLine": 21,
+      "question": "Explain how Mux coordinates routing, middleware and subrouters. What state is shared by With?",
+      "facts": [
+        "chi-1",
+        "chi-2",
+        "chi-3",
+        "chi-4"
+      ]
+    },
+    {
+      "repository": "click",
+      "symbol": "_AtomicFile",
+      "file": "src/click/_compat.py",
+      "startLine": 455,
+      "question": "Explain _AtomicFile ownership, close behavior and context manager cleanup on exceptions.",
+      "facts": [
+        "click-1",
+        "click-2",
+        "click-3",
+        "click-4"
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "symbol": "Cleaner",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43,
+      "question": "Explain Cleaner responsibilities, how it uses the supplied Safelist, and whether cleaning mutates the input document.",
+      "facts": [
+        "jsoup-1",
+        "jsoup-2",
+        "jsoup-3",
+        "jsoup-4"
+      ]
+    },
+    {
+      "repository": "redux",
+      "symbol": "createStore",
+      "file": "src/createStore.ts",
+      "startLine": 86,
+      "question": "Explain createStore responsibilities and how dispatch and subscriptions share state safely.",
+      "facts": [
+        "redux-1",
+        "redux-2",
+        "redux-3",
+        "redux-4"
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "symbol": "IntoIter",
+      "file": "src/lib.rs",
+      "startLine": 566,
+      "question": "Explain IntoIter responsibilities, how it limits open directories, and how it detects symlink loops.",
+      "facts": [
+        "walkdir-1",
+        "walkdir-2",
+        "walkdir-3",
+        "walkdir-4"
+      ]
+    }
+  ],
+  "nativeArm": "Each tool gets exactly the supplied short symbol through its public explain CLI, once, with the pinned source repository as working directory. No retries or oracle IDs. All five subjects and 20 facts remain in the denominator.",
+  "sourceAssistedArm": "Provide the same file/startLine/symbol to one public resolver per subject. Compass search_symbols with limits max_candidates=256,max_nodes=500,max_response_bytes=524288; Graphify get_node file::symbol. Reuse the frozen selected_id source-anchor rule: only one returned matching identity may supply an ID to explain. Function/export collisions remain unresolved; no kind-based or graph-based substitution.",
+  "commands": "Compass explain SELECTOR --budget 2000 --max-source-bytes 8000 --graph GRAPH; Graphify explain SELECTOR --graph GRAPH. Current directory is the same pinned source root.",
+  "bounds": "120 seconds and 16 MiB per CLI output stream; 60 seconds and 1 MiB per MCP response. Compass connection budget and source cap have no matching Graphify explain flags. Report actual text/source bytes; no equal-content efficiency or latency claim.",
+  "judgment": "Judge the same 20 complete implementation facts per arm for explicit native assertions and, separately, sufficient returned source evidence. Labels and related-symbol lists are insufficient. Source excerpts are evidence, not synthesized answers. Preserve incorrect assertions, omitted/partial facts, ambiguity, missing source, limits and every failed request. Validate every displayed source line against the pinned source and verification claim against stored digests. Graph consistency alone is not source precision.",
+  "sourceControl": "Neither arm gets an external source follow-up. The earlier symmetric 8000-byte source-reading workflow remains a separate comparison (11/20 Compass,13/20 Graphify); do not suppress it or combine best answers into a new score. These native commands expose unequal capabilities; source availability is an outcome, not an equal-I/O claim.",
+  "provenanceDiagnostic": "Inspection found that Compass marks source digest-verified even when no digest is stored. Reproduce with a native fixture before fixing. Missing, malformed, matching and stale digest cases must distinguish actual verification without rewriting graph/source inputs. This is a Compass correctness diagnostic, not a paired win.",
+  "limitations": [
+    "Same-agent semantic review, not independent adjudication.",
+    "No model-generated answer or god-object label. Responsibility facts alone do not prove excessive responsibility.",
+    "Longer walks, broad edge precision, functional community quality and fresh confirmation remain outstanding."
+  ]
+}

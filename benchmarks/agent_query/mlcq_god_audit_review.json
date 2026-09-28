@@ -1,0 +1,2859 @@
+{
+  "artifacts": {
+    "benchmark-tests-03.log": "409fbe37e44d9079eeee8b3485cc9aab400c759b86f5755e72da608fdae08ba3",
+    "build_graphs.py": "b6f555f0e767135da5c5f7b568fdd672ad9315ee846052dbbddd2468e8b2ecff",
+    "capture.py": "970959ad7e1376666a6eb8fdd1095f62db12df9ac66de8162dc485cd74efff35",
+    "capture/capture.json": "22741d318f67f18dd3dad91150619d0a4de8704889c8707d956c86c14e9df1a5",
+    "cloudstack-live-sample.txt": "b3471ec240696d911f64f1d563c136cfb4d517c48e14c88d209eb2c407adbd0b",
+    "graphs/apache-cloudstack/build.json": "0bf829fe31c53f44bf407316d38e97fd5483756c1882c42555a5fcb19db9b99b",
+    "graphs/apache-cloudstack/compass.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "graphs/apache-cloudstack/compass.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "graphs/apache-cloudstack/graphify.stderr": "5cc985f15fbdf37e6b6af1b427f317f0c8efba81984873e626ce209c149e73dc",
+    "graphs/apache-cloudstack/graphify.stdout": "7f0f8a91acc4d3979bb9c8ee1885a76e6bb4404597980f5cbde2b87b62531c6d",
+    "graphs/eclipse-eclipse.platform.ui/build.json": "f7d226afb76cf57836feabf9cbf4c310f25e5f0ddd65f869af0774f39dd0b2d4",
+    "graphs/eclipse-eclipse.platform.ui/compass.stderr": "6677dd9c5b1be60696b56c2c189264552b4a3bd942bd335d4325201680670f5c",
+    "graphs/eclipse-eclipse.platform.ui/compass.stdout": "bcd65cab1f7d4b6e0f09b2318d51e4fe24a7023445fdb55feba6dc8bf6b41903",
+    "graphs/eclipse-eclipse.platform.ui/graphify.stderr": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb",
+    "graphs/eclipse-eclipse.platform.ui/graphify.stdout": "79bce2ef3d666c37f50591c7f3cee2f44d754562af15491fcbeb3a81123618f2",
+    "launch.json": "69e43eeff6575d8dcc6391dc4b55986dec2c014d56feefc39d2de019a1397870",
+    "product-boundary.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-witnesses-at-build.json": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+    "sql-bottleneck-notes.json": "588760756395597ea621155b65c1df075aa3194454a4ddb837bfed218792e5a2",
+    "verified-capture-repeat.json": "420eb2fc950039450f77c0561aea887e905f0c1a80c21de9fc99c95e031c8878",
+    "verified-capture.json": "420eb2fc950039450f77c0561aea887e905f0c1a80c21de9fc99c95e031c8878",
+    "verified-corpus.json": "b1faf6b1e9816f4e7738bfa90ace23c1393d8fd3814f9e1642117481c1e83507",
+    "verify_capture.py": "1a561ceede49bc03b5de7d8dc240814afbb3f95f085aeb70e652ae93f6f29190",
+    "verify_corpus.py": "d0baa4bbaa4cfd9e0da88ed1646420d7ad6a7d0604efa859bcaa8471409eba69",
+    "witness-portability.json": "6226a28cab6ee3f966004a485adc1e7e562725bdb18b9427ef32f2c11d7c943f",
+    "write_report.py": "a06b4089c92834a94c5bb88e708e121277efcc44636cd66ff0954ce1fe057a61"
+  },
+  "buildProfileDisclosure": {
+    "compass": "Frozen unoptimized Cargo dev binary, with debug information disabled and incremental compilation disabled; not a release executable.",
+    "graphify": "Installed Graphify 0.9.67 Python package and its native dependencies.",
+    "interpretation": "Original extraction timeouts are development-build observations under registered limits. They do not establish release performance or a controlled language/tool speed comparison. Graph bytes and original query/admission outcomes are unchanged.",
+    "sourceBuildLog": "calls-only-trails-01/build.log",
+    "sourceBuildLogSha256": "a79489e56b200092517e298a7e6b0892358dd8af72ea894972ff37b69e8f2b47",
+    "sourceBuildScript": "calls-only-trails-01/validate.py",
+    "sourceBuildScriptSha256": "0ce82fa6d32cb48a6d9bdaa876611e55e8795728b8374653f8f388b79976da93"
+  },
+  "conclusions": [
+    "Compass primary ranking retrieval is unavailable for all four positive and all four none cases. The original limit outcomes remain in the denominator.",
+    "Graphify primary ranking retrieves zero of four positive and zero of four none classes at each registered cutoff 10/50/100. All eight exact classes exist in its graphs and resolve through public source-coordinate queries; they are not extraction misses.",
+    "Graphify returned 200 hub rows; 163 have unique graph label identities and matching distinct-pair degrees. The other 37 remain ambiguous, never selected by degree or external rating.",
+    "All eight Graphify unfiltered neighbor projections match stored displayed direction/label/relation triples (234 rows); this is graph consistency, not source-precision proof or identity-rich navigation.",
+    "No precision-at-k, broad god-object classification accuracy, authored explanation score, representative performance result or Compass superiority follows.",
+    "A live CloudStack sample and code inspection identify speculative repeated SQL prefix scanning before dollar-delimiter syntax rejection as a concrete follow-up. No optimization or improvement claim has been tested here."
+  ],
+  "corpus": {
+    "blobReviews": 4019,
+    "blobSamples": 2334,
+    "classifications": {
+      "minor-or-disagreement": 462,
+      "single-reviewer": 1563,
+      "unanimous-major-critical": 43,
+      "unanimous-none": 266
+    },
+    "datasetSha256": "8e05db55150a984f0b08ab211f5f612374790ea918ba08afc290cf122b63551b",
+    "primaryRatings": {
+      "unanimous-major-critical": 4,
+      "unanimous-none": 4
+    },
+    "primarySamples": 8,
+    "repeatedReviewerSamples": [
+      5715127
+    ],
+    "reviews": 14739,
+    "schema": "compass.mlcq-corpus-verification/1",
+    "selectedReviewRows": 104,
+    "selectedSamples": 55,
+    "sources": [
+      {
+        "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+        "repository": "apache/cloudstack",
+        "trackedFiles": 7764,
+        "trackedJavaFiles": 5474
+      },
+      {
+        "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+        "repository": "eclipse/eclipse.platform.ui",
+        "trackedFiles": 8964,
+        "trackedJavaFiles": 6060
+      }
+    ],
+    "toolScoresAvailable": false,
+    "verifiedSources": [
+      {
+        "fileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+        "sampleId": 6374724,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "50407d33afc5ee8283f1022f5bf38278aa20b4cd82db4cd909eb5ee0e2e22b64",
+        "sampleId": 6391534,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "b45eedb84f09f0a8a258ff2eaa4327dae60fa2e7365ec4046fd3ca53dd9b4d69",
+        "sampleId": 6406137,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "9a70d77d824154488332a1dcced6c6cf50af5943b1f601ef376832edc73202c7",
+        "sampleId": 6413795,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "411ae1dbbd20a532d38af6c39c2fbaf0ece284d758c175be6c6f97618aba19bf",
+        "sampleId": 8528735,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+        "sampleId": 8537138,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "c6999596499204d035357bd6862badaa4d3dcd809d064b9934254917bb6407c9",
+        "sampleId": 8538037,
+        "sourceIdentityVerified": true
+      },
+      {
+        "fileSha256": "af541c9ae7f6f630462a6aaf61239482ac485188d1837f28888637edd145bea2",
+        "sampleId": 8539645,
+        "sourceIdentityVerified": true
+      }
+    ],
+    "verifierSha256": "d0baa4bbaa4cfd9e0da88ed1646420d7ad6a7d0604efa859bcaa8471409eba69"
+  },
+  "dataset": {
+    "authors": [
+      "Lech Madeyski",
+      "Tomasz Lewowski"
+    ],
+    "doi": "10.5281/zenodo.3666840",
+    "file": "MLCQCodeSmellSamples.csv",
+    "license": "CC-BY-4.0",
+    "paperDoi": "10.1145/3383219.3383264",
+    "publishedMd5": "9019beae88089838d2d13dc12e69241b",
+    "recordUrl": "https://zenodo.org/records/3666840",
+    "sha256": "8e05db55150a984f0b08ab211f5f612374790ea918ba08afc290cf122b63551b",
+    "title": "MLCQ: Industry-relevant code smell data set",
+    "version": "1.1"
+  },
+  "externalRun": "mlcq-god-audit-01",
+  "extractionCaveats": [
+    "One timed extraction per tool/repository; concurrent repository runs and native worker settings differ, so these are operational observations, not a controlled speed ranking.",
+    "Compass Eclipse indexed 6162 files and reported 95084 nodes, 347974 edges and 317 communities, with 62 omitted edges and a partial-graph warning. Artifact admission failed at the registered 256 MiB bound.",
+    "Graphify reported 6775 code files for CloudStack and 6162 for Eclipse. Native discovery/support differs; whole-repository request scope does not imply identical emitted facts.",
+    "Compass CloudStack exceeded the registered 1200-second limit and was terminated by the harness, exit -9. No published graph was admitted."
+  ],
+  "extractionObservations": [
+    {
+      "exit_code": -9,
+      "graphBytes": null,
+      "repository": "apache/cloudstack",
+      "timed_out": true,
+      "tool": "compass",
+      "wall_ms": 1200258,
+      "withinRegisteredGraphBound": null
+    },
+    {
+      "exit_code": 0,
+      "graphBytes": 227334534,
+      "repository": "apache/cloudstack",
+      "timed_out": false,
+      "tool": "graphify",
+      "wall_ms": 88899,
+      "withinRegisteredGraphBound": true
+    },
+    {
+      "exit_code": 0,
+      "graphBytes": 477211091,
+      "repository": "eclipse/eclipse.platform.ui",
+      "timed_out": false,
+      "tool": "compass",
+      "wall_ms": 671990,
+      "withinRegisteredGraphBound": false
+    },
+    {
+      "exit_code": 0,
+      "graphBytes": 189557807,
+      "repository": "eclipse/eclipse.platform.ui",
+      "timed_out": false,
+      "tool": "graphify",
+      "wall_ms": 65246,
+      "withinRegisteredGraphBound": true
+    }
+  ],
+  "registrationSha256": "a08e6a0970c605154b329acbfebaa0d9684859f1fad2fa0ed8e8717772866ef1",
+  "repeat": {
+    "byteIdentical": true,
+    "sha256": "420eb2fc950039450f77c0561aea887e905f0c1a80c21de9fc99c95e031c8878"
+  },
+  "schema": "compass.mlcq-god-audit-review/1",
+  "scope": "Registered whole-repository native-only Java Blob cohort; partial external labels, not population precision or overall superiority.",
+  "sourceReviewSha256": "c126379ccdbdfe0991ac28205b06ee6d92f40e5bc5713ca7f45ab1778e2853f7",
+  "sourceWitnessesSha256": "c35e4202703599acca6f96a807c72f598345d7d764d88cfc3b13f9340e01e675",
+  "verification": {
+    "captureSha256": "22741d318f67f18dd3dad91150619d0a4de8704889c8707d956c86c14e9df1a5",
+    "results": [
+      {
+        "build": {
+          "exitCode": -9,
+          "graphBytes": null,
+          "graphSha256": null,
+          "timedOut": true,
+          "withinRegisteredGraphBound": null
+        },
+        "captureStatus": "build-or-artifact-bound-failure",
+        "cases": [
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 8528735
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-none",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 8537138
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 8538037
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-none",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 8539645
+          }
+        ],
+        "connectivityChecks": [],
+        "cutoffs": {
+          "10": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          },
+          "100": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          },
+          "50": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          }
+        },
+        "graphConsistency": null,
+        "repository": "apache/cloudstack",
+        "secondary": [],
+        "tool": "compass"
+      },
+      {
+        "build": {
+          "exitCode": 0,
+          "graphBytes": 227334534,
+          "graphSha256": "8ef3ace655bb60a001851e911737b7995d7da081b04459441b02ab6b68242f72",
+          "timedOut": false,
+          "withinRegisteredGraphBound": true
+        },
+        "captureStatus": "completed",
+        "cases": [
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": [
+              "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl"
+            ],
+            "rank": null,
+            "sampleId": 8528735
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-none",
+            "graphIds": [
+              "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand"
+            ],
+            "rank": null,
+            "sampleId": 8537138
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": [
+              "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi"
+            ],
+            "rank": null,
+            "sampleId": 8538037
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-none",
+            "graphIds": [
+              "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse"
+            ],
+            "rank": null,
+            "sampleId": 8539645
+          }
+        ],
+        "connectivityChecks": [],
+        "cutoffs": {
+          "10": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          },
+          "100": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          },
+          "50": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          }
+        },
+        "graphConsistency": {
+          "executionSucceeded": true,
+          "explicitIdentities": 0,
+          "hubs": [
+            {
+              "degree": 2273,
+              "identityCandidates": 3,
+              "label": "CloudRuntimeException",
+              "rank": 1
+            },
+            {
+              "degree": 1458,
+              "degreeMatches": true,
+              "expectedDegree": 1458,
+              "file": "api/src/main/java/com/cloud/agent/api/Answer.java",
+              "id": "api_src_main_java_com_cloud_agent_api_answer_answer",
+              "identityCandidates": 1,
+              "label": "Answer",
+              "line": 21,
+              "rank": 2
+            },
+            {
+              "degree": 1332,
+              "degreeMatches": true,
+              "expectedDegree": 1332,
+              "file": "api/src/main/java/org/apache/cloudstack/api/APICommand.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_apicommand_apicommand",
+              "identityCandidates": 1,
+              "label": "APICommand",
+              "line": 28,
+              "rank": 3
+            },
+            {
+              "degree": 1293,
+              "identityCandidates": 9,
+              "label": "Network",
+              "rank": 4
+            },
+            {
+              "degree": 1149,
+              "identityCandidates": 10,
+              "label": "Account",
+              "rank": 5
+            },
+            {
+              "degree": 932,
+              "identityCandidates": 2,
+              "label": "cleanup_resources()",
+              "rank": 6
+            },
+            {
+              "degree": 799,
+              "degreeMatches": true,
+              "expectedDegree": 799,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/DB.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_db_db",
+              "identityCandidates": 1,
+              "label": "DB",
+              "line": 40,
+              "rank": 7
+            },
+            {
+              "degree": 798,
+              "identityCandidates": 2,
+              "label": "Pair",
+              "rank": 8
+            },
+            {
+              "degree": 780,
+              "degreeMatches": true,
+              "expectedDegree": 780,
+              "file": "api/src/main/java/org/apache/cloudstack/api/ApiConstants.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_apiconstants_apiconstants",
+              "identityCandidates": 1,
+              "label": "ApiConstants",
+              "line": 19,
+              "rank": 9
+            },
+            {
+              "degree": 758,
+              "degreeMatches": true,
+              "expectedDegree": 758,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/GenericDao.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_genericdao_genericdao",
+              "identityCandidates": 1,
+              "label": "GenericDao",
+              "line": 30,
+              "rank": 10
+            },
+            {
+              "degree": 711,
+              "identityCandidates": 8,
+              "label": "Host",
+              "rank": 11
+            },
+            {
+              "degree": 683,
+              "identityCandidates": 4,
+              "label": "Command",
+              "rank": 12
+            },
+            {
+              "degree": 663,
+              "degreeMatches": true,
+              "expectedDegree": 663,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/GenericDaoBase.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_genericdaobase_genericdaobase",
+              "identityCandidates": 1,
+              "label": "GenericDaoBase",
+              "line": 116,
+              "rank": 13
+            },
+            {
+              "degree": 657,
+              "degreeMatches": true,
+              "expectedDegree": 657,
+              "file": "engine/schema/src/main/java/com/cloud/host/HostVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_host_hostvo_hostvo",
+              "identityCandidates": 1,
+              "label": "HostVO",
+              "line": 47,
+              "rank": 14
+            },
+            {
+              "degree": 639,
+              "degreeMatches": true,
+              "expectedDegree": 639,
+              "file": "api/src/main/java/com/cloud/vm/VirtualMachineProfile.java",
+              "id": "api_src_main_java_com_cloud_vm_virtualmachineprofile_virtualmachineprofile",
+              "identityCandidates": 1,
+              "label": "VirtualMachineProfile",
+              "line": 35,
+              "rank": 15
+            },
+            {
+              "degree": 587,
+              "degreeMatches": true,
+              "expectedDegree": 587,
+              "file": "api/src/main/java/org/apache/cloudstack/api/Parameter.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_parameter_parameter",
+              "identityCandidates": 1,
+              "label": "Parameter",
+              "line": 28,
+              "rank": 16
+            },
+            {
+              "degree": 582,
+              "degreeMatches": true,
+              "expectedDegree": 582,
+              "file": "api/src/main/java/com/cloud/hypervisor/Hypervisor.java",
+              "id": "api_src_main_java_com_cloud_hypervisor_hypervisor_hypervisortype",
+              "identityCandidates": 1,
+              "label": "HypervisorType",
+              "line": 23,
+              "rank": 17
+            },
+            {
+              "degree": 578,
+              "identityCandidates": 9,
+              "label": "VirtualMachine",
+              "rank": 18
+            },
+            {
+              "degree": 560,
+              "degreeMatches": true,
+              "expectedDegree": 560,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/SearchBuilder.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_searchbuilder_searchbuilder",
+              "identityCandidates": 1,
+              "label": "SearchBuilder",
+              "line": 56,
+              "rank": 19
+            },
+            {
+              "degree": 540,
+              "degreeMatches": true,
+              "expectedDegree": 540,
+              "file": "api/src/main/java/org/apache/cloudstack/api/ServerApiException.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_serverapiexception_serverapiexception",
+              "identityCandidates": 1,
+              "label": "ServerApiException",
+              "line": 26,
+              "rank": 20
+            },
+            {
+              "degree": 523,
+              "degreeMatches": true,
+              "expectedDegree": 523,
+              "file": "api/src/main/java/com/cloud/vm/NicProfile.java",
+              "id": "api_src_main_java_com_cloud_vm_nicprofile_nicprofile",
+              "identityCandidates": 1,
+              "label": "NicProfile",
+              "line": 31,
+              "rank": 21
+            },
+            {
+              "degree": 521,
+              "degreeMatches": true,
+              "expectedDegree": 521,
+              "file": "tools/marvin/marvin/cloudstackTestCase.py",
+              "id": "tools_marvin_marvin_cloudstacktestcase_cloudstacktestcase",
+              "identityCandidates": 1,
+              "label": "cloudstackTestCase",
+              "line": 37,
+              "rank": 22
+            },
+            {
+              "degree": 521,
+              "degreeMatches": true,
+              "expectedDegree": 521,
+              "file": "engine/api/src/main/java/org/apache/cloudstack/engine/subsystem/api/storage/DataStore.java",
+              "id": "engine_api_src_main_java_org_apache_cloudstack_engine_subsystem_api_storage_datastore_datastore",
+              "identityCandidates": 1,
+              "label": "DataStore",
+              "line": 22,
+              "rank": 23
+            },
+            {
+              "degree": 512,
+              "degreeMatches": true,
+              "expectedDegree": 512,
+              "file": "api/src/main/java/org/apache/cloudstack/api/BaseCmd.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_basecmd_basecmd",
+              "identityCandidates": 1,
+              "label": "BaseCmd",
+              "line": 85,
+              "rank": 24
+            },
+            {
+              "degree": 507,
+              "degreeMatches": true,
+              "expectedDegree": 507,
+              "file": "api/src/main/java/org/apache/cloudstack/api/ApiErrorCode.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_apierrorcode_apierrorcode",
+              "identityCandidates": 1,
+              "label": "ApiErrorCode",
+              "line": 23,
+              "rank": 25
+            },
+            {
+              "degree": 505,
+              "degreeMatches": true,
+              "expectedDegree": 505,
+              "file": "api/src/main/java/com/cloud/exception/ResourceUnavailableException.java",
+              "id": "api_src_main_java_com_cloud_exception_resourceunavailableexception_resourceunavailableexception",
+              "identityCandidates": 1,
+              "label": "ResourceUnavailableException",
+              "line": 21,
+              "rank": 26
+            },
+            {
+              "degree": 499,
+              "degreeMatches": true,
+              "expectedDegree": 499,
+              "file": "api/src/main/java/com/cloud/exception/InvalidParameterValueException.java",
+              "id": "api_src_main_java_com_cloud_exception_invalidparametervalueexception_invalidparametervalueexception",
+              "identityCandidates": 1,
+              "label": "InvalidParameterValueException",
+              "line": 21,
+              "rank": 27
+            },
+            {
+              "degree": 494,
+              "identityCandidates": 2,
+              "label": "get_zone()",
+              "rank": 28
+            },
+            {
+              "degree": 489,
+              "degreeMatches": true,
+              "expectedDegree": 489,
+              "file": "api/src/main/java/org/apache/cloudstack/api/InternalIdentity.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_internalidentity_internalidentity",
+              "identityCandidates": 1,
+              "label": "InternalIdentity",
+              "line": 26,
+              "rank": 29
+            },
+            {
+              "degree": 478,
+              "degreeMatches": true,
+              "expectedDegree": 478,
+              "file": "api/src/main/java/org/apache/cloudstack/context/CallContext.java",
+              "id": "api_src_main_java_org_apache_cloudstack_context_callcontext_callcontext",
+              "identityCandidates": 1,
+              "label": "CallContext",
+              "line": 42,
+              "rank": 30
+            },
+            {
+              "degree": 457,
+              "degreeMatches": true,
+              "expectedDegree": 457,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/SearchCriteria.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_searchcriteria_searchcriteria",
+              "identityCandidates": 1,
+              "label": "SearchCriteria",
+              "line": 33,
+              "rank": 31
+            },
+            {
+              "degree": 455,
+              "identityCandidates": 3,
+              "label": "get_domain()",
+              "rank": 32
+            },
+            {
+              "degree": 454,
+              "identityCandidates": 10,
+              "label": "Account",
+              "rank": 33
+            },
+            {
+              "degree": 454,
+              "degreeMatches": true,
+              "expectedDegree": 454,
+              "file": "api/src/main/java/org/apache/cloudstack/api/BaseAsyncCmd.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_baseasynccmd_baseasynccmd",
+              "identityCandidates": 1,
+              "label": "BaseAsyncCmd",
+              "line": 25,
+              "rank": 34
+            },
+            {
+              "degree": 434,
+              "degreeMatches": true,
+              "expectedDegree": 434,
+              "file": "api/src/main/java/com/cloud/vm/ReservationContext.java",
+              "id": "api_src_main_java_com_cloud_vm_reservationcontext_reservationcontext",
+              "identityCandidates": 1,
+              "label": "ReservationContext",
+              "line": 28,
+              "rank": 35
+            },
+            {
+              "degree": 434,
+              "degreeMatches": true,
+              "expectedDegree": 434,
+              "file": "api/src/main/java/org/apache/cloudstack/api/BaseResponse.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_baseresponse_baseresponse",
+              "identityCandidates": 1,
+              "label": "BaseResponse",
+              "line": 23,
+              "rank": 36
+            },
+            {
+              "degree": 433,
+              "identityCandidates": 9,
+              "label": "VirtualMachine",
+              "rank": 37
+            },
+            {
+              "degree": 431,
+              "degreeMatches": true,
+              "expectedDegree": 431,
+              "file": "api/src/main/java/org/apache/cloudstack/api/response/ListResponse.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_response_listresponse_listresponse",
+              "identityCandidates": 1,
+              "label": "ListResponse",
+              "line": 24,
+              "rank": 38
+            },
+            {
+              "degree": 415,
+              "degreeMatches": true,
+              "expectedDegree": 415,
+              "file": "plugins/hypervisors/kvm/src/main/java/com/cloud/hypervisor/kvm/resource/LibvirtComputingResource.java",
+              "id": "plugins_hypervisors_kvm_src_main_java_com_cloud_hypervisor_kvm_resource_libvirtcomputingresource_libvirtcomputingresource",
+              "identityCandidates": 1,
+              "label": "LibvirtComputingResource",
+              "line": 198,
+              "rank": 39
+            },
+            {
+              "degree": 409,
+              "identityCandidates": 2,
+              "label": "Config",
+              "rank": 40
+            },
+            {
+              "degree": 408,
+              "degreeMatches": true,
+              "expectedDegree": 408,
+              "file": "engine/schema/src/main/java/com/cloud/host/dao/HostDao.java",
+              "id": "engine_schema_src_main_java_com_cloud_host_dao_hostdao_hostdao",
+              "identityCandidates": 1,
+              "label": "HostDao",
+              "line": 37,
+              "rank": 41
+            },
+            {
+              "degree": 408,
+              "degreeMatches": true,
+              "expectedDegree": 408,
+              "file": "plugins/hypervisors/xenserver/src/main/java/com/cloud/hypervisor/xenserver/resource/CitrixResourceBase.java",
+              "id": "plugins_hypervisors_xenserver_src_main_java_com_cloud_hypervisor_xenserver_resource_citrixresourcebase_citrixresourcebase",
+              "identityCandidates": 1,
+              "label": "CitrixResourceBase",
+              "line": 173,
+              "rank": 42
+            },
+            {
+              "degree": 406,
+              "degreeMatches": true,
+              "expectedDegree": 406,
+              "file": "api/src/main/java/com/cloud/deploy/DeployDestination.java",
+              "id": "api_src_main_java_com_cloud_deploy_deploydestination_deploydestination",
+              "identityCandidates": 1,
+              "label": "DeployDestination",
+              "line": 30,
+              "rank": 43
+            },
+            {
+              "degree": 403,
+              "identityCandidates": 4,
+              "label": "ServiceOffering",
+              "rank": 44
+            },
+            {
+              "degree": 400,
+              "degreeMatches": true,
+              "expectedDegree": 400,
+              "file": "tools/marvin/marvin/lib/utils.py",
+              "id": "tools_marvin_marvin_lib_utils_validatelist",
+              "identityCandidates": 1,
+              "label": "validateList()",
+              "line": 386,
+              "rank": 45
+            },
+            {
+              "degree": 390,
+              "degreeMatches": true,
+              "expectedDegree": 390,
+              "file": "framework/config/src/main/java/org/apache/cloudstack/framework/config/dao/ConfigurationDao.java",
+              "id": "framework_config_src_main_java_org_apache_cloudstack_framework_config_dao_configurationdao_configurationdao",
+              "identityCandidates": 1,
+              "label": "ConfigurationDao",
+              "line": 25,
+              "rank": 46
+            },
+            {
+              "degree": 382,
+              "identityCandidates": 2,
+              "label": "get_template()",
+              "rank": 47
+            },
+            {
+              "degree": 379,
+              "degreeMatches": true,
+              "expectedDegree": 379,
+              "file": "server/src/main/java/com/cloud/api/ApiDBUtils.java",
+              "id": "server_src_main_java_com_cloud_api_apidbutils_apidbutils",
+              "identityCandidates": 1,
+              "label": "ApiDBUtils",
+              "line": 318,
+              "rank": 48
+            },
+            {
+              "degree": 376,
+              "degreeMatches": true,
+              "expectedDegree": 376,
+              "file": "core/src/main/java/com/cloud/resource/ResourceWrapper.java",
+              "id": "core_src_main_java_com_cloud_resource_resourcewrapper_resourcewrapper",
+              "identityCandidates": 1,
+              "label": "ResourceWrapper",
+              "line": 29,
+              "rank": 49
+            },
+            {
+              "degree": 359,
+              "identityCandidates": 6,
+              "label": "Service",
+              "rank": 50
+            },
+            {
+              "degree": 354,
+              "identityCandidates": 3,
+              "label": "NetworkOffering",
+              "rank": 51
+            },
+            {
+              "degree": 353,
+              "degreeMatches": true,
+              "expectedDegree": 353,
+              "file": "core/src/main/java/com/cloud/resource/CommandWrapper.java",
+              "id": "core_src_main_java_com_cloud_resource_commandwrapper_commandwrapper",
+              "identityCandidates": 1,
+              "label": "CommandWrapper",
+              "line": 25,
+              "rank": 52
+            },
+            {
+              "degree": 352,
+              "degreeMatches": true,
+              "expectedDegree": 352,
+              "file": "engine/schema/src/main/java/com/cloud/network/dao/NetworkVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_network_dao_networkvo_networkvo",
+              "identityCandidates": 1,
+              "label": "NetworkVO",
+              "line": 46,
+              "rank": 53
+            },
+            {
+              "degree": 345,
+              "degreeMatches": true,
+              "expectedDegree": 345,
+              "file": "api/src/main/java/com/cloud/event/EventTypes.java",
+              "id": "api_src_main_java_com_cloud_event_eventtypes_eventtypes",
+              "identityCandidates": 1,
+              "label": "EventTypes",
+              "line": 79,
+              "rank": 54
+            },
+            {
+              "degree": 340,
+              "degreeMatches": true,
+              "expectedDegree": 340,
+              "file": "services/console-proxy/rdpconsole/src/main/java/streamer/ByteBuffer.java",
+              "id": "services_console_proxy_rdpconsole_src_main_java_streamer_bytebuffer_bytebuffer",
+              "identityCandidates": 1,
+              "label": "ByteBuffer",
+              "line": 29,
+              "rank": 55
+            },
+            {
+              "degree": 339,
+              "degreeMatches": true,
+              "expectedDegree": 339,
+              "file": "api/src/main/java/com/cloud/event/ActionEvent.java",
+              "id": "api_src_main_java_com_cloud_event_actionevent_actionevent",
+              "identityCandidates": 1,
+              "label": "ActionEvent",
+              "line": 26,
+              "rank": 56
+            },
+            {
+              "degree": 339,
+              "degreeMatches": true,
+              "expectedDegree": 339,
+              "file": "engine/schema/src/main/java/com/cloud/vm/VMInstanceVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_vm_vminstancevo_vminstancevo",
+              "identityCandidates": 1,
+              "label": "VMInstanceVO",
+              "line": 48,
+              "rank": 57
+            },
+            {
+              "degree": 336,
+              "degreeMatches": true,
+              "expectedDegree": 336,
+              "file": "engine/components-api/src/main/java/com/cloud/agent/AgentManager.java",
+              "id": "engine_components_api_src_main_java_com_cloud_agent_agentmanager_agentmanager",
+              "identityCandidates": 1,
+              "label": "AgentManager",
+              "line": 37,
+              "rank": 58
+            },
+            {
+              "degree": 329,
+              "degreeMatches": true,
+              "expectedDegree": 329,
+              "file": "core/src/main/java/com/cloud/agent/api/StartupCommand.java",
+              "id": "core_src_main_java_com_cloud_agent_api_startupcommand_startupcommand",
+              "identityCandidates": 1,
+              "label": "StartupCommand",
+              "line": 24,
+              "rank": 59
+            },
+            {
+              "degree": 329,
+              "degreeMatches": true,
+              "expectedDegree": 329,
+              "file": "api/src/main/java/com/cloud/exception/ConcurrentOperationException.java",
+              "id": "api_src_main_java_com_cloud_exception_concurrentoperationexception_concurrentoperationexception",
+              "identityCandidates": 1,
+              "label": "ConcurrentOperationException",
+              "line": 22,
+              "rank": 60
+            },
+            {
+              "degree": 321,
+              "degreeMatches": true,
+              "expectedDegree": 321,
+              "file": "engine/schema/src/main/java/com/cloud/dc/dao/DataCenterDao.java",
+              "id": "engine_schema_src_main_java_com_cloud_dc_dao_datacenterdao_datacenterdao",
+              "identityCandidates": 1,
+              "label": "DataCenterDao",
+              "line": 26,
+              "rank": 61
+            },
+            {
+              "degree": 321,
+              "identityCandidates": 5,
+              "label": "StoragePool",
+              "rank": 62
+            },
+            {
+              "degree": 317,
+              "degreeMatches": true,
+              "expectedDegree": 317,
+              "file": "api/src/main/java/org/apache/cloudstack/api/ApiCommandJobType.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_apicommandjobtype_apicommandjobtype",
+              "identityCandidates": 1,
+              "label": "ApiCommandJobType",
+              "line": 19,
+              "rank": 63
+            },
+            {
+              "degree": 316,
+              "degreeMatches": true,
+              "expectedDegree": 316,
+              "file": "api/src/main/java/org/apache/cloudstack/api/response/SuccessResponse.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_response_successresponse_successresponse",
+              "identityCandidates": 1,
+              "label": "SuccessResponse",
+              "line": 25,
+              "rank": 64
+            },
+            {
+              "degree": 313,
+              "degreeMatches": true,
+              "expectedDegree": 313,
+              "file": "api/src/main/java/com/cloud/network/NetworkModel.java",
+              "id": "api_src_main_java_com_cloud_network_networkmodel_networkmodel",
+              "identityCandidates": 1,
+              "label": "NetworkModel",
+              "line": 52,
+              "rank": 65
+            },
+            {
+              "degree": 307,
+              "degreeMatches": true,
+              "expectedDegree": 307,
+              "file": "engine/api/src/main/java/org/apache/cloudstack/engine/subsystem/api/storage/DataObject.java",
+              "id": "engine_api_src_main_java_org_apache_cloudstack_engine_subsystem_api_storage_dataobject_dataobject",
+              "identityCandidates": 1,
+              "label": "DataObject",
+              "line": 25,
+              "rank": 66
+            },
+            {
+              "degree": 294,
+              "identityCandidates": 2,
+              "label": "InsufficientCapacityException",
+              "rank": 67
+            },
+            {
+              "degree": 292,
+              "degreeMatches": true,
+              "expectedDegree": 292,
+              "file": "api/src/main/java/org/apache/cloudstack/api/response/UserVmResponse.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_response_uservmresponse_uservmresponse",
+              "identityCandidates": 1,
+              "label": "UserVmResponse",
+              "line": 36,
+              "rank": 68
+            },
+            {
+              "degree": 289,
+              "identityCandidates": 18,
+              "label": "TrafficType",
+              "rank": 69
+            },
+            {
+              "degree": 286,
+              "degreeMatches": true,
+              "expectedDegree": 286,
+              "file": "engine/schema/src/main/java/com/cloud/user/AccountVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_user_accountvo_accountvo",
+              "identityCandidates": 1,
+              "label": "AccountVO",
+              "line": 33,
+              "rank": 70
+            },
+            {
+              "degree": 285,
+              "degreeMatches": true,
+              "expectedDegree": 285,
+              "file": "server/src/main/java/com/cloud/user/AccountManager.java",
+              "id": "server_src_main_java_com_cloud_user_accountmanager_accountmanager",
+              "identityCandidates": 1,
+              "label": "AccountManager",
+              "line": 44,
+              "rank": 71
+            },
+            {
+              "degree": 280,
+              "degreeMatches": true,
+              "expectedDegree": 280,
+              "file": "engine/schema/src/main/java/com/cloud/network/dao/NetworkDao.java",
+              "id": "engine_schema_src_main_java_com_cloud_network_dao_networkdao_networkdao",
+              "identityCandidates": 1,
+              "label": "NetworkDao",
+              "line": 30,
+              "rank": 72
+            },
+            {
+              "degree": 278,
+              "degreeMatches": true,
+              "expectedDegree": 278,
+              "file": "engine/schema/src/main/java/com/cloud/vm/dao/VMInstanceDao.java",
+              "id": "engine_schema_src_main_java_com_cloud_vm_dao_vminstancedao_vminstancedao",
+              "identityCandidates": 1,
+              "label": "VMInstanceDao",
+              "line": 34,
+              "rank": 73
+            },
+            {
+              "degree": 275,
+              "identityCandidates": 7,
+              "label": "Volume",
+              "rank": 74
+            },
+            {
+              "degree": 272,
+              "degreeMatches": true,
+              "expectedDegree": 272,
+              "file": "engine/schema/src/main/java/com/cloud/storage/VolumeVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_storage_volumevo_volumevo",
+              "identityCandidates": 1,
+              "label": "VolumeVO",
+              "line": 40,
+              "rank": 75
+            },
+            {
+              "degree": 266,
+              "degreeMatches": true,
+              "expectedDegree": 266,
+              "file": "plugins/network-elements/juniper-contrail/src/test/java/org/apache/cloudstack/network/contrail/management/IntegrationTestConfiguration.java",
+              "id": "plugins_network_elements_juniper_contrail_src_test_java_org_apache_cloudstack_network_contrail_management_integrationtestconfiguration_integrationtestconfiguration",
+              "identityCandidates": 1,
+              "label": "IntegrationTestConfiguration",
+              "line": 304,
+              "rank": 76
+            },
+            {
+              "degree": 264,
+              "degreeMatches": true,
+              "expectedDegree": 264,
+              "file": "utils/src/main/java/com/cloud/utils/component/ManagerBase.java",
+              "id": "utils_src_main_java_com_cloud_utils_component_managerbase_managerbase",
+              "identityCandidates": 1,
+              "label": "ManagerBase",
+              "line": 22,
+              "rank": 77
+            },
+            {
+              "degree": 262,
+              "identityCandidates": 2,
+              "label": "VolumeInfo",
+              "rank": 78
+            },
+            {
+              "degree": 262,
+              "degreeMatches": true,
+              "expectedDegree": 262,
+              "file": "api/src/main/java/com/cloud/agent/api/to/VirtualMachineTO.java",
+              "id": "api_src_main_java_com_cloud_agent_api_to_virtualmachineto_virtualmachineto",
+              "identityCandidates": 1,
+              "label": "VirtualMachineTO",
+              "line": 27,
+              "rank": 79
+            },
+            {
+              "degree": 260,
+              "identityCandidates": 2,
+              "label": "VirtualRouter",
+              "rank": 80
+            },
+            {
+              "degree": 260,
+              "degreeMatches": true,
+              "expectedDegree": 260,
+              "file": "engine/schema/src/main/java/com/cloud/storage/VMTemplateVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_storage_vmtemplatevo_vmtemplatevo",
+              "identityCandidates": 1,
+              "label": "VMTemplateVO",
+              "line": 40,
+              "rank": 81
+            },
+            {
+              "degree": 260,
+              "degreeMatches": true,
+              "expectedDegree": 260,
+              "file": "api/src/main/java/com/cloud/exception/ResourceAllocationException.java",
+              "id": "api_src_main_java_com_cloud_exception_resourceallocationexception_resourceallocationexception",
+              "identityCandidates": 1,
+              "label": "ResourceAllocationException",
+              "line": 21,
+              "rank": 82
+            },
+            {
+              "degree": 258,
+              "identityCandidates": 2,
+              "label": "Filter",
+              "rank": 83
+            },
+            {
+              "degree": 257,
+              "degreeMatches": true,
+              "expectedDegree": 257,
+              "file": "engine/components-api/src/main/java/com/cloud/resource/ResourceManager.java",
+              "id": "engine_components_api_src_main_java_com_cloud_resource_resourcemanager_resourcemanager",
+              "identityCandidates": 1,
+              "label": "ResourceManager",
+              "line": 48,
+              "rank": 84
+            },
+            {
+              "degree": 256,
+              "degreeMatches": true,
+              "expectedDegree": 256,
+              "file": "framework/config/src/main/java/org/apache/cloudstack/framework/config/ConfigKey.java",
+              "id": "framework_config_src_main_java_org_apache_cloudstack_framework_config_configkey_configkey",
+              "identityCandidates": 1,
+              "label": "ConfigKey",
+              "line": 31,
+              "rank": 85
+            },
+            {
+              "degree": 255,
+              "degreeMatches": true,
+              "expectedDegree": 255,
+              "file": "framework/db/src/main/java/com/cloud/utils/db/TransactionLegacy.java",
+              "id": "framework_db_src_main_java_com_cloud_utils_db_transactionlegacy_transactionlegacy",
+              "identityCandidates": 1,
+              "label": "TransactionLegacy",
+              "line": 65,
+              "rank": 86
+            },
+            {
+              "degree": 250,
+              "degreeMatches": true,
+              "expectedDegree": 250,
+              "file": "api/src/main/java/com/cloud/dc/DataCenter.java",
+              "id": "api_src_main_java_com_cloud_dc_datacenter_datacenter",
+              "identityCandidates": 1,
+              "label": "DataCenter",
+              "line": 28,
+              "rank": 87
+            },
+            {
+              "degree": 249,
+              "identityCandidates": 10,
+              "label": "User",
+              "rank": 88
+            },
+            {
+              "degree": 243,
+              "degreeMatches": true,
+              "expectedDegree": 243,
+              "file": "utils/src/main/java/com/cloud/utils/net/NetUtils.java",
+              "id": "utils_src_main_java_com_cloud_utils_net_netutils_netutils",
+              "identityCandidates": 1,
+              "label": "NetUtils",
+              "line": 59,
+              "rank": 89
+            },
+            {
+              "degree": 241,
+              "degreeMatches": true,
+              "expectedDegree": 241,
+              "file": "utils/src/main/java/com/cloud/utils/script/Script.java",
+              "id": "utils_src_main_java_com_cloud_utils_script_script_script",
+              "identityCandidates": 1,
+              "label": "Script",
+              "line": 49,
+              "rank": 90
+            },
+            {
+              "degree": 240,
+              "degreeMatches": true,
+              "expectedDegree": 240,
+              "file": "engine/schema/src/main/java/com/cloud/vm/DomainRouterVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_vm_domainroutervo_domainroutervo",
+              "identityCandidates": 1,
+              "label": "DomainRouterVO",
+              "line": 32,
+              "rank": 91
+            },
+            {
+              "degree": 239,
+              "identityCandidates": 5,
+              "label": "Provider",
+              "rank": 92
+            },
+            {
+              "degree": 235,
+              "degreeMatches": true,
+              "expectedDegree": 235,
+              "file": "api/src/main/java/org/apache/cloudstack/api/EntityReference.java",
+              "id": "api_src_main_java_org_apache_cloudstack_api_entityreference_entityreference",
+              "identityCandidates": 1,
+              "label": "EntityReference",
+              "line": 25,
+              "rank": 93
+            },
+            {
+              "degree": 233,
+              "degreeMatches": true,
+              "expectedDegree": 233,
+              "file": "engine/schema/src/main/java/org/apache/cloudstack/storage/datastore/db/StoragePoolVO.java",
+              "id": "engine_schema_src_main_java_org_apache_cloudstack_storage_datastore_db_storagepoolvo_storagepoolvo",
+              "identityCandidates": 1,
+              "label": "StoragePoolVO",
+              "line": 40,
+              "rank": 94
+            },
+            {
+              "degree": 232,
+              "identityCandidates": 8,
+              "label": "Param",
+              "rank": 95
+            },
+            {
+              "degree": 232,
+              "degreeMatches": true,
+              "expectedDegree": 232,
+              "file": "api/src/main/java/org/apache/cloudstack/acl/RoleType.java",
+              "id": "api_src_main_java_org_apache_cloudstack_acl_roletype_roletype",
+              "identityCandidates": 1,
+              "label": "RoleType",
+              "line": 24,
+              "rank": 96
+            },
+            {
+              "degree": 231,
+              "degreeMatches": true,
+              "expectedDegree": 231,
+              "file": "tools/marvin/marvin/sshClient.py",
+              "id": "tools_marvin_marvin_sshclient_sshclient",
+              "identityCandidates": 1,
+              "label": "SshClient",
+              "line": 38,
+              "rank": 97
+            },
+            {
+              "degree": 231,
+              "degreeMatches": true,
+              "expectedDegree": 231,
+              "file": "engine/schema/src/main/java/com/cloud/dc/DataCenterVO.java",
+              "id": "engine_schema_src_main_java_com_cloud_dc_datacentervo_datacentervo",
+              "identityCandidates": 1,
+              "label": "DataCenterVO",
+              "line": 38,
+              "rank": 98
+            },
+            {
+              "degree": 227,
+              "identityCandidates": 36,
+              "label": "Status",
+              "rank": 99
+            },
+            {
+              "degree": 225,
+              "degreeMatches": true,
+              "expectedDegree": 225,
+              "file": "engine/schema/src/main/java/com/cloud/storage/dao/VolumeDao.java",
+              "id": "engine_schema_src_main_java_com_cloud_storage_dao_volumedao_volumedao",
+              "identityCandidates": 1,
+              "label": "VolumeDao",
+              "line": 31,
+              "rank": 100
+            }
+          ],
+          "matchingDegrees": 72,
+          "matchingSourceAnchors": 0,
+          "question": "hubs",
+          "repository": "apache/cloudstack",
+          "returned": 100,
+          "tool": "graphify",
+          "verifiedIdentities": 72
+        },
+        "graphCounts": {
+          "edges": 340129,
+          "nodes": 93793
+        },
+        "repository": "apache/cloudstack",
+        "secondary": [
+          {
+            "projection": {
+              "expectedRows": 71,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 71
+            },
+            "sampleId": 8528735,
+            "selection": {
+              "matchedIds": [
+                "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+                  "id": "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl",
+                  "line": 141,
+                  "symbols": [
+                    "ExternalLoadBalancerDeviceManagerImpl"
+                  ]
+                }
+              ],
+              "selector": "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 21,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 21
+            },
+            "sampleId": 8537138,
+            "selection": {
+              "matchedIds": [
+                "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+                  "id": "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand",
+                  "line": 24,
+                  "symbols": [
+                    "HandleConfigDriveIsoCommand"
+                  ]
+                }
+              ],
+              "selector": "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 32,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 32
+            },
+            "sampleId": 8538037,
+            "selection": {
+              "matchedIds": [
+                "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "plugins/network-elements/brocade-vcs/src/main/java/com/cloud/network/brocade/BrocadeVcsApi.java",
+                  "id": "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi",
+                  "line": 63,
+                  "symbols": [
+                    "BrocadeVcsApi"
+                  ]
+                }
+              ],
+              "selector": "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 6,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 6
+            },
+            "sampleId": 8539645,
+            "selection": {
+              "matchedIds": [
+                "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+                  "id": "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse",
+                  "line": 26,
+                  "symbols": [
+                    "DeploymentPlannersResponse"
+                  ]
+                }
+              ],
+              "selector": "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse",
+              "status": "resolved"
+            }
+          }
+        ],
+        "tool": "graphify"
+      },
+      {
+        "build": {
+          "exitCode": 0,
+          "graphBytes": 477211091,
+          "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+          "timedOut": false,
+          "withinRegisteredGraphBound": false
+        },
+        "captureStatus": "build-or-artifact-bound-failure",
+        "cases": [
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 6374724
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-none",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 6391534
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-none",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 6406137
+          },
+          {
+            "atCutoff": {
+              "10": "capture-unavailable",
+              "100": "capture-unavailable",
+              "50": "capture-unavailable"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": null,
+            "rank": null,
+            "sampleId": 6413795
+          }
+        ],
+        "connectivityChecks": [],
+        "cutoffs": {
+          "10": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          },
+          "100": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          },
+          "50": {
+            "unanimous-major-critical": {
+              "capture-unavailable": 2
+            },
+            "unanimous-none": {
+              "capture-unavailable": 2
+            }
+          }
+        },
+        "graphConsistency": null,
+        "repository": "eclipse/eclipse.platform.ui",
+        "secondary": [],
+        "tool": "compass"
+      },
+      {
+        "build": {
+          "exitCode": 0,
+          "graphBytes": 189557807,
+          "graphSha256": "cfdc1f9f8db069df24854f5a0786d8777a9daa2e33615ed44ae39e1189b1cdef",
+          "timedOut": false,
+          "withinRegisteredGraphBound": true
+        },
+        "captureStatus": "completed",
+        "cases": [
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": [
+              "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel"
+            ],
+            "rank": null,
+            "sampleId": 6374724
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-none",
+            "graphIds": [
+              "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty"
+            ],
+            "rank": null,
+            "sampleId": 6391534
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-none",
+            "graphIds": [
+              "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl"
+            ],
+            "rank": null,
+            "sampleId": 6406137
+          },
+          {
+            "ambiguousOutputRanks": [],
+            "atCutoff": {
+              "10": "not-returned",
+              "100": "not-returned",
+              "50": "not-returned"
+            },
+            "classification": "unanimous-major-critical",
+            "graphIds": [
+              "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto"
+            ],
+            "rank": null,
+            "sampleId": 6413795
+          }
+        ],
+        "connectivityChecks": [],
+        "cutoffs": {
+          "10": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          },
+          "100": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          },
+          "50": {
+            "unanimous-major-critical": {
+              "not-returned": 2
+            },
+            "unanimous-none": {
+              "not-returned": 2
+            }
+          }
+        },
+        "graphConsistency": {
+          "executionSucceeded": true,
+          "explicitIdentities": 0,
+          "hubs": [
+            {
+              "degree": 770,
+              "degreeMatches": true,
+              "expectedDegree": 770,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IWorkbenchWindow.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchwindow_iworkbenchwindow",
+              "identityCandidates": 1,
+              "label": "IWorkbenchWindow",
+              "line": 59,
+              "rank": 1
+            },
+            {
+              "degree": 677,
+              "identityCandidates": 2,
+              "label": "PlatformUI",
+              "rank": 2
+            },
+            {
+              "degree": 663,
+              "degreeMatches": true,
+              "expectedDegree": 663,
+              "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/engine/CSSEngine.java",
+              "id": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_engine_cssengine_cssengine",
+              "identityCandidates": 1,
+              "label": "CSSEngine",
+              "line": 41,
+              "rank": 3
+            },
+            {
+              "degree": 652,
+              "degreeMatches": true,
+              "expectedDegree": 652,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/resource/ImageDescriptor.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_resource_imagedescriptor_imagedescriptor",
+              "identityCandidates": 1,
+              "label": "ImageDescriptor",
+              "line": 59,
+              "rank": 4
+            },
+            {
+              "degree": 601,
+              "degreeMatches": true,
+              "expectedDegree": 601,
+              "file": "tests/org.eclipse.e4.ui.tests/src/org/eclipse/e4/ui/tests/application/EPartServiceTest.java",
+              "id": "tests_org_eclipse_e4_ui_tests_src_org_eclipse_e4_ui_tests_application_epartservicetest_epartservicetest",
+              "identityCandidates": 1,
+              "label": "EPartServiceTest",
+              "line": 56,
+              "rank": 5
+            },
+            {
+              "degree": 584,
+              "degreeMatches": true,
+              "expectedDegree": 584,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/value/IObservableValue.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_value_iobservablevalue_iobservablevalue",
+              "identityCandidates": 1,
+              "label": "IObservableValue",
+              "line": 38,
+              "rank": 6
+            },
+            {
+              "degree": 569,
+              "degreeMatches": true,
+              "expectedDegree": 569,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/MUIElement.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_muielement_muielement",
+              "identityCandidates": 1,
+              "label": "MUIElement",
+              "line": 54,
+              "rank": 7
+            },
+            {
+              "degree": 556,
+              "degreeMatches": true,
+              "expectedDegree": 556,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IWorkbenchPage.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpage_iworkbenchpage",
+              "identityCandidates": 1,
+              "label": "IWorkbenchPage",
+              "line": 46,
+              "rank": 8
+            },
+            {
+              "degree": 530,
+              "degreeMatches": true,
+              "expectedDegree": 530,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IWorkbenchPart.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpart_iworkbenchpart",
+              "identityCandidates": 1,
+              "label": "IWorkbenchPart",
+              "line": 99,
+              "rank": 9
+            },
+            {
+              "degree": 522,
+              "degreeMatches": true,
+              "expectedDegree": 522,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/Realm.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_realm_realm",
+              "identityCandidates": 1,
+              "label": "Realm",
+              "line": 84,
+              "rank": 10
+            },
+            {
+              "degree": 508,
+              "degreeMatches": true,
+              "expectedDegree": 508,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/IStructuredSelection.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_istructuredselection_istructuredselection",
+              "identityCandidates": 1,
+              "label": "IStructuredSelection",
+              "line": 22,
+              "rank": 11
+            },
+            {
+              "degree": 501,
+              "degreeMatches": true,
+              "expectedDegree": 501,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/Viewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewer_viewer",
+              "identityCandidates": 1,
+              "label": "Viewer",
+              "line": 43,
+              "rank": 12
+            },
+            {
+              "degree": 496,
+              "degreeMatches": true,
+              "expectedDegree": 496,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IMemento.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_imemento_imemento",
+              "identityCandidates": 1,
+              "label": "IMemento",
+              "line": 57,
+              "rank": 13
+            },
+            {
+              "degree": 456,
+              "degreeMatches": true,
+              "expectedDegree": 456,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/StructuredSelection.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_structuredselection_structuredselection",
+              "identityCandidates": 1,
+              "label": "StructuredSelection",
+              "line": 33,
+              "rank": 14
+            },
+            {
+              "degree": 454,
+              "degreeMatches": true,
+              "expectedDegree": 454,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ISelection.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselection_iselection",
+              "identityCandidates": 1,
+              "label": "ISelection",
+              "line": 23,
+              "rank": 15
+            },
+            {
+              "degree": 402,
+              "degreeMatches": true,
+              "expectedDegree": 402,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/action/IAction.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_iaction_iaction",
+              "identityCandidates": 1,
+              "label": "IAction",
+              "line": 47,
+              "rank": 16
+            },
+            {
+              "degree": 388,
+              "degreeMatches": true,
+              "expectedDegree": 388,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/basic/MPart.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_basic_mpart_mpart",
+              "identityCandidates": 1,
+              "label": "MPart",
+              "line": 56,
+              "rank": 17
+            },
+            {
+              "degree": 387,
+              "degreeMatches": true,
+              "expectedDegree": 387,
+              "file": "tests/org.eclipse.ui.tests.harness/src/org/eclipse/ui/tests/harness/util/UITestCase.java",
+              "id": "tests_org_eclipse_ui_tests_harness_src_org_eclipse_ui_tests_harness_util_uitestcase_uitestcase",
+              "identityCandidates": 1,
+              "label": "UITestCase",
+              "line": 49,
+              "rank": 18
+            },
+            {
+              "degree": 363,
+              "degreeMatches": true,
+              "expectedDegree": 363,
+              "file": "bundles/org.eclipse.core.commands/src/org/eclipse/core/commands/ExecutionEvent.java",
+              "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_executionevent_executionevent",
+              "identityCandidates": 1,
+              "label": "ExecutionEvent",
+              "line": 36,
+              "rank": 19
+            },
+            {
+              "degree": 342,
+              "degreeMatches": true,
+              "expectedDegree": 342,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/action/Action.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_action_action",
+              "identityCandidates": 1,
+              "label": "Action",
+              "line": 29,
+              "rank": 20
+            },
+            {
+              "degree": 342,
+              "degreeMatches": true,
+              "expectedDegree": 342,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/WorkbenchPlugin.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchplugin_workbenchplugin",
+              "identityCandidates": 1,
+              "label": "WorkbenchPlugin",
+              "line": 111,
+              "rank": 21
+            },
+            {
+              "degree": 339,
+              "degreeMatches": true,
+              "expectedDegree": 339,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/action/MenuManager.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_menumanager_menumanager",
+              "identityCandidates": 1,
+              "label": "MenuManager",
+              "line": 48,
+              "rank": 22
+            },
+            {
+              "degree": 338,
+              "identityCandidates": 4,
+              "label": "IWorkbench",
+              "rank": 23
+            },
+            {
+              "degree": 330,
+              "degreeMatches": true,
+              "expectedDegree": 330,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/IObservable.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_iobservable_iobservable",
+              "identityCandidates": 1,
+              "label": "IObservable",
+              "line": 36,
+              "rank": 24
+            },
+            {
+              "degree": 318,
+              "degreeMatches": true,
+              "expectedDegree": 318,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/TableViewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_tableviewer_tableviewer",
+              "identityCandidates": 1,
+              "label": "TableViewer",
+              "line": 69,
+              "rank": 25
+            },
+            {
+              "degree": 310,
+              "degreeMatches": true,
+              "expectedDegree": 310,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/util/IPropertyChangeListener.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_ipropertychangelistener_ipropertychangelistener",
+              "identityCandidates": 1,
+              "label": "IPropertyChangeListener",
+              "line": 37,
+              "rank": 26
+            },
+            {
+              "degree": 308,
+              "degreeMatches": true,
+              "expectedDegree": 308,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/TreeViewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_treeviewer_treeviewer",
+              "identityCandidates": 1,
+              "label": "TreeViewer",
+              "line": 69,
+              "rank": 27
+            },
+            {
+              "degree": 308,
+              "degreeMatches": true,
+              "expectedDegree": 308,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/WorkbenchPage.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchpage_workbenchpage",
+              "identityCandidates": 1,
+              "label": "WorkbenchPage",
+              "line": 197,
+              "rank": 28
+            },
+            {
+              "degree": 302,
+              "degreeMatches": true,
+              "expectedDegree": 302,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/MApplication.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_mapplication_mapplication",
+              "identityCandidates": 1,
+              "label": "MApplication",
+              "line": 70,
+              "rank": 29
+            },
+            {
+              "degree": 297,
+              "degreeMatches": true,
+              "expectedDegree": 297,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IEditorPart.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditorpart_ieditorpart",
+              "identityCandidates": 1,
+              "label": "IEditorPart",
+              "line": 55,
+              "rank": 30
+            },
+            {
+              "degree": 295,
+              "degreeMatches": true,
+              "expectedDegree": 295,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/action/IContributionItem.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_icontributionitem_icontributionitem",
+              "identityCandidates": 1,
+              "label": "IContributionItem",
+              "line": 42,
+              "rank": 31
+            },
+            {
+              "degree": 294,
+              "degreeMatches": true,
+              "expectedDegree": 294,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/StructuredViewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_structuredviewer_structuredviewer",
+              "identityCandidates": 1,
+              "label": "StructuredViewer",
+              "line": 65,
+              "rank": 32
+            },
+            {
+              "degree": 268,
+              "degreeMatches": true,
+              "expectedDegree": 268,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IWorkingSet.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkingset_iworkingset",
+              "identityCandidates": 1,
+              "label": "IWorkingSet",
+              "line": 29,
+              "rank": 33
+            },
+            {
+              "degree": 263,
+              "degreeMatches": true,
+              "expectedDegree": 263,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/action/IMenuManager.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_action_imenumanager_imenumanager",
+              "identityCandidates": 1,
+              "label": "IMenuManager",
+              "line": 32,
+              "rank": 34
+            },
+            {
+              "degree": 262,
+              "degreeMatches": true,
+              "expectedDegree": 262,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/list/IObservableList.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_list_iobservablelist_iobservablelist",
+              "identityCandidates": 1,
+              "label": "IObservableList",
+              "line": 44,
+              "rank": 35
+            },
+            {
+              "degree": 250,
+              "degreeMatches": true,
+              "expectedDegree": 250,
+              "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSS2PropertiesImpl.java",
+              "id": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_css2propertiesimpl_css2propertiesimpl",
+              "identityCandidates": 1,
+              "label": "CSS2PropertiesImpl",
+              "line": 24,
+              "rank": 36
+            },
+            {
+              "degree": 248,
+              "degreeMatches": true,
+              "expectedDegree": 248,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/basic/MWindow.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_basic_mwindow_mwindow",
+              "identityCandidates": 1,
+              "label": "MWindow",
+              "line": 56,
+              "rank": 37
+            },
+            {
+              "degree": 243,
+              "degreeMatches": true,
+              "expectedDegree": 243,
+              "file": "bundles/org.eclipse.core.commands/src/org/eclipse/core/commands/ParameterizedCommand.java",
+              "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_parameterizedcommand_parameterizedcommand",
+              "identityCandidates": 1,
+              "label": "ParameterizedCommand",
+              "line": 41,
+              "rank": 38
+            },
+            {
+              "degree": 242,
+              "degreeMatches": true,
+              "expectedDegree": 242,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IEditorInput.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditorinput_ieditorinput",
+              "identityCandidates": 1,
+              "label": "IEditorInput",
+              "line": 54,
+              "rank": 39
+            },
+            {
+              "degree": 237,
+              "degreeMatches": true,
+              "expectedDegree": 237,
+              "file": "bundles/org.eclipse.e4.ui.workbench/src/org/eclipse/e4/ui/workbench/modeling/EModelService.java",
+              "id": "bundles_org_eclipse_e4_ui_workbench_src_org_eclipse_e4_ui_workbench_modeling_emodelservice_emodelservice",
+              "identityCandidates": 1,
+              "label": "EModelService",
+              "line": 41,
+              "rank": 40
+            },
+            {
+              "degree": 237,
+              "degreeMatches": true,
+              "expectedDegree": 237,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/WorkbenchWindow.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchwindow_workbenchwindow",
+              "identityCandidates": 1,
+              "label": "WorkbenchWindow",
+              "line": 209,
+              "rank": 41
+            },
+            {
+              "degree": 237,
+              "degreeMatches": true,
+              "expectedDegree": 237,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/preference/IPreferenceStore.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_preference_ipreferencestore_ipreferencestore",
+              "identityCandidates": 1,
+              "label": "IPreferenceStore",
+              "line": 59,
+              "rank": 42
+            },
+            {
+              "degree": 233,
+              "identityCandidates": 5,
+              "label": "LabelProvider",
+              "rank": 43
+            },
+            {
+              "degree": 226,
+              "degreeMatches": true,
+              "expectedDegree": 226,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ITreeContentProvider.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_itreecontentprovider_itreecontentprovider",
+              "identityCandidates": 1,
+              "label": "ITreeContentProvider",
+              "line": 22,
+              "rank": 44
+            },
+            {
+              "degree": 226,
+              "degreeMatches": true,
+              "expectedDegree": 226,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/set/IObservableSet.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_set_iobservableset_iobservableset",
+              "identityCandidates": 1,
+              "label": "IObservableSet",
+              "line": 43,
+              "rank": 45
+            },
+            {
+              "degree": 218,
+              "identityCandidates": 2,
+              "label": "AbstractHandler",
+              "rank": 46
+            },
+            {
+              "degree": 218,
+              "degreeMatches": true,
+              "expectedDegree": 218,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/Workbench.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbench_workbench",
+              "identityCandidates": 1,
+              "label": "Workbench",
+              "line": 279,
+              "rank": 47
+            },
+            {
+              "degree": 213,
+              "degreeMatches": true,
+              "expectedDegree": 213,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/resource/JFaceResources.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_resource_jfaceresources_jfaceresources",
+              "identityCandidates": 1,
+              "label": "JFaceResources",
+              "line": 57,
+              "rank": 48
+            },
+            {
+              "degree": 207,
+              "degreeMatches": true,
+              "expectedDegree": 207,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/dialogs/MessageDialog.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_messagedialog_messagedialog",
+              "identityCandidates": 1,
+              "label": "MessageDialog",
+              "line": 40,
+              "rank": 49
+            },
+            {
+              "degree": 203,
+              "degreeMatches": true,
+              "expectedDegree": 203,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IPerspectiveDescriptor.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iperspectivedescriptor_iperspectivedescriptor",
+              "identityCandidates": 1,
+              "label": "IPerspectiveDescriptor",
+              "line": 49,
+              "rank": 50
+            },
+            {
+              "degree": 193,
+              "degreeMatches": true,
+              "expectedDegree": 193,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/dialogs/Dialog.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_dialog_dialog",
+              "identityCandidates": 1,
+              "label": "Dialog",
+              "line": 65,
+              "rank": 51
+            },
+            {
+              "degree": 193,
+              "identityCandidates": 2,
+              "label": "BindingTestSuite",
+              "rank": 52
+            },
+            {
+              "degree": 190,
+              "degreeMatches": true,
+              "expectedDegree": 190,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/CellEditor.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_celleditor_celleditor",
+              "identityCandidates": 1,
+              "label": "CellEditor",
+              "line": 45,
+              "rank": 53
+            },
+            {
+              "degree": 184,
+              "degreeMatches": true,
+              "expectedDegree": 184,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ILabelProviderListener.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_ilabelproviderlistener_ilabelproviderlistener",
+              "identityCandidates": 1,
+              "label": "ILabelProviderListener",
+              "line": 23,
+              "rank": 54
+            },
+            {
+              "degree": 183,
+              "degreeMatches": true,
+              "expectedDegree": 183,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IViewPart.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iviewpart_iviewpart",
+              "identityCandidates": 1,
+              "label": "IViewPart",
+              "line": 58,
+              "rank": 55
+            },
+            {
+              "degree": 178,
+              "identityCandidates": 2,
+              "label": "Command",
+              "rank": 56
+            },
+            {
+              "degree": 173,
+              "degreeMatches": true,
+              "expectedDegree": 173,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/dialogs/IDialogSettings.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_idialogsettings_idialogsettings",
+              "identityCandidates": 1,
+              "label": "IDialogSettings",
+              "line": 28,
+              "rank": 57
+            },
+            {
+              "degree": 172,
+              "degreeMatches": true,
+              "expectedDegree": 172,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/MElementContainer.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_melementcontainer_melementcontainer",
+              "identityCandidates": 1,
+              "label": "MElementContainer",
+              "line": 50,
+              "rank": 58
+            },
+            {
+              "degree": 170,
+              "degreeMatches": true,
+              "expectedDegree": 170,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/WorkbenchMessages.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_workbenchmessages_workbenchmessages",
+              "identityCandidates": 1,
+              "label": "WorkbenchMessages",
+              "line": 33,
+              "rank": 59
+            },
+            {
+              "degree": 169,
+              "degreeMatches": true,
+              "expectedDegree": 169,
+              "file": "tests/org.eclipse.jface.tests.databinding/src/org/eclipse/jface/tests/databinding/AbstractDefaultRealmTestCase.java",
+              "id": "tests_org_eclipse_jface_tests_databinding_src_org_eclipse_jface_tests_databinding_abstractdefaultrealmtestcase_abstractdefaultrealmtestcase",
+              "identityCandidates": 1,
+              "label": "AbstractDefaultRealmTestCase",
+              "line": 30,
+              "rank": 60
+            },
+            {
+              "degree": 167,
+              "degreeMatches": true,
+              "expectedDegree": 167,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ColumnViewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_columnviewer_columnviewer",
+              "identityCandidates": 1,
+              "label": "ColumnViewer",
+              "line": 47,
+              "rank": 61
+            },
+            {
+              "degree": 166,
+              "degreeMatches": true,
+              "expectedDegree": 166,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/AbstractTreeViewer.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_abstracttreeviewer_abstracttreeviewer",
+              "identityCandidates": 1,
+              "label": "AbstractTreeViewer",
+              "line": 73,
+              "rank": 62
+            },
+            {
+              "degree": 165,
+              "degreeMatches": true,
+              "expectedDegree": 165,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IActionBars.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iactionbars_iactionbars",
+              "identityCandidates": 1,
+              "label": "IActionBars",
+              "line": 61,
+              "rank": 63
+            },
+            {
+              "degree": 164,
+              "degreeMatches": true,
+              "expectedDegree": 164,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/PartInitException.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_partinitexception_partinitexception",
+              "identityCandidates": 1,
+              "label": "PartInitException",
+              "line": 26,
+              "rank": 64
+            },
+            {
+              "degree": 164,
+              "degreeMatches": true,
+              "expectedDegree": 164,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IWorkbenchPartReference.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_iworkbenchpartreference_iworkbenchpartreference",
+              "identityCandidates": 1,
+              "label": "IWorkbenchPartReference",
+              "line": 29,
+              "rank": 65
+            },
+            {
+              "degree": 162,
+              "degreeMatches": true,
+              "expectedDegree": 162,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ViewerCell.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewercell_viewercell",
+              "identityCandidates": 1,
+              "label": "ViewerCell",
+              "line": 34,
+              "rank": 66
+            },
+            {
+              "degree": 161,
+              "degreeMatches": true,
+              "expectedDegree": 161,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/services/IServiceLocator.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_services_iservicelocator_iservicelocator",
+              "identityCandidates": 1,
+              "label": "IServiceLocator",
+              "line": 35,
+              "rank": 67
+            },
+            {
+              "degree": 161,
+              "degreeMatches": true,
+              "expectedDegree": 161,
+              "file": "bundles/org.eclipse.ui.ide/src/org/eclipse/ui/internal/ide/IDEWorkbenchPlugin.java",
+              "id": "bundles_org_eclipse_ui_ide_src_org_eclipse_ui_internal_ide_ideworkbenchplugin_ideworkbenchplugin",
+              "identityCandidates": 1,
+              "label": "IDEWorkbenchPlugin",
+              "line": 65,
+              "rank": 68
+            },
+            {
+              "degree": 155,
+              "identityCandidates": 2,
+              "label": "ExecutionException",
+              "rank": 69
+            },
+            {
+              "degree": 154,
+              "degreeMatches": true,
+              "expectedDegree": 154,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ILabelProvider.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_ilabelprovider_ilabelprovider",
+              "identityCandidates": 1,
+              "label": "ILabelProvider",
+              "line": 23,
+              "rank": 70
+            },
+            {
+              "degree": 154,
+              "degreeMatches": true,
+              "expectedDegree": 154,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ISelectionProvider.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselectionprovider_iselectionprovider",
+              "identityCandidates": 1,
+              "label": "ISelectionProvider",
+              "line": 23,
+              "rank": 71
+            },
+            {
+              "degree": 153,
+              "degreeMatches": true,
+              "expectedDegree": 153,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/MApplicationElement.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_mapplicationelement_mapplicationelement",
+              "identityCandidates": 1,
+              "label": "MApplicationElement",
+              "line": 57,
+              "rank": 72
+            },
+            {
+              "degree": 153,
+              "degreeMatches": true,
+              "expectedDegree": 153,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/wizard/WizardDialog.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_wizard_wizarddialog_wizarddialog",
+              "identityCandidates": 1,
+              "label": "WizardDialog",
+              "line": 85,
+              "rank": 73
+            },
+            {
+              "degree": 150,
+              "degreeMatches": true,
+              "expectedDegree": 150,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ISelectionChangedListener.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_iselectionchangedlistener_iselectionchangedlistener",
+              "identityCandidates": 1,
+              "label": "ISelectionChangedListener",
+              "line": 24,
+              "rank": 74
+            },
+            {
+              "degree": 149,
+              "degreeMatches": true,
+              "expectedDegree": 149,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ViewerComparator.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewercomparator_viewercomparator",
+              "identityCandidates": 1,
+              "label": "ViewerComparator",
+              "line": 49,
+              "rank": 75
+            },
+            {
+              "degree": 148,
+              "degreeMatches": true,
+              "expectedDegree": 148,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/IObservableCollection.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_iobservablecollection_iobservablecollection",
+              "identityCandidates": 1,
+              "label": "IObservableCollection",
+              "line": 41,
+              "rank": 76
+            },
+            {
+              "degree": 146,
+              "degreeMatches": true,
+              "expectedDegree": 146,
+              "file": "bundles/org.eclipse.core.databinding/src/org/eclipse/core/databinding/DataBindingContext.java",
+              "id": "bundles_org_eclipse_core_databinding_src_org_eclipse_core_databinding_databindingcontext_databindingcontext",
+              "identityCandidates": 1,
+              "label": "DataBindingContext",
+              "line": 58,
+              "rank": 77
+            },
+            {
+              "degree": 146,
+              "degreeMatches": true,
+              "expectedDegree": 146,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/util/SafeRunnable.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_saferunnable_saferunnable",
+              "identityCandidates": 1,
+              "label": "SafeRunnable",
+              "line": 31,
+              "rank": 78
+            },
+            {
+              "degree": 145,
+              "degreeMatches": true,
+              "expectedDegree": 145,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/advanced/MPerspective.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_advanced_mperspective_mperspective",
+              "identityCandidates": 1,
+              "label": "MPerspective",
+              "line": 52,
+              "rank": 79
+            },
+            {
+              "degree": 144,
+              "degreeMatches": true,
+              "expectedDegree": 144,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/map/IObservableMap.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_map_iobservablemap_iobservablemap",
+              "identityCandidates": 1,
+              "label": "IObservableMap",
+              "line": 45,
+              "rank": 80
+            },
+            {
+              "degree": 144,
+              "identityCandidates": 4,
+              "label": "Binding",
+              "rank": 81
+            },
+            {
+              "degree": 142,
+              "degreeMatches": true,
+              "expectedDegree": 142,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ViewerFilter.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_viewerfilter_viewerfilter",
+              "identityCandidates": 1,
+              "label": "ViewerFilter",
+              "line": 30,
+              "rank": 82
+            },
+            {
+              "degree": 141,
+              "degreeMatches": true,
+              "expectedDegree": 141,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/dialogs/IDialogConstants.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_dialogs_idialogconstants_idialogconstants",
+              "identityCandidates": 1,
+              "label": "IDialogConstants",
+              "line": 45,
+              "rank": 83
+            },
+            {
+              "degree": 140,
+              "degreeMatches": true,
+              "expectedDegree": 140,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/bindings/TriggerSequence.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_bindings_triggersequence_triggersequence",
+              "identityCandidates": 1,
+              "label": "TriggerSequence",
+              "line": 28,
+              "rank": 84
+            },
+            {
+              "degree": 139,
+              "degreeMatches": true,
+              "expectedDegree": 139,
+              "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/IValueProperty.java",
+              "id": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_ivalueproperty_ivalueproperty",
+              "identityCandidates": 1,
+              "label": "IValueProperty",
+              "line": 47,
+              "rank": 85
+            },
+            {
+              "degree": 137,
+              "degreeMatches": true,
+              "expectedDegree": 137,
+              "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/menu/MMenu.java",
+              "id": "bundles_org_eclipse_e4_ui_model_workbench_src_org_eclipse_e4_ui_model_application_ui_menu_mmenu_mmenu",
+              "identityCandidates": 1,
+              "label": "MMenu",
+              "line": 41,
+              "rank": 86
+            },
+            {
+              "degree": 135,
+              "degreeMatches": true,
+              "expectedDegree": 135,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/util/PropertyChangeEvent.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_util_propertychangeevent_propertychangeevent",
+              "identityCandidates": 1,
+              "label": "PropertyChangeEvent",
+              "line": 36,
+              "rank": 87
+            },
+            {
+              "degree": 135,
+              "identityCandidates": 2,
+              "label": "Window",
+              "rank": 88
+            },
+            {
+              "degree": 134,
+              "degreeMatches": true,
+              "expectedDegree": 134,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/IEditorDescriptor.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_ieditordescriptor_ieditordescriptor",
+              "identityCandidates": 1,
+              "label": "IEditorDescriptor",
+              "line": 36,
+              "rank": 89
+            },
+            {
+              "degree": 132,
+              "degreeMatches": true,
+              "expectedDegree": 132,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/IStructuredContentProvider.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_istructuredcontentprovider_istructuredcontentprovider",
+              "identityCandidates": 1,
+              "label": "IStructuredContentProvider",
+              "line": 21,
+              "rank": 90
+            },
+            {
+              "degree": 128,
+              "degreeMatches": true,
+              "expectedDegree": 128,
+              "file": "bundles/org.eclipse.core.databinding.observable/src/org/eclipse/core/databinding/observable/value/WritableValue.java",
+              "id": "bundles_org_eclipse_core_databinding_observable_src_org_eclipse_core_databinding_observable_value_writablevalue_writablevalue",
+              "identityCandidates": 1,
+              "label": "WritableValue",
+              "line": 38,
+              "rank": 91
+            },
+            {
+              "degree": 127,
+              "degreeMatches": true,
+              "expectedDegree": 127,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/plugin/AbstractUIPlugin.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_plugin_abstractuiplugin_abstractuiplugin",
+              "identityCandidates": 1,
+              "label": "AbstractUIPlugin",
+              "line": 126,
+              "rank": 92
+            },
+            {
+              "degree": 125,
+              "degreeMatches": true,
+              "expectedDegree": 125,
+              "file": "bundles/org.eclipse.core.commands/src/org/eclipse/core/commands/operations/IUndoContext.java",
+              "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_operations_iundocontext_iundocontext",
+              "identityCandidates": 1,
+              "label": "IUndoContext",
+              "line": 37,
+              "rank": 93
+            },
+            {
+              "degree": 125,
+              "degreeMatches": true,
+              "expectedDegree": 125,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/bindings/BindingManager.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_bindings_bindingmanager_bindingmanager",
+              "identityCandidates": 1,
+              "label": "BindingManager",
+              "line": 70,
+              "rank": 94
+            },
+            {
+              "degree": 124,
+              "degreeMatches": true,
+              "expectedDegree": 124,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/operation/IRunnableWithProgress.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_operation_irunnablewithprogress_irunnablewithprogress",
+              "identityCandidates": 1,
+              "label": "IRunnableWithProgress",
+              "line": 33,
+              "rank": 95
+            },
+            {
+              "degree": 123,
+              "degreeMatches": true,
+              "expectedDegree": 123,
+              "file": "bundles/org.eclipse.ui.navigator/src/org/eclipse/ui/internal/navigator/NavigatorContentService.java",
+              "id": "bundles_org_eclipse_ui_navigator_src_org_eclipse_ui_internal_navigator_navigatorcontentservice_navigatorcontentservice",
+              "identityCandidates": 1,
+              "label": "NavigatorContentService",
+              "line": 85,
+              "rank": 96
+            },
+            {
+              "degree": 121,
+              "degreeMatches": true,
+              "expectedDegree": 121,
+              "file": "bundles/org.eclipse.core.commands/src/org/eclipse/core/commands/operations/IUndoableOperation.java",
+              "id": "bundles_org_eclipse_core_commands_src_org_eclipse_core_commands_operations_iundoableoperation_iundoableoperation",
+              "identityCandidates": 1,
+              "label": "IUndoableOperation",
+              "line": 37,
+              "rank": 97
+            },
+            {
+              "degree": 121,
+              "degreeMatches": true,
+              "expectedDegree": 121,
+              "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/part/ViewPart.java",
+              "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_part_viewpart_viewpart",
+              "identityCandidates": 1,
+              "label": "ViewPart",
+              "line": 69,
+              "rank": 98
+            },
+            {
+              "degree": 119,
+              "degreeMatches": true,
+              "expectedDegree": 119,
+              "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ArrayContentProvider.java",
+              "id": "bundles_org_eclipse_jface_src_org_eclipse_jface_viewers_arraycontentprovider_arraycontentprovider",
+              "identityCandidates": 1,
+              "label": "ArrayContentProvider",
+              "line": 30,
+              "rank": 99
+            },
+            {
+              "degree": 119,
+              "degreeMatches": true,
+              "expectedDegree": 119,
+              "file": "bundles/org.eclipse.ui.navigator/src/org/eclipse/ui/navigator/INavigatorContentService.java",
+              "id": "bundles_org_eclipse_ui_navigator_src_org_eclipse_ui_navigator_inavigatorcontentservice_inavigatorcontentservice",
+              "identityCandidates": 1,
+              "label": "INavigatorContentService",
+              "line": 104,
+              "rank": 100
+            }
+          ],
+          "matchingDegrees": 91,
+          "matchingSourceAnchors": 0,
+          "question": "hubs",
+          "repository": "eclipse/eclipse.platform.ui",
+          "returned": 100,
+          "tool": "graphify",
+          "verifiedIdentities": 91
+        },
+        "graphCounts": {
+          "edges": 258146,
+          "nodes": 70420
+        },
+        "repository": "eclipse/eclipse.platform.ui",
+        "secondary": [
+          {
+            "projection": {
+              "expectedRows": 22,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 22
+            },
+            "sampleId": 6374724,
+            "selection": {
+              "matchedIds": [
+                "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+                  "id": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel",
+                  "line": 41,
+                  "symbols": [
+                    "BindingModel"
+                  ]
+                }
+              ],
+              "selector": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 52,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 52
+            },
+            "sampleId": 6391534,
+            "selection": {
+              "matchedIds": [
+                "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/SimpleValueProperty.java",
+                  "id": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty",
+                  "line": 54,
+                  "symbols": [
+                    "SimpleValueProperty"
+                  ]
+                }
+              ],
+              "selector": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 11,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 11
+            },
+            "sampleId": 6406137,
+            "selection": {
+              "matchedIds": [
+                "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSSValueListImpl.java",
+                  "id": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl",
+                  "line": 24,
+                  "symbols": [
+                    "CSSValueListImpl"
+                  ]
+                }
+              ],
+              "selector": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl",
+              "status": "resolved"
+            }
+          },
+          {
+            "projection": {
+              "expectedRows": 19,
+              "explicitIdsAvailable": false,
+              "extra": [],
+              "fullDisplayedTriplesMatch": true,
+              "missing": [],
+              "returnedRows": 19
+            },
+            "sampleId": 6413795,
+            "selection": {
+              "matchedIds": [
+                "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto"
+              ],
+              "returnedAnchors": [
+                {
+                  "file": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/dialogs/DeprecatedUIWizardsAuto.java",
+                  "id": "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto",
+                  "line": 45,
+                  "symbols": [
+                    "DeprecatedUIWizardsAuto"
+                  ]
+                }
+              ],
+              "selector": "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto",
+              "status": "resolved"
+            }
+          }
+        ],
+        "tool": "graphify"
+      }
+    ],
+    "schema": "compass.mlcq-hub-verification/1",
+    "scorerSha256": "efecb4fe026e464addb385c312766b5f58fbf8b4cb8b47eb3d43409602511202",
+    "verifiedToolCalls": 18,
+    "verifierSha256": "1a561ceede49bc03b5de7d8dc240814afbb3f95f085aeb70e652ae93f6f29190"
+  },
+  "coverageDisclosure": {
+    "graphifyCloudStackSkippedSqlFiles": 119,
+    "missingOptionalDependency": "tree_sitter_sql",
+    "otherFilesWithSyntaxErrors": 3,
+    "sourceLog": "mlcq-god-audit-01/graphs/apache-cloudstack/graphify.stderr",
+    "sourceLogSha256": "5cc985f15fbdf37e6b6af1b427f317f0c8efba81984873e626ce209c149e73dc",
+    "interpretation": "The frozen Graphify installation reported skipping all SQL files and partially extracting other files with syntax errors. Whole-repository request scope did not yield equal emitted language coverage. No environment, graph, admission outcome or query score is changed by this disclosure."
+  }
+}

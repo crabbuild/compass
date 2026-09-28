@@ -174,7 +174,7 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
                     ("max_hops", json!(0))
                 ])
             )
-            .contains("Path exceeds max_hops=0")
+            .contains("No path found within max_hops=0")
     );
     assert!(
         server
@@ -306,6 +306,46 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
         .call_tool(CallToolRequestParams::new("graph_stats"))
         .await?;
     assert!(!call.content.is_empty());
+    let hubs = client
+        .call_tool(CallToolRequestParams::new("god_nodes"))
+        .await?;
+    assert!(!hubs.content.is_empty());
+    let structured = hubs.structured_content.ok_or("missing structured hubs")?;
+    assert_eq!(structured["result"]["schema"], "compass.mcp.hubs/1");
+    assert!(structured["result"]["nodes"].as_array().is_some());
+    assert_eq!(
+        structured["result"]["nodes"][0]["connectivity"]["schema"],
+        "compass.hub-connectivity/1"
+    );
+    assert!(structured["result"]["nodes"][0]["connectivity"]["edgeRecords"].is_u64());
+    let neighbors = client
+        .call_tool(
+            CallToolRequestParams::new("get_neighbors").with_arguments(args(&[
+                ("label", json!("a")),
+                ("relation_filter", json!("calls")),
+            ])),
+        )
+        .await?;
+    let neighbors = neighbors
+        .structured_content
+        .ok_or("missing neighbor identities")?;
+    assert_eq!(neighbors["result"]["schema"], "compass.query.neighbors/1");
+    assert_eq!(neighbors["result"]["neighbors"][0]["node"]["id"], "b");
+    assert_eq!(
+        neighbors["result"]["neighbors"][0]["edges"][0]["source"],
+        "a"
+    );
+    assert_eq!(neighbors["transportTruncation"]["truncated"], false);
+    let path = client
+        .call_tool(
+            CallToolRequestParams::new("shortest_path")
+                .with_arguments(args(&[("source", json!("a")), ("target", json!("b"))])),
+        )
+        .await?;
+    let path_result = path.structured_content.ok_or("missing structured path")?;
+    assert_eq!(path_result["result"]["schema"], "compass.mcp.path/1");
+    assert_eq!(path_result["result"]["nodes"][0]["id"], "a");
+    assert_eq!(path_result["result"]["steps"][0]["target"], "b");
     assert!(
         client
             .read_resource(ReadResourceRequestParams::new("compass://report"))

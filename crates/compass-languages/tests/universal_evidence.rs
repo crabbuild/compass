@@ -1594,6 +1594,126 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
 }
 
 #[test]
+fn go_struct_named_fields_have_distinct_exact_declarations_and_owners()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"package sample
+
+type Embedded struct{}
+type Store struct {
+    First, Second int
+    Embedded
+    Nested struct { Inner int }
+    _ string
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source_combined(
+        std::path::Path::new("/repo/sample/example.go"),
+        "sample/example.go",
+        source,
+    )?;
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .ok_or("missing Go evidence")?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let store = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "struct" && declaration.name == "Store")
+        .ok_or("missing Store")?;
+    let mut fields = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "field")
+        .collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.name.cmp(&right.name));
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.range.start_line))
+            .collect::<Vec<_>>(),
+        [("First", 5), ("Nested", 7), ("Second", 5)]
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.graph_node_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    for field in fields {
+        assert_eq!(
+            field.qualified_name,
+            format!("sample.Store::{}", field.name)
+        );
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == store.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(field.id.as_str())
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn go_field_contacts_keep_receiver_type_source_site_and_shadowing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"package sample
+type Store struct { Count int; Run func() }
+type Other struct { Count int }
+func (s *Store) Read(other *Store) {
+    s.Count++
+    _ = other.Count
+    s.Run()
+    { s := &Other{}; _ = s.Count }
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source_combined(
+        std::path::Path::new("/repo/sample/access.go"),
+        "sample/access.go",
+        source,
+    )?;
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .ok_or("missing Go evidence")?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let occurrences = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::MemberAccess)
+        .collect::<Vec<_>>();
+    let mut sites = occurrences
+        .iter()
+        .map(|occurrence| (occurrence.spelling.as_str(), occurrence.range.start_line))
+        .collect::<Vec<_>>();
+    sites.sort();
+    assert_eq!(sites, [("Count", 5), ("Count", 6), ("Count", 8)]);
+    for (line, expected) in [
+        (5, "sample.Store::Count"),
+        (6, "sample.Store::Count"),
+        (8, "sample.Other::Count"),
+    ] {
+        let occurrence = occurrences
+            .iter()
+            .find(|occurrence| occurrence.range.start_line == line)
+            .ok_or("missing field occurrence")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::AccessesMember
+                && candidate.occurrence_id.as_deref() == Some(occurrence.id.as_str())
+                && candidate.constraints.qualified_name.as_deref() == Some(expected)
+                && candidate.constraints.allowed_target_kinds == ["field"]
+                && !candidate.constraints.allow_external
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn go_emits_direct_and_grouped_aliases_with_closure_signature_references() {
     let source = br#"package sample
 
@@ -1912,5 +2032,87 @@ fn direct_evidence_ids_and_partial_diagnostics_are_deterministic() {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
+    );
+}
+
+#[test]
+fn go_control_receiver_evidence_uses_the_nearest_binding_and_factory_identity() {
+    let source = br#"package sample
+type Good struct{}
+func (*Good) Run() {}
+type Bad struct{}
+func (*Bad) Run() {}
+func Factory() *Good { return nil }
+func caller(current *Bad, Factory func() *Bad, value any) {
+    if current := Factory(); current != nil { current.Run() } // unknown
+    { var current any; current.Run() } // unknown
+    switch current := value.(type) { case *Good: current.Run() } // unknown
+    current.Run() // sample.Bad::Run
+}
+func direct(current *Bad, values []*Good) {
+    if current := Factory(); current != nil { current.Run() } // sample.Good::Run
+    switch current := Factory(); { default: current.Run() } // sample.Good::Run
+    for _, current := range values {
+        current.Run() // sample.Good::Run
+        { var current *Bad; current.Run() } // sample.Bad::Run
+        current.Run() // sample.Good::Run
+    }
+    current.Run() // sample.Bad::Run
+}
+"#;
+    let evidence = Engine::default()
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/receiver.go"),
+            "sample/receiver.go",
+            source,
+        )
+        .expect("extract Go receiver evidence")
+        .graph
+        .semantic_evidence
+        .expect("Go evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid evidence");
+    for occurrence in evidence
+        .occurrences
+        .iter()
+        .filter(|o| o.spelling == "Run" && o.role == SemanticRole::Call)
+    {
+        let line = std::str::from_utf8(source)
+            .expect("source")
+            .lines()
+            .nth(usize::try_from(occurrence.range.start_line - 1).expect("line index"))
+            .expect("source line");
+        let expected = line.rsplit_once("// ").expect("reviewed call").1;
+        let candidate = evidence
+            .candidates
+            .iter()
+            .find(|c| c.occurrence_id.as_deref() == Some(&occurrence.id))
+            .expect("candidate");
+        if expected == "unknown" {
+            assert!(
+                candidate.constraints.qualified_name.is_none(),
+                "{line}: {candidate:?}"
+            );
+            assert!(
+                candidate.binding_id.is_none(),
+                "{line}: must not reuse outer receiver or factory"
+            );
+        } else {
+            assert_eq!(
+                candidate.constraints.qualified_name.as_deref(),
+                Some(expected),
+                "{line}"
+            );
+        }
+        let start = usize::try_from(occurrence.range.start_byte).expect("start");
+        let end = usize::try_from(occurrence.range.end_byte).expect("end");
+        assert_eq!(&source[start..end], b"current.Run");
+    }
+    assert_eq!(
+        evidence
+            .occurrences
+            .iter()
+            .filter(|o| o.spelling == "Run" && o.role == SemanticRole::Call)
+            .count(),
+        10
     );
 }

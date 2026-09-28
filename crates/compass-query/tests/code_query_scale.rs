@@ -124,6 +124,7 @@ fn enterprise_queries_stay_within_in_process_ceiling() -> Result<(), Box<dyn std
     limits.max_depth = 128;
     let trail_started = Instant::now();
     let trail = engine.node_trail(NodeTrailRequest {
+        calls_only: false,
         source: "scale::f00000".to_owned(),
         target: "scale::f00128".to_owned(),
         include_heuristic: false,

@@ -1,0 +1,163 @@
+{
+  "schema": "compass.java-varargs-diagnostic/1",
+  "scope": "Post-jsoup-output Java varargs development reduction; expected signatures and overload targets derive from this compiler-valid source before inspecting the diagnostic graph. No comparative score.",
+  "productionBinarySha256": "04eab05bd5bbc94f3f0f86580bdd3de9950599bc9e548b8f8ba95791b8baa0c9",
+  "sourceSha256": "2581dc8bb5b39948aee5df49900307a321460bf380d56daccbc9b401e9c0cd63",
+  "policySha256": "d07f29d1636932ea8ed6c108519fb7deb0d7dc20f1b0c87d3a68394cb12562e8",
+  "graphSha256": "881ea26d715768179c6ae3648eb961dbef5fd574a3b0ef29afd76a729016e2ff",
+  "javacVersion": "javac 17.0.8.1",
+  "javapSha256": "d79f5f02a538d36bfbafdcc34e32cd26d8caf221aa7dbe13341f3ab092f17020",
+  "compilerCheck": "javac succeeds; javap descriptors/call instructions independently support all five expected targets. Classes were not executed.",
+  "declarations": [
+    {
+      "id": "sha256:351c542ad2e232f2ea0d17b89768c59fe7f477ecb4494ad2c33d9df5696eed24",
+      "line": 8,
+      "expected": "arrays(String[],int[])",
+      "actual": "arrays(String[],int[])",
+      "matched": true
+    },
+    {
+      "id": "sha256:42e6c1d161fe53865950740560f34b0dcf3594f05a79debcadff1c9b3f13ad52",
+      "line": 5,
+      "expected": "join(int...)",
+      "actual": "join()",
+      "matched": false
+    },
+    {
+      "id": "sha256:7273808751d5af1d86f5092e42120e07b56175d8d307cb0d312c3b7b7cef3677",
+      "line": 7,
+      "expected": "prefixed(String,String...)",
+      "actual": "prefixed(String)",
+      "matched": false
+    },
+    {
+      "id": "sha256:8123f7ec5f2331101c918c18bb9399669ffab56f3a843eeb9d8083b6890cb0df",
+      "line": 4,
+      "expected": "join(String...)",
+      "actual": "join()",
+      "matched": false
+    },
+    {
+      "id": "sha256:d066b45429219b124cf01c557aa12350030de07430407cadaa3675b709f80f5b",
+      "line": 6,
+      "expected": "join(boolean)",
+      "actual": "join(boolean)",
+      "matched": true
+    }
+  ],
+  "calls": [
+    {
+      "caller": "text",
+      "callerId": "sha256:29868b4674ae3182cf0cd3c42560a1ce91f690b36c865f90b9be795dd947a3d0",
+      "expectedTargetLine": 4,
+      "matched": false,
+      "actualEdges": []
+    },
+    {
+      "caller": "numbers",
+      "callerId": "sha256:f9f687138af8cd065ddeabbce57e96f6d6167c755068facc1e35d2d233e49bb5",
+      "expectedTargetLine": 5,
+      "matched": false,
+      "actualEdges": []
+    },
+    {
+      "caller": "flag",
+      "callerId": "sha256:b9acf75cf87d34702e50e4b3f4662a52f46a3bdf390d1a823a9f450d9c65d603",
+      "expectedTargetLine": 6,
+      "matched": true,
+      "actualEdges": [
+        {
+          "id": "sha256:f383ed947b1c6c09363fc97746ff511578a8f5fa0f11077784dc174c5c3c71ae",
+          "target": "sha256:d066b45429219b124cf01c557aa12350030de07430407cadaa3675b709f80f5b",
+          "targetLine": 6,
+          "site": {
+            "file": "VarargsDemo.java",
+            "startByte": 518,
+            "endByte": 522,
+            "startLine": 11,
+            "startColumn": 34,
+            "endLine": 11,
+            "endColumn": 38
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.resolve.java.universal",
+              "confidence": "exact",
+              "rule": "universal-call-exact-lexical-declaration",
+              "anchors": [
+                {
+                  "file": "VarargsDemo.java",
+                  "startByte": 518,
+                  "endByte": 522,
+                  "startLine": 11,
+                  "startColumn": 34,
+                  "endLine": 11,
+                  "endColumn": 38
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caller": "explicitArray",
+      "callerId": "sha256:a603dc4fd8be2f3032f4da006d2a519b5dab3369a9a659418f4f572c68a8a4ab",
+      "expectedTargetLine": 4,
+      "matched": false,
+      "actualEdges": []
+    },
+    {
+      "caller": "mixed",
+      "callerId": "sha256:7e5a305a9c07d2bb49f922cd757f4c094667bb90bae191b53a14fd1efd507d74",
+      "expectedTargetLine": 7,
+      "matched": true,
+      "actualEdges": [
+        {
+          "id": "sha256:879485c67e8b7c9f6b104dc531cf819a1938e46e47e1833172caa8f0bea8e383",
+          "target": "sha256:7273808751d5af1d86f5092e42120e07b56175d8d307cb0d312c3b7b7cef3677",
+          "targetLine": 7,
+          "site": {
+            "file": "VarargsDemo.java",
+            "startByte": 643,
+            "endByte": 651,
+            "startLine": 13,
+            "startColumn": 35,
+            "endLine": 13,
+            "endColumn": 43
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.resolve.java.universal",
+              "confidence": "exact",
+              "rule": "universal-call-explicit-binding",
+              "anchors": [
+                {
+                  "file": "VarargsDemo.java",
+                  "startByte": 643,
+                  "endByte": 651,
+                  "startLine": 13,
+                  "startColumn": 35,
+                  "endLine": 13,
+                  "endColumn": 43
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "findings": [
+    "Both varargs-only join signatures omit their parameter types; prefixed omits its trailing spread parameter. Boolean and ordinary array signatures are preserved.",
+    "The graph preserves only two of five source/compiler-supported calls: flag and mixed. String, integer and explicit-array overload calls are missing. No wrong target is emitted for those three in this reduction.",
+    "java_parameter_signature and collect_java_parameter_type_nodes only read child_by_field_name(type); spread_parameter can lack that field. This is a code-inspection hypothesis until AST/native regression confirms the exact grammar shape."
+  ],
+  "inspectionCorrection": "Initial inspection looked for a top-level signature field. Corrected inspection reads details.data.signature; no claim that all signatures are absent.",
+  "status": "Historical before-fix diagnostic; preserved failures. See followupReview for the subsequent native correction and repeated development comparison.",
+  "artifactRoot": "java-varargs-diagnostic",
+  "sourceFixture": "benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java",
+  "followupReview": "java_varargs_development_review.json"
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "compass.agent-query-replay/1",
+  "repository": "sharkdp/fd",
+  "sourceCommit": "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5",
+  "sourceFile": "src/exec/mod.rs",
+  "sourceFileSha256": "bd1aa5927c74a583c57ae7c49b160df28eaa5b543685fec3a06be0e417dea620",
+  "registrationSha256": "34cddd72fb17386bfe29d42e1fd8c3e9f0683a9b16ddd06500492b93cb273721",
+  "runnerSha256": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "baselineRun": "fd-shadow-02",
+  "replayRun": "fd-result-vec-03",
+  "compassBinarySha256": "da2c565517ea7976b42540d242c060eee578dd61d2e9bd194ab7f25c7de02781",
+  "baselineCompassGraphSha256": "70eb55937cc7c92d250a3a102d6af8153aa0a2966f64d76ba7490be88d5deb04",
+  "replayCompassGraphSha256": "d4b858b6128a1a696b4542876e48ce546c984f23e342eeeb48b609b4b2781be6",
+  "graphifyGraphSha256": "f75a8fd15c6a4db40e7f7464d7c68a5530f9425c47c732a49a379e1b00cb7e69",
+  "selectedTextOracles": {
+    "baselineCompass": "11/12",
+    "replayCompass": "12/12",
+    "graphify": "9/12",
+    "scope": "One known Rust repository and 12 previously registered questions; not a whole-graph or held-out accuracy estimate"
+  },
+  "addedSourceReviewedCalls": [
+    {"caller": "CommandSet::execute", "callee": "CommandTemplate::generate", "line": 86},
+    {"caller": "CommandSet::execute_batch", "callee": "CommandBuilder::push", "line": 104},
+    {"caller": "CommandSet::execute_batch", "callee": "CommandBuilder::finish", "line": 111},
+    {"caller": "CommandSet::execute_batch", "callee": "CommandBuilder::exit_code", "line": 116},
+    {"caller": "CommandTemplate::generate", "callee": "FormatTemplate::generate", "line": 267},
+    {"caller": "tests::generate_str", "callee": "FormatTemplate::generate", "line": 283}
+  ],
+  "removedCalls": 0,
+  "additionalReferenceKeysWithoutIndependentPrecisionReview": 213,
+  "knownGraphifyWrongConstructor": {
+    "line": 97,
+    "sourceTarget": "CommandBuilder::new",
+    "graphifyTarget": "CommandTemplate::new",
+    "textOraclePassRetained": true
+  }
+}

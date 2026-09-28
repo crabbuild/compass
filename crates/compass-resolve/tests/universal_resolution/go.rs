@@ -1,4 +1,34 @@
 #[test]
+fn go_returned_callback_invocation_does_not_reference_receiver_type() {
+    let source = br#"package pkg
+type Command struct{}
+func (*Command) Callback() func() { return nil }
+func caller(command *Command) {
+    command.Callback()()
+}
+"#;
+    let extracted = extract("pkg/callback.go", source);
+    let sources = HashMap::from([(
+        "pkg/callback.go".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let callback = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Command::Callback")
+        .expect("callback factory declaration");
+    let site_edges: Vec<_> = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("source_location") == "L5")
+        .collect();
+    assert_eq!(site_edges.len(), 1, "only the inner factory call is known");
+    assert_eq!(site_edges[0].target, callback.id);
+    assert_eq!(site_edges[0].string("relation"), "calls");
+}
+
+#[test]
 fn go_closures_resolve_typed_parameters_and_captured_receivers() {
     let go_source = br#"package pkg
 import "io/fs"
@@ -573,4 +603,218 @@ func (body *Body) Encode() {
     assert!(resolved.edges.iter().all(|edge| {
         edge.string("relation") != "calls" || edge.string("source_location") != "L6"
     }));
+}
+
+#[test]
+fn go_field_accesses_resolve_only_source_proven_named_targets() {
+    let types = br#"package pkg
+type Logger struct{}
+type Store struct { Count int; Logger *Logger }
+type Other struct { Count int }
+"#;
+    let methods = br#"package pkg
+func (s *Store) Read(other *Store) {
+    s.Count++
+    _ = other.Count
+    s.Touch()
+    { s := &Other{}; _ = s.Count }
+    _ = s.Missing
+    _ = s.Logger
+}
+func (s *Store) Touch() {}
+"#;
+    let extracted = [
+        extract("pkg/types.go", types),
+        extract("pkg/methods.go", methods),
+    ];
+    let sources = HashMap::from([(
+        "pkg/methods.go".to_owned(),
+        String::from_utf8(methods.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&extracted, &sources);
+    let read = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Read")
+        .expect("Store.Read declaration");
+    let store_count = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Count")
+        .expect("Store.Count declaration");
+    let other_count = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Other::Count")
+        .expect("Other.Count declaration");
+    let store_logger = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Logger")
+        .expect("Store.Logger declaration");
+    let accesses = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "accesses" && edge.source == read.id)
+        .map(|edge| (edge.string("source_location"), edge.target.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        accesses,
+        std::collections::BTreeSet::from([
+            ("L3".to_owned(), store_count.id.clone()),
+            ("L4".to_owned(), store_count.id.clone()),
+            ("L6".to_owned(), other_count.id.clone()),
+            ("L8".to_owned(), store_logger.id.clone()),
+        ])
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "accesses"
+            || (edge.string("source_location") != "L5"
+                && edge.string("source_location") != "L7")
+    }));
+}
+
+#[test]
+fn go_imported_receiver_without_a_field_declaration_stays_unresolved() {
+    let source = br#"package pkg
+import ext "example.com/ext"
+func Use(value *ext.External) { _ = value.Field }
+"#;
+    let extracted = extract("pkg/external.go", source);
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .expect("Go universal evidence");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("example.com/ext.External::Field")
+            && !candidate.constraints.allow_external
+    }));
+    let sources = HashMap::from([(
+        "pkg/external.go".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "accesses" || edge.string("source_location") != "L3"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "example.com/ext.External::Field"
+    }));
+}
+
+
+#[test]
+fn go_control_initializers_resolve_occurrences_without_leaking_shadowed_types() {
+    let definitions = br#"package pkg
+type Runner interface { Run() }
+type Good struct{}
+func (*Good) Run() {}
+type Bad struct{}
+func (*Bad) Run() {}
+func Factory() *Good { return nil }
+func Other() *Bad { return nil }
+"#;
+    let source = br#"package pkg
+func Use(current *Bad, Factory func() Runner) {
+    current.Run() // bad
+    if current := Other(); current != nil {
+        current.Run() // bad
+    }
+    if current := Factory(); current != nil {
+        current.Run() // unknown callback
+    }
+    current.Run() // bad
+}
+func Direct(current *Bad) {
+    if current := Factory(); current != nil {
+        current.Run() // good
+        current.Run() // good
+    } else {
+        current.Run() // good
+    }
+    current.Run() // bad
+    switch current := Factory(); {
+    default: current.Run() // good
+    }
+    for current := Factory(); current != nil; {
+        current.Run() // good
+        break
+    }
+    {
+        current := Factory()
+        current.Run() // good
+        callback := func(current *Bad) { current.Run() } // bad
+        _ = callback
+    }
+    current.Run() // bad
+}
+"#;
+    let inputs = vec![
+        extract("pkg/definitions.go", definitions),
+        extract("pkg/caller.go", source),
+    ];
+    let sources = HashMap::from([
+        (
+            "pkg/definitions.go".to_owned(),
+            String::from_utf8(definitions.to_vec()).expect("definitions"),
+        ),
+        (
+            "pkg/caller.go".to_owned(),
+            String::from_utf8(source.to_vec()).expect("caller"),
+        ),
+    ]);
+    let first = compass_resolve::resolve(&inputs, &sources);
+    let second = compass_resolve::resolve(&[inputs[1].clone(), inputs[0].clone()], &sources);
+    assert_eq!(universal_edges(&first), universal_edges(&second));
+    let good = first
+        .nodes
+        .iter()
+        .find(|n| n.string("qualified_name") == "pkg.Good::Run")
+        .expect("Good.Run");
+    let bad = first
+        .nodes
+        .iter()
+        .find(|n| n.string("qualified_name") == "pkg.Bad::Run")
+        .expect("Bad.Run");
+    for (index, line) in std::str::from_utf8(source)
+        .expect("source")
+        .lines()
+        .enumerate()
+    {
+        let expected = if line.ends_with("// good") {
+            Some(&good.id)
+        } else if line.ends_with("// bad") {
+            Some(&bad.id)
+        } else {
+            None
+        };
+        if !line.contains(".Run()") {
+            continue;
+        }
+        let calls = first
+            .edges
+            .iter()
+            .filter(|e| {
+                e.string("relation") == "calls"
+                    && e.string("source_file") == "pkg/caller.go"
+                    && e.string("source_location") == format!("L{}", index + 1)
+            })
+            .collect::<Vec<_>>();
+        let matches = calls
+            .iter()
+            .filter(|e| e.target == good.id || e.target == bad.id)
+            .collect::<Vec<_>>();
+        if let Some(target) = expected {
+            assert_eq!(matches.len(), 1, "line {}: {line}; {matches:?}", index + 1);
+            assert_eq!(&matches[0].target, target, "line {}: {line}", index + 1);
+            assert!(matches[0].string("extractor").contains(".universal"));
+        } else {
+            assert!(
+                matches.is_empty(),
+                "callback must not select a same-named factory: {matches:?}"
+            );
+        }
+    }
 }

@@ -43,6 +43,18 @@ turns those cases into inferred relationships. A producer-version or capability
 change invalidates this decision and must return the affected entry to
 `Qualifying` until a new release decision is reviewed.
 
+The Go producer emits exact named direct struct-field declarations and
+ownership candidates, including each name in a grouped declaration. This
+does not include embedded, blank, or nested anonymous-struct fields as direct
+named members of the outer struct. Go selector expressions outside direct call
+targets also emit exact `MemberAccess` occurrences. A receiver with a bounded
+source type emits an `AccessesMember` candidate constrained to the exact
+owner-qualified field declaration. Missing or ambiguous fields remain
+unresolved; method selectors are excluded. Resolved graph v1 contacts appear
+as `references` with member-access provenance. These are structural contacts,
+not read/write or runtime-alias conclusions. Disposable AST cache version 13
+invalidates older extraction facts.
+
 ## Evidence contract
 
 The serialized evidence schema is `compass.languages.evidence/2`. The
@@ -118,7 +130,12 @@ collections:
   boxing/unboxing, array, complete source-hierarchy, and stable core-Java
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
-  remains unresolved.
+  remains unresolved. Java checks strict fixed-arity applicability before
+  boxing/unboxing, and both fixed-arity phases before varargs expansion. A
+  spread declaration participates in fixed-arity phases with its declared
+  array type. Expanded specificity requires comparable parameter vectors;
+  differing fixed-prefix lengths remain ambiguous. This bounded source model
+  does not implement compiler-level generic inference.
   The TypeScript/JavaScript producer represents a tagged
   template (``tag`text ${value}``) as a call with occurrence context
   `tagged_template` (or `tagged_member` for a member tag). Its bounded argument
@@ -192,6 +209,38 @@ repository-local receiver unless a source declaration or explicit import
 proves that ownership. Unshadowed `Option` and `Result` use their canonical
 standard-library identities; other unproven spellings remain unresolved
 rather than becoming crate-qualified placeholders.
+
+Rust value lookup preserves unknown local bindings as shadowing boundaries.
+Loop patterns, closure parameters, match patterns/guards, and conditional-let
+bindings cannot reuse an outer parameter alias. Let initializers retain the
+previous binding, and condition bindings end before an else branch. An unknown
+inner receiver retains its source occurrence and unresolved candidate instead
+of acquiring an invented target. This correctness correction keeps the existing
+producer capability contract; AST cache semantics version 3 prevents reuse of
+facts produced before it.
+
+For an explicitly typed standard `Result<Vec<_>>`, Rust evidence can infer the
+vector element from a direct `collect()` over a standard vector `iter().map`
+closure whose associated constructor declares standard `Result<Self>`. A
+matching unshadowed `Ok` arm then carries that vector type into whole-value
+loop bindings and standard `iter().map` closure parameters. Each method call
+still requires a unique source owner. Custom collection aliases, unsupported
+iterator shapes, and ambiguous methods retain unresolved occurrences. AST
+cache version 11 refreshes earlier facts without changing the producer's
+version-2 capability identity.
+
+Java method-call candidates can derive their receiver from direct named object
+creation, including fully qualified types and parenthesized forms. The method
+occurrence remains the exact method-name span, and the existing argument vector
+selects among overloads. The producer unwraps at most seven parenthesis levels;
+deeper forms retain an unresolved candidate. This bounded inference limit is
+not evidence that no call exists. Anonymous classes, enclosing-instance
+creation, arrays, casts, and unproven chained results do not acquire a target
+from punctuation-stripped expression text. Enclosing-instance construction
+retains its receiver qualifier and stays unresolved without owner evidence,
+even if a same-named class is imported. AST cache semantics version 5 prevents
+reuse of the previous extraction; producer capabilities and schemas are
+unchanged.
 
 Rust producer version 2 follows fields through source-proven standard-library
 `Arc`, `Rc`, and `Box` dereference wrappers and carries a unique source-visible
@@ -450,6 +499,19 @@ literal result must not become a `returns` contract on that enclosing function
 or file; publishing such an edge would invent a return contract and can create
 an invalid file-to-type relationship. Named functions, methods, and interface
 methods continue to publish their result types as `returns` evidence.
+
+Go selector receivers follow the nearest supported lexical binding, including
+`if`, expression-switch, and loop initializers, block variables, range values,
+and closure parameters. Initializers are visible only after their declaration;
+control bindings do not escape their statement. An unknown nearer type blocks
+an outer parameter alias. Factory results require a source-resolved callable;
+a local callback or shadowed import cannot borrow a same-named global factory.
+Parameter/import bindings still carry project evidence for cross-file fields
+and return contracts. Type-switch aliases block outer types but case-specific
+narrowing remains unsupported. In `factory()()`, only the named inner factory
+call is eligible for resolution; the unnamed returned callback cannot borrow
+the factory receiver's type as its target. Receiver inference keeps its bounded
+depth and does not select methods solely because their terminal names match.
 
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
@@ -824,3 +886,65 @@ source-proven inherited members. Parser recovery diagnostics use bounded,
 nonempty source ranges even when Tree-sitter reports a zero-width missing token.
 Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.
+
+
+### Java field contacts
+
+Java fields and enum constants use the existing `MemberAccess` / `AccessesMember`
+contract. Qualified expressions allow field or enum-member targets; known
+unqualified values retain their declaration kind. Exact member-token ranges
+retain repeated uses. Unqualified names require a source-declared value after
+lexical lookup. The extraction index tracks block and loop exit, declaration order,
+parameters, lambda/catch/resource bindings, and local type-name shadowing.
+Declared nominal receivers, source-local field chains, arrays, casts, direct
+construction and single generic bounds may establish a target. Visible source
+types shadow imports and package prefixes, including nested type syntax.
+Qualified Java field lookup stops on absent or ambiguous receiver types before
+considering member availability; exact declaration evidence retains precedence. Simple pattern
+branches and abrupt guards retain proven scope; unsupported pattern flow masks
+possibly shadowed names. Scope traversal is capped at 64 ancestors and receiver
+inference at 16 steps. Lexical records use the existing binding capacity; crowded
+same-name scopes become unknown rather than requiring unbounded lookup.
+
+Graph v1 projects these contacts as `references` with member-access provenance.
+They are not read/write effects, runtime identities or cohesion judgments.
+Inherited fields, general access checking, cross-file field-type chains and
+unregistered local/anonymous class ownership remain unsupported. Unknown
+qualified receivers never select a same-named field. Schema and producer
+capabilities are unchanged; AST cache semantics version 10 rebuilds prior facts.
+
+Enum constants retain their enclosing enum as their nominal value type, even
+when they own a constant-specific body. Registered body methods and field
+initializers retain their declaration owners; body fields shadow the enclosing
+enum's values. The resolver admits a body-specific field only when the candidate
+scope descends from that exact enum-member owner, within the lookup budget.
+External enum values and static imports cannot select a body-specific field by
+its qualified spelling alone. Duplicate receiver declarations remain ambiguous.
+
+The Java resolver indexes nominal owners under their complete dotted source
+spelling as well as their canonical declaration identity. A dotted nominal
+receiver must identify one owner before member lookup; duplicate receiver or
+enclosing type declarations and package/type spelling collisions cannot be
+disambiguated by member availability. Owner candidates and enclosing-type
+lookups share a bounded nominal lookup budget. Exact source declaration evidence
+still takes precedence. This joins already established nominal types; it does
+not reinterpret value-expression chains as type names. Existing extraction facts
+and schema versions remain unchanged; stored graphs require rebuilding.
+
+Bare enum switch labels derive their target from the selector's nominal type,
+not a same-named field of the enclosing class. Candidates allow only enum-member
+targets; unknown selectors retain unresolved occurrences. This does not add
+integer-switch constant evaluation or general expression-result inference.
+Type parameters shadow same-named receiver types; visible source types retain
+precedence over imports. Unregistered local/anonymous bodies remain unsupported.
+
+### Rust field contacts
+
+Rust field expressions now emit `MemberAccess` occurrences and `AccessesMember`
+candidates under the existing `Members` capability. Candidates preserve the
+field identifier range, source owner, receiver spelling and bounded qualified
+receiver type when available. Targets are restricted to field declarations;
+unknown receivers remain unresolved, and method call selectors do not become
+field contacts. The existing graph projection emits `references` with
+member-access provenance. This is state-contact evidence, not read/write or alias
+analysis. Disposable AST semantics version 8 invalidates pre-access facts.

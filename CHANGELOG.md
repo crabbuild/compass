@@ -2,6 +2,189 @@
 
 ## Unreleased
 
+- Resolve source-proven Go field selectors to exact named struct fields and
+  publish occurrence-anchored references. Rebuild graphs to see the new edges;
+  disposable AST cache semantics advance to 13.
+
+- Publish explicit named Go struct fields as source-anchored field declarations
+  owned by their struct. Rebuild existing graphs to see the new nodes and hub
+  member counts; disposable AST cache semantics advance to 12.
+
+- Show stored direct-member and own-field reference counts for typed class and
+  struct hubs in MCP `god_nodes`, with ambiguous owners excluded and undirected
+  graphs left unavailable. Keep hub ranks unchanged; the counts are graph
+  evidence, not a god-object diagnosis.
+
+- Resolve a unique owner-qualified method such as `APIRoute.get_route_handler`
+  in typed callers, callees, impact and trail questions and the legacy
+  `explain`/`path` commands when the stored name includes a module prefix or
+  `::` separator. Preserve ambiguity, typed candidate bounds and exact-ID
+  precedence. Typed queries reject a nonexistent owner when the method name
+  exists under other owners.
+
+- Recover exact Rust calls through source-proven `Result<Vec<_>>` collection,
+  `Ok` match bindings, vector loops, and `iter().map` closure receivers. Keep
+  custom or ambiguous collection types unresolved and rebuild disposable AST
+  caches so older facts do not hide the new edges.
+
+- Bind disposable graph caches to bounded content digests and keep MCP graph
+  views coherent within a request. Detect equal-size replacements even when
+  modification times are preserved. Rebuild older graph caches automatically.
+
+- Resolve dotted Java nominal receiver names against canonical nested type
+  declarations for field and enum references. Preserve duplicate-owner and
+  package/type ambiguity, exact occurrence evidence and bounded lookup work.
+
+- Emit Java enum-constant references with exact occurrence evidence, selector-based
+  switch labels and registered constant-body ownership. Preserve field/value/type
+  shadowing and unresolved receivers; invalidate older disposable AST caches.
+
+- Cache fixed SQL read/write access patterns so statements reuse compiled
+  regular expressions.
+
+- Avoid repeated SQL statement-prefix scans for bytes that cannot begin a
+  dollar-quoted delimiter, preserving statement-sensitive identifier handling.
+
+- Add `node --calls-only`, MCP `get_node` `calls_only`, and explicit `ask`
+  call-path/call-chain syntax. Restrict traversal and direction/depth diagnostics
+  to call edges while retaining structural defaults and bounded-work semantics.
+
+- Add opt-in `explain --source-members --member-focus TEXT` to prioritize
+  normalized member-name matches within the existing shared source budget.
+  Preserve source order for ties, retain unmatched candidates and report the
+  lexical matches without claiming behavioral relevance.
+
+- Emit Java field-access references from bounded lexical scope and receiver
+  evidence, preserving shadowing, field identity and parallel source occurrences.
+  Invalidate prior AST caches; retain unsupported targets without name fallback.
+
+- Emit Rust field-access evidence for source-proven nominal receivers, preserving
+  exact occurrences and unknown or shadowed receiver outcomes. Publish qualified
+  field contacts as references without inventing read/write effects. Rebuild
+  graphs to refresh older AST caches.
+
+- Add `search --exact` and MCP `search_symbols` exact mode with optional
+  source file, declaration line and node-kind filters. Return all bounded exact
+  matches without lexical fallback; preserve ambiguity and incomplete lookup.
+
+- Add opt-in `explain --source-members` to retrieve callable implementations
+  through recorded containment, including nested types. Share one source-byte
+  budget, retain individual verification status, and report unavailable or
+  omitted members explicitly.
+
+- Label explanation excerpts without a stored source digest as unverified.
+  Preserve bounded source access and reject malformed or mismatching digests
+  instead of claiming that an anchor alone verifies current source.
+
+- Report incomplete directed trail searches when the depth frontier remains
+  unexplored, instead of inferring a direction mismatch from a shorter
+  undirected route. Preserve successful bounded paths and closed negatives;
+  retain incomplete status in exploration even when no path is returned.
+
+- Add exact destination identities and full relationship records to MCP neighbor
+  results, preserving source anchors, provenance, direction and parallel calls.
+  Bound adjacency work and response size; report exhaustion explicitly.
+
+- Resolve Rust method receivers reached through source-proven scalar indexes
+  into standard vectors, arrays, and slices, retaining field declaration scope
+  and each call occurrence. Preserve intermediate modules in qualified Rust
+  type paths instead of selecting a same-named outer type. Custom containers, ranges, unknown index types,
+  and shadowed collection names remain unresolved. Rebuild graphs to refresh
+  older AST caches.
+
+- Prefer exact IDs and symbol names for MCP neighbor navigation before broader
+  prefix/substring matches, while preserving genuine declaration ambiguity and
+  fuzzy fallback when no exact candidate exists.
+
+- Preserve literal compound identifiers in natural discovery questions ahead
+  of generic behavior matches, while retaining declaration collisions and
+  uncertainty from bounded name lookups.
+
+- Preserve Java varargs signatures, parameter array types, and explicit array
+  argument dimensions. Resolve supported overloads in strict, loose, then
+  variable-arity order, retaining ambiguity when evidence cannot select a
+  unique target. Rebuild graphs to refresh older AST caches.
+
+- Correct natural discovery help to report the 10,000 examined-relationship
+  default independently of the 128 returned-edge default. Runtime limits are
+  unchanged.
+
+- Resolve coincident export-binding and declaration name matches through exact
+  export evidence, improving symbol-based paths and relationship queries while
+  preserving genuine ambiguity and exact-ID selection. Traversal caches retain
+  the weakest relationship confidence and deferred state.
+
+- Resolve Java method receivers constructed directly at the call site,
+  including qualified types and bounded parentheses, while retaining overload
+  and occurrence evidence. Stop turning arbitrary receiver expressions into
+  invented external type names. Enclosing-instance construction no longer
+  selects an unrelated imported class. Rebuild older AST caches.
+
+- Resolve file-route parents from framework nesting conventions instead of
+  choosing a nearby module. Preserve layout, flat-route, index, pathless, and
+  non-nesting distinctions; retain ambiguous parents without inventing edges.
+  Pages Router, Astro, and HTTP endpoints no longer acquire automatic layout
+  parents from directory order. Rebuild graphs under framework semantics 8.
+
+- Restrict filesystem route hierarchy to recognized file-route conventions.
+  Independent programmatic routers no longer acquire containment edges merely
+  from shared receiver names and source directories, which could inflate hubs
+  and create unsupported navigation paths.
+
+- Resolve Go receivers introduced by `if` and switch initializers using their
+  source-proven factory results. Respect nearer locals, range bindings, and
+  closure parameters instead of borrowing an outer receiver type; do not
+  substitute a same-named package factory for a callback or attribute a returned
+  callback invocation to its factory's receiver type. Rebuild older AST caches.
+
+- Make ambiguous typed query headlines request exact node IDs without naming
+  a fallback subject or claiming no path. Include IDs for all retained
+  ambiguity candidates in text output.
+
+- Explain MCP hub candidates with node kind and bounded relation/direction
+  counts, preserving parallel records and distinguishing incident records from
+  ranking degree. Report omitted relation categories explicitly.
+
+- Require unique exact endpoints for MCP paths and return ambiguity candidates
+  instead of choosing by score. Explore within the requested hop bound using
+  shared work limits, prefer structural relations among equal-hop paths, and
+  include exact node/edge identities in structured responses.
+
+- Include exact node IDs and source locations in MCP hub results, with a
+  versioned structured projection for follow-up navigation. Describe hubs as
+  topology candidates rather than established design defects.
+
+- Preserve community IDs alongside labels in traversal caches, restoring MCP
+  community membership and statistics on typed graphs. Older disposable
+  traversal caches rebuild automatically.
+- Return candidate paths and IDs for ambiguous MCP neighbor lookups instead
+  of silently selecting one declaration.
+- Apply MCP neighbor relationship filters before grouping repeated neighbors,
+  preserving matching calls when another relation shares the same endpoints.
+
+- Preserve parsed `ask` operands in agent and text answers so headlines,
+  answer evidence, path endpoints, and follow-up actions describe the requested
+  symbols.
+- Match agent-answer subjects using the query engine's existing case and
+  function-label normalization, including names such as `convertSchema()`.
+
+- Prevent Rust local receiver bindings from inheriting shadowed outer parameter
+  types in lets, loops, closures, match arms/guards, and conditional lets.
+  Preserve initializer and else-branch scope, and rebuild older AST caches.
+
+- Fix weighted `path --max-depth` searches losing a feasible shorter prefix.
+  Search work exhaustion now fails explicitly instead of appearing disconnected.
+
+- Fix bounded weighted node trails: retain shorter prefixes when a cheaper
+  route exhausts the hop limit, and never admit a previously rejected node
+  without charging the traversal budget.
+
+- Respect explicit graph node kinds in topology analysis: method-shaped labels
+  and extensionless source files retain their structural candidates, and
+  explicitly typed files stay out of hub lists.
+
+- Make god-node ranking stable for equal-degree nodes, retain project
+  declarations whose names overlap library names, and omit isolated nodes.
 - Move theme selection into Graph settings, grouped with appearance controls.
   Separate layout and selection settings, collapse keyboard shortcuts, and keep
   theme settings available in every community overview design.

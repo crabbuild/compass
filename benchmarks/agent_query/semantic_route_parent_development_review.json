@@ -1,0 +1,819 @@
+{
+  "schema": "compass.semantic-route-parent-development-review/1",
+  "scope": "Repeated five-language development comparison and independently registered source-selected Next diagnostic. Neither is fresh held-out evidence or proof of general superiority.",
+  "runId": "semantic-route-parent-panel-a-01",
+  "suiteDigest": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "runnerDigest": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "tools": [
+    {
+      "binary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/semantic-route-parent-provenance/compass",
+      "binarySha256": "9efe548537b106c69d1da7a5ac7955e764e43103e0d1e4a754a3c1880c292bea",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30"
+    },
+    {
+      "binary": "/Users/haipingfu/.local/bin/graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67"
+    }
+  ],
+  "metrics": {
+    "compass": {
+      "text": {
+        "medianAnswerTokens": 148.0,
+        "medianFirstPageTokens": 148.0,
+        "medianWallMs": 462.0,
+        "passRate": 0.8364,
+        "passed": 46,
+        "questions": 55
+      },
+      "selectedSourceEdges": {
+        "relationshipPassed": 16,
+        "allOccurrencesPassed": 16,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 6,
+        "total": 10
+      }
+    },
+    "graphify": {
+      "text": {
+        "medianAnswerTokens": 104.0,
+        "medianFirstPageTokens": 75.0,
+        "medianWallMs": 166.0,
+        "passRate": 0.8364,
+        "passed": 46,
+        "questions": 55
+      },
+      "selectedSourceEdges": {
+        "relationshipPassed": 20,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      }
+    }
+  },
+  "panelProductionDelta": {
+    "chi": {
+      "removedNodeIds": 0,
+      "addedNodeIds": 0,
+      "changedNodes": 0,
+      "removedEdgeIds": 0,
+      "addedEdgeIds": 0,
+      "changedEdges": 0,
+      "beforeGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "afterGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5"
+    },
+    "click": {
+      "removedNodeIds": 0,
+      "addedNodeIds": 0,
+      "changedNodes": 0,
+      "removedEdgeIds": 0,
+      "addedEdgeIds": 0,
+      "changedEdges": 0,
+      "beforeGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "afterGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93"
+    },
+    "jsoup": {
+      "removedNodeIds": 0,
+      "addedNodeIds": 0,
+      "changedNodes": 0,
+      "removedEdgeIds": 0,
+      "addedEdgeIds": 0,
+      "changedEdges": 0,
+      "beforeGraphSha256": "8035487618e4e96af8b7cc668d92eaea9ee3ec2a831c486d20055bc808fa23f6",
+      "afterGraphSha256": "8035487618e4e96af8b7cc668d92eaea9ee3ec2a831c486d20055bc808fa23f6"
+    },
+    "redux": {
+      "removedNodeIds": 0,
+      "addedNodeIds": 0,
+      "changedNodes": 0,
+      "removedEdgeIds": 0,
+      "addedEdgeIds": 0,
+      "changedEdges": 0,
+      "beforeGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "afterGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b"
+    },
+    "walkdir": {
+      "removedNodeIds": 0,
+      "addedNodeIds": 0,
+      "changedNodes": 0,
+      "removedEdgeIds": 0,
+      "addedEdgeIds": 0,
+      "changedEdges": 0,
+      "beforeGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "afterGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177"
+    }
+  },
+  "performanceLimitation": "One shared-machine run with overlapping verification work. Latencies are descriptive, not a comparative performance win. Graphify hash attests launcher only, not its full environment.",
+  "shadcnDiagnostic": {
+    "commit": "a87a63b2ca25143d26c8bd0903e4e9bc77b3f824",
+    "sourceScope": "apps/v4/app plus package and TypeScript configuration; source-selected development diagnostic, not held out, not full repository qualification",
+    "files": 273,
+    "bytes": 1398028,
+    "registration": "Expected pairs recorded before inspecting either binary graph for this projection.",
+    "results": {
+      "before": {
+        "graphSha256": "06c4633cc9d6dd31147ee5930920f632e6249500171301b5e02dbfb647c3bc9f",
+        "nodes": 14762,
+        "edges": 21316,
+        "checks": [
+          {
+            "sourceFile": "apps/v4/app/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/layout.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:279ad634fee3cd57de2942c9a849667d3335ae139ce50078c65a8fd86f4f4e61"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": false
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/page.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:0f9e6cff50b2bc845dbf05d3b8645bd1aa63778f267769d5487f0a16e2150cd7"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/[...categories]/page.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:6d0244dae1b62062f05ff67b9f23a439533feaa9c571de7889e200a59ca53997"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/page.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/[...categories]/page.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/charts/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/colors/layout.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/examples/dashboard/page.tsx",
+            "targetFile": "apps/v4/app/(app)/examples/tasks/page.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          }
+        ],
+        "passed": 6,
+        "total": 7
+      },
+      "after": {
+        "graphSha256": "bf891990821aaef52ac8512dcc04d9f5fc7762a744d987823eb6c10ba77d657f",
+        "nodes": 14762,
+        "edges": 21307,
+        "checks": [
+          {
+            "sourceFile": "apps/v4/app/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/layout.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:279ad634fee3cd57de2942c9a849667d3335ae139ce50078c65a8fd86f4f4e61"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:2e8c788629fad70689771c5516055d5eabf914f548cd510774a854616a7319fd"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/page.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:0f9e6cff50b2bc845dbf05d3b8645bd1aa63778f267769d5487f0a16e2150cd7"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/[...categories]/page.tsx",
+            "expected": true,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [
+              "sha256:6d0244dae1b62062f05ff67b9f23a439533feaa9c571de7889e200a59ca53997"
+            ],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/blocks/page.tsx",
+            "targetFile": "apps/v4/app/(app)/blocks/[...categories]/page.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/charts/layout.tsx",
+            "targetFile": "apps/v4/app/(app)/colors/layout.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          },
+          {
+            "sourceFile": "apps/v4/app/(app)/examples/dashboard/page.tsx",
+            "targetFile": "apps/v4/app/(app)/examples/tasks/page.tsx",
+            "expected": false,
+            "sourceRouteCount": 1,
+            "targetRouteCount": 1,
+            "edgeIds": [],
+            "passed": true
+          }
+        ],
+        "passed": 7,
+        "total": 7
+      }
+    },
+    "removed": [
+      {
+        "id": "sha256:15176e79a2d4b491baab1723dbd53c4ce846a8aa4ac15a1c6498480a32296b6b",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(create)/init/route.ts",
+          "startByte": 0,
+          "endByte": 1920,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 67,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:268dbca6ec1676bfe144c88b8dc21c16510716f2fcc274559749ba6fcd9c2cb0",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 3907,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 128,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/api/search/route.ts",
+          "startByte": 0,
+          "endByte": 151,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:35e4b09f5e9d7ec5789ae5cc7e20074337bdd731b8cf8d4302783b602a8140ba",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/blocks/page.tsx",
+          "startByte": 0,
+          "endByte": 1068,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 43,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/blocks/layout.tsx",
+          "startByte": 0,
+          "endByte": 2078,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 80,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:4c7d7b2ea643ea4294ae4b8f0fbfd786abc96f003ea0e8156db150b8f4eb1275",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/(create)/init/route.ts",
+          "startByte": 0,
+          "endByte": 1920,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 67,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(create)/init/md/route.ts",
+          "startByte": 0,
+          "endByte": 882,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 30,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:4e519c58b5603bb494122ed2fe3b94499c4d133321aeed69e7caea404268ec7a",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/colors/page.tsx",
+          "startByte": 0,
+          "endByte": 446,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 18,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/colors/layout.tsx",
+          "startByte": 0,
+          "endByte": 2112,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 79,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:5693c412d16e91053c21598d7ec82b0685629700ab0267469d7235a944327b6b",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/(create)/create/loading.tsx",
+          "startByte": 0,
+          "endByte": 154,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(create)/create/layout.tsx",
+          "startByte": 0,
+          "endByte": 754,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 23,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:5ceffb5d4722f1333b88493a33a5f50faa10a90615a70c109438902c08d65c1a",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/llm/[[...slug]]/route.ts",
+          "startByte": 0,
+          "endByte": 1421,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 58,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:b399ea85d01d285ab598d99d49c44080f494e6c65b37681b966dd5afa737b9ef",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 3907,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 128,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/r/registries.json/route.ts",
+          "startByte": 0,
+          "endByte": 1818,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 66,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:b41f3e9218ffbab15d46d74f4ec347bd8bf0db083d65e6657c47c09118161bc2",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/(create)/init/route.ts",
+          "startByte": 0,
+          "endByte": 1920,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 67,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(create)/init/v0/route.ts",
+          "startByte": 0,
+          "endByte": 1285,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 45,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:ca60ee6b934f3f1cbac3cf8123284b7a119f85c01278344b63177bd2b2eb446c",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 3907,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 128,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/typeset.css/route.ts",
+          "startByte": 0,
+          "endByte": 543,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 21,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:e8cabf166d7d580a77ce85134330fc65819de4765366f436f6604ebdc4945492",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/(typeset)/typeset/loading.tsx",
+          "startByte": 0,
+          "endByte": 159,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 6,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(typeset)/typeset/layout.tsx",
+          "startByte": 0,
+          "endByte": 799,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 24,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:e9bb286bcda82d0c9b2e0e29237169ca36ca35e5e1ad033b89198f57f9ae2944",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 3907,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 128,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/og/route.tsx",
+          "startByte": 0,
+          "endByte": 3402,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 118,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:ff7a1144ac8915185c676676c772e66d08ee6687bc852eab3ed8472e043b11ce",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/layout.tsx",
+          "startByte": 0,
+          "endByte": 3907,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 128,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/rss.xml/route.ts",
+          "startByte": 0,
+          "endByte": 1303,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 45,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      }
+    ],
+    "added": [
+      {
+        "id": "sha256:2e8c788629fad70689771c5516055d5eabf914f548cd510774a854616a7319fd",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/blocks/layout.tsx",
+          "startByte": 0,
+          "endByte": 2078,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 80,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:93c266645b8ffd077f7c13d0cf52d3bc80e3b65070ec5676b0409f3259cb0974",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(create)/create/layout.tsx",
+          "startByte": 0,
+          "endByte": 754,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 23,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:bda10b102f9b54e0128eba4ec16dc4f1912aac605e9c300858d370cad5d643d7",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/colors/layout.tsx",
+          "startByte": 0,
+          "endByte": 2112,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 79,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      },
+      {
+        "id": "sha256:c5297dee9df67aa4cba652d6c21327317420c5ca218ec7f6657434b81234587f",
+        "kind": "contains",
+        "source": {
+          "file": "apps/v4/app/(app)/layout.tsx",
+          "startByte": 0,
+          "endByte": 526,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 16,
+          "endColumn": 0
+        },
+        "target": {
+          "file": "apps/v4/app/(app)/(typeset)/typeset/layout.tsx",
+          "startByte": 0,
+          "endByte": 799,
+          "startLine": 1,
+          "startColumn": 0,
+          "endLine": 24,
+          "endColumn": 0
+        },
+        "rule": "framework-route-hierarchy"
+      }
+    ],
+    "sourceHashes": {
+      "apps/v4/app/(app)/(create)/create/layout.tsx": {
+        "bytes": 754,
+        "sha256": "199daabcf33d69c31ee72b1d29ea9341b971df760dbfe0b49b6b670508e1ed6b",
+        "gitBlob": "51bc22a1d22570ca20b51fd14aac1e83a5aaa55f"
+      },
+      "apps/v4/app/(app)/(create)/create/loading.tsx": {
+        "bytes": 154,
+        "sha256": "c5959e1b8fb3c433111f2fe360760586e9bb3bfcbb424813570eae46d3a060ec",
+        "gitBlob": "0922185cff0aa5e5f554cca5d68d00717ba2d64c"
+      },
+      "apps/v4/app/(app)/(create)/init/md/route.ts": {
+        "bytes": 882,
+        "sha256": "5cbc9cdf08f08c092eb0e3bae9e645f0b08b45abae42d51edfe03e3c7d9494d8",
+        "gitBlob": "1b4f1129a88853ed31d6df774a56a378c9b7ceed"
+      },
+      "apps/v4/app/(app)/(create)/init/route.ts": {
+        "bytes": 1920,
+        "sha256": "0838621b8b2bbe90f0534790aa8259232d4d5792798ceea8e228b78322c58a20",
+        "gitBlob": "dc8eae9cbd63720fe461efe11cbe866123ceab7c"
+      },
+      "apps/v4/app/(app)/(create)/init/v0/route.ts": {
+        "bytes": 1285,
+        "sha256": "c61ede79717f2f1b49b12b72671d37f28cc651a346337268f7dc8c9819726951",
+        "gitBlob": "a8b0bc61fb0db58fddded97b9deecae57260dfb0"
+      },
+      "apps/v4/app/(app)/(typeset)/typeset/layout.tsx": {
+        "bytes": 799,
+        "sha256": "f09ab4e53dcb36d40b4f7a12019ae136146344863ac0f61a098829ecf32b8b08",
+        "gitBlob": "dbd826a44a05f7151298050fc211d3c69f6fb999"
+      },
+      "apps/v4/app/(app)/(typeset)/typeset/loading.tsx": {
+        "bytes": 159,
+        "sha256": "0382fac46d0c64a892227d2399d6b3e6db2dc947914931452298e19d939da49b",
+        "gitBlob": "8b50e3e79bf209fbb0e47d67f3a503a1e48e29e2"
+      },
+      "apps/v4/app/(app)/blocks/layout.tsx": {
+        "bytes": 2078,
+        "sha256": "6d4f4dca39fa0e5047d3bfae5783627f590e356982e40f983d100c3260a3d5da",
+        "gitBlob": "70a9e67d546496d7799b0064106ec03bbf87f975"
+      },
+      "apps/v4/app/(app)/blocks/page.tsx": {
+        "bytes": 1068,
+        "sha256": "248322276f09adb17ab7accfc2a869dcebd267d468c34dcca877b54d0597ccd1",
+        "gitBlob": "2fff179f0d318ea7b784f7dd4d338d41c111c6f9"
+      },
+      "apps/v4/app/(app)/colors/layout.tsx": {
+        "bytes": 2112,
+        "sha256": "32f230bd2572945b0a59b0df7ffeeda18ffe06be007e2c42fd2c6871fc19de7f",
+        "gitBlob": "4813f342a265048877497a90664156667c5f813e"
+      },
+      "apps/v4/app/(app)/colors/page.tsx": {
+        "bytes": 446,
+        "sha256": "55d52c1591df7e2fcd8504afd2f13e5d884209309bd7f463d78675078f624219",
+        "gitBlob": "be71657930192672d0342ebe3a04f2e3a7ec58cf"
+      },
+      "apps/v4/app/(app)/layout.tsx": {
+        "bytes": 526,
+        "sha256": "8efe40cc4f24659566fd9b47cd93d09d058d637b544725057b7e60c5f7291453",
+        "gitBlob": "ca5f8e14502fe7568cef8bc79925789b51ffdf7f"
+      },
+      "apps/v4/app/(app)/llm/[[...slug]]/route.ts": {
+        "bytes": 1421,
+        "sha256": "fef8ef73e8c6a97eceace445fc89683b4f69ed094a526e655f06b404afe952bb",
+        "gitBlob": "baa0eafa4fba2a32a2a98fbc123ffa427ce42cea"
+      },
+      "apps/v4/app/api/search/route.ts": {
+        "bytes": 151,
+        "sha256": "64ea20fbd34200da023c4dd88c204650509a12dcfcc3b592fa33e8d1e1f85aea",
+        "gitBlob": "3bafe9c5a2e3970d99fc097b373159c7ff13259b"
+      },
+      "apps/v4/app/layout.tsx": {
+        "bytes": 3907,
+        "sha256": "ae953cf25882c0cee17725a9da68a5a6fe255f6adc3d7629bbc39cf92063d3ab",
+        "gitBlob": "ade2f148715e346b18c844e010ae02fd9f15e624"
+      },
+      "apps/v4/app/og/route.tsx": {
+        "bytes": 3402,
+        "sha256": "8b69aa880c787f6d80055edbc8f612dc63fbeabbb971f94e8d5c979072192af2",
+        "gitBlob": "1710b3212c7e90541a5201cd3c7918bfdc65c4aa"
+      },
+      "apps/v4/app/r/registries.json/route.ts": {
+        "bytes": 1818,
+        "sha256": "3ef3d5b3391e3f67d1c6ed6037707b98869b80b4f52c20ee4606a72c32b05cf1",
+        "gitBlob": "a2f91a2dfc77129c4f895f319fdefd6a1668beda"
+      },
+      "apps/v4/app/rss.xml/route.ts": {
+        "bytes": 1303,
+        "sha256": "9a565f05e2345d4428074dfd21741301ed882f6fe67875fde5a6f308868448a8",
+        "gitBlob": "a83241a23baf8ffaed4854b3fa29f972a8885dfc"
+      },
+      "apps/v4/app/typeset.css/route.ts": {
+        "bytes": 543,
+        "sha256": "c8ce1feb7e038fb598d9b8081d734b1c7d1e08d138d0d2a887bc1cba865c9dc6",
+        "gitBlob": "e65708d44aa78c68dc568c1a325506a1ed47a3d0"
+      }
+    },
+    "sourceReview": "All 13 removed links inspected: 9 target HTTP route handlers, 2 page-to-layout reversals, 2 loading-to-layout reversals. Four added links connect AppLayout to nested layout modules which render children. This is an audit of this changed edge set, not a graph-wide precision estimate.",
+    "unchangedNodesExceptCommunity": true,
+    "unchangedCommonEdges": true,
+    "genericDeltaHelperLimitation": "The raw delta also records failures from an inapplicable fixture-only negative checker; those are not scored for this real source projection. The registered witness-results file is the diagnostic oracle.",
+    "reference": "https://nextjs.org/docs/app/getting-started/layouts-and-pages"
+  },
+  "artifactSha256": {
+    "runs/semantic-route-parent-panel-a-01/run.json": "fd990ebabbc950c1f4678e390e4b4d53425d7370cfb95e919db8735dc6fd4f07",
+    "semantic-route-parent-panel-a-path-audit-01.json": "7e00690db7fe2f929162d574db08c3097ed40cafb7b6fb789ec6d06416767125",
+    "semantic-route-parent-shadcn-diagnostic/source-review.json": "c2ae84bd110910638d38fda0d6d1078e157d9e529f7b317c62d9adb138004b19",
+    "semantic-route-parent-shadcn-diagnostic/witness-results.json": "3ded522ca70836326910d21f78897bba5ce5258578d458efa9b26b7bfa62c580",
+    "semantic-route-parent-shadcn-diagnostic/delta.json": "402428f15ee4da3bd21eca1e290c13659c9f0858899734c9e38010b79bc41c6d",
+    "semantic-route-parent-provenance/manifest.json": "06906ec5a324add01dee7fef9194972cab83e40d38a28cc18a869d3339da7789",
+    "semantic-route-parent-panel-a-chi-audit-01.json": "97260bd7333630dd078b069ab90347476c8916a564ba617168912dcae377e66f",
+    "semantic-route-parent-panel-a-click-audit-01.json": "44469c4b7f85d4d2f63334438e2f87bf877704922b6eedbdfb9db82d6b5252bd",
+    "semantic-route-parent-panel-a-jsoup-audit-01.json": "64bfb2053434959c62f64bfc9158d532441c204ff01289744e13091f4b18be22",
+    "semantic-route-parent-panel-a-redux-audit-01.json": "3245cb05a41d8de5d9eb23f98b7c96967ccd833f319be0249866027e27f2dd43",
+    "semantic-route-parent-panel-a-walkdir-audit-01.json": "08ce5010bc936dfcb5f5d76661bfefcfb7b1fb194b08714eecf802b26f55e3a7",
+    "semantic-route-parent-native-03.log": "1c2891fbb20b755cbf539a709ba201cb88eaef5095baba34350dbd124a30466c",
+    "semantic-route-parent-clippy-01.log": "23c46dfc9f6c9cbb620ba34e0db71c19bbb4abe80b26d20cffa56468b69caa07",
+    "semantic-route-parent-clippy-02.log": "ca46c5728557323cbc93705205a9f88d6bb98583b578e2b494ee01d768492a6f",
+    "semantic-route-parent-clippy-03.log": "fff5f30464d4f3ef197fa2e8ab93c1a1304fda11a03bfb079432b2a0c4a79218",
+    "semantic-route-parent-build-01.log": "6700369d26cb823392e539ac8a47c4d937fdf30db8c53bfac640d03ad3b282a7",
+    "semantic-route-parent-python-05.log": "f62958151715e26c01500d1393ad0e69837f6579714e0f99de70ef376313ce3d",
+    "semantic-route-parent-oracle-03.log": "42ca74749b922ec801cb27b67a4d6fd8576478696cf8271c44dc2d297fe7d5a4",
+    "semantic-route-parent-benchmark-tests-01.log": "c8bd418cb4120ed7a029b186d3ff1501dd56ff23ac1a065dfd27082b44903e4a",
+    "semantic-route-parent-boundary-01.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "semantic-route-parent-frontend-debug/result-02.json": "5333e65df4f3282f715aeb1e9dd0ff21c8013497e20e988eb84f7a5131f75c68",
+    "semantic-route-parent-qualification-01.log": "c7d420bc8df5baecb5f9e0898d9833621c8cd80e05493221a157c39f2ea0b54b",
+    "semantic-route-parent-qualification-02.log": "648dbf055cc6f5bdf73c8a92a7c7d1795b5c5479e98a94fb77ea5089912f39e9"
+  },
+  "verification": {
+    "native": {
+      "passed": 1436,
+      "failed": 0,
+      "ignored": 2,
+      "limitation": "Before final needless-borrow correction; final corrected production built and passed Clippy."
+    },
+    "scriptTests": 88,
+    "sourceOracleCases": 15,
+    "benchmarkTests": 97,
+    "frontendDebugCheck": "Passed source-oracle and explicit layout-pair checks on positive/negative fixtures; no repeat-build or release equivalence claimed by this standalone check.",
+    "fullQualification": "Passed: semantic-route-parent-qualification-02.log, session 64446 exit 0. Includes native scale, deterministic lifecycle, source semantic/topology/Markdown assertions and release frontend matrix/positive/negative/repeat-build checks. Qualifies production commit c20db15b, before the Java constructor-receiver change.",
+    "pinnedHierarchy": "Three historical hierarchy scorecards invalidated; independent source re-review remains required."
+  }
+}

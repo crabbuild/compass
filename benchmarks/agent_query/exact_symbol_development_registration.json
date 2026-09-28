@@ -1,0 +1,56 @@
+{
+  "schema": "compass.exact-symbol-development-registration/1",
+  "baselineCommit": "5131598e0ee06992c12a233656d2816cfd9cf977",
+  "scope": "Known five-language development subjects. Prior source and outputs have been inspected. Test explicit exact name/ID search with optional source file, declaration line and node-kind filters; no hidden selector substitutions or held-out claim.",
+  "sourceQuestions": "benchmarks/agent_query/responsibility_questions_panel_a.json",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "graphRun": "rust-index-receiver-03/run.json",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "tasks": [
+    {
+      "repository": "chi",
+      "symbol": "Mux",
+      "file": "mux.go",
+      "startLine": 21,
+      "kind": "struct"
+    },
+    {
+      "repository": "click",
+      "symbol": "_AtomicFile",
+      "file": "src/click/_compat.py",
+      "startLine": 455,
+      "kind": "class"
+    },
+    {
+      "repository": "jsoup",
+      "symbol": "Cleaner",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43,
+      "kind": "class"
+    },
+    {
+      "repository": "redux",
+      "symbol": "createStore",
+      "file": "src/createStore.ts",
+      "startLine": 86,
+      "kind": "function"
+    },
+    {
+      "repository": "walkdir",
+      "symbol": "IntoIter",
+      "file": "src/lib.rs",
+      "startLine": 566,
+      "kind": "struct"
+    }
+  ],
+  "productContract": "Exact node ID takes precedence; otherwise normalized exact name or qualified name lookup. All matching candidate records remain visible; file, start line and kind are explicit conjunctive filters. No fuzzy/lexical fallback or inferred ownership/export collapse. The existing candidate cap applies before filtering and truncation remains explicit, even if the filtered prefix has one or zero results. Default ranked search remains unchanged.",
+  "identityControl": "Both tools receive the same known symbol, repository-relative file, declaration line and expected kind. Compass uses search_symbols exact=true, source_file, start_line, kind with existing limits (256 candidates, 500 nodes, 524288 response bytes). Graphify uses its existing file::symbol get_node; validate returned source identity and source-declaration kind afterward. Do not imply Graphify natively accepts all filters. One call per tool/subject, no retries. Preserve all ambiguity/error/limit outcomes.",
+  "followup": "For each uniquely source-validated endpoint, repeat the member_source_development_registration symmetric public-neighbor/source-window policy verbatim, with the same 8000-byte source quota and all 20 facts. Keep the earlier 11/20 vs 15/20 workflow and native-member 13/20 scores separate. Capture native declaration explanation for resolved roots separately if used; do not combine scores.",
+  "negativeControls": "Native fixtures must cover duplicate exact names, same source coordinates with distinct kinds, multiple overloads of the same kind, exact IDs, wrong file/line/kind, no exact match despite lexical hits, truncated exact lookup even after filters, response limits, invalid selectors/filters, and JSON/store parity. Public real-source probes retain Redux function/export ambiguity when kind is omitted and reject a nonexistent line.",
+  "verification": "Preserve raw argv, MCP requests/responses, graphs, source pins, binary and support hashes. Verify every selected identity against pinned source and every follow-up window against public returned anchors. Existing unscoped resolver payloads must be replayed unchanged; expose any differences.",
+  "limitations": [
+    "Same-agent semantic adjudication, not independent human review.",
+    "Explicit identity constraints are additional task inputs; do not retroactively replace old unresolved outcomes.",
+    "This does not improve extraction, synthesize explanations, or prove god-object quality or broad superiority."
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "compass.directed-identity-label-control-registration/1",
+  "parentProtocolCommit": "98759ae8",
+  "reason": "The first ID-input capture showed Graphify CLI path selecting a wrong starting node despite using a publicly resolved ID. Preserve that result as cross-interface identity evidence, and retain a separate native label-input comparison rather than presenting it as pure path-algorithm quality.",
+  "timing": "Registered after observing the ID baseline and the earlier short-label development panel, before executing this label control on the current fixed graph pair. Not blind or held-out.",
+  "inputs": "Use exactly the original five witness source and target short names from directed_path_development_registration.json. No IDs, new aliases, post-output candidates, retries or scope changes.",
+  "commands": "Compass node SOURCE TARGET --max-depth 8 --max-paths 1 --format json --graph GRAPH; Graphify path SOURCE TARGET --directed --graph GRAPH.",
+  "artifacts": "Use the same ten frozen graphs, final evaluated Compass binary and hash-verified Graphify environment as the source-assisted arm.",
+  "bounds": "60 seconds and 16 MiB per stdout/stderr stream. Internal work limits differ; no speed ranking.",
+  "scoring": "Keep all five positive tasks. Review full ordered node identity, directed call edges, source anchors and alternate routes with the same source witnesses. Ambiguity, wrong endpoints, mixed-relation paths, limits and missing paths are distinct failures to complete a reviewed call-chain request. Never combine the best outputs from ID and label arms into a new primary score."
+}

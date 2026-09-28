@@ -1,0 +1,45 @@
+{
+  "schema": "compass.sql-prefix-scan-registration/1",
+  "baselineCommit": "749ed287ce90c5bfe4fa47a920060aa37fa8bbe1",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "selection": "Sort all tracked SQL files by byte size then path; take indices floor(n/4), floor(n/2), floor(3n/4), n-1. Preserve full files without editing. Selection frozen before candidate results.",
+  "samples": [
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-224to225-cleanup.sql",
+      "sortedIndex": 29,
+      "bytes": 938,
+      "sha256": "e3956e631ed1569790c0e715416726ed397e0d9d2e9a60551dcc41dcd29de92f"
+    },
+    {
+      "file": "setup/db/postprocess-20to21.sql",
+      "sortedIndex": 59,
+      "bytes": 1949,
+      "sha256": "88784b0df00be6d6939ebe275c6d1aabcf8bac8636c00bf7d6ad08e2caee2aae"
+    },
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-41120to41200.sql",
+      "sortedIndex": 89,
+      "bytes": 10288,
+      "sha256": "03e7035ff015e9e3eb7f194a32d37f6e418244cee81853ec6d370b47e7589780"
+    },
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-430to440.sql",
+      "sortedIndex": 118,
+      "bytes": 411080,
+      "sha256": "99cc9ada9dae1119b8757f805211aa714702b81d2446c0f9fa58e9e7f3c62f4f"
+    }
+  ],
+  "baselineBinary": "calls-only-trails-01/compass",
+  "baselineBinarySha256": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+  "hypothesis": "Reject impossible dollar-delimiter syntax before scanning the SQL prefix; preserve every extraction fact and diagnostic.",
+  "procedure": "For each complete source sample, copy once into a dedicated external input directory preserving its repository-relative path; use that same source directory for both binaries. Three fresh-output CLI extractions per binary, alternating old/new order by repeat. No cached output reuse. Same --code-only --no-viz --store sqlite options. Timeout and stream failures stay visible; no latency ratio if either observation is unavailable. Retain commands, wall time, outputs and graph digests. Full graph JSON and published canonical graph digests are compared; any nondeterministic metadata exclusion must be reported.",
+  "sampleTimeoutSeconds": 180,
+  "streamLimitBytes": 16777216,
+  "graphLimitBytes": 268435456,
+  "fullRepositoryFollowup": "After correctness checks, rerun Compass CloudStack on its original complete source, same 1200-second extraction limit and 256 MiB graph admission rule. Do not substitute sample results or rewrite the original failed run. No controlled Graphify speed claim from this diagnosis.",
+  "scope": "Development diagnosis of observed extraction bottleneck; not release-performance qualification, held-out evaluation, or god-object classification improvement."
+}

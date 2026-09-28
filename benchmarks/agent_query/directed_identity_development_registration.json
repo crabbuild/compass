@@ -1,0 +1,25 @@
+{
+  "schema": "compass.directed-identity-development-registration/1",
+  "scope": "Same five source-reviewed directed call chains from the existing development panel. New public endpoint-resolution workflow and depth-bound diagnostics, not held-out evidence or longer-path coverage.",
+  "baselineCommit": "8eb1bf0fbede6ffa6353a64343870f992a546dd5",
+  "baselineBinary": "neighbor-identity-02/compass",
+  "baselineBinarySha256": "59addb98d357f8ed9b09618a340df6e9dc1352357887d465eb1514c45cbd862f",
+  "sourceWitnesses": {
+    "directed_path_development_registration.json": "749eaca9649b1975f099445b4eab7a17259b4578a01747aaa7182a622d0282e6",
+    "directed_path_development_review.json": "82ef7fd83173a7935e1729c44651324bdd76ae46c58198d5c5ebab17abf192bd"
+  },
+  "graphRun": "rust-index-receiver-03/run.json",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "graphs": "Reuse all ten frozen graphs without extraction. Verify hashes and pinned sources before and after.",
+  "endpointResolution": "Supply the same witness endpoint file, start line and symbol to both tools. Make one public search_symbols request for Compass (max_candidates 256, max_nodes 500, max_response_bytes 524288) and one path::symbol get_node request for Graphify per endpoint. Use existing source-anchor selectors. Request builders cannot read graph IDs/adjacency. Unresolved endpoints remain in the denominator; no oracle-ID substitution.",
+  "pathRequests": "For each pair of uniquely source-matched returned IDs, invoke Compass node SOURCE TARGET --max-depth 8 --max-paths 1 --format json and Graphify path SOURCE TARGET --directed. Repeat swapped endpoints as a diagnostic; a forward witness does not prove reverse absence. Preserve all errors and output.",
+  "bounds": "60 seconds and 16 MiB per stdout/stderr stream for each CLI call; 60 seconds and 1 MiB per MCP response. Native internal limits differ (Graphify has no CLI depth flag); no equal-work, latency or extraction comparison.",
+  "pathJudgment": "Verify ordered exact identities, directed relationship kinds, adjacency, confidence, anchors and source support for every returned route. Registered routes are positive witnesses, not mandatory shortest routes. Review alternate routes against source before credit. Mixed containment/reference routes are not call-chain successes.",
+  "depthDiagnostics": "For Compass, repeat source-resolved forward IDs with each max_depth from 1 through one below the source witness hop count. Review any found route. Missing bounded results must not assert global direction mismatch or unreachability without proof. Graphify has no equivalent depth control, so this arm is a Compass correctness diagnostic, not a paired score.",
+  "fixValidation": "First reproduce a longer forward path plus shorter reverse shortcut in a native regression. Preserve successful paths at the boundary, exhausted work budgets, dead-end and cycle cases, deterministic ordering, and JSON/store parity. Run applicable native baseline and public contracts.",
+  "limitations": [
+    "Reused tasks, graphs and known misses; no held-out or population claims.",
+    "Resolution, path availability, route identity, source-supported call flow and bound correctness are separate outcomes.",
+    "God-object responsibility, source explanations and broader/longer walks remain outstanding."
+  ]
+}

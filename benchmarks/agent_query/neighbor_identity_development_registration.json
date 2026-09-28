@@ -1,0 +1,51 @@
+{
+  "schema": "compass.neighbor-identity-development-registration/1",
+  "scope": "Reused five-repository development panel; source-assisted navigation. Same-agent review. Not held-out or overall superiority.",
+  "baselineImplementation": "a07ab99126e76f50059ee631caa4d2b584488133",
+  "baselineRoot": "rust-index-receiver-03",
+  "inputs": {
+    "run.json": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+    "community_task_pairs_panel_a.json": "678419fbd9fd9dddb6fffdaf108047f23f055b8c4df40035236c8ac1f561d9af",
+    "community_identity_navigation_panel_a.json": "114bfc837847bccee24caa9de6ac4905d4c353146b82a16633147913ccab5e23",
+    "navigation/capture.json": "636833c4a6847e1267b757c2cbf45691dad66cb38ffc33b409d02b7f9dd7e630"
+  },
+  "repositories": [
+    "chi",
+    "click",
+    "jsoup",
+    "redux",
+    "walkdir"
+  ],
+  "artifactPolicy": "Reuse all ten frozen graphs byte-for-byte. No extraction changes or timing comparison. Verify source commits, graph hashes, binary and Graphify environment before and after capture.",
+  "workflow": "Repeat all 15 registered source-assisted community -> seed resolver -> call-neighbor workflows with the existing selectors and bounds. Request construction cannot consult graph IDs or graph adjacency. Preserve all failures and count all 14 direct-call tasks.",
+  "metrics": {
+    "legacy": "Keep collaborator label presence and globally unambiguous target-label counts separate and unchanged.",
+    "directResponseIdentity": "Count a reviewed outgoing collaborator only if its exact node ID and an outgoing relationship from the observed seed are explicitly present in the public neighbor response. Validate returned identities, direction, anchors and all retained relationship records against frozen graphs after requests. Do not infer exact IDs from labels or conveniently matching adjacency.",
+    "followupIdentity": "Allow each tool one additional public resolver call per direct-call task, using only returned collaborator labels and the same registered target source file/symbol/start line available to both tools. Use the existing per-tool public resolver and source-anchor selector. Count only if the expected collaborator label was actually returned, resolver emits exactly one matching ID, and the ID matches the source oracle. This measures a source-assisted follow-up, not direct response identity.",
+    "cost": "Report call counts, text bytes, wire-response bytes, full-session bytes, errors/timeouts/limits, and richer payload differences. Never interpret bytes as equal semantic content or universal efficiency."
+  },
+  "bounds": {
+    "requestTimeoutSeconds": 60,
+    "maxResponseBytes": 1048576,
+    "maxSessionBytes": 67108864,
+    "graphifyTokenBudget": 262144,
+    "compassResolver": {
+      "max_candidates": 256,
+      "max_nodes": 500,
+      "max_response_bytes": 524288
+    }
+  },
+  "implementationRequirements": [
+    "Exact destination IDs and available definition anchors; no guessed IDs or source coordinates.",
+    "Deterministic relation records preserve direction, multiplicity, anchors and provenance, including same-label destinations, parallel relations and self loops.",
+    "Explicit bounded failure must not appear as empty or complete adjacency.",
+    "Legacy text remains available; machine consumers use a versioned structured result."
+  ],
+  "validation": "Focused query and MCP unit/integration contracts, adversarial scoring tests, native Rust baseline, product tests/boundary and applicable code graph fixture gate. Preserve full commands/logs.",
+  "limitations": [
+    "Known development tasks; no held-out claim.",
+    "Graph consistency is not independent source precision.",
+    "Existing source witnesses cover 14 direct collaborators; other graph assertions are not newly source-scored.",
+    "God-object responsibility judgments, richer source explanations and longer directed walks remain separate outstanding requirements."
+  ]
+}

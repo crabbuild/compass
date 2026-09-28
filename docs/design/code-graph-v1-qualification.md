@@ -1,7 +1,7 @@
 # Compass code graph v1 qualification
 
 Status: executable release gate
-Contracts: `compass.graph/1` and `compass.code-graph-qualification/2`
+Contracts: `compass.graph/1` and `compass.code-graph-qualification/3`
 
 ## Release claim
 
@@ -15,6 +15,8 @@ The checked-in manifests require:
   family, including route operation, normalized path, source, handler kind,
   handler language, relationship stage, resolution, and provenance;
 - executable near-match negatives that must not publish exact framework routes;
+- source-reviewed independent route groups that must retain route nodes in
+  both files while publishing no containment from the first group to the second;
 - an observed production producer for every one of the 45 node kinds and 28
   edge kinds;
 - an inventoried file, language, and current extractor version for every
@@ -30,6 +32,34 @@ The oracle also validates durable identities, typed details, endpoint-kind
 compatibility, source bounds, known producers, direct and heuristic
 provenance, candidate bounds, external-placeholder scope, deferred placeholder
 wiring, non-recursive self-loops, and unresolved global hubs.
+
+Manifest version 3 adds required `routeContainmentNegatives`. Each entry names
+two source files and records the source-based reason for their independence.
+Both files must have route nodes; a missing endpoint is a failure, not an absence
+success. The assertion forbids directed `contains` edges regardless of claimed
+confidence. The graph and summary schema majors are unchanged.
+
+The September 26 hierarchy correction removed 19 false containment records from
+the qualification fixture graph. The topology policy was recalibrated by adding
+each measured before/after metric delta to its existing bound, retaining the
+previous margin. Counts alone do not validate edge meaning or community quality.
+The [fixture review](../../benchmarks/agent_query/route_hierarchy_fixture_review.json)
+records all removed identities, source hashes, and policy changes; eight new
+semantic negatives reject the former links independently of those counts.
+That route-hierarchy checkpoint still failed one of these negatives:
+the directory-order lookup makes sibling `/tanstack` and `/home` modules a
+parent-child pair. The subsequent framework-specific correction removes the
+remaining 12 unsupported file-route records from identical original sources.
+The negative manifest now covers 18 source-file pairs. Two explicit Next layout
+fixtures separately add four expected layout relationships, checked as an exact
+set by the frontend fixture gate. The
+[follow-up review](../../benchmarks/agent_query/semantic_route_parent_fixture_review.json)
+records both identical-input comparisons and the fixture-only delta, along with
+mutation checks and topology bound adjustments preserving their prior margins.
+The complete fixture gate passed for commit `c20db15b`, including the release
+frontend checks. Historical
+pinned frontend hierarchy scorecards are invalidated until their sources are
+re-reviewed, so their prior counts cannot establish current qualification.
 
 ## Command
 

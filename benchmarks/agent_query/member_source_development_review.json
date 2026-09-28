@@ -1,0 +1,4607 @@
+{
+  "schema": "compass.member-source-development-review/1",
+  "registration": "benchmarks/agent_query/member_source_development_registration.json",
+  "registrationSha256": "e95a8b9964a9b5482d66051bc533edb57f93ede59a0a576fb95a85f0460f3f76",
+  "productCommit": "6d4df99470df35f07b19a308311c4020ffe37e60",
+  "evaluatedBinarySha256": "25e59141988814e06ea005f14a4380145f18c545d9863f3d477eb0746dfc2693",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "scope": "Five known development subjects; frozen source questions, graphs and public endpoint selection. No held-out evidence or broad superiority claim.",
+  "summary": {
+    "native-members": {
+      "compass": {
+        "subjects": 5,
+        "facts": 20,
+        "resolvedSubjects": 4,
+        "sourceEvidenceFacts": 13,
+        "literalWitnessFacts": 4,
+        "explicitNativeFacts": 0,
+        "sourceBytes": 23082,
+        "stdoutBytes": 48177,
+        "neighborTextBytes": 0,
+        "neighborWireBytes": 0
+      }
+    },
+    "neighbor-window-control": {
+      "compass": {
+        "subjects": 5,
+        "facts": 20,
+        "resolvedSubjects": 4,
+        "sourceEvidenceFacts": 11,
+        "literalWitnessFacts": 10,
+        "explicitNativeFacts": 0,
+        "sourceBytes": 27673,
+        "stdoutBytes": 0,
+        "neighborTextBytes": 26497,
+        "neighborWireBytes": 281242
+      },
+      "graphify": {
+        "subjects": 5,
+        "facts": 20,
+        "resolvedSubjects": 5,
+        "sourceEvidenceFacts": 15,
+        "literalWitnessFacts": 14,
+        "explicitNativeFacts": 0,
+        "sourceBytes": 35673,
+        "stdoutBytes": 0,
+        "neighborTextBytes": 6980,
+        "neighborWireBytes": 7534
+      }
+    }
+  },
+  "results": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "native-members",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 476,
+              "expected": "\tmethod, ok := methodMap[rctx.RouteMethod]",
+              "returned": null
+            },
+            {
+              "line": 477,
+              "expected": "\tif !ok {",
+              "returned": null
+            },
+            {
+              "line": 478,
+              "expected": "\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 479,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 480,
+              "expected": "\t}",
+              "returned": null
+            },
+            {
+              "line": 481,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 482,
+              "expected": "\t// Find the route",
+              "returned": null
+            },
+            {
+              "line": 483,
+              "expected": "\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {",
+              "returned": null
+            },
+            {
+              "line": 484,
+              "expected": "\t\t// Set http.Request path values from our request context",
+              "returned": null
+            },
+            {
+              "line": 485,
+              "expected": "\t\tfor i, key := range rctx.URLParams.Keys {",
+              "returned": null
+            },
+            {
+              "line": 486,
+              "expected": "\t\t\tvalue := rctx.URLParams.Values[i]",
+              "returned": null
+            },
+            {
+              "line": 487,
+              "expected": "\t\t\tr.SetPathValue(key, value)",
+              "returned": null
+            },
+            {
+              "line": 488,
+              "expected": "\t\t}",
+              "returned": null
+            },
+            {
+              "line": 489,
+              "expected": "\t\tr.Pattern = rctx.RoutePattern()",
+              "returned": null
+            },
+            {
+              "line": 490,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 491,
+              "expected": "\t\th.ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 492,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 493,
+              "expected": "\t}",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 18858,
+      "members": [
+        {
+          "id": "sha256:0b03f729c4b4c93626eb48b705704c97e8d051ebb76354fdb1028644c0c003f3",
+          "name": ".ServeHTTP()",
+          "file": "mux.go",
+          "startLine": 63,
+          "lastReturnedLine": 92,
+          "sourceBytes": 1039,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "name": ".Use()",
+          "file": "mux.go",
+          "startLine": 100,
+          "lastReturnedLine": 105,
+          "sourceBytes": 225,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b6f4933c875274b7724a57dc037f278cef17603b5a17c0123f74f09c4859ade3",
+          "name": ".Handle()",
+          "file": "mux.go",
+          "startLine": 109,
+          "lastReturnedLine": 117,
+          "sourceBytes": 268,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:00488c58ae8e3d2aea91ae763f174cddbcbfa1edb9fda7a9650119778dac1272",
+          "name": ".HandleFunc()",
+          "file": "mux.go",
+          "startLine": 121,
+          "lastReturnedLine": 123,
+          "sourceBytes": 104,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "name": ".Method()",
+          "file": "mux.go",
+          "startLine": 127,
+          "lastReturnedLine": 133,
+          "sourceBytes": 233,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "name": ".MethodFunc()",
+          "file": "mux.go",
+          "startLine": 137,
+          "lastReturnedLine": 139,
+          "sourceBytes": 120,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c68a79f08a92785f7b855336a541459e9fdc62201d4430b22c5a267720fe0e2e",
+          "name": ".Connect()",
+          "file": "mux.go",
+          "startLine": 143,
+          "lastReturnedLine": 145,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7eaf9ccc10f79e519444ce15ca5e733334b9706658f775085bcd446e28339098",
+          "name": ".Delete()",
+          "file": "mux.go",
+          "startLine": 149,
+          "lastReturnedLine": 151,
+          "sourceBytes": 109,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:cc338ab0fc91b15feee67ab6ef6b5cb5f32500ccb4011e5a672be9f91a09e728",
+          "name": ".Get()",
+          "file": "mux.go",
+          "startLine": 155,
+          "lastReturnedLine": 157,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f6e8a7560084fdf9a66af0e486fd6ceed76e6607c6ede28fdb1bf8c314ed4a19",
+          "name": ".Head()",
+          "file": "mux.go",
+          "startLine": 161,
+          "lastReturnedLine": 163,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:86384a3e1b4355bef88f940fa46a5af66a9ba09309b1555884da609ceabad4b5",
+          "name": ".Options()",
+          "file": "mux.go",
+          "startLine": 167,
+          "lastReturnedLine": 169,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:940225f9f7c63134e90084b0f543639b43293824ada2130d5aa1c37c6e3de01f",
+          "name": ".Patch()",
+          "file": "mux.go",
+          "startLine": 173,
+          "lastReturnedLine": 175,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:4dc5dca620fc82d5378b46e6646c03877017e141daa1474dab9ce69c1d4cfc56",
+          "name": ".Post()",
+          "file": "mux.go",
+          "startLine": 179,
+          "lastReturnedLine": 181,
+          "sourceBytes": 105,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:af7652f3b85f23544717c7555bffe88a5b3ee1fc645491c1dd5d6fd3e5367bbe",
+          "name": ".Put()",
+          "file": "mux.go",
+          "startLine": 185,
+          "lastReturnedLine": 187,
+          "sourceBytes": 103,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e2015cff9c7be8cb29614b5a597580ec714c51b3a9bb8622c8a0c15674b79ade",
+          "name": ".Query()",
+          "file": "mux.go",
+          "startLine": 191,
+          "lastReturnedLine": 193,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8fb9d62ca6fa95670412c09930734152e8175fa59cb9ba6e74c30eba422ed530",
+          "name": ".Trace()",
+          "file": "mux.go",
+          "startLine": 197,
+          "lastReturnedLine": 199,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:eb197ef3e44ebc05271156e9e59ec93db988e2df4ca08efea5788baa91401518",
+          "name": ".NotFound()",
+          "file": "mux.go",
+          "startLine": 203,
+          "lastReturnedLine": 219,
+          "sourceBytes": 419,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1ac18c4f1a692f25a73fdc98b240ed310b2c4a6cf5065ffde2524dd41b7a1f78",
+          "name": ".MethodNotAllowed()",
+          "file": "mux.go",
+          "startLine": 223,
+          "lastReturnedLine": 239,
+          "sourceBytes": 467,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "name": ".With()",
+          "file": "mux.go",
+          "startLine": 242,
+          "lastReturnedLine": 263,
+          "sourceBytes": 682,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0ac374940442cf9a4d0a0d3270546ca4b87d036fd9ec4aa8f8e48ca2d49e4407",
+          "name": ".Group()",
+          "file": "mux.go",
+          "startLine": 268,
+          "lastReturnedLine": 274,
+          "sourceBytes": 106,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:395cabe22892d311ed21d29bf7a01cb9d9d2eb1681c634bfd76121bdcf20b34f",
+          "name": ".Route()",
+          "file": "mux.go",
+          "startLine": 278,
+          "lastReturnedLine": 286,
+          "sourceBytes": 258,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:29cd93db4ec894393cf257f027b8988a07ee77181191167f3eb2037f2cfdf5be",
+          "name": ".Mount()",
+          "file": "mux.go",
+          "startLine": 295,
+          "lastReturnedLine": 354,
+          "sourceBytes": 1986,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:0fa43499c8e3e06b415a5fd6585b87c3fd541d6c883379d774c9247edeb94951",
+          "name": ".Routes()",
+          "file": "mux.go",
+          "startLine": 358,
+          "lastReturnedLine": 360,
+          "sourceBytes": 60,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:2e266536f77bb3848784eb117cb5935bce2575bba587e1653ce1e6f9c056ebef",
+          "name": ".Middlewares()",
+          "file": "mux.go",
+          "startLine": 363,
+          "lastReturnedLine": 365,
+          "sourceBytes": 67,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:f0a27beb5e2a6ff88e563c8dbed4dc6b6a697c1895287734f456edcb78d3ada3",
+          "name": ".Match()",
+          "file": "mux.go",
+          "startLine": 373,
+          "lastReturnedLine": 375,
+          "sourceBytes": 107,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:b84d22d8b0ff377822bcdc4cb0d4aaf092970f4a85c5e1107b4d09b1592c015d",
+          "name": ".Find()",
+          "file": "mux.go",
+          "startLine": 382,
+          "lastReturnedLine": 408,
+          "sourceBytes": 537,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1580e9037451fb2ed515953396059772522a762628fd281119ff95ef6389357a",
+          "name": ".NotFoundHandler()",
+          "file": "mux.go",
+          "startLine": 412,
+          "lastReturnedLine": 417,
+          "sourceBytes": 138,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6d0c29b15fa70de4383c9685161ae0dea68e92fdbb120770c4a7315e8a2fc10b",
+          "name": ".MethodNotAllowedHandler()",
+          "file": "mux.go",
+          "startLine": 421,
+          "lastReturnedLine": 422,
+          "sourceBytes": 116,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "omittedMembers": 5,
+      "truncated": true,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 476,
+              "expected": "\tmethod, ok := methodMap[rctx.RouteMethod]",
+              "returned": null
+            },
+            {
+              "line": 477,
+              "expected": "\tif !ok {",
+              "returned": null
+            },
+            {
+              "line": 478,
+              "expected": "\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 479,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 480,
+              "expected": "\t}",
+              "returned": null
+            },
+            {
+              "line": 481,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 482,
+              "expected": "\t// Find the route",
+              "returned": null
+            },
+            {
+              "line": 483,
+              "expected": "\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {",
+              "returned": null
+            },
+            {
+              "line": 484,
+              "expected": "\t\t// Set http.Request path values from our request context",
+              "returned": null
+            },
+            {
+              "line": 485,
+              "expected": "\t\tfor i, key := range rctx.URLParams.Keys {",
+              "returned": null
+            },
+            {
+              "line": 486,
+              "expected": "\t\t\tvalue := rctx.URLParams.Values[i]",
+              "returned": null
+            },
+            {
+              "line": 487,
+              "expected": "\t\t\tr.SetPathValue(key, value)",
+              "returned": null
+            },
+            {
+              "line": 488,
+              "expected": "\t\t}",
+              "returned": null
+            },
+            {
+              "line": 489,
+              "expected": "\t\tr.Pattern = rctx.RoutePattern()",
+              "returned": null
+            },
+            {
+              "line": 490,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 491,
+              "expected": "\t\th.ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 492,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 493,
+              "expected": "\t}",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 13154,
+      "neighborWireBytes": 147275,
+      "returnedMembershipRows": 33,
+      "windows": [
+        {
+          "file": "mux.go",
+          "startLine": 63,
+          "lastReturnedLine": 99,
+          "sourceBytes": 1373,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 100,
+          "lastReturnedLine": 108,
+          "sourceBytes": 333,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 109,
+          "lastReturnedLine": 120,
+          "sourceBytes": 386,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 121,
+          "lastReturnedLine": 126,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 127,
+          "lastReturnedLine": 136,
+          "sourceBytes": 356,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 137,
+          "lastReturnedLine": 142,
+          "sourceBytes": 241,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 143,
+          "lastReturnedLine": 148,
+          "sourceBytes": 230,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 149,
+          "lastReturnedLine": 154,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 155,
+          "lastReturnedLine": 160,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 161,
+          "lastReturnedLine": 166,
+          "sourceBytes": 227,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 167,
+          "lastReturnedLine": 172,
+          "sourceBytes": 228,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 173,
+          "lastReturnedLine": 178,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 179,
+          "lastReturnedLine": 184,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 185,
+          "lastReturnedLine": 190,
+          "sourceBytes": 220,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 191,
+          "lastReturnedLine": 196,
+          "sourceBytes": 224,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 197,
+          "lastReturnedLine": 202,
+          "sourceBytes": 242,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 203,
+          "lastReturnedLine": 222,
+          "sourceBytes": 579,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 223,
+          "lastReturnedLine": 241,
+          "sourceBytes": 526,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 242,
+          "lastReturnedLine": 267,
+          "sourceBytes": 880,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 268,
+          "lastReturnedLine": 277,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 278,
+          "lastReturnedLine": 293,
+          "sourceBytes": 605,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 12,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "chi-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 476,
+              "expected": "\tmethod, ok := methodMap[rctx.RouteMethod]",
+              "returned": null
+            },
+            {
+              "line": 477,
+              "expected": "\tif !ok {",
+              "returned": null
+            },
+            {
+              "line": 478,
+              "expected": "\t\tmx.MethodNotAllowedHandler().ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 479,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 480,
+              "expected": "\t}",
+              "returned": null
+            },
+            {
+              "line": 481,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 482,
+              "expected": "\t// Find the route",
+              "returned": null
+            },
+            {
+              "line": 483,
+              "expected": "\tif _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {",
+              "returned": null
+            },
+            {
+              "line": 484,
+              "expected": "\t\t// Set http.Request path values from our request context",
+              "returned": null
+            },
+            {
+              "line": 485,
+              "expected": "\t\tfor i, key := range rctx.URLParams.Keys {",
+              "returned": null
+            },
+            {
+              "line": 486,
+              "expected": "\t\t\tvalue := rctx.URLParams.Values[i]",
+              "returned": null
+            },
+            {
+              "line": 487,
+              "expected": "\t\t\tr.SetPathValue(key, value)",
+              "returned": null
+            },
+            {
+              "line": 488,
+              "expected": "\t\t}",
+              "returned": null
+            },
+            {
+              "line": 489,
+              "expected": "\t\tr.Pattern = rctx.RoutePattern()",
+              "returned": null
+            },
+            {
+              "line": 490,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 491,
+              "expected": "\t\th.ServeHTTP(w, r)",
+              "returned": null
+            },
+            {
+              "line": 492,
+              "expected": "\t\treturn",
+              "returned": null
+            },
+            {
+              "line": 493,
+              "expected": "\t}",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 2189,
+      "neighborWireBytes": 2319,
+      "returnedMembershipRows": 33,
+      "windows": [
+        {
+          "file": "mux.go",
+          "startLine": 63,
+          "lastReturnedLine": 99,
+          "sourceBytes": 1373,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 100,
+          "lastReturnedLine": 108,
+          "sourceBytes": 333,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 109,
+          "lastReturnedLine": 120,
+          "sourceBytes": 386,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 121,
+          "lastReturnedLine": 126,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 127,
+          "lastReturnedLine": 136,
+          "sourceBytes": 356,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 137,
+          "lastReturnedLine": 142,
+          "sourceBytes": 241,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 143,
+          "lastReturnedLine": 148,
+          "sourceBytes": 230,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 149,
+          "lastReturnedLine": 154,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 155,
+          "lastReturnedLine": 160,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 161,
+          "lastReturnedLine": 166,
+          "sourceBytes": 227,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 167,
+          "lastReturnedLine": 172,
+          "sourceBytes": 228,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 173,
+          "lastReturnedLine": 178,
+          "sourceBytes": 222,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 179,
+          "lastReturnedLine": 184,
+          "sourceBytes": 218,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 185,
+          "lastReturnedLine": 190,
+          "sourceBytes": 220,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 191,
+          "lastReturnedLine": 196,
+          "sourceBytes": 224,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 197,
+          "lastReturnedLine": 202,
+          "sourceBytes": 242,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 203,
+          "lastReturnedLine": 222,
+          "sourceBytes": 579,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 223,
+          "lastReturnedLine": 241,
+          "sourceBytes": 526,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 242,
+          "lastReturnedLine": 267,
+          "sourceBytes": 880,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 268,
+          "lastReturnedLine": 277,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "mux.go",
+          "startLine": 278,
+          "lastReturnedLine": 293,
+          "sourceBytes": 605,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 12,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "native-members",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 455,
+              "expected": "class _AtomicFile:",
+              "returned": null
+            },
+            {
+              "line": 461,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 462,
+              "expected": "    @property",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Initialization and name getter bodies are present, but the recorded method spans omit @property. A method named name does not establish property semantics; deny the complete fact."
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 874,
+      "stdoutBytes": 3408,
+      "members": [
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "name": ".__init__()",
+          "file": "src/click/_compat.py",
+          "startLine": 456,
+          "lastReturnedLine": 460,
+          "sourceBytes": 216,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:e878c6438bdce958c03a089d80b07294ed83ae9ee2f0f0a633df5fbf50ae9e52",
+          "name": ".name()",
+          "file": "src/click/_compat.py",
+          "startLine": 463,
+          "lastReturnedLine": 464,
+          "sourceBytes": 57,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3",
+          "name": ".close()",
+          "file": "src/click/_compat.py",
+          "startLine": 466,
+          "lastReturnedLine": 471,
+          "sourceBytes": 200,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5bb38e0f070dd04a772efc8c9ee16003caa1e687bc2c12cc19b86bef7e08349e",
+          "name": ".__getattr__()",
+          "file": "src/click/_compat.py",
+          "startLine": 473,
+          "lastReturnedLine": 474,
+          "sourceBytes": 80,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bc6d909e3fad7e2cbc5726cdd962e543d80d2c22e04f4748a0c4a6a6df90301b",
+          "name": ".__enter__()",
+          "file": "src/click/_compat.py",
+          "startLine": 476,
+          "lastReturnedLine": 477,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7bf788bd87c967bb2c80b682108ca265ce1ea9c213b3c8d55931a267d73c15b4",
+          "name": ".__exit__()",
+          "file": "src/click/_compat.py",
+          "startLine": 479,
+          "lastReturnedLine": 485,
+          "sourceBytes": 211,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:1b6882765c798cf51eff1c70453ffc9687e893d38733a758d193bd1e6c7845f1",
+          "name": ".__repr__()",
+          "file": "src/click/_compat.py",
+          "startLine": 487,
+          "lastReturnedLine": 488,
+          "sourceBytes": 55,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "omittedMembers": 0,
+      "truncated": false,
+      "literalWitnessFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 455,
+              "expected": "class _AtomicFile:",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Only the class header is absent. The exact selected owner is already verified as _AtomicFile, while initialization, @property, and the complete name getter are returned."
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 3673,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 2092,
+      "neighborWireBytes": 23086,
+      "returnedMembershipRows": 7,
+      "windows": [
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 456,
+          "lastReturnedLine": 462,
+          "sourceBytes": 236,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 463,
+          "lastReturnedLine": 465,
+          "sourceBytes": 63,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 466,
+          "lastReturnedLine": 472,
+          "sourceBytes": 206,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 473,
+          "lastReturnedLine": 475,
+          "sourceBytes": 86,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 476,
+          "lastReturnedLine": 478,
+          "sourceBytes": 61,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 479,
+          "lastReturnedLine": 486,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 487,
+          "lastReturnedLine": 590,
+          "sourceBytes": 2804,
+          "partial": false
+        }
+      ],
+      "omittedGroups": 0,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 4,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "click-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 455,
+              "expected": "class _AtomicFile:",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Only the class header is absent. The exact selected owner is already verified as _AtomicFile, while initialization, @property, and the complete name getter are returned."
+        },
+        {
+          "fact": "click-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "click-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 3673,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 636,
+      "neighborWireBytes": 735,
+      "returnedMembershipRows": 7,
+      "windows": [
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 456,
+          "lastReturnedLine": 462,
+          "sourceBytes": 236,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 463,
+          "lastReturnedLine": 465,
+          "sourceBytes": 63,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 466,
+          "lastReturnedLine": 472,
+          "sourceBytes": 206,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 473,
+          "lastReturnedLine": 475,
+          "sourceBytes": 86,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 476,
+          "lastReturnedLine": 478,
+          "sourceBytes": 61,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 479,
+          "lastReturnedLine": 486,
+          "sourceBytes": 217,
+          "partial": false
+        },
+        {
+          "file": "src/click/_compat.py",
+          "startLine": 487,
+          "lastReturnedLine": 590,
+          "sourceBytes": 2804,
+          "partial": false
+        }
+      ],
+      "omittedGroups": 0,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 4,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "native-members",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 6208,
+      "stdoutBytes": 12866,
+      "members": [
+        {
+          "id": "sha256:66aaadb3479119cae227c0e51b5674eae36cb9b29e80428e2697aa7cb45518f0",
+          "name": "<init>",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 50,
+          "lastReturnedLine": 53,
+          "sourceBytes": 111,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034",
+          "name": ".clean()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 62,
+          "lastReturnedLine": 70,
+          "sourceBytes": 319,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:817144c6469132780623c859650f3dbb59eef49b75108e12e8fd2efe7763b330",
+          "name": ".isValid()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 94,
+          "lastReturnedLine": 101,
+          "sourceBytes": 441,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "name": ".isValidBodyHtml()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 124,
+          "lastReturnedLine": 133,
+          "sourceBytes": 630,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:d82578355e71b0d55f68499706f70276db9cf44a16bf283bba6360df410deec5",
+          "name": "<init>",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 143,
+          "lastReturnedLine": 146,
+          "sourceBytes": 144,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:65912eb3660f15092355589775d874a7a702efcf0336e9865cf93b4fb56aaa29",
+          "name": ".head()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 148,
+          "lastReturnedLine": 173,
+          "sourceBytes": 1371,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:fb8588d79c5d9dcbd1a0c6a8e2f901d5c54be3050e7626a3b8f59a8c55bd025c",
+          "name": ".tail()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 175,
+          "lastReturnedLine": 179,
+          "sourceBytes": 266,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "name": ".copySafeNodes()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 182,
+          "lastReturnedLine": 186,
+          "sourceBytes": 227,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:7ce3db44fb899d894dd900ab8808bd0fdc411323a6276f4164fede39e46f8157",
+          "name": ".createSafeElement()",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 188,
+          "lastReturnedLine": 235,
+          "sourceBytes": 2553,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:bd66755ef9e0f349f3e772c8d9b23a0441194bd6300a6431d51bc2f11650e890",
+          "name": "<init>",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 241,
+          "lastReturnedLine": 244,
+          "sourceBytes": 146,
+          "truncated": false,
+          "digestVerified": true
+        }
+      ],
+      "omittedMembers": 0,
+      "truncated": false,
+      "literalWitnessFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 206,
+              "expected": "                Range.AttributeRange range = sourceAttrs.sourceRange(key);",
+              "returned": "                Range.AttributeRange r"
+            },
+            {
+              "line": 207,
+              "expected": "                destAttrs.put(key, value);",
+              "returned": null
+            },
+            {
+              "line": 208,
+              "expected": "                NodeInternals.attributeRange(destAttrs, key, range);",
+              "returned": null
+            },
+            {
+              "line": 209,
+              "expected": "            } else",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 7014,
+      "neighborWireBytes": 66437,
+      "returnedMembershipRows": 9,
+      "windows": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 44,
+          "lastReturnedLine": 49,
+          "sourceBytes": 180,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 50,
+          "lastReturnedLine": 61,
+          "sourceBytes": 541,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 62,
+          "lastReturnedLine": 93,
+          "sourceBytes": 1549,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 94,
+          "lastReturnedLine": 123,
+          "sourceBytes": 1625,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 124,
+          "lastReturnedLine": 137,
+          "sourceBytes": 748,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 138,
+          "lastReturnedLine": 181,
+          "sourceBytes": 2032,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 182,
+          "lastReturnedLine": 187,
+          "sourceBytes": 233,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 188,
+          "lastReturnedLine": 206,
+          "sourceBytes": 1092,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 1,
+      "literalWitnessFacts": 3,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "jsoup-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1034,
+      "neighborWireBytes": 1135,
+      "returnedMembershipRows": 8,
+      "windows": [
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 50,
+          "lastReturnedLine": 61,
+          "sourceBytes": 541,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 62,
+          "lastReturnedLine": 93,
+          "sourceBytes": 1549,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 94,
+          "lastReturnedLine": 123,
+          "sourceBytes": 1625,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 124,
+          "lastReturnedLine": 137,
+          "sourceBytes": 748,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 138,
+          "lastReturnedLine": 181,
+          "sourceBytes": 2032,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 182,
+          "lastReturnedLine": 187,
+          "sourceBytes": 233,
+          "partial": false
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "startLine": 188,
+          "lastReturnedLine": 210,
+          "sourceBytes": 1272,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 1,
+      "literalWitnessFacts": 4,
+      "sourceEvidenceFacts": 4,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "native-members",
+      "resolverStatus": "truncated-or-unknown",
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 121,
+              "expected": "  if (typeof enhancer !== 'undefined') {",
+              "returned": null
+            },
+            {
+              "line": 122,
+              "expected": "    if (typeof enhancer !== 'function') {",
+              "returned": null
+            },
+            {
+              "line": 123,
+              "expected": "      throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 124,
+              "expected": "        `Expected the enhancer to be a function. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 125,
+              "expected": "          enhancer",
+              "returned": null
+            },
+            {
+              "line": 126,
+              "expected": "        )}'`",
+              "returned": null
+            },
+            {
+              "line": 127,
+              "expected": "      )",
+              "returned": null
+            },
+            {
+              "line": 128,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 129,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 130,
+              "expected": "    return enhancer(createStore)(",
+              "returned": null
+            },
+            {
+              "line": 131,
+              "expected": "      reducer,",
+              "returned": null
+            },
+            {
+              "line": 132,
+              "expected": "      preloadedState as PreloadedState | undefined",
+              "returned": null
+            },
+            {
+              "line": 133,
+              "expected": "    )",
+              "returned": null
+            },
+            {
+              "line": 134,
+              "expected": "  }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 293,
+              "expected": "    if (isDispatching) {",
+              "returned": null
+            },
+            {
+              "line": 294,
+              "expected": "      throw new Error('Reducers may not dispatch actions.')",
+              "returned": null
+            },
+            {
+              "line": 295,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 296,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 297,
+              "expected": "    try {",
+              "returned": null
+            },
+            {
+              "line": 298,
+              "expected": "      isDispatching = true",
+              "returned": null
+            },
+            {
+              "line": 299,
+              "expected": "      currentState = currentReducer(currentState, action)",
+              "returned": null
+            },
+            {
+              "line": 300,
+              "expected": "    } finally {",
+              "returned": null
+            },
+            {
+              "line": 301,
+              "expected": "      isDispatching = false",
+              "returned": null
+            },
+            {
+              "line": 302,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 152,
+              "expected": "  function ensureCanMutateNextListeners() {",
+              "returned": null
+            },
+            {
+              "line": 153,
+              "expected": "    if (nextListeners === currentListeners) {",
+              "returned": null
+            },
+            {
+              "line": 154,
+              "expected": "      nextListeners = new Map()",
+              "returned": null
+            },
+            {
+              "line": 155,
+              "expected": "      currentListeners.forEach((listener, key) => {",
+              "returned": null
+            },
+            {
+              "line": 156,
+              "expected": "        nextListeners.set(key, listener)",
+              "returned": null
+            },
+            {
+              "line": 157,
+              "expected": "      })",
+              "returned": null
+            },
+            {
+              "line": 158,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 159,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 221,
+              "expected": "    ensureCanMutateNextListeners()",
+              "returned": null
+            },
+            {
+              "line": 222,
+              "expected": "    const listenerId = listenerIdCounter++",
+              "returned": null
+            },
+            {
+              "line": 223,
+              "expected": "    nextListeners.set(listenerId, listener)",
+              "returned": null
+            },
+            {
+              "line": 224,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 225,
+              "expected": "    return function unsubscribe() {",
+              "returned": null
+            },
+            {
+              "line": 226,
+              "expected": "      if (!isSubscribed) {",
+              "returned": null
+            },
+            {
+              "line": 227,
+              "expected": "        return",
+              "returned": null
+            },
+            {
+              "line": 228,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 229,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 230,
+              "expected": "      if (isDispatching) {",
+              "returned": null
+            },
+            {
+              "line": 231,
+              "expected": "        throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 232,
+              "expected": "          'You may not unsubscribe from a store listener while the reducer is executing. ' +",
+              "returned": null
+            },
+            {
+              "line": 233,
+              "expected": "            'See https://redux.js.org/api/store#subscribelistener for more details.'",
+              "returned": null
+            },
+            {
+              "line": 234,
+              "expected": "        )",
+              "returned": null
+            },
+            {
+              "line": 235,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 236,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 237,
+              "expected": "      isSubscribed = false",
+              "returned": null
+            },
+            {
+              "line": 238,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 239,
+              "expected": "      ensureCanMutateNextListeners()",
+              "returned": null
+            },
+            {
+              "line": 240,
+              "expected": "      nextListeners.delete(listenerId)",
+              "returned": null
+            },
+            {
+              "line": 241,
+              "expected": "      currentListeners = null",
+              "returned": null
+            },
+            {
+              "line": 242,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 243,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 304,
+              "expected": "    const listeners = (currentListeners = nextListeners)",
+              "returned": null
+            },
+            {
+              "line": 305,
+              "expected": "    listeners.forEach(listener => {",
+              "returned": null
+            },
+            {
+              "line": 306,
+              "expected": "      listener()",
+              "returned": null
+            },
+            {
+              "line": 307,
+              "expected": "    })",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 344,
+              "expected": "  function observable() {",
+              "returned": null
+            },
+            {
+              "line": 345,
+              "expected": "    const outerSubscribe = subscribe",
+              "returned": null
+            },
+            {
+              "line": 346,
+              "expected": "    return {",
+              "returned": null
+            },
+            {
+              "line": 347,
+              "expected": "      /**",
+              "returned": null
+            },
+            {
+              "line": 348,
+              "expected": "       * The minimal observable subscription method.",
+              "returned": null
+            },
+            {
+              "line": 349,
+              "expected": "       * @param observer Any object that can be used as an observer.",
+              "returned": null
+            },
+            {
+              "line": 350,
+              "expected": "       * The observer object should have a `next` method.",
+              "returned": null
+            },
+            {
+              "line": 351,
+              "expected": "       * @returns An object with an `unsubscribe` method that can",
+              "returned": null
+            },
+            {
+              "line": 352,
+              "expected": "       * be used to unsubscribe the observable from the store, and prevent further",
+              "returned": null
+            },
+            {
+              "line": 353,
+              "expected": "       * emission of values from the observable.",
+              "returned": null
+            },
+            {
+              "line": 354,
+              "expected": "       */",
+              "returned": null
+            },
+            {
+              "line": 355,
+              "expected": "      subscribe(observer: unknown) {",
+              "returned": null
+            },
+            {
+              "line": 356,
+              "expected": "        if (typeof observer !== 'object' || observer === null) {",
+              "returned": null
+            },
+            {
+              "line": 357,
+              "expected": "          throw new TypeError(",
+              "returned": null
+            },
+            {
+              "line": 358,
+              "expected": "            `Expected the observer to be an object. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 359,
+              "expected": "              observer",
+              "returned": null
+            },
+            {
+              "line": 360,
+              "expected": "            )}'`",
+              "returned": null
+            },
+            {
+              "line": 361,
+              "expected": "          )",
+              "returned": null
+            },
+            {
+              "line": 362,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 363,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 364,
+              "expected": "        function observeState() {",
+              "returned": null
+            },
+            {
+              "line": 365,
+              "expected": "          const observerAsObserver = observer as Observer<S>",
+              "returned": null
+            },
+            {
+              "line": 366,
+              "expected": "          if (observerAsObserver.next) {",
+              "returned": null
+            },
+            {
+              "line": 367,
+              "expected": "            observerAsObserver.next(getState())",
+              "returned": null
+            },
+            {
+              "line": 368,
+              "expected": "          }",
+              "returned": null
+            },
+            {
+              "line": 369,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 370,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 371,
+              "expected": "        observeState()",
+              "returned": null
+            },
+            {
+              "line": 372,
+              "expected": "        const unsubscribe = outerSubscribe(observeState)",
+              "returned": null
+            },
+            {
+              "line": 373,
+              "expected": "        return { unsubscribe }",
+              "returned": null
+            },
+            {
+              "line": 374,
+              "expected": "      },",
+              "returned": null
+            },
+            {
+              "line": 375,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 376,
+              "expected": "      [$$observable]() {",
+              "returned": null
+            },
+            {
+              "line": 377,
+              "expected": "        return this",
+              "returned": null
+            },
+            {
+              "line": 378,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 379,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 380,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 381,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 382,
+              "expected": "  // When a store is created, an \"INIT\" action is dispatched so that every",
+              "returned": null
+            },
+            {
+              "line": 383,
+              "expected": "  // reducer returns their initial state. This effectively populates",
+              "returned": null
+            },
+            {
+              "line": 384,
+              "expected": "  // the initial state tree.",
+              "returned": null
+            },
+            {
+              "line": 385,
+              "expected": "  dispatch({ type: ActionTypes.INIT } as A)",
+              "returned": null
+            },
+            {
+              "line": 386,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 387,
+              "expected": "  const store = {",
+              "returned": null
+            },
+            {
+              "line": 388,
+              "expected": "    dispatch: dispatch as Dispatch<A>,",
+              "returned": null
+            },
+            {
+              "line": 389,
+              "expected": "    subscribe,",
+              "returned": null
+            },
+            {
+              "line": 390,
+              "expected": "    getState,",
+              "returned": null
+            },
+            {
+              "line": 391,
+              "expected": "    replaceReducer,",
+              "returned": null
+            },
+            {
+              "line": 392,
+              "expected": "    [$$observable]: observable",
+              "returned": null
+            },
+            {
+              "line": 393,
+              "expected": "  } as unknown as Store<S, A, StateExt> & Ext",
+              "returned": null
+            },
+            {
+              "line": 394,
+              "expected": "  return store",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        }
+      ],
+      "sourceBytes": 0,
+      "stdoutBytes": 0,
+      "members": [],
+      "literalWitnessFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "truncated-or-unknown",
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 121,
+              "expected": "  if (typeof enhancer !== 'undefined') {",
+              "returned": null
+            },
+            {
+              "line": 122,
+              "expected": "    if (typeof enhancer !== 'function') {",
+              "returned": null
+            },
+            {
+              "line": 123,
+              "expected": "      throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 124,
+              "expected": "        `Expected the enhancer to be a function. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 125,
+              "expected": "          enhancer",
+              "returned": null
+            },
+            {
+              "line": 126,
+              "expected": "        )}'`",
+              "returned": null
+            },
+            {
+              "line": 127,
+              "expected": "      )",
+              "returned": null
+            },
+            {
+              "line": 128,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 129,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 130,
+              "expected": "    return enhancer(createStore)(",
+              "returned": null
+            },
+            {
+              "line": 131,
+              "expected": "      reducer,",
+              "returned": null
+            },
+            {
+              "line": 132,
+              "expected": "      preloadedState as PreloadedState | undefined",
+              "returned": null
+            },
+            {
+              "line": 133,
+              "expected": "    )",
+              "returned": null
+            },
+            {
+              "line": 134,
+              "expected": "  }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 293,
+              "expected": "    if (isDispatching) {",
+              "returned": null
+            },
+            {
+              "line": 294,
+              "expected": "      throw new Error('Reducers may not dispatch actions.')",
+              "returned": null
+            },
+            {
+              "line": 295,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 296,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 297,
+              "expected": "    try {",
+              "returned": null
+            },
+            {
+              "line": 298,
+              "expected": "      isDispatching = true",
+              "returned": null
+            },
+            {
+              "line": 299,
+              "expected": "      currentState = currentReducer(currentState, action)",
+              "returned": null
+            },
+            {
+              "line": 300,
+              "expected": "    } finally {",
+              "returned": null
+            },
+            {
+              "line": 301,
+              "expected": "      isDispatching = false",
+              "returned": null
+            },
+            {
+              "line": 302,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 152,
+              "expected": "  function ensureCanMutateNextListeners() {",
+              "returned": null
+            },
+            {
+              "line": 153,
+              "expected": "    if (nextListeners === currentListeners) {",
+              "returned": null
+            },
+            {
+              "line": 154,
+              "expected": "      nextListeners = new Map()",
+              "returned": null
+            },
+            {
+              "line": 155,
+              "expected": "      currentListeners.forEach((listener, key) => {",
+              "returned": null
+            },
+            {
+              "line": 156,
+              "expected": "        nextListeners.set(key, listener)",
+              "returned": null
+            },
+            {
+              "line": 157,
+              "expected": "      })",
+              "returned": null
+            },
+            {
+              "line": 158,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 159,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 221,
+              "expected": "    ensureCanMutateNextListeners()",
+              "returned": null
+            },
+            {
+              "line": 222,
+              "expected": "    const listenerId = listenerIdCounter++",
+              "returned": null
+            },
+            {
+              "line": 223,
+              "expected": "    nextListeners.set(listenerId, listener)",
+              "returned": null
+            },
+            {
+              "line": 224,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 225,
+              "expected": "    return function unsubscribe() {",
+              "returned": null
+            },
+            {
+              "line": 226,
+              "expected": "      if (!isSubscribed) {",
+              "returned": null
+            },
+            {
+              "line": 227,
+              "expected": "        return",
+              "returned": null
+            },
+            {
+              "line": 228,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 229,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 230,
+              "expected": "      if (isDispatching) {",
+              "returned": null
+            },
+            {
+              "line": 231,
+              "expected": "        throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 232,
+              "expected": "          'You may not unsubscribe from a store listener while the reducer is executing. ' +",
+              "returned": null
+            },
+            {
+              "line": 233,
+              "expected": "            'See https://redux.js.org/api/store#subscribelistener for more details.'",
+              "returned": null
+            },
+            {
+              "line": 234,
+              "expected": "        )",
+              "returned": null
+            },
+            {
+              "line": 235,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 236,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 237,
+              "expected": "      isSubscribed = false",
+              "returned": null
+            },
+            {
+              "line": 238,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 239,
+              "expected": "      ensureCanMutateNextListeners()",
+              "returned": null
+            },
+            {
+              "line": 240,
+              "expected": "      nextListeners.delete(listenerId)",
+              "returned": null
+            },
+            {
+              "line": 241,
+              "expected": "      currentListeners = null",
+              "returned": null
+            },
+            {
+              "line": 242,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 243,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 304,
+              "expected": "    const listeners = (currentListeners = nextListeners)",
+              "returned": null
+            },
+            {
+              "line": 305,
+              "expected": "    listeners.forEach(listener => {",
+              "returned": null
+            },
+            {
+              "line": 306,
+              "expected": "      listener()",
+              "returned": null
+            },
+            {
+              "line": 307,
+              "expected": "    })",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 344,
+              "expected": "  function observable() {",
+              "returned": null
+            },
+            {
+              "line": 345,
+              "expected": "    const outerSubscribe = subscribe",
+              "returned": null
+            },
+            {
+              "line": 346,
+              "expected": "    return {",
+              "returned": null
+            },
+            {
+              "line": 347,
+              "expected": "      /**",
+              "returned": null
+            },
+            {
+              "line": 348,
+              "expected": "       * The minimal observable subscription method.",
+              "returned": null
+            },
+            {
+              "line": 349,
+              "expected": "       * @param observer Any object that can be used as an observer.",
+              "returned": null
+            },
+            {
+              "line": 350,
+              "expected": "       * The observer object should have a `next` method.",
+              "returned": null
+            },
+            {
+              "line": 351,
+              "expected": "       * @returns An object with an `unsubscribe` method that can",
+              "returned": null
+            },
+            {
+              "line": 352,
+              "expected": "       * be used to unsubscribe the observable from the store, and prevent further",
+              "returned": null
+            },
+            {
+              "line": 353,
+              "expected": "       * emission of values from the observable.",
+              "returned": null
+            },
+            {
+              "line": 354,
+              "expected": "       */",
+              "returned": null
+            },
+            {
+              "line": 355,
+              "expected": "      subscribe(observer: unknown) {",
+              "returned": null
+            },
+            {
+              "line": 356,
+              "expected": "        if (typeof observer !== 'object' || observer === null) {",
+              "returned": null
+            },
+            {
+              "line": 357,
+              "expected": "          throw new TypeError(",
+              "returned": null
+            },
+            {
+              "line": 358,
+              "expected": "            `Expected the observer to be an object. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 359,
+              "expected": "              observer",
+              "returned": null
+            },
+            {
+              "line": 360,
+              "expected": "            )}'`",
+              "returned": null
+            },
+            {
+              "line": 361,
+              "expected": "          )",
+              "returned": null
+            },
+            {
+              "line": 362,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 363,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 364,
+              "expected": "        function observeState() {",
+              "returned": null
+            },
+            {
+              "line": 365,
+              "expected": "          const observerAsObserver = observer as Observer<S>",
+              "returned": null
+            },
+            {
+              "line": 366,
+              "expected": "          if (observerAsObserver.next) {",
+              "returned": null
+            },
+            {
+              "line": 367,
+              "expected": "            observerAsObserver.next(getState())",
+              "returned": null
+            },
+            {
+              "line": 368,
+              "expected": "          }",
+              "returned": null
+            },
+            {
+              "line": 369,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 370,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 371,
+              "expected": "        observeState()",
+              "returned": null
+            },
+            {
+              "line": 372,
+              "expected": "        const unsubscribe = outerSubscribe(observeState)",
+              "returned": null
+            },
+            {
+              "line": 373,
+              "expected": "        return { unsubscribe }",
+              "returned": null
+            },
+            {
+              "line": 374,
+              "expected": "      },",
+              "returned": null
+            },
+            {
+              "line": 375,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 376,
+              "expected": "      [$$observable]() {",
+              "returned": null
+            },
+            {
+              "line": 377,
+              "expected": "        return this",
+              "returned": null
+            },
+            {
+              "line": 378,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 379,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 380,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 381,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 382,
+              "expected": "  // When a store is created, an \"INIT\" action is dispatched so that every",
+              "returned": null
+            },
+            {
+              "line": 383,
+              "expected": "  // reducer returns their initial state. This effectively populates",
+              "returned": null
+            },
+            {
+              "line": 384,
+              "expected": "  // the initial state tree.",
+              "returned": null
+            },
+            {
+              "line": 385,
+              "expected": "  dispatch({ type: ActionTypes.INIT } as A)",
+              "returned": null
+            },
+            {
+              "line": 386,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 387,
+              "expected": "  const store = {",
+              "returned": null
+            },
+            {
+              "line": 388,
+              "expected": "    dispatch: dispatch as Dispatch<A>,",
+              "returned": null
+            },
+            {
+              "line": 389,
+              "expected": "    subscribe,",
+              "returned": null
+            },
+            {
+              "line": 390,
+              "expected": "    getState,",
+              "returned": null
+            },
+            {
+              "line": 391,
+              "expected": "    replaceReducer,",
+              "returned": null
+            },
+            {
+              "line": 392,
+              "expected": "    [$$observable]: observable",
+              "returned": null
+            },
+            {
+              "line": 393,
+              "expected": "  } as unknown as Store<S, A, StateExt> & Ext",
+              "returned": null
+            },
+            {
+              "line": 394,
+              "expected": "  return store",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "No uniquely selected owner after bounded recall; retain all four facts in the denominator."
+        }
+      ],
+      "sourceBytes": 0,
+      "stdoutBytes": 0,
+      "literalWitnessFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 121,
+              "expected": "  if (typeof enhancer !== 'undefined') {",
+              "returned": null
+            },
+            {
+              "line": 122,
+              "expected": "    if (typeof enhancer !== 'function') {",
+              "returned": null
+            },
+            {
+              "line": 123,
+              "expected": "      throw new Error(",
+              "returned": null
+            },
+            {
+              "line": 124,
+              "expected": "        `Expected the enhancer to be a function. Instead, received: '${kindOf(",
+              "returned": null
+            },
+            {
+              "line": 125,
+              "expected": "          enhancer",
+              "returned": null
+            },
+            {
+              "line": 126,
+              "expected": "        )}'`",
+              "returned": null
+            },
+            {
+              "line": 127,
+              "expected": "      )",
+              "returned": null
+            },
+            {
+              "line": 128,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 129,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 130,
+              "expected": "    return enhancer(createStore)(",
+              "returned": null
+            },
+            {
+              "line": 131,
+              "expected": "      reducer,",
+              "returned": null
+            },
+            {
+              "line": 132,
+              "expected": "      preloadedState as PreloadedState | undefined",
+              "returned": null
+            },
+            {
+              "line": 133,
+              "expected": "    )",
+              "returned": null
+            },
+            {
+              "line": 134,
+              "expected": "  }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "redux-2",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "redux-3",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "redux-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 365,
+              "expected": "          const observerAsObserver = observer as Observer<S>",
+              "returned": "          const observerAsObserver = observer a"
+            },
+            {
+              "line": 366,
+              "expected": "          if (observerAsObserver.next) {",
+              "returned": null
+            },
+            {
+              "line": 367,
+              "expected": "            observerAsObserver.next(getState())",
+              "returned": null
+            },
+            {
+              "line": 368,
+              "expected": "          }",
+              "returned": null
+            },
+            {
+              "line": 369,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 370,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 371,
+              "expected": "        observeState()",
+              "returned": null
+            },
+            {
+              "line": 372,
+              "expected": "        const unsubscribe = outerSubscribe(observeState)",
+              "returned": null
+            },
+            {
+              "line": 373,
+              "expected": "        return { unsubscribe }",
+              "returned": null
+            },
+            {
+              "line": 374,
+              "expected": "      },",
+              "returned": null
+            },
+            {
+              "line": 375,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 376,
+              "expected": "      [$$observable]() {",
+              "returned": null
+            },
+            {
+              "line": 377,
+              "expected": "        return this",
+              "returned": null
+            },
+            {
+              "line": 378,
+              "expected": "      }",
+              "returned": null
+            },
+            {
+              "line": 379,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 380,
+              "expected": "  }",
+              "returned": null
+            },
+            {
+              "line": 381,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 382,
+              "expected": "  // When a store is created, an \"INIT\" action is dispatched so that every",
+              "returned": null
+            },
+            {
+              "line": 383,
+              "expected": "  // reducer returns their initial state. This effectively populates",
+              "returned": null
+            },
+            {
+              "line": 384,
+              "expected": "  // the initial state tree.",
+              "returned": null
+            },
+            {
+              "line": 385,
+              "expected": "  dispatch({ type: ActionTypes.INIT } as A)",
+              "returned": null
+            },
+            {
+              "line": 386,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 387,
+              "expected": "  const store = {",
+              "returned": null
+            },
+            {
+              "line": 388,
+              "expected": "    dispatch: dispatch as Dispatch<A>,",
+              "returned": null
+            },
+            {
+              "line": 389,
+              "expected": "    subscribe,",
+              "returned": null
+            },
+            {
+              "line": 390,
+              "expected": "    getState,",
+              "returned": null
+            },
+            {
+              "line": 391,
+              "expected": "    replaceReducer,",
+              "returned": null
+            },
+            {
+              "line": 392,
+              "expected": "    [$$observable]: observable",
+              "returned": null
+            },
+            {
+              "line": 393,
+              "expected": "  } as unknown as Store<S, A, StateExt> & Ext",
+              "returned": null
+            },
+            {
+              "line": 394,
+              "expected": "  return store",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1785,
+      "neighborWireBytes": 1897,
+      "returnedMembershipRows": 2,
+      "windows": [
+        {
+          "file": "src/createStore.ts",
+          "startLine": 152,
+          "lastReturnedLine": 269,
+          "sourceBytes": 4521,
+          "partial": false
+        },
+        {
+          "file": "src/createStore.ts",
+          "startLine": 270,
+          "lastReturnedLine": 365,
+          "sourceBytes": 3479,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 0,
+      "literalWitnessFacts": 2,
+      "sourceEvidenceFacts": 2,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "native-members",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 972,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 976,
+              "expected": "        for ancestor in self.stack_path.iter().rev() {",
+              "returned": "        for ancestor in"
+            },
+            {
+              "line": 977,
+              "expected": "            let is_same = ancestor",
+              "returned": null
+            },
+            {
+              "line": 978,
+              "expected": "                .is_same(&hchild)",
+              "returned": null
+            },
+            {
+              "line": 979,
+              "expected": "                .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 980,
+              "expected": "            if is_same {",
+              "returned": null
+            },
+            {
+              "line": 981,
+              "expected": "                return Err(Error::from_loop(",
+              "returned": null
+            },
+            {
+              "line": 982,
+              "expected": "                    self.depth,",
+              "returned": null
+            },
+            {
+              "line": 983,
+              "expected": "                    &ancestor.path,",
+              "returned": null
+            },
+            {
+              "line": 984,
+              "expected": "                    child.as_ref(),",
+              "returned": null
+            },
+            {
+              "line": 985,
+              "expected": "                ));",
+              "returned": null
+            },
+            {
+              "line": 986,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 987,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 988,
+              "expected": "        Ok(())",
+              "returned": null
+            },
+            {
+              "line": 989,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 883,
+              "expected": "",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "Only blank separator lines between verified callable spans are missing; both complete implementation bodies establishing the fact are returned."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 13045,
+      "members": [
+        {
+          "id": "sha256:5c1a2f2ab2725e97f0e936e554e3381bc72abac584341846089152518b8314b1",
+          "name": ".next()",
+          "file": "src/lib.rs",
+          "startLine": 687,
+          "lastReturnedLine": 734,
+          "sourceBytes": 1812,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c3fe8fc9e9d0038d0c1191e7cf0d4ee7783cebd55c755a07c627023b60a3d188",
+          "name": ".skip_current_dir()",
+          "file": "src/lib.rs",
+          "startLine": 781,
+          "lastReturnedLine": 785,
+          "sourceBytes": 117,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:5704b7023e55533acf5164ddd3ae50467aea1abf4c19866f3e143ae7bf09d370",
+          "name": ".filter_entry()",
+          "file": "src/lib.rs",
+          "startLine": 833,
+          "lastReturnedLine": 838,
+          "sourceBytes": 169,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "name": ".handle_entry()",
+          "file": "src/lib.rs",
+          "startLine": 840,
+          "lastReturnedLine": 882,
+          "sourceBytes": 1726,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867",
+          "name": ".get_deferred_dir()",
+          "file": "src/lib.rs",
+          "startLine": 884,
+          "lastReturnedLine": 899,
+          "sourceBytes": 607,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45",
+          "name": ".push()",
+          "file": "src/lib.rs",
+          "startLine": 901,
+          "lastReturnedLine": 948,
+          "sourceBytes": 2459,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:3d843599c82e0cf88d7512278cc2b4f2ffc87c5797785e0c9caad89ab4af8f98",
+          "name": ".pop()",
+          "file": "src/lib.rs",
+          "startLine": 950,
+          "lastReturnedLine": 959,
+          "sourceBytes": 484,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "name": ".follow()",
+          "file": "src/lib.rs",
+          "startLine": 961,
+          "lastReturnedLine": 971,
+          "sourceBytes": 431,
+          "truncated": false,
+          "digestVerified": true
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "name": ".check_loop()",
+          "file": "src/lib.rs",
+          "startLine": 973,
+          "lastReturnedLine": 976,
+          "sourceBytes": 195,
+          "truncated": true,
+          "digestVerified": true
+        }
+      ],
+      "omittedMembers": 2,
+      "truncated": true,
+      "literalWitnessFacts": 1,
+      "sourceEvidenceFacts": 3,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 901,
+              "expected": "    fn push(&mut self, dent: &DirEntry) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 902,
+              "expected": "        // Make room for another open file descriptor if we've hit the max.",
+              "returned": null
+            },
+            {
+              "line": 903,
+              "expected": "        let free =",
+              "returned": null
+            },
+            {
+              "line": 904,
+              "expected": "            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();",
+              "returned": null
+            },
+            {
+              "line": 905,
+              "expected": "        if free == self.opts.max_open {",
+              "returned": null
+            },
+            {
+              "line": 906,
+              "expected": "            self.stack_list[self.oldest_opened].close();",
+              "returned": null
+            },
+            {
+              "line": 907,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 908,
+              "expected": "        // Open a handle to reading the directory's entries.",
+              "returned": null
+            },
+            {
+              "line": 909,
+              "expected": "        let rd = fs::read_dir(dent.path()).map_err(|err| {",
+              "returned": null
+            },
+            {
+              "line": 910,
+              "expected": "            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))",
+              "returned": null
+            },
+            {
+              "line": 911,
+              "expected": "        });",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 961,
+              "expected": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 962,
+              "expected": "        dent =",
+              "returned": null
+            },
+            {
+              "line": 963,
+              "expected": "            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;",
+              "returned": null
+            },
+            {
+              "line": 964,
+              "expected": "        // The only way a symlink can cause a loop is if it points",
+              "returned": null
+            },
+            {
+              "line": 965,
+              "expected": "        // to a directory. Otherwise, it always points to a leaf",
+              "returned": null
+            },
+            {
+              "line": 966,
+              "expected": "        // and we can omit any loop checks.",
+              "returned": null
+            },
+            {
+              "line": 967,
+              "expected": "        if dent.is_dir() {",
+              "returned": null
+            },
+            {
+              "line": 968,
+              "expected": "            self.check_loop(dent.path())?;",
+              "returned": null
+            },
+            {
+              "line": 969,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 970,
+              "expected": "        Ok(dent)",
+              "returned": null
+            },
+            {
+              "line": 971,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 972,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 973,
+              "expected": "    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 974,
+              "expected": "        let hchild = Handle::from_path(&child)",
+              "returned": null
+            },
+            {
+              "line": 975,
+              "expected": "            .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 976,
+              "expected": "        for ancestor in self.stack_path.iter().rev() {",
+              "returned": null
+            },
+            {
+              "line": 977,
+              "expected": "            let is_same = ancestor",
+              "returned": null
+            },
+            {
+              "line": 978,
+              "expected": "                .is_same(&hchild)",
+              "returned": null
+            },
+            {
+              "line": 979,
+              "expected": "                .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 980,
+              "expected": "            if is_same {",
+              "returned": null
+            },
+            {
+              "line": 981,
+              "expected": "                return Err(Error::from_loop(",
+              "returned": null
+            },
+            {
+              "line": 982,
+              "expected": "                    self.depth,",
+              "returned": null
+            },
+            {
+              "line": 983,
+              "expected": "                    &ancestor.path,",
+              "returned": null
+            },
+            {
+              "line": 984,
+              "expected": "                    child.as_ref(),",
+              "returned": null
+            },
+            {
+              "line": 985,
+              "expected": "                ));",
+              "returned": null
+            },
+            {
+              "line": 986,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 987,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 988,
+              "expected": "        Ok(())",
+              "returned": null
+            },
+            {
+              "line": 989,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 873,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 874,
+              "expected": "        if is_normal_dir && self.opts.contents_first {",
+              "returned": null
+            },
+            {
+              "line": 875,
+              "expected": "            self.deferred_dirs.push(dent);",
+              "returned": null
+            },
+            {
+              "line": 876,
+              "expected": "            None",
+              "returned": null
+            },
+            {
+              "line": 877,
+              "expected": "        } else if self.skippable() {",
+              "returned": null
+            },
+            {
+              "line": 878,
+              "expected": "            None",
+              "returned": null
+            },
+            {
+              "line": 879,
+              "expected": "        } else {",
+              "returned": null
+            },
+            {
+              "line": 880,
+              "expected": "            Some(Ok(dent))",
+              "returned": null
+            },
+            {
+              "line": 881,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 882,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 883,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 884,
+              "expected": "    fn get_deferred_dir(&mut self) -> Option<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 885,
+              "expected": "        if self.opts.contents_first {",
+              "returned": null
+            },
+            {
+              "line": 886,
+              "expected": "            if self.depth < self.deferred_dirs.len() {",
+              "returned": null
+            },
+            {
+              "line": 887,
+              "expected": "                // Unwrap is safe here because we've guaranteed that",
+              "returned": null
+            },
+            {
+              "line": 888,
+              "expected": "                // `self.deferred_dirs.len()` can never be less than 1",
+              "returned": null
+            },
+            {
+              "line": 889,
+              "expected": "                let deferred: DirEntry = self",
+              "returned": null
+            },
+            {
+              "line": 890,
+              "expected": "                    .deferred_dirs",
+              "returned": null
+            },
+            {
+              "line": 891,
+              "expected": "                    .pop()",
+              "returned": null
+            },
+            {
+              "line": 892,
+              "expected": "                    .expect(\"BUG: deferred_dirs should be non-empty\");",
+              "returned": null
+            },
+            {
+              "line": 893,
+              "expected": "                if !self.skippable() {",
+              "returned": null
+            },
+            {
+              "line": 894,
+              "expected": "                    return Some(deferred);",
+              "returned": null
+            },
+            {
+              "line": 895,
+              "expected": "                }",
+              "returned": null
+            },
+            {
+              "line": 896,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 897,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 898,
+              "expected": "        None",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 4237,
+      "neighborWireBytes": 44444,
+      "returnedMembershipRows": 20,
+      "windows": [
+        {
+          "file": "src/lib.rs",
+          "startLine": 568,
+          "lastReturnedLine": 572,
+          "sourceBytes": 167,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 573,
+          "lastReturnedLine": 578,
+          "sourceBytes": 348,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 579,
+          "lastReturnedLine": 585,
+          "sourceBytes": 253,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 586,
+          "lastReturnedLine": 590,
+          "sourceBytes": 283,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 591,
+          "lastReturnedLine": 593,
+          "sourceBytes": 135,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 594,
+          "lastReturnedLine": 597,
+          "sourceBytes": 207,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 598,
+          "lastReturnedLine": 604,
+          "sourceBytes": 318,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 605,
+          "lastReturnedLine": 679,
+          "sourceBytes": 2788,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 680,
+          "lastReturnedLine": 686,
+          "sourceBytes": 273,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 687,
+          "lastReturnedLine": 776,
+          "sourceBytes": 3228,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 10,
+      "literalWitnessFacts": 1,
+      "sourceEvidenceFacts": 1,
+      "explicitNativeFacts": 0
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "neighbor-window-control",
+      "resolverStatus": "resolved",
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        },
+        {
+          "fact": "walkdir-2",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 902,
+              "expected": "        // Make room for another open file descriptor if we've hit the max.",
+              "returned": "        // Make room for another open file descriptor if we"
+            },
+            {
+              "line": 903,
+              "expected": "        let free =",
+              "returned": null
+            },
+            {
+              "line": 904,
+              "expected": "            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();",
+              "returned": null
+            },
+            {
+              "line": 905,
+              "expected": "        if free == self.opts.max_open {",
+              "returned": null
+            },
+            {
+              "line": 906,
+              "expected": "            self.stack_list[self.oldest_opened].close();",
+              "returned": null
+            },
+            {
+              "line": 907,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 908,
+              "expected": "        // Open a handle to reading the directory's entries.",
+              "returned": null
+            },
+            {
+              "line": 909,
+              "expected": "        let rd = fs::read_dir(dent.path()).map_err(|err| {",
+              "returned": null
+            },
+            {
+              "line": 910,
+              "expected": "            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))",
+              "returned": null
+            },
+            {
+              "line": 911,
+              "expected": "        });",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-3",
+          "literalWitnessCoverage": false,
+          "missingAfterIndentNormalization": [
+            {
+              "line": 961,
+              "expected": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {",
+              "returned": null
+            },
+            {
+              "line": 962,
+              "expected": "        dent =",
+              "returned": null
+            },
+            {
+              "line": 963,
+              "expected": "            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;",
+              "returned": null
+            },
+            {
+              "line": 964,
+              "expected": "        // The only way a symlink can cause a loop is if it points",
+              "returned": null
+            },
+            {
+              "line": 965,
+              "expected": "        // to a directory. Otherwise, it always points to a leaf",
+              "returned": null
+            },
+            {
+              "line": 966,
+              "expected": "        // and we can omit any loop checks.",
+              "returned": null
+            },
+            {
+              "line": 967,
+              "expected": "        if dent.is_dir() {",
+              "returned": null
+            },
+            {
+              "line": 968,
+              "expected": "            self.check_loop(dent.path())?;",
+              "returned": null
+            },
+            {
+              "line": 969,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 970,
+              "expected": "        Ok(dent)",
+              "returned": null
+            },
+            {
+              "line": 971,
+              "expected": "    }",
+              "returned": null
+            },
+            {
+              "line": 972,
+              "expected": "",
+              "returned": null
+            },
+            {
+              "line": 973,
+              "expected": "    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {",
+              "returned": null
+            },
+            {
+              "line": 974,
+              "expected": "        let hchild = Handle::from_path(&child)",
+              "returned": null
+            },
+            {
+              "line": 975,
+              "expected": "            .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 976,
+              "expected": "        for ancestor in self.stack_path.iter().rev() {",
+              "returned": null
+            },
+            {
+              "line": 977,
+              "expected": "            let is_same = ancestor",
+              "returned": null
+            },
+            {
+              "line": 978,
+              "expected": "                .is_same(&hchild)",
+              "returned": null
+            },
+            {
+              "line": 979,
+              "expected": "                .map_err(|err| Error::from_io(self.depth, err))?;",
+              "returned": null
+            },
+            {
+              "line": 980,
+              "expected": "            if is_same {",
+              "returned": null
+            },
+            {
+              "line": 981,
+              "expected": "                return Err(Error::from_loop(",
+              "returned": null
+            },
+            {
+              "line": 982,
+              "expected": "                    self.depth,",
+              "returned": null
+            },
+            {
+              "line": 983,
+              "expected": "                    &ancestor.path,",
+              "returned": null
+            },
+            {
+              "line": 984,
+              "expected": "                    child.as_ref(),",
+              "returned": null
+            },
+            {
+              "line": 985,
+              "expected": "                ));",
+              "returned": null
+            },
+            {
+              "line": 986,
+              "expected": "            }",
+              "returned": null
+            },
+            {
+              "line": 987,
+              "expected": "        }",
+              "returned": null
+            },
+            {
+              "line": 988,
+              "expected": "        Ok(())",
+              "returned": null
+            },
+            {
+              "line": 989,
+              "expected": "    }",
+              "returned": null
+            }
+          ],
+          "sufficientSourceEvidence": false,
+          "explicitNativeAssertion": false,
+          "reason": "Required implementation code is absent or partial; no partial-fact credit."
+        },
+        {
+          "fact": "walkdir-4",
+          "literalWitnessCoverage": true,
+          "missingAfterIndentNormalization": [],
+          "sufficientSourceEvidence": true,
+          "explicitNativeAssertion": false,
+          "reason": "All required source lines are returned; differences from literal witnesses, if any, are only leading indentation at recorded span starts."
+        }
+      ],
+      "sourceBytes": 8000,
+      "stdoutBytes": 0,
+      "neighborTextBytes": 1336,
+      "neighborWireBytes": 1448,
+      "returnedMembershipRows": 11,
+      "windows": [
+        {
+          "file": "src/lib.rs",
+          "startLine": 687,
+          "lastReturnedLine": 780,
+          "sourceBytes": 3391,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 781,
+          "lastReturnedLine": 832,
+          "sourceBytes": 1974,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 833,
+          "lastReturnedLine": 839,
+          "sourceBytes": 175,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 840,
+          "lastReturnedLine": 883,
+          "sourceBytes": 1732,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 884,
+          "lastReturnedLine": 900,
+          "sourceBytes": 613,
+          "partial": false
+        },
+        {
+          "file": "src/lib.rs",
+          "startLine": 901,
+          "lastReturnedLine": 902,
+          "sourceBytes": 115,
+          "partial": true
+        }
+      ],
+      "omittedGroups": 5,
+      "literalWitnessFacts": 2,
+      "sourceEvidenceFacts": 2,
+      "explicitNativeFacts": 0
+    }
+  ],
+  "adjudication": {
+    "reviewer": "Same agent, separate verification script and post-capture semantic review; not independent human adjudication.",
+    "literalPolicy": "Exact complete witness line text and line locations. Leading indentation differences and omitted blank separators make literal coverage fail; this is a strict formatting/coverage measure, not a semantic quality score.",
+    "semanticPolicy": "Complete implementation fact only. Leading indentation and blank separator differences do not remove code meaning. The class header may be supplied by the independently verified exact owner identity, but decorator semantics require the decorator in the evidence. No credit for absent code, partial statements or guessed property/ownership behavior.",
+    "nativeClaims": "The new mode renders node, relationship and source evidence. It authors zero task-specific responsibility explanations.",
+    "anchorReview": "All 130 returned membership anchors were inspected against source declarations (69 Compass, 61 Graphify). Graphify sites match displayed member declarations in this sample; this does not establish general relation-site identity safety, full relationship precision, or complete membership recall.",
+    "nativeVerification": "54 displayed member IDs match the independently recomputed directed containment traversal and source order. All 54 complete stored span digests match pinned bytes; rendered prefixes match their shared 8000-byte quota. Nested jsoup methods are reached through type containers. No unavailable members in this sample.",
+    "controlVerification": "Nine recorded get_neighbors calls, with unchanged root IDs and no filters or pagination. Recompute all windows from captured returned anchors only. No printed Graphify truncation marker was observed; this does not prove complete graph membership. Compass reports no neighbor or transport truncation. Omitted source-window groups remain explicit."
+  },
+  "comparison": {
+    "previousNativeDeclarationEvidence": {
+      "compass": 7,
+      "graphify": 0,
+      "facts": 20
+    },
+    "previousQueryPlusSourceRead": {
+      "compass": 11,
+      "graphify": 13,
+      "facts": 20
+    },
+    "nativeDelta": "Seven gained facts and one lost fact: Chi +3, jsoup +1, WalkDir +3, Click -1; Redux unchanged unresolved. No equivalent Graphify member-mode operation is asserted.",
+    "controlDifference": "Graphify gains one jsoup fact, two Redux facts and one WalkDir fact over Compass under this policy. Returned field anchors consume Compass window budget; Graphify exposes fewer such anchors. Both follow the same source-window algorithm.",
+    "noAggregation": "Keep all three workflows and the declaration baseline separate. No best-of-arms score, latency, equal-I/O efficiency, synthesized-explanation or god-object-quality claim."
+  },
+  "validation": {
+    "baseCommit": "bac936f9eae3890e23f0776a692c145409134550",
+    "sourceSha256": {
+      "crates/compass-query/src/explanation_members.rs": "c6b9581d44012f8d4218c2d79408f2527702e56ce0ea0d6c967922c5daff2081",
+      "crates/compass-query/src/neighbors.rs": "20988f2ac56bd6e077a4bcbc317fc7a21f20e9ae705afcd642def1e507c271c9",
+      "crates/compass-query/src/traversal.rs": "d7d581ecfa1a32bbd76c3be6e2ba1dd4db1bcf3b1a316263b50c93a4052def16",
+      "crates/compass-query/src/lib.rs": "6009f8ba46df2aeefc6a01a92ae749a2bf6e7b06fb4022136c9e84f6c83d2b65",
+      "crates/compass-query/tests/explanation_members.rs": "e5bd2a42b81314a847212dc5af877700adf0d9b3d79f804cbca1e2e109e6c0fb",
+      "crates/compass-query/tests/explanation_source.rs": "34186c0a032ee576f587d1302d78f07959270ab9e139737414529b7781c869b6",
+      "crates/compass-cli/src/lib.rs": "057e9325c6cc85fe5da0f0f8dfafecbcd2e85e257f6d9355af15462308e7a002",
+      "crates/compass-cli/src/help.rs": "1887ad3a201c7bf3c35eb18677f26f8d6a573948ce90f41d81234856978e3f57",
+      "crates/compass-cli/tests/code_query_cli.rs": "72b9ede4e56262328636c08e7f4666e7f859d592edd71377c3cc45f0b7005c63"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 3.71
+      },
+      {
+        "name": "query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--test",
+          "explanation_source",
+          "--test",
+          "explanation_members",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 5.09
+      },
+      {
+        "name": "cli-query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "code_query_cli",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 59.87
+      },
+      {
+        "name": "mcp-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 38.96
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 14.21
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 90.29
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 9.2
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.08
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exitCode": 0,
+        "seconds": 1.87
+      }
+    ]
+  },
+  "validationScope": {
+    "passed": "fmt; 13 focused query tests; 40 CLI query tests; 60 MCP tests; workspace Clippy; 1106 workspace tests, 2 ignored; 9 product tests; product boundary; CLI build.",
+    "notRun": "JS/viewer and extraction/resolution publication qualification gates were not rerun because only source retrieval, CLI rendering and documentation changed. The general benchmark harness was not modified.",
+    "binaryBinding": "Final CLI build bytes match the frozen evaluated binary; every recorded Rust source hash matches productCommit."
+  },
+  "attempts": [
+    "Initial collector failed before any public requests because its hash helper passed an unsupported read bound. Preserve capture.log, collect-attempt-01.py; corrected streaming hashing and used fresh capture-02 directory.",
+    "First verifier split the MEMBER SOURCES heading as a member. Preserve verification-01.log and verify-capture-attempt-01.py. Corrected parsing; verification-02 passed. Final verifier also checks source byte-to-line consistency and passes."
+  ],
+  "artifacts": {
+    "member-source-02/build-final.log": "9c112f5e179b81b74ab3c14ed843179185008da9475637274660aed074d421a5",
+    "member-source-02/capture-02/capture.json": "96a88b74d425287525311c647b97ef7daa0c659ada56c31645be83def3e3c4a5",
+    "member-source-02/capture-02/collect.py": "7a95e6dddb8a8b69ea21082163d5125783816f5ebb460dfcf3f691f9a608da69",
+    "member-source-02/capture-02/community_identity.py": "5bc3d1c574211aa3180a2334fe6c758043f384651948b7077aba3ea879de4503",
+    "member-source-02/capture-02/community_navigation.py": "808df1c7b15c8c2afc86ac1ed09dc4f339c98a77d7a7b14eb4866e3da1c8c0f8",
+    "member-source-02/capture-02/community_tasks.py": "77f599ff7ee7eebfe4b590fee6c771ecfb3ed475d1944e37bcabc110634d3660",
+    "member-source-02/capture-02/graphify-mcp-environment.json": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+    "member-source-02/capture-02/mcp_compare.py": "d23f093a1300fcf825457f917694097f0f8b8dc8ee8d671946032f5e4e89a5dc",
+    "member-source-02/capture-02/mcp_transport.py": "daaad69c554f824a1df94f0ef93cb9d4c6e9b4f4b712d1611323d524e10d44ee",
+    "member-source-02/capture-02/member_source_development_registration.json": "e95a8b9964a9b5482d66051bc533edb57f93ede59a0a576fb95a85f0460f3f76",
+    "member-source-02/capture-02/raw/chi/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/chi/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "member-source-02/capture-02/raw/chi/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/chi/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/chi/compass/mcp/03.response.jsonl": "64d26fe612b4c19a3c88ba6d5548476cf5322cf118de8d206b2698ce99b02a65",
+    "member-source-02/capture-02/raw/chi/compass/mcp/04.request.json": "fa0a888eb5b3c0af33258fcda7dd5fda8d8524b58106a73dd14a5a5ce751a653",
+    "member-source-02/capture-02/raw/chi/compass/mcp/04.response.jsonl": "bee27b222019288810fb48facfe2f2ce43153b8e3f1d88f3cb6bc37bb628e1b5",
+    "member-source-02/capture-02/raw/chi/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/chi/compass/members.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/chi/compass/members.stdout": "a827aea6e1c28e363d972da58943349455dd43154d162d5adecfffaaf2bcd41f",
+    "member-source-02/capture-02/raw/chi/compass/windows/000.source": "9eb2d52dd04b27bb3b9db2723a9510feade0e1a02233f894b869ea87dbe3660e",
+    "member-source-02/capture-02/raw/chi/compass/windows/001.source": "b62f2613be37ad6011c1399c13810dc40d7a7d31672ea7b4b845e7388a076652",
+    "member-source-02/capture-02/raw/chi/compass/windows/002.source": "a9a0519cc2a6c3a65e7439b10e243ac41e96d1e0b84309ee74cc2ec221ad67e4",
+    "member-source-02/capture-02/raw/chi/compass/windows/003.source": "6c7ee9d15cf8b902474cb2a889af3e6ce8d930ce6b2549c9370bf917300afb7f",
+    "member-source-02/capture-02/raw/chi/compass/windows/004.source": "14e3766158a070b4d2458b2d12c46dfed9135e5eb7d92e75cc2ddd267a79df48",
+    "member-source-02/capture-02/raw/chi/compass/windows/005.source": "41e6f1b96477603fc758b76907ab2b58c89f5b2a19977a9ae02a977219d043c8",
+    "member-source-02/capture-02/raw/chi/compass/windows/006.source": "6e98f4a2cfb379527398e03898a69adcaaf22578436847e3e8e97a2c308b1ee4",
+    "member-source-02/capture-02/raw/chi/compass/windows/007.source": "d3229d590c609f7973a948e38c2b535897de1b1a0c4c8155c53b51c200fdd05f",
+    "member-source-02/capture-02/raw/chi/compass/windows/008.source": "7baa3aa1ed3dfed62e1f78abedbcf849b2fe24c2d5d98c691f798c299b386cc9",
+    "member-source-02/capture-02/raw/chi/compass/windows/009.source": "1ab1ac9656f4ba94ee77a2eadfc583448b7dc9e56810b342d15c4223a49e293a",
+    "member-source-02/capture-02/raw/chi/compass/windows/010.source": "1b96890f53d5a7135b7ee8dbd2aa833d315351c53c412ed5f17c04b3717799c1",
+    "member-source-02/capture-02/raw/chi/compass/windows/011.source": "4964102336465ac8fda4b73892e06e76450b04c7a6e911bc3923a9ba35bb182e",
+    "member-source-02/capture-02/raw/chi/compass/windows/012.source": "6e9579c6e34320ab72c2eb6b62fd2e97b753caffc5fe2fde72d8ee87285bf834",
+    "member-source-02/capture-02/raw/chi/compass/windows/013.source": "4f8642971aca332f7c9211a74565ecfd72df1840647e7e697f0a7301f047bb03",
+    "member-source-02/capture-02/raw/chi/compass/windows/014.source": "af566e9b84a61be0e5cb7f650727d90d31d354496e61e6f0860b02cd80d2ba15",
+    "member-source-02/capture-02/raw/chi/compass/windows/015.source": "f73834c009a6738ec43bdf1f733fac56afcdbf9dbd6bdd6fceacaa6567b6c41c",
+    "member-source-02/capture-02/raw/chi/compass/windows/016.source": "30f6edf9f7358667d354a02d8133c3d0b9250877faf97696a64eba0ce9936214",
+    "member-source-02/capture-02/raw/chi/compass/windows/017.source": "7b7346b3001bf77da22e762643d47cd5187073ba41ee4eef160d007c5a445b82",
+    "member-source-02/capture-02/raw/chi/compass/windows/018.source": "fe91417f99bad942628bf086fc17692a8cc2062fc0a021dc9d75cfdb98864480",
+    "member-source-02/capture-02/raw/chi/compass/windows/019.source": "9bc7883443efbda77ee326ec80ec195fc5bc00589d09aedf444dbdd4cde0c118",
+    "member-source-02/capture-02/raw/chi/compass/windows/020.source": "4612f1c12f2566386a31823750264c222924baf490d7ad33ef5305792bc6e3b3",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/04.request.json": "099de0bb0962487971342d734b860bc412719fd1469fddc833ba46ec7c7fee98",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/04.response.jsonl": "07cf8f5c1e427dedccf1f84b1388c0969e74a1f2c08c7b628ee7443f36dc7d0c",
+    "member-source-02/capture-02/raw/chi/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/chi/graphify/windows/000.source": "9eb2d52dd04b27bb3b9db2723a9510feade0e1a02233f894b869ea87dbe3660e",
+    "member-source-02/capture-02/raw/chi/graphify/windows/001.source": "b62f2613be37ad6011c1399c13810dc40d7a7d31672ea7b4b845e7388a076652",
+    "member-source-02/capture-02/raw/chi/graphify/windows/002.source": "a9a0519cc2a6c3a65e7439b10e243ac41e96d1e0b84309ee74cc2ec221ad67e4",
+    "member-source-02/capture-02/raw/chi/graphify/windows/003.source": "6c7ee9d15cf8b902474cb2a889af3e6ce8d930ce6b2549c9370bf917300afb7f",
+    "member-source-02/capture-02/raw/chi/graphify/windows/004.source": "14e3766158a070b4d2458b2d12c46dfed9135e5eb7d92e75cc2ddd267a79df48",
+    "member-source-02/capture-02/raw/chi/graphify/windows/005.source": "41e6f1b96477603fc758b76907ab2b58c89f5b2a19977a9ae02a977219d043c8",
+    "member-source-02/capture-02/raw/chi/graphify/windows/006.source": "6e98f4a2cfb379527398e03898a69adcaaf22578436847e3e8e97a2c308b1ee4",
+    "member-source-02/capture-02/raw/chi/graphify/windows/007.source": "d3229d590c609f7973a948e38c2b535897de1b1a0c4c8155c53b51c200fdd05f",
+    "member-source-02/capture-02/raw/chi/graphify/windows/008.source": "7baa3aa1ed3dfed62e1f78abedbcf849b2fe24c2d5d98c691f798c299b386cc9",
+    "member-source-02/capture-02/raw/chi/graphify/windows/009.source": "1ab1ac9656f4ba94ee77a2eadfc583448b7dc9e56810b342d15c4223a49e293a",
+    "member-source-02/capture-02/raw/chi/graphify/windows/010.source": "1b96890f53d5a7135b7ee8dbd2aa833d315351c53c412ed5f17c04b3717799c1",
+    "member-source-02/capture-02/raw/chi/graphify/windows/011.source": "4964102336465ac8fda4b73892e06e76450b04c7a6e911bc3923a9ba35bb182e",
+    "member-source-02/capture-02/raw/chi/graphify/windows/012.source": "6e9579c6e34320ab72c2eb6b62fd2e97b753caffc5fe2fde72d8ee87285bf834",
+    "member-source-02/capture-02/raw/chi/graphify/windows/013.source": "4f8642971aca332f7c9211a74565ecfd72df1840647e7e697f0a7301f047bb03",
+    "member-source-02/capture-02/raw/chi/graphify/windows/014.source": "af566e9b84a61be0e5cb7f650727d90d31d354496e61e6f0860b02cd80d2ba15",
+    "member-source-02/capture-02/raw/chi/graphify/windows/015.source": "f73834c009a6738ec43bdf1f733fac56afcdbf9dbd6bdd6fceacaa6567b6c41c",
+    "member-source-02/capture-02/raw/chi/graphify/windows/016.source": "30f6edf9f7358667d354a02d8133c3d0b9250877faf97696a64eba0ce9936214",
+    "member-source-02/capture-02/raw/chi/graphify/windows/017.source": "7b7346b3001bf77da22e762643d47cd5187073ba41ee4eef160d007c5a445b82",
+    "member-source-02/capture-02/raw/chi/graphify/windows/018.source": "fe91417f99bad942628bf086fc17692a8cc2062fc0a021dc9d75cfdb98864480",
+    "member-source-02/capture-02/raw/chi/graphify/windows/019.source": "9bc7883443efbda77ee326ec80ec195fc5bc00589d09aedf444dbdd4cde0c118",
+    "member-source-02/capture-02/raw/chi/graphify/windows/020.source": "4612f1c12f2566386a31823750264c222924baf490d7ad33ef5305792bc6e3b3",
+    "member-source-02/capture-02/raw/click/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/click/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "member-source-02/capture-02/raw/click/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/click/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/click/compass/mcp/03.response.jsonl": "64d26fe612b4c19a3c88ba6d5548476cf5322cf118de8d206b2698ce99b02a65",
+    "member-source-02/capture-02/raw/click/compass/mcp/04.request.json": "fb8d2bc88ad1880a6ce22d99a63be7cd8d08ab0871a9f8622424a0304542a4aa",
+    "member-source-02/capture-02/raw/click/compass/mcp/04.response.jsonl": "a59049551958eb6a2914b0f4987029b33770f8cf4e5a688b67863c6beba8835d",
+    "member-source-02/capture-02/raw/click/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/click/compass/members.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/click/compass/members.stdout": "c12fa7fd7a03bcdf46578c982de39a5d539d41846e69dd3a93bd5a8b59bfcba2",
+    "member-source-02/capture-02/raw/click/compass/windows/000.source": "75e95b9bbc3c0e0eb155a8832aece6c91ad55fc665f3e75f975f7f56a4f714c4",
+    "member-source-02/capture-02/raw/click/compass/windows/001.source": "d60bde99d994e7a7514909d64528e29bca38a4a8ab83539fd5255f78b55e8e9b",
+    "member-source-02/capture-02/raw/click/compass/windows/002.source": "ccddee379cb2066c45d953575817cc4039d73deab55149c3378717de58b76632",
+    "member-source-02/capture-02/raw/click/compass/windows/003.source": "6c48735e9c2665c3f370a0dc40392d32c969bca52d33e3e4dc6d42dad7c1e48a",
+    "member-source-02/capture-02/raw/click/compass/windows/004.source": "093b12bc46f9d5036f4b4dbaa6d3a0846aa191ba19b826d415077363a304c3fa",
+    "member-source-02/capture-02/raw/click/compass/windows/005.source": "6069237b3debc11dd51020c834ad9e5816bbeab1000466034710d575faf439d1",
+    "member-source-02/capture-02/raw/click/compass/windows/006.source": "29d44ac5a6a9f8ded9079cf6c8315259bf1d21a487df8993d48d575bd5dc92b8",
+    "member-source-02/capture-02/raw/click/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/click/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "member-source-02/capture-02/raw/click/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/click/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/click/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "member-source-02/capture-02/raw/click/graphify/mcp/04.request.json": "45d70070999af8bb5dac2cc3539f70fe83e41d5c898f53cd1fac42b55187988a",
+    "member-source-02/capture-02/raw/click/graphify/mcp/04.response.jsonl": "2e2b8b5d78de91e357e8a741b3959ee11bb1e48cfcbc71de6dd101570561c5fa",
+    "member-source-02/capture-02/raw/click/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/click/graphify/windows/000.source": "75e95b9bbc3c0e0eb155a8832aece6c91ad55fc665f3e75f975f7f56a4f714c4",
+    "member-source-02/capture-02/raw/click/graphify/windows/001.source": "d60bde99d994e7a7514909d64528e29bca38a4a8ab83539fd5255f78b55e8e9b",
+    "member-source-02/capture-02/raw/click/graphify/windows/002.source": "ccddee379cb2066c45d953575817cc4039d73deab55149c3378717de58b76632",
+    "member-source-02/capture-02/raw/click/graphify/windows/003.source": "6c48735e9c2665c3f370a0dc40392d32c969bca52d33e3e4dc6d42dad7c1e48a",
+    "member-source-02/capture-02/raw/click/graphify/windows/004.source": "093b12bc46f9d5036f4b4dbaa6d3a0846aa191ba19b826d415077363a304c3fa",
+    "member-source-02/capture-02/raw/click/graphify/windows/005.source": "6069237b3debc11dd51020c834ad9e5816bbeab1000466034710d575faf439d1",
+    "member-source-02/capture-02/raw/click/graphify/windows/006.source": "29d44ac5a6a9f8ded9079cf6c8315259bf1d21a487df8993d48d575bd5dc92b8",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/03.response.jsonl": "64d26fe612b4c19a3c88ba6d5548476cf5322cf118de8d206b2698ce99b02a65",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/04.request.json": "a1e85cbdc8e510db04097cad55c25814a93c38b7b1f0372227e93481236d429b",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/04.response.jsonl": "baa465652b18341c09d564600481e0110f0e1e63079c5522540f83b90e7a5d4a",
+    "member-source-02/capture-02/raw/jsoup/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/jsoup/compass/members.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/jsoup/compass/members.stdout": "c4ef7ef86f96a867ab3b4bdafab8826ae1c940a34a9872fff0068dab32d73ed1",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/000.source": "f1137f4d17d7bc9a18934c4387a08fd79118e7f98548d4e9ac73a3edd6cd237c",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/001.source": "b577f811b284f994dc62cfd95d6c60d63e5d5b70cac13cb5cb3da8ba175b8e71",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/002.source": "39bd7723e9a79009a4a2aeb394f195913bf9f10ef0dc062a4c2f7af545134689",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/003.source": "4b46b8429cab31bbc393bf838692c23b5bce68cf1809a07982380fcfac468a11",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/004.source": "5fca2e4eae89593e8bfba5cd9b0d10f8269493abd2a6f08c49940c0cce1f49a7",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/005.source": "618a9b93563047fcf224a5c27946d83af48606455a610d785c9675ab93527589",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/006.source": "eb5ce17dd624ef1c4474e74a29cf9013c9cae2eff77a75e8560ba06c6b085a28",
+    "member-source-02/capture-02/raw/jsoup/compass/windows/007.source": "c80f32af2fa6b5b37f6a6b6aed035cc318e7d4e6bda0580a428bff234b2ac17a",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/04.request.json": "a5d8506f70b3490e64d4cc9ed5e594dc9c3142343ab0ea47ef2f627e63c4ac51",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/04.response.jsonl": "de51e58563a7882c32c0729aa8574535fd5f4c2464ab1fcacb4f0a548aca5c51",
+    "member-source-02/capture-02/raw/jsoup/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/000.source": "b577f811b284f994dc62cfd95d6c60d63e5d5b70cac13cb5cb3da8ba175b8e71",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/001.source": "39bd7723e9a79009a4a2aeb394f195913bf9f10ef0dc062a4c2f7af545134689",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/002.source": "4b46b8429cab31bbc393bf838692c23b5bce68cf1809a07982380fcfac468a11",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/003.source": "5fca2e4eae89593e8bfba5cd9b0d10f8269493abd2a6f08c49940c0cce1f49a7",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/004.source": "618a9b93563047fcf224a5c27946d83af48606455a610d785c9675ab93527589",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/005.source": "eb5ce17dd624ef1c4474e74a29cf9013c9cae2eff77a75e8560ba06c6b085a28",
+    "member-source-02/capture-02/raw/jsoup/graphify/windows/006.source": "655f66ae9b5a39084ace665e8c4bc2908062931d8d7a8d4370ae0af6e4792230",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/04.request.json": "e68cdb047d4c46a669be395ce3f665e42bc05be7aff7eaab19a3834b6ff51df1",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/04.response.jsonl": "7fc2c10f6ad01773cef5d5d0a8f420a6fd05da5405af40e6dea393245f165dbc",
+    "member-source-02/capture-02/raw/redux/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/redux/graphify/windows/000.source": "02f3df4750372f7d2806a2932dcb7a287ac405470fdbaf58c96adb8903f7223c",
+    "member-source-02/capture-02/raw/redux/graphify/windows/001.source": "104842ff0af72b77928d0a849bc5aa5e5bf080e95aeca8f8bc0baacd3dd90aa1",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/01.response.jsonl": "444f8278167864389038bc2b79fa4620d30cec4d51a6cd729797a86d487f1d23",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/03.response.jsonl": "64d26fe612b4c19a3c88ba6d5548476cf5322cf118de8d206b2698ce99b02a65",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/04.request.json": "88007595c05c740812b9033f2ee95b791edf9b2707d4f7ade7b768f046d1d612",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/04.response.jsonl": "894892461013ff8ea0bf43d1fdd32cc5fb97e101ded12eaf24dd45200fa98d97",
+    "member-source-02/capture-02/raw/walkdir/compass/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/walkdir/compass/members.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/walkdir/compass/members.stdout": "a29d756672a534873059500754d482cc21f60c69b525a206e8a42e65f1176e62",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/000.source": "ff45ca1c29db9f3173b1f545ef952fb6b79c3fe1bc0bd48c6948fbbf216fd72a",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/001.source": "386a59fc2a5e4ae1f44959b2be8feeb2ac6dde5822d24f36c4165bfdfeb417ac",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/002.source": "2e584390c911c511c659505ad05cf56eb6f2124bd3d365715d47b80b352f4f99",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/003.source": "81998d6b94d50a7e4bbe3bfa2df65cb1a331098c70eb327ac33c8fd66974b0fb",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/004.source": "cfa77a0ba1f9e61f2c03f2754f13a698331b406e0b76623484aaac2b96db4831",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/005.source": "2b1252e1e1bcb53d4f0a66e59ced59dbb29926ae626b78cea2ecaeaa39d5a276",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/006.source": "cc91b2d0560786f75b77509e46eb2b04a0fa4242464c1705e05b91f11a7d9e64",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/007.source": "e40e140647193c41d7635036b1dec0786efe1cbc5863edaf76db8096fe8d4ddf",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/008.source": "be7342201ed171b2aa6ef80130e3b3d8ec259442a137c0fa9a3f5182ee79401e",
+    "member-source-02/capture-02/raw/walkdir/compass/windows/009.source": "907ef6bd190a9985da364ec084579cacae6b06067d5a3bdfa8d98a2c3256eb9b",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/01.request.json": "c7a933c9b57fcff6957c6dbe624b6443d1a62b28bebbf4445452a117a146d2e5",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/01.response.jsonl": "e38aa737515685d5e80f14b4ae13b09ac47cc287e64c0872d9a2129b6db2c1f5",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/02.request.json": "0f1af7b35815b407111bc7d97d0c26b1b879311df49455ef2a676ff20cecbb38",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/03.request.json": "cea371b903cf1632df866b3cdc4941a42b631907b8fbbebff01a52d845e65cdd",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/03.response.jsonl": "58f4bfd56df06a7801ad440723d137cb8510049e5192f77b15ac79700380df01",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/04.request.json": "24caf98a41faa25bd5103d2d458f36b9be08bc70a408ee37a1f35594325ff78a",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/04.response.jsonl": "dd345c5346476f0054a0c8ba1f4b4fcc552a63f79701d2f9de1328bb9ef44650",
+    "member-source-02/capture-02/raw/walkdir/graphify/mcp/stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/000.source": "47cab2eca2cc07d78d319f7a9acc39c45d31992cc01788c804c2f9b53ff3600b",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/001.source": "c08a2af053b0f567c208bc02679f7d0442c7d867050104de90edb223a2cab75b",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/002.source": "64f8be64c7277d8447281854e37989c0b4d002448950982be85d036fdb8a1a7d",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/003.source": "c1e268fb5bde75384cb45c0375ade42dda153da149dfa7645f53d67854c7672e",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/004.source": "2923912d8a93208e4633fd4efd61514a7449defd6519f815c445be6318c10f32",
+    "member-source-02/capture-02/raw/walkdir/graphify/windows/005.source": "b0c0b5e23f7d4cf98d355ff7f08101ea772f51b09b278f51ab7bb66ad2aaf4a6",
+    "member-source-02/capture-02/runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "member-source-02/capture-02.log": "4262aa9f199672649ef280bca6511a6e59b9f3651611d0f80c4ae25c422a9a54",
+    "member-source-02/capture.log": "2950ab87049f66e57a977f54b24c4c7bf960b48d8055022a4635885f565d135e",
+    "member-source-02/cli-query-tests-final.log": "ed725935bcfd27883a6b77d6f9e318f19e2a7f4e893e026fd78c90541f13e503",
+    "member-source-02/clippy-final.log": "55d20891684ab855b3f0830e781ad502f9b9c47a3e1ac044016769a262f6f787",
+    "member-source-02/collect-attempt-01.py": "e6178c5ccb4da9e81d555864fe86cc45df41840cc9a9d771d00729ce7a6d20c2",
+    "member-source-02/collect.py": "7a95e6dddb8a8b69ea21082163d5125783816f5ebb460dfcf3f691f9a608da69",
+    "member-source-02/fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/mcp-tests-final.log": "daad87200738aca3825b27790a5fddf6f163844b3748fb116e06ba7819dfb4a9",
+    "member-source-02/product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "member-source-02/product-tests-final.log": "40548fd0bd61eafef2d25ca799ca5ac271b0ea033ff79bbc4553e451622ab30b",
+    "member-source-02/query-tests-final.log": "04df29746e74c5916a094b6635bae03d1be38679ddf0af035e6da8dc46b00f86",
+    "member-source-02/validate.py": "a13b0ba21ca5e370e78249348902480215907f28b691176cd5f63db91e393ca9",
+    "member-source-02/validation.json": "5e5fdb61fa4d1b802055f7a9dc2ecde0698a351e1232b59530430f0ade6f5cab",
+    "member-source-02/verification-01.log": "675e592251fe1b4f9261ae61cdf120a3b0026564eed6ed21d6b860d1c7667ce0",
+    "member-source-02/verification-02.log": "a06d655d6c58ea073baa191515e8651598736eb02ba8e29363603beec0d8501c",
+    "member-source-02/verification-final.log": "a06d655d6c58ea073baa191515e8651598736eb02ba8e29363603beec0d8501c",
+    "member-source-02/verified-summary.json": "a75c2d706cece1fc4ba02886ebebd243b30fd0c0d4195bbbbd4e1a70a364e522",
+    "member-source-02/verify-capture-attempt-01.py": "d4faee604c4efcf677a20f0fb0f5aac51f8d1145f3b7198510046515d796d97c",
+    "member-source-02/verify-capture-attempt-02.py": "3b1a1530806b803c2f568954d0a8b191b4ab7a40eb209aa34c9f9678d837c5cd",
+    "member-source-02/verify_capture.py": "570a2513f5b4941b3baf0d6a466971c272eecf45d1bee44f982ea5429c275bc1",
+    "member-source-02/workspace-tests-final.log": "06e06019ba7db6dbb909788ad6597ac8f9394708c964f25276c82efbe288edb9",
+    "member-source-02/write_review.py": "c4451376ec967f7589561fd12f60d543c2f6d90bc552a089c2ecf29d9a37f4ba"
+  },
+  "limitations": [
+    "Known purposive development panel, one subject per language, no representative precision estimate.",
+    "Whole-file verification and MCP/CLI metadata bytes differ; a shared source payload budget is not equal compute or disk I/O.",
+    "Member mode can omit annotations/decorators outside stored callable spans, even when source truncation is false.",
+    "Compass Redux candidate recall remains unresolved at the registered bound of 256.",
+    "Chi routeHTTP and WalkDir check_loop remain omitted or incomplete under native source budget.",
+    "Actual responsibility synthesis, god-object defect diagnosis, full caller/callee precision, longer walks, community task quality, and fresh confirmation remain outstanding."
+  ]
+}

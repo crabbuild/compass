@@ -1,0 +1,20 @@
+{
+  "schema": "compass.mcp-comparison-inputs/1",
+  "scope": "Development comparison on the existing five pinned repository graphs. Graph consistency, source correctness, and design quality are separate. Inputs are committed before these MCP questions execute.",
+  "policy": {
+    "god_nodes": "Return top 10 hubs. Independently check displayed degree against distinct stored directed endpoint pairs, counting self-loops twice. Ambiguous labels do not verify identity. Report source-backed declarations separately; degree does not prove a god-object defect.",
+    "get_community": "Return every member of the largest stored community; break size ties by smallest numeric ID. Compare the exact multiset of displayed labels and source files with that tool's graph. Different partitions are allowed. Also query a community ID above the stored maximum and require not found.",
+    "get_neighbors": "Return calls adjacent to the exact source declaration identified below, using its tool-specific exact ID as input. Compare distinct direction/neighbor/relation triples with stored calls. Separately report repeated-site information and ambiguous labels. ID lookup is preparation, not a measured retrieval success.",
+    "ambiguous_neighbors": "The same unqualified label denotes multiple source declarations. Require explicit ambiguity or a candidate list; selecting one neighbor list silently fails.",
+    "graph_stats": "Compare node and community counts with the captured graph, and edge count with stored edge records. Report representation discrepancies rather than treating more edges as better.",
+    "bounds": "60 seconds per RPC; 16 MiB per response/stderr and 64 MiB per session. For full membership/neighbor enumeration, Graphify receives token_budget=262144; Compass exposes no equivalent option. Record truncation, requested bounds, actual text bytes, and protocol overhead separately. This arm measures complete enumeration, not equal 2000-token answers.",
+    "source_review": "Review every returned hub identity for source location and inspect its declared role. Review neighbor call directions against the previously reviewed source facts. Functional cluster and god-object judgments remain separate and cannot be inferred from consistency scores."
+  },
+  "repositories": [
+    {"name":"cobra", "file":"command.go", "line":757, "symbol":"Find", "sourceText":"func (c *Command) Find(", "ambiguousLabel":null},
+    {"name":"flask", "file":"src/flask/app.py", "line":995, "symbol":"full_dispatch_request", "sourceText":"def full_dispatch_request(", "ambiguousLabel":"url_for"},
+    {"name":"gson", "file":"gson/src/main/java/com/google/gson/Gson.java", "line":797, "symbol":"newJsonWriter", "sourceText":"public JsonWriter newJsonWriter(", "ambiguousLabel":"toJson"},
+    {"name":"zod", "file":"packages/zod/src/v4/classic/from-json-schema.ts", "line":105, "symbol":"detectVersion", "sourceText":"function detectVersion(", "ambiguousLabel":"safeParse"},
+    {"name":"axum", "file":"src/routing/path_router.rs", "line":22, "symbol":"validate_path", "sourceText":"fn validate_path(", "ambiguousLabel":"with_state"}
+  ]
+}

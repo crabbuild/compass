@@ -1,0 +1,98 @@
+{
+  "binarySha256": "668fd1c8c145241387d04a35eb319eec09825e3d5bd9c031c2cc6863a45c1d04",
+  "priorHubRunSha256": "4ce35f4a7dbd7218cfc6ee9e6120b5f75e712bd920d29501c70c5ed5bc6c7a0b",
+  "registrationSha256": "da554737c494f51eb15f4b7a8cce8a455382df2c228b97754a88dc46105fb586",
+  "repetitions": 2,
+  "repositories": [
+    {
+      "graphSha256": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db",
+      "memberEvidenceRows": 33,
+      "repository": "litestream",
+      "unchangedLegacyRows": 100,
+      "witnesses": [
+        {
+          "memberEvidence": {
+            "ambiguousDirectMembers": 0,
+            "directFields": 0,
+            "directMethods": 27,
+            "distinctOwnFieldPairs": 0,
+            "methodsTouchingOwnFields": 0,
+            "ownFieldReferenceRecords": 0,
+            "schema": "compass.hub-members/1",
+            "sourceCoverage": "unverified"
+          },
+          "rank": 10,
+          "returnedLabelMatches": 1,
+          "symbol": "Store"
+        },
+        {
+          "memberEvidence": null,
+          "rank": null,
+          "returnedLabelMatches": 0,
+          "symbol": "HeartbeatClient"
+        }
+      ]
+    },
+    {
+      "graphSha256": "1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a",
+      "memberEvidenceRows": 34,
+      "repository": "fastapi",
+      "unchangedLegacyRows": 100,
+      "witnesses": [
+        {
+          "memberEvidence": {
+            "ambiguousDirectMembers": 0,
+            "directFields": 0,
+            "directMethods": 23,
+            "distinctOwnFieldPairs": 0,
+            "methodsTouchingOwnFields": 0,
+            "ownFieldReferenceRecords": 0,
+            "schema": "compass.hub-members/1",
+            "sourceCoverage": "unverified"
+          },
+          "rank": 1,
+          "returnedLabelMatches": 1,
+          "symbol": "FastAPI"
+        },
+        {
+          "memberEvidence": {
+            "ambiguousDirectMembers": 0,
+            "directFields": 0,
+            "directMethods": 3,
+            "distinctOwnFieldPairs": 0,
+            "methodsTouchingOwnFields": 0,
+            "ownFieldReferenceRecords": 0,
+            "schema": "compass.hub-members/1",
+            "sourceCoverage": "unverified"
+          },
+          "rank": 31,
+          "returnedLabelMatches": 1,
+          "symbol": "DefaultPlaceholder"
+        }
+      ]
+    },
+    {
+      "graphSha256": "6db996ad031824f7b476c16145cc94287738eaba1e63f1802011f70559cfd1d6",
+      "memberEvidenceRows": 26,
+      "repository": "celld",
+      "unchangedLegacyRows": 100,
+      "witnesses": [
+        {
+          "memberEvidence": null,
+          "rank": null,
+          "returnedLabelMatches": 0,
+          "symbol": "PeerAuth"
+        },
+        {
+          "memberEvidence": null,
+          "rank": null,
+          "returnedLabelMatches": 0,
+          "symbol": "CellActivityGuard"
+        }
+      ]
+    }
+  ],
+  "schema": "compass.hub-members-three-language-replay/1",
+  "scope": "Post-change public MCP development replay. Prior identities, ranks, degrees, anchors and connectivity must remain identical. Source roles are not defect labels.",
+  "sourceRunSha256": "f28a92dd08363607f534632471e15f61e7f3d6cd3ce34e479ab04ff09ebdba4c"
+}
