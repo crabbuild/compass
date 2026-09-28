@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-28
+
 - Resolve source-proven Go field selectors to exact named struct fields and
   publish occurrence-anchored references. Rebuild graphs to see the new edges;
   disposable AST cache semantics advance to 13.
