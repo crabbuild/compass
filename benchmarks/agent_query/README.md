@@ -968,3 +968,22 @@ development replay on the same frozen FastAPI graph after the owner-qualified
 selector correction. It pins the source, graph, candidate binary, command
 output hashes and exact call endpoints. The preregistered 12-question scores
 remain unchanged.
+
+## Source-first three-language hub retrieval
+
+`source_first_hub_three_language_registration.json` freezes six source-located
+Go/Python/Rust declarations, both existing graph hashes, server environments,
+and `god_nodes(top_n=100)` before either hub request. Run
+`source_first_hub_capture.py` on the pinned checkouts to retain the bounded
+public stdio MCP transcripts, then run `source_first_hub_review.py` to check
+exact source identities, top-10/50/100 retrieval and displayed degrees against
+each tool's own graph. `source_first_hub_three_language_review.json` is the
+result; the raw run is retained externally as `source-first-hubs-01`.
+
+Compass returns 3/6 selected declarations in its top 100; Graphify returns
+4/6. Graphify returns `PeerAuth` at rank 55 while Compass does not return it.
+Compass's 300 returned rows include explicit identities and matching source
+anchors, and all 300 degrees match its graph. Graphify's label-only output
+allows 247/300 rows to be uniquely joined; their degrees also match. These
+source roles are not god-object defect labels, and the two graphs differ.
+The panel measures neither classifier accuracy nor broad superiority.

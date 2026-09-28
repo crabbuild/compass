@@ -8,7 +8,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. Exact source-assisted resolution succeeds for all eight per tool. Earlier failures remain unchanged; classifier quality is unproven. |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel below checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. Neither panel establishes god-object classifier quality. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. The dotted-owner follow-up retains all earlier verified contacts; its 27 other additions (21 test, six Java 11 overlay) remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
@@ -4611,3 +4611,46 @@ outside this patch; with only that lint allowed, all targets pass. Package
 version remains 0.3.30. This one known Python
 case does not establish representative query superiority or explanation
 quality, god-object diagnosis, or community quality.
+
+### Source-first Go/Python/Rust hub retrieval on frozen graphs
+
+Registration commit `4d5ca44d` and
+[the pinned panel](../../benchmarks/agent_query/source_first_hub_three_language_registration.json)
+selected six declaration anchors across the same clean Litestream, FastAPI and
+Celld source checkouts **before** either public hub request. The panel pins
+source and graph hashes, both server environments and the common stdio MCP
+`god_nodes(top_n=100)` request. The bounded collector retains six raw requests,
+responses and server diagnostics under external run `runs/source-first-hubs-01`;
+all six requests succeeded. The
+[independent graph review](../../benchmarks/agent_query/source_first_hub_three_language_review.json)
+joins each witness by exact file, declaration line and symbol, then checks
+returned rows against each tool's own stored graph. Every selected declaration
+exists uniquely in both graphs.
+
+| Source witness | Compass rank / stored degree | Graphify rank / stored degree |
+| --- | ---: | ---: |
+| Litestream `Store` | 10 / 67 | 13 / 45 |
+| Litestream `HeartbeatClient` | outside top 100 / 11 | outside top 100 / 11 |
+| FastAPI `FastAPI` | 1 / 1,401 | 1 / 830 |
+| FastAPI `DefaultPlaceholder` | 31 / 42 | 31 / 26 |
+| Celld `PeerAuth` | outside top 100 / 27 | 55 / 26 |
+| Celld `CellActivityGuard` | outside top 100 / 6 | outside top 100 / 9 |
+
+Compass returns 100 explicit graph IDs and matching source anchors per
+repository; its 300 displayed degrees equal recomputed distinct endpoint-pair
+degrees. Graphify returns labels and degrees only. Its globally unique labels
+identify 75/100 Litestream, 86/100 FastAPI and 86/100 Celld rows; all 247
+identified degrees match its own graph. The remaining label-only rows stay
+unresolved, rather than borrowing an identity from rank or source context.
+Every returned registered witness is uniquely resolved.
+
+At the registered cutoffs, Compass retrieves 2/6 witnesses in the top 10,
+3/6 in the top 50 and 3/6 in the top 100. Graphify retrieves 1/6, 3/6 and
+4/6 respectively. These are selected source roles, not positive or negative
+god-object defect labels; the fractions are retrieval counts, not accuracy or
+precision. Each tool ranks a different extracted graph, so its degree and
+rank cannot be interpreted as a controlled algorithm comparison. In Celld,
+Compass's top positions include large JavaScript module nodes; this panel
+does not determine whether filtering such nodes would improve useful type
+retrieval. No production behavior changed in this checkpoint, and broad hub
+or god-object superiority remains unproven.
