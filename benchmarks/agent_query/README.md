@@ -987,3 +987,17 @@ anchors, and all 300 degrees match its graph. Graphify's label-only output
 allows 247/300 rows to be uniquely joined; their degrees also match. These
 source roles are not god-object defect labels, and the two graphs differ.
 The panel measures neither classifier accuracy nor broad superiority.
+
+## Paired rated-Java class-degree diagnostic
+
+`mlcq_class_degree_registration.json` fixes an offline class-only degree rule
+on the four frozen CloudStack/Eclipse Compass and Graphify graphs before the
+scan. `mlcq_class_degree_probe.py` validates the prior graph and rated-class
+identities, runs each graph under a separate time bound, and writes
+`mlcq_class_degree_review.json`. Two runs are byte-identical. All eight primary
+classes are eligible in each tool's graph, but **neither tool retrieves any of
+the four consensus-positive classes in the top 100**. The positive ranks are
+340–1,529 for Compass and 463–1,740 for Graphify. Class-only degree therefore
+does not repair the known misses. This development diagnostic is not a
+god-object classifier or held-out evaluation; graph coverage and direction
+differ, and public `god_nodes` behavior is unchanged.

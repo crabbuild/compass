@@ -8,7 +8,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel below checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. Neither panel establishes god-object classifier quality. |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel below checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. A separately registered class-only degree scan still retrieves 0/4 Java positives for either tool. These panels do not establish god-object classifier quality. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. The dotted-owner follow-up retains all earlier verified contacts; its 27 other additions (21 test, six Java 11 overlay) remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
@@ -4654,3 +4654,40 @@ Compass's top positions include large JavaScript module nodes; this panel
 does not determine whether filtering such nodes would improve useful type
 retrieval. No production behavior changed in this checkpoint, and broad hub
 or god-object superiority remains unproven.
+
+### Paired class-only degree diagnostic on rated Java classes
+
+[Registration](../../benchmarks/agent_query/mlcq_class_degree_registration.json)
+commit `3ebdf975` fixed the rule and four frozen graph hashes before the
+[read-only scan](../../benchmarks/agent_query/mlcq_class_degree_review.json).
+The rule ranks every source-located class by distinct stored endpoint-pair
+degree, then exact ID. Compass uses `kind=class`; Graphify uses its
+`_callable_class=true` marker. No test or generated class is filtered. This
+is an offline, identical rule applied to both graphs; neither public
+`god_nodes` call was changed or rerun. The 16 graph IDs for eight externally
+rated classes come from the prior source-assisted release follow-up. Every
+identity remains present and eligible. The scan processes each graph in a
+separate 300-second bounded process and retains graph hashes, pool sizes,
+all top-100 IDs and degrees, primary ranks and raw outputs externally under
+`mlcq-class-degree-01`. Two runs produce byte-identical review files.
+
+| Frozen graph | Compass class pool | Compass positive ranks | Graphify class pool | Graphify positive ranks |
+| --- | ---: | --- | ---: | --- |
+| CloudStack | 6,373 | 340, 999 | 7,700 | 463, 1,315 |
+| Eclipse | 6,628 | 728, 1,529 | 7,597 | 1,403, 1,740 |
+
+Neither tool retrieves a consensus-positive or consensus-none primary class
+at cutoffs 10, 50 or 100. The closest consensus-none ranks are 366 for
+Compass and 382 for Graphify. All four graphs have zero dangling endpoint
+pairs. The stored Compass graphs are directed and the Graphify graphs are
+undirected; the registered rule counts ordered endpoint pairs for each, as
+the earlier response auditor did. Pool sizes and emitted graph coverage
+also differ. Therefore these ranks cannot isolate a better extraction or
+ranking algorithm, even though the rule is applied consistently.
+
+This falsifies class-only raw degree as an immediate repair for the known
+Java god-object misses. The cohort is purposively enriched, includes a
+positive-rated test class, and is development data. Class status and degree
+do not measure responsibilities or cohesion. A supported classifier would
+need source-checked method/field access and responsibility evidence with a
+separate held-out cohort; no classifier or production code changed here.
