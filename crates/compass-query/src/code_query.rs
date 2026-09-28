@@ -3337,9 +3337,10 @@ impl CodeQueryEngine {
         // prefix or the stored `::` separator. Verify that suffix against the
         // complete bounded leaf-name posting, never against a ranked prefix.
         // If the posting is truncated, uniqueness cannot be proved.
+        let qualified_query = normalized.replace("::", ".");
         if exact_nodes.is_empty()
             && !exact_truncated
-            && let Some((_, leaf)) = normalized.rsplit_once('.')
+            && let Some((_, leaf)) = qualified_query.rsplit_once('.')
             && !leaf.is_empty()
         {
             let (leaf_nodes, leaf_truncated) = self
@@ -3350,7 +3351,6 @@ impl CodeQueryEngine {
                 .candidates_read
                 .saturating_add(u64::try_from(leaf_nodes.len()).unwrap_or(u64::MAX));
             let leaf_has_exact_candidates = !leaf_nodes.is_empty();
-            let qualified_query = normalized.replace("::", ".");
             let suffix = format!(".{qualified_query}");
             let qualified = leaf_nodes
                 .into_iter()

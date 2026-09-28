@@ -232,7 +232,8 @@ history profiles, and cache identities.
 ### Owner-qualified symbol lookup
 
 Typed callers, callees, impact and node-trail queries now accept a unique
-owner/member suffix such as `APIRoute.get_route_handler` when the stored
+owner/member suffix such as `APIRoute.get_route_handler` or
+`APIRoute::get_route_handler` when the stored
 qualified name is `fastapi.routing.APIRoute::get_route_handler`. An exact ID or
 full normalized name still takes precedence. The lookup reads the bounded
 exact leaf-name posting and verifies every candidate's full owner suffix;

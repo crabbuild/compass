@@ -156,37 +156,37 @@ fn owner_qualified_calls_resolve_only_a_proven_unique_suffix()
                     .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
             );
 
-            let short_owner =
-                engine.query_natural(request("what does APIRoute.get_route_handler call?"))?;
-            if duplicate_owner {
-                assert!(short_owner.edges.is_empty());
-                assert!(
-                    short_owner.diagnostics.iter().any(|diagnostic| {
+            for owner in ["APIRoute.get_route_handler", "APIRoute::get_route_handler"] {
+                let short_owner =
+                    engine.query_natural(request(&format!("what does {owner} call?")))?;
+                if duplicate_owner {
+                    assert!(short_owner.edges.is_empty());
+                    assert!(short_owner.diagnostics.iter().any(|diagnostic| {
                         diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
-                    })
-                );
-                assert_eq!(short_owner.nodes.len(), 2);
-            } else {
-                assert!(
-                    short_owner
-                        .edges
-                        .iter()
-                        .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
-                );
-                assert!(
-                    !short_owner
-                        .diagnostics
-                        .iter()
-                        .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::NoMatch })
-                );
-                let path = engine.query_natural(request(
-                    "call path from APIRoute.get_route_handler to get_request_handler",
-                ))?;
-                assert!(
-                    path.paths
-                        .iter()
-                        .any(|path| { path.node_ids == ["n:caller", "n:list"] })
-                );
+                    }));
+                    assert_eq!(short_owner.nodes.len(), 2);
+                } else {
+                    assert!(
+                        short_owner
+                            .edges
+                            .iter()
+                            .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
+                    );
+                    assert!(
+                        !short_owner
+                            .diagnostics
+                            .iter()
+                            .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::NoMatch })
+                    );
+                    let path = engine.query_natural(request(&format!(
+                        "call path from {owner} to get_request_handler"
+                    )))?;
+                    assert!(
+                        path.paths
+                            .iter()
+                            .any(|path| { path.node_ids == ["n:caller", "n:list"] })
+                    );
+                }
             }
 
             let missing_owner =

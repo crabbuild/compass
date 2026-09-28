@@ -441,7 +441,7 @@ optional `source_file`, `start_line` and `kind` fields. The raw response stays
 `compass.query/1`; ordinary ranked search remains the default.
 
 For typed relationship and trail questions, an owner-qualified operand such as
-`APIRoute.get_route_handler` can identify a stored
+`APIRoute.get_route_handler` or `APIRoute::get_route_handler` can identify a stored
 `fastapi.routing.APIRoute::get_route_handler` without the module prefix.
 Compass verifies the suffix against the bounded exact method-name candidates.
 If several declarations share that owner/member suffix, retry with the full

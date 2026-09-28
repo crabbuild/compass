@@ -94,8 +94,10 @@ fn ask_resolves_a_unique_owner_suffix_without_guessing_a_short_name() -> Result<
 
     for (question, expected_code, expected_edges) in [
         ("what does Controller.Caller call?", None, 1),
+        ("what does Controller::Caller call?", None, 1),
         ("what does Caller call?", Some("ambiguous_match"), 0),
         ("what does Missing.Caller call?", Some("no_match"), 0),
+        ("what does Missing::Caller call?", Some("no_match"), 0),
     ] {
         let output = support::compass_command()
             .args(["ask", question, "--graph"])
