@@ -1001,3 +1001,20 @@ the four consensus-positive classes in the top 100**. The positive ranks are
 does not repair the known misses. This development diagnostic is not a
 god-object classifier or held-out evaluation; graph coverage and direction
 differ, and public `god_nodes` behavior is unchanged.
+
+## Paired rated-Java member declarations
+
+`mlcq_member_paired_registration.json` fixes the prior independent JDK syntax
+census of eight rated Java classes, all source and graph hashes, and an exact
+source declaration join before inspecting both tools' frozen graphs.
+`mlcq_member_paired_probe.py` scans one bounded graph per process and writes
+`mlcq_member_paired_review.json`; two runs are byte-identical. Compass has a
+distinct, directly owned graph node for all 95 direct source methods and all
+65 direct fields. Graphify has 90/95 matching method nodes and 0/65
+field-compatible declaration nodes in these files. Its five missing method
+identities are later overloads collapsed onto same-named nodes anchored at
+the first overload, although some class-to-method edges cite later lines.
+
+This is paired declaration coverage in a selected development cohort. It
+does not validate field-access targets, cohesion, responsibilities, god-object
+labels, whole-repository precision or cross-language superiority.

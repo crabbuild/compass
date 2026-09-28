@@ -9,7 +9,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel below checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. A separately registered class-only degree scan still retrieves 0/4 Java positives for either tool. These panels do not establish god-object classifier quality. |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. The dotted-owner follow-up retains all earlier verified contacts; its 27 other additions (21 test, six Java 11 overlay) remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. A separate JDK syntax census of eight rated Java classes finds 95/95 direct methods and 65/65 direct fields as unique Compass graph nodes versus 90/95 methods and 0/65 field nodes in Graphify's frozen graphs under the registered source join. These selected results do not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
@@ -4691,3 +4691,43 @@ positive-rated test class, and is development data. Class status and degree
 do not measure responsibilities or cohesion. A supported classifier would
 need source-checked method/field access and responsibility evidence with a
 separate held-out cohort; no classifier or production code changed here.
+
+### Paired source-member coverage in the rated Java classes
+
+[Registration](../../benchmarks/agent_query/mlcq_member_paired_registration.json)
+commit `3996067c` fixed the eight-class independent JDK syntax census, source
+hashes, class identities, both frozen graph pairs and the exact file/name/span
+join before the paired scan. The census has 95 direct methods, 65 direct
+fields and five constructors; constructors remain outside this registered
+denominator. Overloads remain separate source declarations. A candidate node
+must have a compatible kind or callable marker and an anchor within its
+source declaration span. The review records direct class ownership separately
+from node presence and never substitutes a same-name node on another line.
+
+| Graph | Direct methods with unique nodes / 95 | Direct fields with unique nodes / 65 | Direct owner links for matched methods / fields |
+| --- | ---: | ---: | ---: |
+| Compass | 95 | 65 | 95 / 65 |
+| Graphify | 90 | 0 | 90 / 0 |
+
+The [paired review](../../benchmarks/agent_query/mlcq_member_paired_review.json)
+retains every source declaration, candidate graph ID, owner relation, missing
+or ambiguous result, both graph hashes and source roles. All four graph scans
+succeeded under the 1 GiB artifact and 300-second per-graph bounds; two
+complete runs produced byte-identical reviews. The five Graphify method
+nonmatches are overloads: three in `BindingModel` and two in
+`SimpleValueProperty`. Its stored graph has one same-named method node at
+the first overload's source line, while class-to-method edges for that ID
+can refer to later overload lines. Those edges preserve some declaration
+evidence but do not give the later overloads separate node identities.
+Compass preserves a unique direct-owned method node for each of the 95.
+
+Graphify does not provide a typed field declaration node matching any of the
+65 source fields in these files under the registered line/name rule. Its
+class graph can still contain field-context references to other types; this
+result does not mean it extracted no information about fields. Since Graphify
+does not expose Compass's typed field kind, even a future matching
+noncallable node would be type-unverified under this protocol. This is a
+selected declaration-presence comparison, not a field-access correctness,
+source responsibility, class cohesion, or god-object classifier score.
+The frozen graphs have different direction and coverage, and one positive
+rating belongs to a test class. No production code changed in this checkpoint.
