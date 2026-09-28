@@ -4874,12 +4874,14 @@ quality or superiority over Graphify.
 Focused Go producer and resolver tests, workspace formatting, workspace
 Clippy, workspace library/binary tests, the cache-version contract test and
 the product-boundary check pass.
-The fixtures-only code-graph gate passed manifest validation, scale checks,
-semantic assertions, cold/warm/rebuild/lifecycle byte comparisons, topology
-policy and the independent React source tests. Its final release-binary
-frontend phase was stopped when the shared mounted volume fell below 2 GiB
-free; the per-worktree Cargo target was then cleaned, restoring capacity.
-The complete fixtures-only gate is therefore not claimed for this follow-up.
+The full fixtures-only code-graph gate passed on revision `c1b0d78f` after
+mounted-volume capacity was restored. It covered manifest validation, scale
+checks, semantic assertions, cold/warm/rebuild/lifecycle byte comparisons,
+topology policy, and the independent React frontend qualification using a
+release binary. The first resumed attempt stopped on a missing snapshot file
+during the lifecycle phase; the complete diagnostic repeat passed. This
+single pass does not establish that the intermittent snapshot failure is
+resolved.
 
 ### Explicitly typed Go parameter-field contacts
 

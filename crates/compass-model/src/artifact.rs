@@ -122,12 +122,11 @@ mod tests {
         let before = br#"{"nodes":[{"id":"a","label":"Alpha"}],"links":[]}"#;
         std::fs::write(&path, before)?;
         let opened = File::open(&path)?;
-        let mut next = tempfile::NamedTempFile::new_in(directory.path())?;
-        std::io::Write::write_all(
-            &mut next,
+        std::fs::rename(&path, directory.path().join("original.json"))?;
+        std::fs::write(
+            &path,
             br#"{"nodes":[{"id":"b","label":"Omega"}],"links":[]}"#,
         )?;
-        next.persist(&path)?;
         let snapshot = GraphArtifact::read_opened(&path, opened, 1024)?;
         assert_eq!(
             snapshot.artifact_digest(),
