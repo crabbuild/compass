@@ -1,0 +1,51 @@
+{
+  "schema": "compass.go-struct-field-registration/1",
+  "purpose": "Source-first census of every top-level named struct and every explicitly named direct field in two frozen Litestream Go files. Compare frozen Compass and Graphify declaration identities before a Compass producer change.",
+  "declaredBeforeCapture": true,
+  "knownDevelopmentGap": "The previous hub replay showed zero direct fields for Store and HeartbeatClient; this is a known development sample, not a held-out or random sample.",
+  "sourceRepository": "litestream",
+  "sourceCommit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+  "sourceFiles": [
+    {
+      "path": "store.go",
+      "bytes": 24903,
+      "sha256": "56b3da1cdd69e7a3e30b4982f93fcfc4377f7572497c60ac3371cf4b867f7a17"
+    },
+    {
+      "path": "heartbeat.go",
+      "bytes": 1575,
+      "sha256": "ef90f2e79f1a8f89bd34a9cada9e3c399a410cf774b5c2b3233863dc7cbf2581"
+    }
+  ],
+  "frozenGraphs": [
+    {
+      "tool": "compass",
+      "bytes": 11490932,
+      "sha256": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db"
+    },
+    {
+      "tool": "graphify",
+      "bytes": 5333935,
+      "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e"
+    }
+  ],
+  "priorSourceRunSha256": "f28a92dd08363607f534632471e15f61e7f3d6cd3ce34e479ab04ff09ebdba4c",
+  "priorHubRegistrationSha256": "da554737c494f51eb15f4b7a8cce8a455382df2c228b97754a88dc46105fb586",
+  "sourceOracle": "Use Go standard-library go/parser and go/ast. Include every top-level TypeSpec whose type is StructType in the two files. For every Field with one or more Names, emit one declaration per name at that identifier's exact 1-based line. Keep embedded fields in a separate unavailable category; never infer a name from the type. Preserve same-line multiple names as separate declarations.",
+  "graphJoin": "Resolve each struct by exact file, case-sensitive name and declaration start line, with no fallback identity. A direct field declaration match needs an exact case-sensitive field label, exact file and identifier line, a distinct field-compatible node identity, and a directed owner-to-field containment edge. Multiple matching identities or owners are ambiguous. Graphify field-context type-reference edges are recorded separately and cannot substitute for named field declarations. Neither graph receives source-assisted output credit.",
+  "bounds": {
+    "maxSourceBytesPerFile": 1048576,
+    "maxGraphBytes": 16777216,
+    "maxGraphNodes": 100000,
+    "maxGraphEdges": 100000,
+    "maxStructs": 100,
+    "maxNamedFields": 1000,
+    "maxSecondsPerTool": 60
+  },
+  "report": "Retain every source declaration and per-tool exact/ambiguous/missing result, both graph identities and hashes, field-context counts, all unavailable outcomes and limits. Compare both frozen graphs under the same rule. A subsequent Compass candidate must be evaluated separately without changing the frozen denominator.",
+  "limitations": [
+    "This is a selected Go development slice from one repository and does not establish general extraction precision or recall.",
+    "Declaration coverage does not validate field-access targets, responsibility cohesion, god-object classification, query explanation quality or broad superiority.",
+    "The frozen graph producers differ; this comparison does not isolate parser and graph schema effects."
+  ]
+}
