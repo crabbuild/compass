@@ -4546,9 +4546,17 @@ method name. Seven declarations have that name in the full checkout.
 Compass refuses the ambiguous `explain`, `callees` and `path` requests instead
 of choosing one; Graphify refuses the first two and emits an ambiguous-source
 warning with its incorrect path. This is a navigation/identity failure for the
-registered workflow, not a missing call in either graph. A separate exact-ID
-diagnostic may establish whether source-qualified lookup removes it, but must
-not change these preregistered scores.
+registered workflow, not a missing call in either graph. A separate unscored
+diagnostic on the same frozen graphs confirms that Compass accepts both exact
+node IDs and full `fastapi.routing.APIRoute::get_route_handler` /
+`fastapi.routing.get_request_handler` names: `explain` identifies line 1225,
+`callees` shows the call at line 1232, and `path` prints one extracted call hop.
+Graphify's file-qualified `explain` also identifies the declaration and its
+call. Its file-qualified `path` rejects the pair after resolving both names
+to an unrelated node; its exact-ID `path` returns an unrelated two-hop import
+route with a target-ambiguity warning. The raw diagnostic responses are retained
+beside `runs/source-first-3lang-01`. These later probes do not change the
+preregistered scores or imply general selector behavior outside this example.
 
 These are six selected static call sites and 12 source-first development
 questions, not independent whole-graph precision, authored explanation
