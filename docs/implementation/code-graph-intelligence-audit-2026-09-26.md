@@ -4880,3 +4880,27 @@ policy and the independent React source tests. Its final release-binary
 frontend phase was stopped when the shared mounted volume fell below 2 GiB
 free; the per-worktree Cargo target was then cleaned, restoring capacity.
 The complete fixtures-only gate is therefore not claimed for this follow-up.
+
+### Explicitly typed Go parameter-field contacts
+
+The later [parameter registration](../../benchmarks/agent_query/go_parameter_field_registration.json)
+fixed all 146 tracked Go paths and the same three frozen graphs after the
+receiver-only audit had exposed 1,908 uncredited new links. A separate Go
+standard-parser oracle accepts only selectors bound by object identity to an
+ordinary method parameter with an explicit local nominal struct type and one
+direct named field. Called selectors, shadowed parameters, qualified/imported
+types, duplicate structs/fields and unsupported receiver expressions stay out
+of the denominator. A synthetic fixture checks parameter binding, shadowing
+and call exclusion.
+
+The [review](../../benchmarks/agent_query/go_parameter_field_review.json)
+finds **276/276** exact candidate method-to-field links at the source byte,
+versus zero in the frozen pre-access Compass graph. Graphify has no exact
+declaration target for these 98 fields, while retaining 19 field-type context
+records. All 276 sites were previously classified as `other_receiver` by the
+receiver-only oracle, with no overlapping credited edges. The two narrow
+oracles therefore credit **3,018 distinct links of 4,650**; **1,632 remain
+uncredited**. Both complete source outputs and graph-probe reports are byte
+identical across two runs. This expands independently verified coverage on
+one known Go repository; it does not establish precision for the remaining
+links or broad superiority across the requested tasks and languages.

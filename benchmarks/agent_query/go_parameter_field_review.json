@@ -1,0 +1,27 @@
+{
+  "schema": "compass.go-parameter-field-development-review/1",
+  "scope": "Pinned Litestream 6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa, all 146 tracked Go files; known development repository, not held-out",
+  "registrationCommit": "d82d94b9",
+  "registrationSha256": "d197a66d02a26e967505ba38cfe76544aaac94c4e9edea2f2ac0293b348a5088",
+  "oracleSourceSha256": "8fba86e8cb96623a90778c5b3cbe95dd4642627900dd60748dda8e837839afb7",
+  "oracleBinarySha256": "5a544db0aeeec403b2a4bebca9320386c767f623b3b5b220849a0276401e28ed",
+  "oracleOutputSha256": "1fae7219be73ef2fa142a6581153a5b91cfa47cb93a07c29c61bcfdf80fc92a4",
+  "probeSourceSha256": "eadc176b7f841ee6e980ac07c694a1c6ba8938329ba7404d7f2319fa9fa4605e",
+  "rawProbeSha256": "5292c80955aeda23cc97378d5ad6fd04a3bc17898fc1c1b59a6310a57de5be9f",
+  "rawRun": "go-parameter-field-01 in the external code-graph audit runs directory",
+  "sourceSelectorCount": 10586,
+  "sourceExplicitParameterDirectFieldContacts": 276,
+  "uniqueFieldTargets": 98,
+  "candidateExactContacts": 276,
+  "baselineCompassExactContacts": 0,
+  "frozenGraphifyExactContacts": 0,
+  "graphifyFieldTypeContextRecordsOnTheseFields": 19,
+  "priorReceiverOracleCategory": "All 276 contacts were previously categorized as other_receiver, with no overlap in credited sites or edges.",
+  "combinedDirectReceiverAndParameterOracle": {
+    "exactDistinctCandidateLinks": 3018,
+    "candidateMemberAccessLinks": 4650,
+    "remainingUncreditedLinks": 1632
+  },
+  "repeatability": "Two full source-oracle outputs and two full graph-probe outputs were byte identical. A synthetic fixture confirmed typed parameter binding, shadowed parameter exclusion and called-selector exclusion.",
+  "limits": "The source oracle covers only explicitly typed ordinary method parameters whose unqualified nominal type has one direct source struct and one direct named field. The remaining 1632 links have no precision credit. This does not establish whole-Go graph precision, other languages, god-object diagnosis or overall superiority."
+}

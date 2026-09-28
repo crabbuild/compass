@@ -1093,3 +1093,15 @@ The first candidate graph exceeded the registered 16 MiB audit read cap by
 no file, source contact or graph record was filtered. This is development
 evidence from one known repository, not broad field precision, a god-object
 classifier, community quality or overall superiority.
+
+`go_parameter_field_registration.json` then fixed a separate source oracle for
+explicitly typed ordinary method parameters on the same pinned files and
+graphs. The independent [review](go_parameter_field_review.json) finds
+**276/276** exact method-to-field contacts in the candidate graph and none
+in the frozen pre-access Compass graph. Graphify has no exact declaration
+target for these 98 fields, though it retains 19 field-type context records.
+The 276 contacts were all outside the receiver-only denominator and share no
+credited edge with it. Together the two narrow oracles credit **3,018 of
+4,650** new member-access links; **1,632 remain uncredited**. Two complete
+source and graph probe runs are byte identical. The result remains one known
+Go development repository, not whole-graph precision or broad superiority.
