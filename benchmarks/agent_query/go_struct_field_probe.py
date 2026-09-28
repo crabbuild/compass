@@ -36,9 +36,12 @@ def compare(graph: dict, tool: str, declarations: list[dict]) -> dict:
     if len(by_id) != len(nodes):
         raise ValueError(f"{tool} duplicate node IDs")
     outgoing = {}
+    containment_owners = {}
     contexts = Counter()
     for link in links:
         outgoing.setdefault(link["source"], []).append(link)
+        if link.get("relation", link.get("kind")) in ("contains", "defines"):
+            containment_owners.setdefault(link["target"], set()).add(link["source"])
         if link.get("relation", link.get("kind")) == "references" and link.get("context") == "field":
             contexts[(link.get("source"), link.get("source_file"), link.get("source_location"))] += 1
     rows = []
@@ -59,16 +62,20 @@ def compare(graph: dict, tool: str, declarations: list[dict]) -> dict:
                         and source_location(member, tool) == (file, item["fieldLine"])
                         and (tool != "compass" or member.get("kind") == "field")):
                     field_ids.add(member["id"])
+        ambiguous_field_owner = any(len(containment_owners.get(identifier, set())) != 1 for identifier in field_ids)
         status = ("unavailable-owner" if not owner_ids else "ambiguous-owner" if len(owner_ids) > 1
-                  else "matched" if len(field_ids) == 1 else "ambiguous-field" if len(field_ids) > 1
+                  else "matched" if len(field_ids) == 1 and not ambiguous_field_owner
+                  else "ambiguous-field" if field_ids
                   else "missing-field")
         rows.append({**item, "status": status, "ownerIds": owner_ids,
                      "fieldIds": sorted(field_ids),
                      "fieldTypeContextRecords": contexts[(owner_ids[0], file, f"L{item['fieldLine']}")] if len(owner_ids) == 1 else 0})
+    context_sites = {(row["ownerIds"][0], row["file"], f"L{row['fieldLine']}")
+                     for row in rows if len(row["ownerIds"]) == 1}
     return {"tool": tool, "directed": graph["directed"],
             "nodeCount": len(nodes), "edgeRecordCount": len(links),
             "statusCounts": dict(sorted(Counter(row["status"] for row in rows).items())),
-            "fieldTypeContextRecords": sum(row["fieldTypeContextRecords"] for row in rows),
+            "fieldTypeContextRecords": sum(contexts[site] for site in context_sites),
             "rows": rows}
 
 

@@ -1594,6 +1594,71 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
 }
 
 #[test]
+fn go_struct_named_fields_have_distinct_exact_declarations_and_owners()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"package sample
+
+type Embedded struct{}
+type Store struct {
+    First, Second int
+    Embedded
+    Nested struct { Inner int }
+    _ string
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source_combined(
+        std::path::Path::new("/repo/sample/example.go"),
+        "sample/example.go",
+        source,
+    )?;
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .ok_or("missing Go evidence")?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let store = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "struct" && declaration.name == "Store")
+        .ok_or("missing Store")?;
+    let mut fields = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "field")
+        .collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.name.cmp(&right.name));
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.range.start_line))
+            .collect::<Vec<_>>(),
+        [("First", 5), ("Nested", 7), ("Second", 5)]
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.graph_node_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    for field in fields {
+        assert_eq!(
+            field.qualified_name,
+            format!("sample.Store::{}", field.name)
+        );
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Contains
+                && candidate.source_declaration_id == store.id
+                && candidate.constraints.exact_target_declaration_id.as_deref()
+                    == Some(field.id.as_str())
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn go_emits_direct_and_grouped_aliases_with_closure_signature_references() {
     let source = br#"package sample
 

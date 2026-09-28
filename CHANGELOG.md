@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Publish explicit named Go struct fields as source-anchored field declarations
+  owned by their struct. Rebuild existing graphs to see the new nodes and hub
+  member counts; disposable AST cache semantics advance to 12.
+
 - Show stored direct-member and own-field reference counts for typed class and
   struct hubs in MCP `god_nodes`, with ambiguous owners excluded and undirected
   graphs left unavailable. Keep hub ranks unchanged; the counts are graph

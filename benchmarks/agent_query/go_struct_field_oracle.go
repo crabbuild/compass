@@ -32,15 +32,21 @@ type result struct {
 	Schema       string        `json:"schema"`
 	Declarations []declaration `json:"declarations"`
 	Embedded     []embedded    `json:"embedded"`
+	Blank        []embedded    `json:"blank"`
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	paths := os.Args[1:]
+	relative := len(paths) > 0 && paths[0] == "--relative"
+	if relative {
+		paths = paths[1:]
+	}
+	if len(paths) == 0 {
 		fmt.Fprintln(os.Stderr, "expected registered source paths")
 		os.Exit(2)
 	}
-	output := result{Schema: "compass.go-struct-field-oracle/1", Declarations: []declaration{}, Embedded: []embedded{}}
-	for _, path := range os.Args[1:] {
+	output := result{Schema: "compass.go-struct-field-oracle/1", Declarations: []declaration{}, Embedded: []embedded{}, Blank: []embedded{}}
+	for _, path := range paths {
 		set := token.NewFileSet()
 		file, err := parser.ParseFile(set, path, nil, parser.AllErrors)
 		if err != nil {
@@ -48,6 +54,9 @@ func main() {
 			os.Exit(1)
 		}
 		name := filepath.Base(path)
+		if relative {
+			name = filepath.ToSlash(path)
+		}
 		for _, top := range file.Decls {
 			general, ok := top.(*ast.GenDecl)
 			if !ok || general.Tok != token.TYPE {
@@ -69,6 +78,10 @@ func main() {
 						continue
 					}
 					for _, identifier := range field.Names {
+						if identifier.Name == "_" {
+							output.Blank = append(output.Blank, embedded{name, typeSpec.Name.Name, structLine, set.Position(identifier.Pos()).Line})
+							continue
+						}
 						output.Declarations = append(output.Declarations, declaration{name, typeSpec.Name.Name, structLine, identifier.Name, set.Position(identifier.Pos()).Line})
 					}
 				}
@@ -90,6 +103,16 @@ func main() {
 	})
 	sort.Slice(output.Embedded, func(i, j int) bool {
 		a, b := output.Embedded[i], output.Embedded[j]
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		if a.StructLine != b.StructLine {
+			return a.StructLine < b.StructLine
+		}
+		return a.Line < b.Line
+	})
+	sort.Slice(output.Blank, func(i, j int) bool {
+		a, b := output.Blank[i], output.Blank[j]
 		if a.File != b.File {
 			return a.File < b.File
 		}

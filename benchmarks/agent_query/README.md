@@ -1037,3 +1037,37 @@ their stored direct methods/fields and own-field records equal the selected
 independent JDK source and compiler-bound counts. The fourth rated Eclipse
 class was outside that request. These checks validate the projection for
 known examples, not god-object diagnosis or overall superiority.
+
+## Go struct field declaration census
+
+`go_struct_field_registration.json` fixed two Litestream files, their clean
+source revision and both frozen graphs before the first source parser run.
+`go_struct_field_oracle.go` uses Go's standard parser to enumerate every
+top-level named struct and each explicit named direct field. The first
+`go_struct_field_probe.py` attempt stopped before scoring because Graphify's
+graph is marked undirected. The amended registration uses stored
+source-owner-to-target-field containment records without implying traversal
+direction. The selected two-file census has 33 fields in five structs; both
+frozen graphs have 0/33 matching declaration identities. Graphify retains 13
+field-type context records on these lines, which are not declaration nodes.
+The first full context tally counted a record once per grouped field name;
+the corrected tally counts each owner/source-line record once. Declaration
+outcomes are unchanged.
+
+`go_full_field_registration.json` separately fixes **all 146 tracked Go
+files** in the same known repository and the preliminary candidate graph
+before the wider source census. The [full review](go_full_field_review.json)
+and `go_full_field_probe.py` compare exact source file, struct name/start line,
+field name/identifier line and ownership, rejecting duplicate or shared
+owners. The Go parser finds 993 named fields in 167 structs and keeps 27
+embedded fields outside that denominator. The frozen Compass and Graphify
+graphs each have **0/993** matching field declaration nodes; Graphify has 323
+field-type context records. The Compass candidate has **993/993** exact
+matches. Its 993 added nodes are all fields and all source matched; its 993
+added containment edges preserve every old node and edge. The 59 publication
+omissions are the same in both Compass graphs. Two full verifier runs are byte
+identical, and a warm candidate rebuild matches the cold graph byte for byte.
+Raw per-field outcomes remain in external run `go-struct-fields-01` under the
+review's SHA-256. This is one known Go development repository, not broad
+source precision, field-access binding, cohesion, god-object diagnosis or
+overall superiority.

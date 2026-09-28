@@ -55,6 +55,20 @@ and AST cache semantics are unchanged. Content reads use the configured graph
 byte cap; this correctness correction makes no latency or memory improvement
 claim.
 
+## Go struct field declarations
+
+The universal Go producer now publishes one `field` declaration per explicitly
+named direct struct field, with its identifier source range and a directed
+`contains` relation from the owning `struct`. A declaration with multiple
+names creates distinct fields. Embedded fields, blank identifiers, and fields
+inside anonymous nested structs do not become direct named members of the
+outer struct. Existing type-reference and receiver-binding evidence remains.
+This adds graph nodes and containment edges, so graph digests, communities,
+hub degrees and hub member counts can change after a rebuild. It does not
+assert field-access target resolution or god-object classification. Disposable
+AST cache semantics advance from 11 to 12; old cache entries are ignored and
+recomputed. Graph schema and package version remain unchanged.
+
 ## Java field-access evidence
 
 Java emits `MemberAccess` occurrences for ordinary fields and enum constants,

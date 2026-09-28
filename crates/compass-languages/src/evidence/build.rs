@@ -7432,6 +7432,9 @@ impl<'source> DirectEvidenceState<'source> {
                 };
                 self.add_ownership(file, &context)?;
                 self.declarations.insert(node.id(), context.clone());
+                if kind == "struct" {
+                    self.add_go_struct_fields(node, &context)?;
+                }
                 if kind == "interface" {
                     let mut interfaces = Vec::new();
                     collect_nodes(node, "interface_type", &mut interfaces);
@@ -7506,6 +7509,71 @@ impl<'source> DirectEvidenceState<'source> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_go_declarations(child, file)?;
+        }
+        Ok(())
+    }
+
+    fn add_go_struct_fields(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        let Some(structure) = declaration
+            .child_by_field_name("type")
+            .filter(|node| node.kind() == "struct_type")
+        else {
+            return Ok(());
+        };
+        let mut cursor = structure.walk();
+        let Some(fields) = structure
+            .children(&mut cursor)
+            .find(|child| child.kind() == "field_declaration_list")
+        else {
+            return Ok(());
+        };
+        let mut cursor = fields.walk();
+        for field in fields
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "field_declaration")
+        {
+            let mut field_cursor = field.walk();
+            for name_node in field
+                .children(&mut field_cursor)
+                .filter(|child| child.kind() == "field_identifier")
+            {
+                let name = self.text(name_node);
+                if name.is_empty() || name == "_" {
+                    continue;
+                }
+                let qualified_name = format!("{}::{name}", owner.qualified_name);
+                let base = make_id(&[&owner.graph_node_id, &name, "field"]);
+                let graph_node_id = if self.graph_ids.insert(base.clone()) {
+                    base
+                } else {
+                    let duplicate = make_id(&[&base, &name_node.start_byte().to_string()]);
+                    self.graph_ids.insert(duplicate.clone());
+                    duplicate
+                };
+                let fact_id = self.builder.declare(
+                    "field",
+                    &graph_node_id,
+                    &name,
+                    &qualified_name,
+                    Some(&self.module_or_package),
+                    Some(&owner.scope_id),
+                    range_for_node(self.source_file, name_node),
+                )?;
+                let member = DeclarationContext {
+                    fact_id,
+                    scope_id: owner.scope_id.clone(),
+                    graph_node_id,
+                    name,
+                    qualified_name,
+                    kind: "field".to_owned(),
+                    enclosing_type_qualified_name: Some(owner.qualified_name.clone()),
+                };
+                self.add_ownership(owner, &member)?;
+            }
         }
         Ok(())
     }

@@ -43,6 +43,11 @@ turns those cases into inferred relationships. A producer-version or capability
 change invalidates this decision and must return the affected entry to
 `Qualifying` until a new release decision is reviewed.
 
+The Go producer emits exact named direct struct-field declarations and
+ownership candidates, including each name in a grouped declaration. This
+does not establish field-access targets or include embedded, blank, or nested
+anonymous-struct fields as direct named members of the outer struct.
+
 ## Evidence contract
 
 The serialized evidence schema is `compass.languages.evidence/2`. The

@@ -2,9 +2,9 @@
   "schema": "compass.code-graph-topology-policy/1",
   "topology": {
     "minimums": {
-      "communities": 239,
+      "communities": 238,
       "edges": 1277,
-      "exactCrossCommunityEdges": 3,
+      "exactCrossCommunityEdges": 2,
       "exactCrossFileEdges": 56,
       "exactCrossFileEdgesPerThousandNodes": 43,
       "exactEdgeBearingNodePermille": 710,
