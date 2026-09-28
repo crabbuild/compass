@@ -32,7 +32,7 @@
   "priorSourceRunSha256": "f28a92dd08363607f534632471e15f61e7f3d6cd3ce34e479ab04ff09ebdba4c",
   "priorHubRegistrationSha256": "da554737c494f51eb15f4b7a8cce8a455382df2c228b97754a88dc46105fb586",
   "sourceOracle": "Use Go standard-library go/parser and go/ast. Include every top-level TypeSpec whose type is StructType in the two files. For every Field with one or more Names, emit one declaration per name at that identifier's exact 1-based line. Keep embedded fields in a separate unavailable category; never infer a name from the type. Preserve same-line multiple names as separate declarations.",
-  "graphJoin": "Resolve each struct by exact file, case-sensitive name and declaration start line, with no fallback identity. A direct field declaration match needs an exact case-sensitive field label, exact file and identifier line, a distinct field-compatible node identity, and a directed owner-to-field containment edge. Multiple matching identities or owners are ambiguous. Graphify field-context type-reference edges are recorded separately and cannot substitute for named field declarations. Neither graph receives source-assisted output credit.",
+  "graphJoin": "Resolve each struct by exact file, case-sensitive name and declaration start line, with no fallback identity. A direct field declaration match needs an exact case-sensitive field label, exact file and identifier line, a distinct field-compatible node identity, and a stored source-owner-to-target-field contains/defines record. This record-orientation rule also applies to Graphify's undirected graph and does not imply directed traversal. Multiple matching identities or owners are ambiguous. Graphify field-context type-reference edges are recorded separately and cannot substitute for named field declarations. Neither graph receives source-assisted output credit.",
   "bounds": {
     "maxSourceBytesPerFile": 1048576,
     "maxGraphBytes": 16777216,
@@ -44,6 +44,7 @@
   },
   "report": "Retain every source declaration and per-tool exact/ambiguous/missing result, both graph identities and hashes, field-context counts, all unavailable outcomes and limits. Compare both frozen graphs under the same rule. A subsequent Compass candidate must be evaluated separately without changing the frozen denominator.",
   "limitations": [
+    "The first probe stopped before scoring because it incorrectly required both frozen graphs to have directed=true. Graphify's graph is undirected. The amended join uses stored source/target ownership records only; no candidate outcomes were inspected before this correction.",
     "This is a selected Go development slice from one repository and does not establish general extraction precision or recall.",
     "Declaration coverage does not validate field-access targets, responsibility cohesion, god-object classification, query explanation quality or broad superiority.",
     "The frozen graph producers differ; this comparison does not isolate parser and graph schema effects."
