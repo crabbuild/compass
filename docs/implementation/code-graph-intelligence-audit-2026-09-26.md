@@ -10,12 +10,12 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | --- | --- | --- |
 | Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. Exact source-assisted resolution succeeds for all eight per tool. Earlier failures remain unchanged; classifier quality is unproven. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. The dotted-owner follow-up retains all earlier verified contacts; its 27 other additions (21 test, six Java 11 overlay) remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
-| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
+| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
 | Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
 | Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The largest of four SQL files improves in repeated release timings, but the first complete-source candidate observation is longer (280.053 s versus 193.966 s). The separate registered repeat completes all six runs with identical partial graphs and medians of 204.082 s candidate versus 215.288 s baseline (ratio 0.948). Timing variation remains unexplained; no general efficiency win is established. |
-| Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
+| Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Three previously unused Go/Python/Rust checkouts were pinned and 12 selected source-first questions registered before both tools ran. Their narrow direct-call review is recorded below. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
 
 Current evidence summaries are in the
 [original Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
@@ -4500,3 +4500,59 @@ pruning contract, workspace formatting, workspace library/binary Clippy,
 targeted integration-test Clippy, the full workspace library/binary test
 baseline, and fixtures-only code-graph qualification including the independent
 React frontend gate. The release package version remains 0.3.30.
+
+### Source-first Go, Python and Rust direct-call questions
+
+The [registered suite](../../benchmarks/agent_query/source_first_three_language_suite.toml)
+fixed 12 selected declaration, callee, caller and one-hop path questions before
+either tool queried three previously unused, clean source checkouts:
+`benbjohnson/litestream` at `6a71ccd9` (Go), `fastapi/fastapi` at `0c2b6aaf`
+(Python), and `denoland/celld` at `10cb1303` (Rust). Registration commit
+`ab93cd34` pins the exact suite SHA256
+`13338a37b219b82d6b0a99f5a8b884cc27efa8043b1a38d5a32dcfa88a53da0e`.
+The same runner rebuilt both graphs per repository and retained commands,
+responses, timings, source and graph hashes under external run
+`runs/source-first-3lang-01`. Compass used frozen debug binary SHA256 prefix
+`da2c565517ea7976`; Graphify 0.9.67 used prefix `a7fdb4ac8985755b`.
+Debug-versus-installed timing is not a fair performance comparison.
+
+The original registered **text** checks pass **9/12 for Compass and 8/12 for
+Graphify**. The separate [source-and-edge review](../../benchmarks/agent_query/source_first_three_language_review.json)
+preserves those outcomes and checks the six selected source call sites against
+exact caller and callee declarations, relationship direction and site line in
+each graph. It additionally requires a rendered one-hop `calls [EXTRACTED]`
+edge for each path question. Under that narrower source-supported question
+rule the results are **9/12 for Compass and 6/12 for Graphify**. The verifier
+pins run, suite, runner, binary, graph, source-file and raw stdout digests;
+two verifier executions gave byte-identical review files.
+
+| Repository | Registered text passes (Compass / Graphify) | Source-supported passes (Compass / Graphify) | Reviewed direct-call facts |
+| --- | ---: | ---: | --- |
+| Litestream | 4/4 / 2/4 | 4/4 / 1/4 | Compass has one exact call at each of `store.go:721`, `:735` and `:737`; Graphify has none. |
+| FastAPI | 1/4 / 2/4 | 1/4 / 1/4 | Both graphs have the exact call at `fastapi/routing.py:1232`. |
+| Celld | 4/4 / 4/4 | 4/4 / 4/4 | Both graphs have the exact calls at `peer_auth.rs:145` and `:149`. |
+
+Two Graphify path outputs met the registered token test while answering a
+different question. Its Litestream path is three structural hops through
+`Store` and `HeartbeatClient`, rather than the direct call at line 721. Its
+FastAPI path is four hops through a test override, `FastAPI` and
+`DefaultPlaceholder`, rather than the direct call at line 1232. The corrected
+review removes **only** these two path credits; it does not revise the frozen
+text score. The Celld path is a one-hop call in both tools.
+
+FastAPI also exposes an interface limitation. The registered subject names
+`APIRoute.get_route_handler`, but each CLI request supplies only the short
+method name. Seven declarations have that name in the full checkout.
+Compass refuses the ambiguous `explain`, `callees` and `path` requests instead
+of choosing one; Graphify refuses the first two and emits an ambiguous-source
+warning with its incorrect path. This is a navigation/identity failure for the
+registered workflow, not a missing call in either graph. A separate exact-ID
+diagnostic may establish whether source-qualified lookup removes it, but must
+not change these preregistered scores.
+
+These are six selected static call sites and 12 source-first development
+questions, not independent whole-graph precision, authored explanation
+quality, runtime reachability, god-object diagnosis, community quality or a
+representative superiority claim. A source-backed edge does not validate all
+other claims in the surrounding answer. No production code changed in this
+checkpoint; the review ran without a new Cargo build.

@@ -945,3 +945,20 @@ Version-10 AST cache reuse reproduces the fresh candidate graph byte-for-byte.
 The separate nested-expression fixture retains three enum misses. The report
 binds production `be2fb542`, qualification and repeated verification. These
 known development results do not establish broad or held-out superiority.
+
+## Source-first three-language direct-call review
+
+`source_first_three_language_suite.toml` registers 12 selected Go, Python and
+Rust declaration/call/path questions before either tool ran. The retained
+external run `source-first-3lang-01` contains both freshly built graphs,
+commands and raw responses. `review_source_first_three_language.py` requires
+that run, the registered suite and the three pinned source roots; it checks
+their hashes, exact source call sites and graph edges, then writes
+`source_first_three_language_review.json`.
+
+The registered text score is Compass 9/12 versus Graphify 8/12. Two Graphify
+path responses contain the required names but follow indirect structural
+routes, so the separate source-supported score is 9/12 versus 6/12. The audit
+explains each correction and the unresolved FastAPI short-name ambiguity.
+These selected development questions do not measure whole-graph accuracy,
+authored explanations or god-object diagnosis.
