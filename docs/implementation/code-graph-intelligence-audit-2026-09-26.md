@@ -4455,3 +4455,48 @@ subset despite missing project dependencies. It does not prove recall for
 unresolved, inherited or foreign fields; it does not measure ATFD, TCC,
 responsibility defects, other languages or Graphify quality. The known rated
 panel, including one positive test class, remains development data.
+
+### Rust `fd` collected-builder receiver replay
+
+The recorded `fd-shadow-02` failure above is now addressed by source-backed
+Rust value flow. A `Result<Vec<_>>` collected from a standard vector iterator
+and a constructor returning standard `Result<Self>` can carry its element type
+through the `Ok` arm, whole-value vector loops, and `iter().map` closures.
+Custom `Result` or `Vec` aliases and constructors returning a different type
+stay unresolved in the native regression. The preceding receiver-shadowing
+regression still passes. Disposable AST cache version 11 invalidates older
+extraction facts; the Rust producer capability identity remains version 2.
+
+Fresh run `fd-result-vec-03` reused the registered `fd` suite SHA256
+`34cddd72fb17386bfe29d42e1fd8c3e9f0683a9b16ddd06500492b93cb273721`
+and pinned checkout `b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5`.
+It rebuilt both tools' graphs in a new output directory. The Compass debug
+binary SHA256 is `da2c565517ea7976`; Graphify 0.9.67 retains the recorded
+binary SHA256 prefix `a7fdb4ac8985755b`. The run, graph digests, responses,
+and commands are under the external evaluation workspace at
+`runs/fd-result-vec-03`. The committed
+[replay manifest](../../benchmarks/agent_query/fd_result_vec_replay.json)
+records graph hashes and reviewed call deltas. Compass now passes **12/12** selected text oracles
+versus Graphify **9/12**. Both pass the formerly Graphify-only
+`execute_batch` callees row. On the nine shared passes, the median estimated
+answer size remains higher for Compass, **288 versus 114 tokens**. These are
+text-oracle outcomes on one known Rust repository, not an independent
+cross-language superiority result or a speed comparison.
+
+The new graph has exact `calls` edges from `CommandSet::execute_batch` to
+`CommandBuilder::push` at `src/exec/mod.rs:104`, `finish` at line 111, and
+`exit_code` at line 116. The three other newly materialized call sites in
+that file are source-consistent: `CommandTemplate::generate` at line 86,
+`FormatTemplate::generate` at line 267, and the latter method in the test
+helper at line 283. No prior call edge disappeared. Another 213 newly
+materialized `references` relationship keys, mostly field contacts, have not
+received an independent precision census and are excluded from this call
+finding. Graphify's earlier wrong constructor target at line 97 remains in
+its fresh graph; its registered text pass is preserved.
+
+Verification for this correction passed the 212-case universal resolver
+integration suite, the 13-case Rust language conformance suite, the AST-cache
+pruning contract, workspace formatting, workspace library/binary Clippy,
+targeted integration-test Clippy, the full workspace library/binary test
+baseline, and fixtures-only code-graph qualification including the independent
+React frontend gate. The release package version remains 0.3.30.

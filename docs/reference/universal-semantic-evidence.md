@@ -207,6 +207,16 @@ of acquiring an invented target. This correctness correction keeps the existing
 producer capability contract; AST cache semantics version 3 prevents reuse of
 facts produced before it.
 
+For an explicitly typed standard `Result<Vec<_>>`, Rust evidence can infer the
+vector element from a direct `collect()` over a standard vector `iter().map`
+closure whose associated constructor declares standard `Result<Self>`. A
+matching unshadowed `Ok` arm then carries that vector type into whole-value
+loop bindings and standard `iter().map` closure parameters. Each method call
+still requires a unique source owner. Custom collection aliases, unsupported
+iterator shapes, and ambiguous methods retain unresolved occurrences. AST
+cache version 11 refreshes earlier facts without changing the producer's
+version-2 capability identity.
+
 Java method-call candidates can derive their receiver from direct named object
 creation, including fully qualified types and parenthesized forms. The method
 occurrence remains the exact method-name span, and the existing argument vector

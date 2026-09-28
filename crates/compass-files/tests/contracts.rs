@@ -993,6 +993,11 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v7/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v8/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v9/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v10/e1"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v10/e1/stale.msgpack"),
+        "Rust facts without source-proven Result vector receiver flow",
+    )?;
     fs::write(
         cache_root.join("compass-out/cache/ast/v9/e1/stale.msgpack"),
         "Java facts without enum contacts and constant-body ownership",
@@ -1050,6 +1055,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(!cache_root.join("compass-out/cache/ast/v7").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v8").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v9").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v10").exists());
 
     let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(

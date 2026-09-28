@@ -1038,6 +1038,7 @@ struct DirectEvidenceState<'source> {
     rust_ambiguous_field_types: HashSet<(String, String)>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
     rust_callable_return_types: HashMap<String, Vec<String>>,
+    rust_result_self_methods: HashSet<String>,
     rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
@@ -1133,6 +1134,7 @@ impl<'source> DirectEvidenceState<'source> {
                 && rust_standard_prelude_enabled(root, source),
             rust_value_types: HashMap::new(),
             rust_callable_return_types: HashMap::new(),
+            rust_result_self_methods: HashSet::new(),
             rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
@@ -4039,6 +4041,7 @@ impl<'source> DirectEvidenceState<'source> {
         self.collect_rust_declarations(root, &file, None)?;
         self.collect_rust_imports(root, &file)?;
         self.collect_rust_callable_return_types(root);
+        self.collect_rust_callable_value_types(root);
         self.collect_rust_parameter_bindings(root, &file)?;
         self.walk_rust_evidence(root, &file, true)
     }
@@ -4049,6 +4052,14 @@ impl<'source> DirectEvidenceState<'source> {
             && let Some(return_type) = node.child_by_field_name("return_type")
         {
             let raw = self.text(return_type);
+            if rust_single_generic_type_argument(&raw) == Some("Self")
+                && let Some(result) = rust_nominal_type_path(&raw)
+                && self.rust_standard_result_type(&owner, &result, return_type.start_byte())
+                && self.rust_concrete_callable_receiver(&owner).is_some()
+            {
+                self.rust_result_self_methods
+                    .insert(owner.qualified_name.clone());
+            }
             let qualified = if raw.trim() == "Self" {
                 self.rust_concrete_callable_receiver(&owner)
             } else {
@@ -4066,6 +4077,18 @@ impl<'source> DirectEvidenceState<'source> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_rust_callable_return_types(child);
+        }
+    }
+
+    fn collect_rust_callable_value_types(&mut self, node: Node<'_>) {
+        if let Some(owner) = self.declarations.get(&node.id()).cloned()
+            && matches!(owner.kind.as_str(), "function" | "method")
+        {
+            self.collect_rust_value_types(node, &owner);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            self.collect_rust_callable_value_types(child);
         }
     }
 
@@ -4409,7 +4432,6 @@ impl<'source> DirectEvidenceState<'source> {
                 .map(|implementation| implementation.type_qualified_name.clone())
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
         };
-        self.collect_rust_value_types(node, &context);
         self.collect_rust_generic_bounds(node, &context);
         if owner.kind == "trait" {
             self.rust_trait_methods
@@ -5317,7 +5339,25 @@ impl<'source> DirectEvidenceState<'source> {
         if node.kind() == "closure_expression"
             && let Some(parameters) = node.child_by_field_name("parameters")
         {
-            self.collect_rust_parameter_value_types(parameters, &scope_id, true);
+            if let Some(raw) = self.rust_map_closure_element_type(node, owner)
+                && parameters.named_child_count() == 1
+                && let Some(pattern) = parameters.named_child(0)
+                && rust_pattern_binds_whole_value(pattern)
+            {
+                let mut names = Vec::new();
+                collect_rust_pattern_names(pattern, &mut names, self.source);
+                for name in names {
+                    self.record_rust_value_type(
+                        &scope_id,
+                        &name,
+                        Some(raw.clone()),
+                        pattern.end_byte()..node.end_byte(),
+                        true,
+                    );
+                }
+            } else {
+                self.collect_rust_parameter_value_types(parameters, &scope_id, true);
+            }
         }
         if node.kind() == "let_declaration"
             && let Some(pattern) = node.child_by_field_name("pattern")
@@ -5325,7 +5365,14 @@ impl<'source> DirectEvidenceState<'source> {
             let raw = rust_pattern_binds_whole_value(pattern)
                 .then(|| {
                     node.child_by_field_name("type")
-                        .map(|type_node| self.text(type_node))
+                        .map(|type_node| {
+                            let declared = self.text(type_node);
+                            node.child_by_field_name("value")
+                                .and_then(|value| {
+                                    self.rust_collected_result_vec_type(owner, type_node, value)
+                                })
+                                .unwrap_or(declared)
+                        })
                         .or_else(|| {
                             node.child_by_field_name("value")
                                 .and_then(|value| self.rust_inferred_value_type(value, owner))
@@ -5349,6 +5396,11 @@ impl<'source> DirectEvidenceState<'source> {
         if matches!(node.kind(), "for_expression" | "match_arm")
             && let Some(pattern) = node.child_by_field_name("pattern")
         {
+            let inferred = if node.kind() == "for_expression" {
+                self.rust_for_element_type(node, owner, pattern)
+            } else {
+                self.rust_ok_arm_type(node, owner, pattern)
+            };
             let active_from = if node.kind() == "for_expression" {
                 node.child_by_field_name("body")
                     .map(|body| body.start_byte())
@@ -5364,7 +5416,7 @@ impl<'source> DirectEvidenceState<'source> {
                     self.record_rust_value_type(
                         &scope_id,
                         &name,
-                        None,
+                        inferred.clone(),
                         active_from..node.end_byte(),
                         true,
                     );
@@ -5404,6 +5456,242 @@ impl<'source> DirectEvidenceState<'source> {
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_rust_value_types_in_body(child, owner, &scope_id, false);
         }
+    }
+
+    fn rust_standard_result_type(
+        &self,
+        owner: &DeclarationContext,
+        nominal: &str,
+        position: usize,
+    ) -> bool {
+        if self.visible_import_binding_is_ambiguous(owner, qualified_binding_head(nominal)) {
+            return false;
+        }
+        let qualified = rust_qualify_evidence_path(self, owner, nominal, position);
+        matches!(
+            qualified.as_deref(),
+            Some("std::io::Result" | "std::result::Result")
+        ) && (nominal != "Result"
+            || (self.rust_standard_prelude_enabled
+                && self.local_target_for(owner, "Result").is_none()
+                && self
+                    .imported_target_for_occurrence(owner, "Result", position, true)
+                    .is_none()
+                && self
+                    .import_binding_version_at(owner, "*", position, true)
+                    .is_none()))
+    }
+
+    fn rust_standard_vec_element<'b>(
+        &self,
+        owner: &DeclarationContext,
+        raw: &'b str,
+        position: usize,
+    ) -> Option<&'b str> {
+        let nominal = rust_nominal_type_path(raw)?;
+        if self.visible_import_binding_is_ambiguous(owner, qualified_binding_head(&nominal)) {
+            return None;
+        }
+        let qualified = rust_qualify_evidence_path(self, owner, &nominal, position)?;
+        let standard = matches!(qualified.as_str(), "std::vec::Vec" | "alloc::vec::Vec")
+            || (nominal == "Vec"
+                && self.rust_standard_prelude_enabled
+                && self.local_target_for(owner, "Vec").is_none()
+                && self
+                    .imported_target_for_occurrence(owner, "Vec", position, true)
+                    .is_none()
+                && self
+                    .import_binding_version_at(owner, "*", position, true)
+                    .is_none());
+        standard
+            .then(|| rust_single_generic_type_argument(raw))
+            .flatten()
+    }
+
+    fn rust_collected_result_vec_type(
+        &self,
+        owner: &DeclarationContext,
+        declared: Node<'_>,
+        collect: Node<'_>,
+    ) -> Option<String> {
+        let raw = self.text(declared);
+        let result = rust_nominal_type_path(&raw)?;
+        if !self.rust_standard_result_type(owner, &result, declared.start_byte()) {
+            return None;
+        }
+        let vector = rust_single_generic_type_argument(&raw)?;
+        if self.rust_standard_vec_element(owner, vector, declared.start_byte())? != "_" {
+            return None;
+        }
+        let collect_function = collect.child_by_field_name("function")?;
+        if collect.kind() != "call_expression"
+            || collect_function.kind() != "field_expression"
+            || self.text(collect_function.child_by_field_name("field")?) != "collect"
+            || collect
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let map = collect_function.child_by_field_name("value")?;
+        let map_function = map.child_by_field_name("function")?;
+        if map.kind() != "call_expression"
+            || map_function.kind() != "field_expression"
+            || self.text(map_function.child_by_field_name("field")?) != "map"
+        {
+            return None;
+        }
+        let iterator = map_function.child_by_field_name("value")?;
+        let iterator_function = iterator.child_by_field_name("function")?;
+        if iterator.kind() != "call_expression"
+            || iterator_function.kind() != "field_expression"
+            || self.text(iterator_function.child_by_field_name("field")?) != "iter"
+            || iterator
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let source = self.rust_indexed_receiver_type(
+            owner,
+            iterator_function.child_by_field_name("value")?,
+            16,
+        )?;
+        self.rust_standard_vec_element(&source.owner, &source.raw, source.source_start)?;
+        let arguments = map.child_by_field_name("arguments")?;
+        if arguments.named_child_count() != 1 {
+            return None;
+        }
+        let closure = arguments.named_child(0)?;
+        if closure.kind() != "closure_expression" {
+            return None;
+        }
+        let body = closure.child_by_field_name("body")?;
+        if body.kind() != "call_expression" {
+            return None;
+        }
+        let function = body.child_by_field_name("function")?;
+        let raw_function = self.text(function);
+        let (receiver, method) = split_qualified(&raw_function);
+        let receiver = rust_qualify_evidence_path(self, owner, receiver?, function.start_byte())?;
+        let target = self.rust_receiver_method_target(&receiver, method)?;
+        if !self.rust_result_self_methods.contains(&target) {
+            return None;
+        }
+        Some(format!("{result}<Vec<{receiver}>>"))
+    }
+
+    fn rust_ok_arm_type(
+        &self,
+        arm: Node<'_>,
+        owner: &DeclarationContext,
+        pattern: Node<'_>,
+    ) -> Option<String> {
+        let match_expression = arm.parent()?.parent()?;
+        if match_expression.kind() != "match_expression" {
+            return None;
+        }
+        let scrutinee = match_expression.child_by_field_name("value")?;
+        if scrutinee.kind() != "identifier" {
+            return None;
+        }
+        let raw = self.rust_value_type_for(
+            owner,
+            &self.text(scrutinee),
+            scrutinee.start_byte(),
+            Some(scrutinee),
+        )?;
+        let result = rust_nominal_type_path(raw)?;
+        if !self.rust_standard_result_type(owner, &result, scrutinee.start_byte()) {
+            return None;
+        }
+        let inner = rust_single_generic_type_argument(raw)?;
+        let wrapper = pattern.named_child(0)?;
+        if wrapper.kind() != "tuple_struct_pattern"
+            || self.text(wrapper.child_by_field_name("type")?) != "Ok"
+            || wrapper.named_child_count() != 2
+            || !rust_pattern_binds_whole_value(wrapper.named_child(1)?)
+            || self.local_target_for(owner, "Ok").is_some()
+            || self
+                .imported_target_for_occurrence(owner, "Ok", pattern.start_byte(), true)
+                .is_some()
+            || self
+                .import_binding_version_at(owner, "*", pattern.start_byte(), true)
+                .is_some()
+            || !self.rust_standard_prelude_enabled
+        {
+            return None;
+        }
+        self.rust_standard_vec_element(owner, inner, scrutinee.start_byte())?;
+        Some(inner.to_owned())
+    }
+
+    fn rust_for_element_type(
+        &self,
+        loop_node: Node<'_>,
+        owner: &DeclarationContext,
+        pattern: Node<'_>,
+    ) -> Option<String> {
+        if !rust_pattern_binds_whole_value(pattern) {
+            return None;
+        }
+        let iterable = loop_node.child_by_field_name("value")?;
+        if iterable.kind() != "reference_expression" {
+            return None;
+        }
+        let binding = iterable.child_by_field_name("value")?;
+        if binding.kind() != "identifier" {
+            return None;
+        }
+        let raw = self.rust_value_type_for(
+            owner,
+            &self.text(binding),
+            binding.start_byte(),
+            Some(binding),
+        )?;
+        let element = self.rust_standard_vec_element(owner, raw, binding.start_byte())?;
+        (element != "_").then(|| element.to_owned())
+    }
+
+    fn rust_map_closure_element_type(
+        &self,
+        closure: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Option<String> {
+        let arguments = closure.parent()?;
+        if arguments.kind() != "arguments" || arguments.named_child_count() != 1 {
+            return None;
+        }
+        let map = arguments.parent()?;
+        let function = map.child_by_field_name("function")?;
+        if map.kind() != "call_expression"
+            || function.kind() != "field_expression"
+            || self.text(function.child_by_field_name("field")?) != "map"
+        {
+            return None;
+        }
+        let iterator = function.child_by_field_name("value")?;
+        let iterator_function = iterator.child_by_field_name("function")?;
+        if iterator.kind() != "call_expression"
+            || iterator_function.kind() != "field_expression"
+            || self.text(iterator_function.child_by_field_name("field")?) != "iter"
+            || iterator
+                .child_by_field_name("arguments")?
+                .named_child_count()
+                != 0
+        {
+            return None;
+        }
+        let source = self.rust_indexed_receiver_type(
+            owner,
+            iterator_function.child_by_field_name("value")?,
+            16,
+        )?;
+        let element =
+            self.rust_standard_vec_element(&source.owner, &source.raw, source.source_start)?;
+        (element != "_").then(|| element.to_owned())
     }
 
     fn rust_inferred_value_type(

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recover exact Rust calls through source-proven `Result<Vec<_>>` collection,
+  `Ok` match bindings, vector loops, and `iter().map` closure receivers. Keep
+  custom or ambiguous collection types unresolved and rebuild disposable AST
+  caches so older facts do not hide the new edges.
+
 - Bind disposable graph caches to bounded content digests and keep MCP graph
   views coherent within a request. Detect equal-size replacements even when
   modification times are preserved. Rebuild older graph caches automatically.

@@ -3182,6 +3182,113 @@ fn rust_shadowed_receivers_never_capture_an_outer_parameter() {
 }
 
 #[test]
+fn rust_result_vec_match_loop_preserves_source_proven_builder_calls() {
+    let source = br#"use std::io;
+struct CommandSet { commands: Vec<()> }
+struct CommandBuilder;
+struct Decoy;
+impl Decoy { fn finish(&self) {} }
+impl CommandBuilder {
+    fn new(_: &()) -> io::Result<Self> { Ok(Self) }
+    fn push(&mut self) {}
+    fn finish(&mut self) {}
+    fn exit_code(&self) {}
+}
+impl CommandSet {
+    fn execute_batch(&self, builder: &Decoy) {
+        let builders: io::Result<Vec<_>> = self.commands.iter()
+            .map(|command| CommandBuilder::new(command)).collect();
+        match builders {
+            Ok(mut builders) => {
+                for builder in &mut builders {
+                    builder.push();
+                    builder.finish();
+                }
+                builders.iter().map(|b| b.exit_code()).count();
+            }
+            Err(_) => {}
+        }
+        builder.finish();
+    }
+}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::CommandSet::execute_batch")
+        .expect("source caller");
+    for (target_name, line) in [
+        ("crate::CommandBuilder::new", "L15"),
+        ("crate::CommandBuilder::push", "L19"),
+        ("crate::CommandBuilder::finish", "L20"),
+        ("crate::CommandBuilder::exit_code", "L22"),
+        ("crate::Decoy::finish", "L26"),
+    ] {
+        let target = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .expect("source target");
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == caller.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("source_location") == line
+        }), "missing {line} -> {target_name}");
+    }
+    let decoy = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Decoy::finish")
+        .expect("Decoy method");
+    assert_eq!(resolved.edges.iter().filter(|edge| {
+        edge.source == caller.id && edge.target == decoy.id && edge.string("relation") == "calls"
+    }).count(), 1, "the loop receiver must not inherit the outer Decoy binding");
+
+    let source = String::from_utf8(source.to_vec()).expect("source");
+    for (case, altered) in [
+        (
+            "custom Result alias",
+            source.replace("use std::io;", "mod io { pub type Result<T> = std::io::Result<T>; }"),
+        ),
+        (
+            "local Vec alias",
+            source.replace("use std::io;", "use std::io;\ntype Vec<T> = std::vec::Vec<T>;"),
+        ),
+        (
+            "different constructor return",
+            source.replace("io::Result<Self> { Ok(Self) }", "io::Result<Decoy> { Ok(Decoy) }"),
+        ),
+    ] {
+        let resolved = compass_resolve::resolve(
+            &[extract("src/lib.rs", altered.as_bytes())],
+            &HashMap::from([("src/lib.rs".to_owned(), altered)]),
+        );
+        let caller = resolved.nodes.iter().find(|node| {
+            node.string("qualified_name") == "crate::CommandSet::execute_batch"
+        }).expect("caller");
+        for edge in resolved.edges.iter().filter(|edge| {
+            edge.source == caller.id && edge.string("relation") == "calls"
+        }) {
+            let target = resolved.nodes.iter().find(|node| node.id == edge.target)
+                .expect("call target");
+            assert!(
+                !matches!(target.string("qualified_name").as_str(),
+                    "crate::CommandBuilder::push" | "crate::CommandBuilder::finish" | "crate::CommandBuilder::exit_code"),
+                "{case}: unsupported type chain invented a builder call: {edge:#?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rust_let_initializer_uses_the_previous_receiver_binding() {
     let source = b"struct Actual;
 impl Actual { fn finish(&self) {} }

@@ -368,6 +368,14 @@ type is proven. The advertised producer capabilities and evidence/graph schemas
 are unchanged. AST cache semantics advance from 2 to 3, rebuilding prior AST
 facts automatically across languages. Published historical graphs are unchanged.
 
+Rust extraction now follows a bounded source-proven `Result<Vec<_>>` collected
+from a standard vector iterator and a constructor declared to return standard
+`Result<Self>`. Its `Ok` match binding, vector loop variables, and `iter().map`
+closure parameters can gain exact method-call targets. Local aliases and
+unsupported iterator or constructor forms remain unresolved. AST cache
+semantics advance from 10 to 11, rebuilding disposable facts; graph and
+evidence schema majors and published historical graphs are unchanged.
+
 Go receiver lookup now includes `if` and switch initializers alongside loop
 initializers. Block locals, range variables, and closure parameters are resolved
 in lexical order; an unsupported nearer binding cannot inherit an outer
