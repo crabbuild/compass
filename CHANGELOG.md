@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve a unique owner-qualified method such as `APIRoute.get_route_handler`
+  in typed callers, callees, impact and trail questions and the legacy
+  `explain`/`path` commands when the stored name includes a module prefix or
+  `::` separator. Preserve ambiguity, typed candidate bounds and exact-ID
+  precedence. Typed queries reject a nonexistent owner when the method name
+  exists under other owners.
+
 - Recover exact Rust calls through source-proven `Result<Vec<_>>` collection,
   `Ok` match bindings, vector loops, and `iter().map` closure receivers. Keep
   custom or ambiguous collection types unresolved and rebuild disposable AST

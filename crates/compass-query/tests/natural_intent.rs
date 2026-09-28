@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use compass_graph::GraphSnapshotBuilder;
+use compass_model::code_graph::GraphDocument;
 use compass_model::query_contract::{
     CodeQueryLimits, CodeQueryOperation, MAX_INDEXED_CANDIDATE_NODES_READ, QueryDiagnosticCode,
     SearchRequest,
@@ -99,6 +100,126 @@ fn natural_intents_route_to_typed_operations_with_backend_parity()
                 .any(|node| node.id == required_id),
             "{question:?} did not return {required_id}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn owner_qualified_calls_resolve_only_a_proven_unique_suffix()
+-> Result<(), Box<dyn std::error::Error>> {
+    for duplicate_owner in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let graph_path = directory.path().join("graph.json");
+        support::write_graph(&graph_path)?;
+        let mut graph = GraphDocument::load(&graph_path)?;
+        for node in &mut graph.nodes {
+            match node.id.as_str() {
+                "n:caller" => {
+                    node.name = ".get_route_handler()".to_owned();
+                    node.qualified_name = "fastapi.routing.APIRoute::get_route_handler".to_owned();
+                }
+                "n:other" => {
+                    node.name = ".get_route_handler()".to_owned();
+                    node.qualified_name = "GzipRoute::get_route_handler".to_owned();
+                }
+                "n:listing" => {
+                    node.name = ".get_route_handler()".to_owned();
+                    node.qualified_name = if duplicate_owner {
+                        "docs.APIRoute::get_route_handler".to_owned()
+                    } else {
+                        "docs.TimedRoute::get_route_handler".to_owned()
+                    };
+                }
+                "n:list" => {
+                    node.name = "get_request_handler".to_owned();
+                    node.qualified_name = "fastapi.routing.get_request_handler".to_owned();
+                }
+                _ => {}
+            }
+        }
+        fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+        publish_snapshot(directory.path(), &graph_path)?;
+        for backend in [EngineSelection::Json, EngineSelection::Store] {
+            let engine = open_with_engine(
+                &graph_path,
+                None,
+                &directory.path().join(format!("cache-{backend:?}")),
+                backend,
+            )?;
+            let fully_qualified = engine.query_natural(request(
+                "what does fastapi.routing.APIRoute::get_route_handler call?",
+            ))?;
+            assert!(
+                fully_qualified
+                    .edges
+                    .iter()
+                    .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
+            );
+
+            let short_owner =
+                engine.query_natural(request("what does APIRoute.get_route_handler call?"))?;
+            if duplicate_owner {
+                assert!(short_owner.edges.is_empty());
+                assert!(
+                    short_owner.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
+                    })
+                );
+                assert_eq!(short_owner.nodes.len(), 2);
+            } else {
+                assert!(
+                    short_owner
+                        .edges
+                        .iter()
+                        .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
+                );
+                assert!(
+                    !short_owner
+                        .diagnostics
+                        .iter()
+                        .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::NoMatch })
+                );
+                let path = engine.query_natural(request(
+                    "call path from APIRoute.get_route_handler to get_request_handler",
+                ))?;
+                assert!(
+                    path.paths
+                        .iter()
+                        .any(|path| { path.node_ids == ["n:caller", "n:list"] })
+                );
+            }
+
+            let missing_owner =
+                engine.query_natural(request("what does MissingRoute.get_route_handler call?"))?;
+            assert!(missing_owner.edges.is_empty());
+            assert!(
+                missing_owner
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::NoMatch })
+            );
+
+            let root_owner =
+                engine.query_natural(request("what does GzipRoute.get_route_handler call?"))?;
+            assert!(
+                !root_owner
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::NoMatch })
+            );
+
+            let mut bounded_request = request("what does APIRoute.get_route_handler call?");
+            bounded_request.limits.max_candidates = 1;
+            let bounded = engine.query_natural(bounded_request)?;
+            assert!(bounded.truncated);
+            assert!(bounded.edges.is_empty());
+            assert!(
+                bounded
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::AmbiguousMatch })
+            );
+        }
     }
     Ok(())
 }

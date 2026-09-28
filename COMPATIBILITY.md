@@ -198,6 +198,23 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### Owner-qualified symbol lookup
+
+Typed callers, callees, impact and node-trail queries now accept a unique
+owner/member suffix such as `APIRoute.get_route_handler` when the stored
+qualified name is `fastapi.routing.APIRoute::get_route_handler`. An exact ID or
+full normalized name still takes precedence. The lookup reads the bounded
+exact leaf-name posting and verifies every candidate's full owner suffix;
+multiple matches or an exhausted candidate bound remain ambiguous. If the
+leaf name exists but the owner does not, no fuzzy winner is chosen. Existing
+fuzzy fallback remains available for a misspelled leaf with no exact leaf-name
+candidate. JSON response schema and graph artifacts are unchanged; previously
+fuzzy or unresolved typed queries may now return a source-identifiable direct
+answer. This behavior applies to `ask` when it routes to those typed queries.
+Legacy `explain` and `path` also accept the unique owner suffix after checking
+exact IDs and full names. Their existing candidate-list behavior preserves
+multiple matches. No graph rebuild or package-version change is required.
+
 ### MCP paths
 
 `shortest_path` resolves exact node IDs or normalized symbol/qualified names.

@@ -962,3 +962,9 @@ routes, so the separate source-supported score is 9/12 versus 6/12. The audit
 explains each correction and the unresolved FastAPI short-name ambiguity.
 These selected development questions do not measure whole-graph accuracy,
 authored explanations or god-object diagnosis.
+
+`fastapi_owner_suffix_replay.json` separately records a post-registration
+development replay on the same frozen FastAPI graph after the owner-qualified
+selector correction. It pins the source, graph, candidate binary, command
+output hashes and exact call endpoints. The preregistered 12-question scores
+remain unchanged.

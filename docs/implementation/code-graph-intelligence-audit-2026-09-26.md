@@ -4564,3 +4564,50 @@ quality, runtime reachability, god-object diagnosis, community quality or a
 representative superiority claim. A source-backed edge does not validate all
 other claims in the surrounding answer. No production code changed in this
 checkpoint; the review ran without a new Cargo build.
+
+### FastAPI owner-qualified query and navigation correction
+
+The three-language run exposed a user-intent mismatch: its subject named
+`APIRoute.get_route_handler`, while its commands passed only the ambiguous
+leaf `get_route_handler`. Seven source-backed declarations share that leaf.
+The frozen Compass graph already contains the exact `calls` edge from
+`fastapi/routing.py:1225` to `get_request_handler` at line 1232. Before this
+correction, typed `ask "what does APIRoute.get_route_handler call?"` reported
+`no_match` and fell back to lexical candidates; legacy `explain` and `path`
+could not resolve that owner-qualified spelling.
+
+Typed resolution now checks a dotted owner/member suffix against the bounded
+exact leaf-name posting, normalizing stored `::` only for comparison. It uses
+the candidate only when the complete posting proves uniqueness. Two matching
+owners remain ambiguous with their IDs; an exhausted posting remains
+truncated/ambiguous; a nonexistent owner cannot borrow another owner's
+same-named method. Exact ID/full-name precedence and the existing typo
+fallback for an absent leaf remain intact. The legacy `explain`/`path` exact
+selector applies the same suffix comparison after exact names and preserves
+its candidate list on ambiguity. Stored graph identities and schemas do not
+change.
+
+The [post-registration replay](../../benchmarks/agent_query/fastapi_owner_suffix_replay.json)
+uses the same pinned FastAPI checkout and byte-identical Compass graph SHA256
+`1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a`.
+Candidate binary SHA256 is `17620181b2ca2fb051b234fa022c1fe1bd03913fad2246f48b643603fe85c623`.
+The owner-qualified `ask` callees response now has the source-backed call
+without diagnostics, its call-path form has one directed hop, legacy `explain`
+identifies the method and line-1232 call, and legacy `path` renders one
+extracted call hop. `MissingRoute.get_route_handler` still fails. Raw command
+responses and their hashes are retained beside `runs/source-first-3lang-01`.
+This is a development replay of a known failure, **not** a revision of the
+registered 9/12 versus 8/12 text or 9/12 versus 6/12 source-supported scores.
+Graphify was not rerun for this correction.
+
+The native query regression covers JSON/store parity, unique/duplicate/missing
+owners, a one-hop call path, absent-module owner spelling, candidate truncation
+and the existing fuzzy typo case. The CLI regression executes `ask`, `explain`
+and `path` and checks the versioned JSON call plus ambiguity/no-match behavior.
+Focused suites, workspace library/binary Clippy and tests, CLI product tests,
+and the product-boundary check pass. The optional all-target query Clippy run
+stops on an existing redundant closure in `tests/explanation_members.rs`,
+outside this patch; with only that lint allowed, all targets pass. Package
+version remains 0.3.30. This one known Python
+case does not establish representative query superiority or explanation
+quality, god-object diagnosis, or community quality.

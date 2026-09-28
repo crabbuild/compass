@@ -75,6 +75,79 @@ fn ask_preserves_typed_operands_in_agent_and_text_answers() -> Result<(), Box<dy
 }
 
 #[test]
+fn ask_resolves_a_unique_owner_suffix_without_guessing_a_short_name() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let caller = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "n:caller")
+        .ok_or("caller fixture node missing")?;
+    caller.qualified_name = "pkg.Controller::Caller".to_owned();
+    let mut other = caller.clone();
+    other.id = "n:other-caller".to_owned();
+    other.qualified_name = "pkg.Other::Caller".to_owned();
+    graph.nodes.push(other);
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+
+    for (question, expected_code, expected_edges) in [
+        ("what does Controller.Caller call?", None, 1),
+        ("what does Caller call?", Some("ambiguous_match"), 0),
+        ("what does Missing.Caller call?", Some("no_match"), 0),
+    ] {
+        let output = support::compass_command()
+            .args(["ask", question, "--graph"])
+            .arg(&graph_path)
+            .args(["--format", "json"])
+            .current_dir(directory.path())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{question}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(response["operation"], "callees", "{question}");
+        assert_eq!(
+            response["edges"].as_array().ok_or("edges missing")?.len(),
+            expected_edges,
+            "{question}"
+        );
+        if expected_edges == 1 {
+            assert_eq!(response["edges"][0]["source"], "n:caller");
+            assert_eq!(response["edges"][0]["target"], "n:target");
+        }
+        if let Some(code) = expected_code {
+            assert!(
+                response["diagnostics"]
+                    .as_array()
+                    .ok_or("diagnostics missing")?
+                    .iter()
+                    .any(|diagnostic| diagnostic["code"] == code)
+            );
+        }
+    }
+    let explained = support::compass_command()
+        .args(["explain", "Controller.Caller", "--graph"])
+        .arg(&graph_path)
+        .current_dir(directory.path())
+        .output()?;
+    assert!(explained.status.success());
+    assert!(String::from_utf8_lossy(&explained.stdout).contains("ID:        n:caller"));
+
+    let path = support::compass_command()
+        .args(["path", "Controller.Caller", "Target", "--graph"])
+        .arg(&graph_path)
+        .current_dir(directory.path())
+        .output()?;
+    assert!(path.status.success());
+    assert!(String::from_utf8_lossy(&path.stdout).contains("Caller --calls [EXTRACTED]--> Target"));
+    Ok(())
+}
+
+#[test]
 fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;

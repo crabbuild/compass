@@ -528,8 +528,24 @@ pub fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
                 || (!norm_qualified_name.is_empty() && norm_query == norm_qualified_name))
                 .then_some(index)
         })
+        .collect::<Vec<_>>();
+    if !matches.is_empty() {
+        return crate::export_binding::legacy_candidates(graph, matches);
+    }
+    let qualified_query = norm_query.trim_end_matches("()").replace("::", ".");
+    if !qualified_query.contains('.') {
+        return Vec::new();
+    }
+    let suffix = format!(".{qualified_query}");
+    let suffix_matches = graph
+        .nodes()
+        .filter_map(|(index, node)| {
+            let qualified_name = normalized_qualified_name(node).replace("::", ".");
+            (qualified_name == qualified_query || qualified_name.ends_with(&suffix))
+                .then_some(index)
+        })
         .collect();
-    crate::export_binding::legacy_candidates(graph, matches)
+    crate::export_binding::legacy_candidates(graph, suffix_matches)
 }
 
 fn normalized_qualified_name(node: &NodeRecord) -> String {
@@ -729,6 +745,46 @@ mod tests {
         assert_eq!(padded.len(), 1);
         assert_eq!(graph.node(padded[0]).id, "A");
         assert_eq!(super::find_node(&graph, "run").len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn owner_qualified_suffix_preserves_exact_precedence_and_ambiguity()
+    -> Result<(), Box<dyn Error>> {
+        let mut document = json!({
+            "directed": true,
+            "nodes": [
+                {"id":"fastapi","label":".get_route_handler()","kind":"method","qualifiedName":"fastapi.routing.APIRoute::get_route_handler"},
+                {"id":"docs","label":".get_route_handler()","kind":"method","qualifiedName":"docs.GzipRoute::get_route_handler"},
+                {"id":"other","label":".get_route_handler()","kind":"method","qualifiedName":"other.routing.APIRoute::get_route_handler"}
+            ],
+            "links": []
+        });
+        let graph = Graph::from_document(serde_json::from_value(document.clone())?)?;
+        let ids = |graph: &Graph, query| {
+            super::find_exact_nodes(graph, query)
+                .into_iter()
+                .map(|index| graph.node(index).id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&graph, "APIRoute.get_route_handler"),
+            ["fastapi", "other"]
+        );
+        assert_eq!(
+            ids(&graph, "fastapi.routing.APIRoute.get_route_handler"),
+            ["fastapi"]
+        );
+        assert!(ids(&graph, "MissingRoute.get_route_handler").is_empty());
+        document["nodes"]
+            .as_array_mut()
+            .ok_or("missing nodes")?
+            .push(json!({"id":"literal","label":"APIRoute.get_route_handler","kind":"method","qualifiedName":"literal"}));
+        let with_literal = Graph::from_document(serde_json::from_value(document)?)?;
+        assert_eq!(
+            ids(&with_literal, "APIRoute.get_route_handler"),
+            ["literal"]
+        );
         Ok(())
     }
 

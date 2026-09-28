@@ -3333,6 +3333,73 @@ impl CodeQueryEngine {
             .work
             .candidates_read
             .saturating_add(u64::try_from(exact_nodes.len()).unwrap_or(u64::MAX));
+        // A question may name an owner and member without knowing the module
+        // prefix or the stored `::` separator. Verify that suffix against the
+        // complete bounded leaf-name posting, never against a ranked prefix.
+        // If the posting is truncated, uniqueness cannot be proved.
+        if exact_nodes.is_empty()
+            && !exact_truncated
+            && let Some((_, leaf)) = normalized.rsplit_once('.')
+            && !leaf.is_empty()
+        {
+            let (leaf_nodes, leaf_truncated) = self
+                .backend
+                .nodes_by_normalized_name(leaf, candidate_limit)?;
+            instrumentation.work.candidates_read = instrumentation
+                .work
+                .candidates_read
+                .saturating_add(u64::try_from(leaf_nodes.len()).unwrap_or(u64::MAX));
+            let leaf_has_exact_candidates = !leaf_nodes.is_empty();
+            let qualified_query = normalized.replace("::", ".");
+            let suffix = format!(".{qualified_query}");
+            let qualified = leaf_nodes
+                .into_iter()
+                .filter(|node| {
+                    let qualified_name = normalize_symbol(&node.qualified_name).replace("::", ".");
+                    qualified_name == qualified_query || qualified_name.ends_with(&suffix)
+                })
+                .collect::<Vec<_>>();
+            if leaf_truncated {
+                response.truncated = true;
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::AmbiguousMatch,
+                    message: format!(
+                        "Owner-qualified symbol {query:?} cannot be resolved within the {}-candidate leaf-name bound",
+                        response.limits.max_candidates
+                    ),
+                    node_id: None,
+                    path: None,
+                });
+                self.publish_exact_ambiguity(response, &qualified, candidate_limit)?;
+                return Ok(None);
+            }
+            match qualified.as_slice() {
+                [node] => return Ok(Some(node.id.clone())),
+                [] if leaf_has_exact_candidates => {
+                    response.diagnostics.push(QueryDiagnostic {
+                        code: QueryDiagnosticCode::NoMatch,
+                        message: format!("NO OWNER-QUALIFIED MATCH for {query:?}"),
+                        node_id: None,
+                        path: None,
+                    });
+                    return Ok(None);
+                }
+                [] => {}
+                _ => {
+                    response.diagnostics.push(QueryDiagnostic {
+                        code: QueryDiagnosticCode::AmbiguousMatch,
+                        message: format!(
+                            "Owner-qualified symbol {query:?} matched {} nodes",
+                            qualified.len()
+                        ),
+                        node_id: None,
+                        path: None,
+                    });
+                    self.publish_exact_ambiguity(response, &qualified, candidate_limit)?;
+                    return Ok(None);
+                }
+            }
+        }
         let mut proof_truncated = false;
         if !exact_truncated
             && exact_nodes.len() > 1

@@ -440,6 +440,16 @@ MCP exposes the same operation through `search_symbols` with `exact: true` and
 optional `source_file`, `start_line` and `kind` fields. The raw response stays
 `compass.query/1`; ordinary ranked search remains the default.
 
+For typed relationship and trail questions, an owner-qualified operand such as
+`APIRoute.get_route_handler` can identify a stored
+`fastapi.routing.APIRoute::get_route_handler` without the module prefix.
+Compass verifies the suffix against the bounded exact method-name candidates.
+If several declarations share that owner/member suffix, retry with the full
+qualified name or an exact ID; a truncated candidate set never proves a unique
+match. A nonexistent owner does not select another class's same-named method.
+This also applies to `ask` questions that route to a typed operation; it does
+not change the separate `search --exact` contract.
+
 Use `compass node SOURCE TARGET --calls-only` to find a directed call chain.
 The equivalent natural forms are `compass ask "call path from SOURCE to TARGET"`
 and `compass ask "call chain from SOURCE to TARGET"`. MCP `get_node` accepts
@@ -573,9 +583,10 @@ compass path "<source>" "<target>" [--max-depth N]
   [--format text|json|agent-json] [--graph PATH | --at REV]
 ```
 
-Resolves both endpoints by exact node ID, name, or qualified name before doing
-any graph search; missing and ambiguous endpoints fail explicitly. The text path
-search is bounded to eight hops by default and ranks structural relationships
+Resolves both endpoints by exact node ID, name, full qualified name, or a
+unique owner/member suffix before doing any graph search; missing and ambiguous
+endpoints fail explicitly. The text path search is bounded to eight hops by
+default and ranks structural relationships
 such as calls, containment, imports, and dependencies ahead of weak references
 or documentation links. When a meaningfully weaker route is up to two hops
 shorter, Compass shows it separately. Output names the resolved target, and
@@ -618,10 +629,11 @@ compass explain "<node>"
   [--graph PATH | --at REV]
 ```
 
-Shows one node and incoming/outgoing connections. An exact node ID or unique
-exact qualified name resolves directly. When a label or qualified name names
-multiple source-backed declarations, Compass lists the candidates and their
-source ranges and asks for the full node ID instead of silently selecting one.
+Shows one node and incoming/outgoing connections. An exact node ID, unique
+full qualified name, or unique owner/member suffix resolves directly. When a
+label or qualified name names multiple source-backed declarations, Compass
+lists the candidates and their source ranges and asks for the full node ID
+instead of silently selecting one.
 Connection lines include the stored relationship site; extraction is the
 graph's default provenance, so `[EXTRACTED]` is stated once in the
 `Connections (N, extracted unless marked):` header and a line carries a
