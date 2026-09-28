@@ -88,6 +88,9 @@ impl ResolutionDb<'_> {
                 {
                     return Some(decision);
                 }
+                if !candidate.constraints.allow_external {
+                    return Some(ResolutionDecision::Unresolved);
+                }
                 return Some(ResolutionDecision::QualifiedExternal {
                     qualified_name: qualified,
                     evidence: ResolutionEvidence {

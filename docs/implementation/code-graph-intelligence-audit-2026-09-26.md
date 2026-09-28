@@ -9,7 +9,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. Class-only degree still retrieves 0/4 Java positives for either tool. Typed member evidence exposes stored methods, fields and own-field contacts; the later Go field correction changes ranks in rebuilt graphs but does not supply a classifier. God-object quality remains unproven. |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. Eight rated Java classes have 95/95 direct methods and 65/65 direct fields as unique Compass nodes versus 90/95 methods and 0/65 field nodes in Graphify's frozen graphs. In one pinned Go repository, an independent all-file parser census finds 993/993 named struct fields in the candidate Compass graph versus 0/993 in each frozen baseline graph under the exact declaration join. These selected results do not establish cross-language or whole-graph precision. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. Eight rated Java classes have 95/95 direct methods and 65/65 direct fields as unique Compass nodes versus 90/95 methods and 0/65 field nodes in Graphify's frozen graphs. In one pinned Go repository, independent parser censuses find 993/993 named struct fields and 2,742/2,742 exact direct receiver-field contacts in the candidate Compass graph versus zero under each matching frozen-graph join. The 1,908 other new field-reference edges remain uncredited. These selected results do not establish cross-language or whole-graph precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
@@ -4836,3 +4836,47 @@ thresholds remain unchanged. The full fixtures-only gate passes after the
 policy update, including semantic assertions, cold/warm, rebuild,
 alternate-checkout and lifecycle byte comparisons, Markdown quality, and the
 independent React frontend qualification.
+
+## Go receiver-field access follow-up
+
+The [access registration](../../benchmarks/agent_query/go_field_access_registration.json)
+fixed the same pinned Litestream source and frozen graph identities before an
+independent Go parser enumerated direct receiver-field selectors. The oracle
+found 2,742 accepted source occurrences. The producer now preserves each
+selector identifier site; a typed receiver supplies an owner-qualified field
+candidate. The resolver checks the exact field before expanding its declared
+type alias. Missing, ambiguous and method-call selectors do not acquire a
+convenient field target. The disposable AST cache advances from version 12 to
+13; graph and evidence schemas and package version stay unchanged.
+
+The [review](../../benchmarks/agent_query/go_field_access_review.json)
+joins **2,742/2,742** accepted contacts to unique directed method-to-field
+references at the exact source byte. Both frozen graphs have 0 under the
+same exact field-target join. The candidate adds 4,650 member-access links,
+all targeting fields, with no removed node identity or old link and no changed
+old link payload. The 1,908 new links outside this narrow oracle are retained
+in the external raw report and uncredited: 719 on other receiver identifiers,
+225 on non-identifier receivers and 964 outside method-body oracle scope. This
+audit has not independently established their precision. A cold extraction
+processed 199 files; a warm extraction reused 199/199 and produced byte-identical
+graph JSON. Two full probe reports are byte identical.
+
+The candidate graph is 16,902,487 bytes, above the registration's original
+16 MiB read cap. The registration transparently amends the read cap to 24 MiB
+after capture without excluding records; this makes the bound change
+exploratory rather than preregistered. Public `god_nodes(top_n=500)` on the
+new graph shows 113 own-field reference records and 23 methods touching own
+fields for `Store` (rank 8); `HeartbeatClient` shows 13 and four (rank 164).
+These are stored contacts, not a god-object diagnosis. One known Go repository
+cannot establish broader graph precision, responsibility cohesion, community
+quality or superiority over Graphify.
+
+Focused Go producer and resolver tests, workspace formatting, workspace
+Clippy, workspace library/binary tests, the cache-version contract test and
+the product-boundary check pass.
+The fixtures-only code-graph gate passed manifest validation, scale checks,
+semantic assertions, cold/warm/rebuild/lifecycle byte comparisons, topology
+policy and the independent React source tests. Its final release-binary
+frontend phase was stopped when the shared mounted volume fell below 2 GiB
+free; the per-worktree Cargo target was then cleaned, restoring capacity.
+The complete fixtures-only gate is therefore not claimed for this follow-up.

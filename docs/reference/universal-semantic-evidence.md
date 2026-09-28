@@ -45,8 +45,15 @@ change invalidates this decision and must return the affected entry to
 
 The Go producer emits exact named direct struct-field declarations and
 ownership candidates, including each name in a grouped declaration. This
-does not establish field-access targets or include embedded, blank, or nested
-anonymous-struct fields as direct named members of the outer struct.
+does not include embedded, blank, or nested anonymous-struct fields as direct
+named members of the outer struct. Go selector expressions outside direct call
+targets also emit exact `MemberAccess` occurrences. A receiver with a bounded
+source type emits an `AccessesMember` candidate constrained to the exact
+owner-qualified field declaration. Missing or ambiguous fields remain
+unresolved; method selectors are excluded. Resolved graph v1 contacts appear
+as `references` with member-access provenance. These are structural contacts,
+not read/write or runtime-alias conclusions. Disposable AST cache version 13
+invalidates older extraction facts.
 
 ## Evidence contract
 

@@ -1071,3 +1071,25 @@ Raw per-field outcomes remain in external run `go-struct-fields-01` under the
 review's SHA-256. This is one known Go development repository, not broad
 source precision, field-access binding, cohesion, god-object diagnosis or
 overall superiority.
+
+## Go direct receiver-field contacts
+
+`go_field_access_registration.json` fixed the same 146 tracked Litestream Go
+paths, frozen graphs, exact source-site join and exclusions before the new
+source parser ran. `go_field_access_oracle.go` independently finds 2,742
+selector occurrences bound to a method receiver and one direct named struct
+field. `go_field_access_probe.py` joins each occurrence to a unique method,
+field, direct containment owner and exact graph relationship site. The
+[development review](go_field_access_review.json) records **2,742/2,742**
+exact contacts in the rebuilt Compass graph, versus 0 in the frozen Compass
+and Graphify graphs under this exact field-target join. It also records 4,650
+new member-access references, all targeting field nodes. The 1,908 edges
+outside this narrow oracle remain uncredited and available in the raw probe
+for further source review. No old node ID or relationship was removed or
+changed. Cold and warm graphs and two probe runs match byte for byte.
+
+The first candidate graph exceeded the registered 16 MiB audit read cap by
+125,271 bytes. The registration records a **post-capture** increase to 24 MiB;
+no file, source contact or graph record was filtered. This is development
+evidence from one known repository, not broad field precision, a god-object
+classifier, community quality or overall superiority.

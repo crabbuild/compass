@@ -606,6 +606,106 @@ func (body *Body) Encode() {
 }
 
 #[test]
+fn go_field_accesses_resolve_only_source_proven_named_targets() {
+    let types = br#"package pkg
+type Logger struct{}
+type Store struct { Count int; Logger *Logger }
+type Other struct { Count int }
+"#;
+    let methods = br#"package pkg
+func (s *Store) Read(other *Store) {
+    s.Count++
+    _ = other.Count
+    s.Touch()
+    { s := &Other{}; _ = s.Count }
+    _ = s.Missing
+    _ = s.Logger
+}
+func (s *Store) Touch() {}
+"#;
+    let extracted = [
+        extract("pkg/types.go", types),
+        extract("pkg/methods.go", methods),
+    ];
+    let sources = HashMap::from([(
+        "pkg/methods.go".to_owned(),
+        String::from_utf8(methods.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&extracted, &sources);
+    let read = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Read")
+        .expect("Store.Read declaration");
+    let store_count = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Count")
+        .expect("Store.Count declaration");
+    let other_count = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Other::Count")
+        .expect("Other.Count declaration");
+    let store_logger = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.Store::Logger")
+        .expect("Store.Logger declaration");
+    let accesses = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "accesses" && edge.source == read.id)
+        .map(|edge| (edge.string("source_location"), edge.target.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        accesses,
+        std::collections::BTreeSet::from([
+            ("L3".to_owned(), store_count.id.clone()),
+            ("L4".to_owned(), store_count.id.clone()),
+            ("L6".to_owned(), other_count.id.clone()),
+            ("L8".to_owned(), store_logger.id.clone()),
+        ])
+    );
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "accesses"
+            || (edge.string("source_location") != "L5"
+                && edge.string("source_location") != "L7")
+    }));
+}
+
+#[test]
+fn go_imported_receiver_without_a_field_declaration_stays_unresolved() {
+    let source = br#"package pkg
+import ext "example.com/ext"
+func Use(value *ext.External) { _ = value.Field }
+"#;
+    let extracted = extract("pkg/external.go", source);
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .expect("Go universal evidence");
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::AccessesMember
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("example.com/ext.External::Field")
+            && !candidate.constraints.allow_external
+    }));
+    let sources = HashMap::from([(
+        "pkg/external.go".to_owned(),
+        String::from_utf8(source.to_vec()).expect("source"),
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.string("relation") != "accesses" || edge.string("source_location") != "L3"
+    }));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.string("qualified_name") != "example.com/ext.External::Field"
+    }));
+}
+
+
+#[test]
 fn go_control_initializers_resolve_occurrences_without_leaking_shadowed_types() {
     let definitions = br#"package pkg
 type Runner interface { Run() }

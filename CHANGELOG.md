@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Resolve source-proven Go field selectors to exact named struct fields and
+  publish occurrence-anchored references. Rebuild graphs to see the new edges;
+  disposable AST cache semantics advance to 13.
+
 - Publish explicit named Go struct fields as source-anchored field declarations
   owned by their struct. Rebuild existing graphs to see the new nodes and hub
   member counts; disposable AST cache semantics advance to 12.

@@ -1659,6 +1659,61 @@ type Store struct {
 }
 
 #[test]
+fn go_field_contacts_keep_receiver_type_source_site_and_shadowing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = br#"package sample
+type Store struct { Count int; Run func() }
+type Other struct { Count int }
+func (s *Store) Read(other *Store) {
+    s.Count++
+    _ = other.Count
+    s.Run()
+    { s := &Other{}; _ = s.Count }
+}
+"#;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source_combined(
+        std::path::Path::new("/repo/sample/access.go"),
+        "sample/access.go",
+        source,
+    )?;
+    let evidence = extraction
+        .graph
+        .semantic_evidence
+        .ok_or("missing Go evidence")?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let occurrences = evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::MemberAccess)
+        .collect::<Vec<_>>();
+    let mut sites = occurrences
+        .iter()
+        .map(|occurrence| (occurrence.spelling.as_str(), occurrence.range.start_line))
+        .collect::<Vec<_>>();
+    sites.sort();
+    assert_eq!(sites, [("Count", 5), ("Count", 6), ("Count", 8)]);
+    for (line, expected) in [
+        (5, "sample.Store::Count"),
+        (6, "sample.Store::Count"),
+        (8, "sample.Other::Count"),
+    ] {
+        let occurrence = occurrences
+            .iter()
+            .find(|occurrence| occurrence.range.start_line == line)
+            .ok_or("missing field occurrence")?;
+        assert!(evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::AccessesMember
+                && candidate.occurrence_id.as_deref() == Some(occurrence.id.as_str())
+                && candidate.constraints.qualified_name.as_deref() == Some(expected)
+                && candidate.constraints.allowed_target_kinds == ["field"]
+                && !candidate.constraints.allow_external
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn go_emits_direct_and_grouped_aliases_with_closure_signature_references() {
     let source = br#"package sample
 

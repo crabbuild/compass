@@ -7706,6 +7706,7 @@ impl<'source> DirectEvidenceState<'source> {
                 return Ok(());
             }
             "call_expression" => self.add_call(node, &active, "call_expression")?,
+            "selector_expression" => self.add_go_field_access(node, &active)?,
             "method_declaration" => self.add_go_receiver(node, &active)?,
             "field_declaration" => self.add_go_field_types(node, &active)?,
             "type_elem" => self.add_go_embedded_types(node, &active)?,
@@ -7733,6 +7734,69 @@ impl<'source> DirectEvidenceState<'source> {
             }
             self.walk_go_evidence(child, &active, false)?;
         }
+        Ok(())
+    }
+
+    fn add_go_field_access(
+        &mut self,
+        selector: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(selector)
+            || selector.parent().is_some_and(|parent| {
+                parent.kind() == "call_expression"
+                    && parent
+                        .child_by_field_name("function")
+                        .is_some_and(|function| function.id() == selector.id())
+            })
+        {
+            return Ok(());
+        }
+        let (Some(receiver), Some(field)) = (
+            selector.child_by_field_name("operand"),
+            selector.child_by_field_name("field"),
+        ) else {
+            return Ok(());
+        };
+        let spelling = self.text(field);
+        let qualifier = self.text(receiver);
+        if spelling.is_empty() || qualifier.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self
+            .go_expression_type(owner, receiver, 0, &mut HashSet::new())
+            .map(|receiver_type| format!("{receiver_type}::{spelling}"));
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::MemberAccess,
+            &owner.fact_id,
+            &spelling,
+            Some(&qualifier),
+            Some(&owner.scope_id),
+            Some("member"),
+            range_for_node(self.source_file, field),
+        )?;
+        let Some(qualified_name) = qualified_name else {
+            // Preserve the exact use site without allowing an unrelated
+            // import or terminal name to invent a field target.
+            return Ok(());
+        };
+        self.builder.relate(
+            CandidateRelation::AccessesMember,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            None,
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name: Some(qualified_name),
+                allowed_target_kinds: vec!["field".to_owned()],
+                // Unknown receiver types, package selectors and promoted
+                // members stay unresolved. Never choose by terminal name.
+                allow_external: false,
+                ..ResolutionConstraint::default()
+            },
+        )?;
         Ok(())
     }
 

@@ -69,6 +69,23 @@ assert field-access target resolution or god-object classification. Disposable
 AST cache semantics advance from 11 to 12; old cache entries are ignored and
 recomputed. Graph schema and package version remain unchanged.
 
+## Go field-access evidence
+
+The Go producer emits source-anchored `MemberAccess` occurrences for selector
+expressions outside direct call targets. When bounded receiver typing establishes
+an exact owner, it also emits an `AccessesMember` candidate restricted to a
+source field declaration with the same qualified owner and name. Resolution
+looks up that field before following its type alias; missing or ambiguous fields
+remain unresolved. The graph projects resolved contacts as directed `references`
+with exact occurrence provenance. These records do not claim read/write effects,
+runtime aliases, promoted members or complete field-use coverage.
+
+Rebuild graphs to see the additive references. Disposable AST cache semantics
+advance from 12 to 13; old entries are ignored and recomputed. Existing graph
+and evidence schemas and package version remain unchanged. Added references can
+change degrees, navigation, clusters and communities. Historical realizations
+remain immutable.
+
 ## Java field-access evidence
 
 Java emits `MemberAccess` occurrences for ordinary fields and enum constants,

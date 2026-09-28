@@ -36,5 +36,10 @@
     "maxGraphEdges": 100000,
     "maxSecondsPerOracle": 60
   },
+  "postCaptureAmendment": {
+    "status": "declared after observing the candidate graph byte count; not preregistered",
+    "reason": "The additive access graph is 16902487 bytes, above the original 16777216-byte graph read cap. No source files, oracle contacts, joins, or graph records are excluded.",
+    "amendedMaxGraphBytes": 25165824
+  },
   "outputs": "Retain all source contacts and exclusions, exact graph outcomes, producer/binary/graph/source hashes, cold/warm equivalence, unexpected additions and omissions, and public god_nodes member-evidence changes. Run twice for deterministic reports. Do not infer broad source precision or Graphify superiority from this one known repository."
 }

@@ -1057,6 +1057,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(!cache_root.join("compass-out/cache/ast/v9").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v10").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v11").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v12").exists());
 
     let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(

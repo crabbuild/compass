@@ -236,6 +236,23 @@ impl ResolutionDb<'_> {
         let Some(qualified) = candidate.constraints.qualified_name.as_ref() else {
             return StageOutcome::Continue;
         };
+        if candidate.language == "go"
+            && candidate.relation == CandidateRelation::AccessesMember
+            && candidate.constraints.allowed_target_kinds == ["field"]
+        {
+            // A field's declared type may also create an alias with this
+            // qualified name. Resolve the source field itself before alias
+            // expansion, and leave missing fields unresolved.
+            let key = (context.language.to_owned(), qualified.clone());
+            return StageOutcome::Decided(
+                self.unique_decision(
+                    self.indexes.names.by_qualified.get(&key),
+                    candidate,
+                    ResolutionRule::ExplicitBinding,
+                )
+                .unwrap_or(ResolutionDecision::Unresolved),
+            );
+        }
         let qualified = match self.follow_alias(context.language, qualified) {
             Ok(qualified) => qualified,
             Err(candidate_count) => {
