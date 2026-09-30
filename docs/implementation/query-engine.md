@@ -129,7 +129,7 @@ an otherwise equal production declaration remains first.
 
 ## Natural-language intent routing
 
-`compass ask "<question>"` uses the deterministic `query-planner/1` profile
+`compass ask "<question>"` uses the deterministic `query-planner/2` profile
 before executing the existing typed query operations. `compass query` also
 selects this path for a high-confidence question against a current typed graph.
 High-confidence forms route callers, callees, impact, and source-to-target path
@@ -140,13 +140,16 @@ spending recall terms on question prose. Explicit `search`, `callers`,
 
 The planner is deliberately bounded and conservative. Questions above 4,096
 bytes fail before graph work. Empty, low-confidence, or contradictory requests
-fall back to bounded search; ambiguous symbol resolution remains an explicit
-`ambiguous_match` diagnostic and never selects a convenient candidate. Planner
+fall back to bounded search; natural-language symbol resolution ranks declarations by exact name, source
+scope, declaration kind, and bounded connectivity. It executes the selected
+identity and retains an `ambiguous_match` diagnostic with the other candidates.
+Explicit structured commands retain strict ambiguity behavior. Planner
 rules are local, credential-free, deterministic, and share the request limits,
 heuristic-evidence gate, backend behavior, and response envelope of the typed
-operation they select. Generic or contradictory questions, historical `--at`
-queries, and requests carrying `--traverse` or a text-traversal control remain
-on the established relevance traversal. MCP `query_graph` uses the same routing
+operation they select. Generic or contradictory `compass query` questions
+remain on bounded discovery. Explicit direction, scope, context, and DFS
+controls are honored by filtered discovery; `--traverse` selects the legacy
+relevance traversal. Historical queries retain their immutable graph identity. MCP `query_graph` uses the same routing
 rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 `context_filter` field is present.
 
@@ -458,7 +461,9 @@ covers the projection without mutating the raw result.
 CLI and MCP call the same projector and text renderer. Raw `json` output and
 MCP `structuredContent.result` remain authoritative and unchanged. The
 discovery page renderer accepts an already escaped fixed header but keeps its
-`compass.query.discovery-text-page/2` entry ledger and cursor semantics.
+`compass.query.discovery-text-page/3` entry ledger and cursor semantics.
+Compact discovery pages list relationships before the declaration inventory;
+`--evidence` retains the detailed occurrence and provenance ledger.
 
 ## Explain and profile
 

@@ -24,6 +24,33 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Natural-language answer cost qualification
+
+The developer-side [agent query harness](benchmarks/agent_query/README.md)
+qualifies answer recall and output cost separately from runtime performance.
+Run `suite_natural.toml` on its five pinned repositories with the same question
+and an 800-token first page for each tool; no follow-up pages are counted.
+The harness records binary identities, source revisions, bounded stdout,
+source-reviewed oracle results, and query wall time. Token estimates use
+UTF-8 output bytes divided by four, rather than a model tokenizer.
+
+On 2026-09-30, a macOS debug build of Compass 0.3.29 with natural-language
+candidate selection passed 24 of 25 questions, compared with 17 of 25 for
+Graphify 0.9.67. Mean output cost across all questions was 544 versus 757
+estimated tokens. On the 17 questions both tools answered, median output cost
+was 746 versus 754 estimated tokens. One broad Cobra question still omitted
+a required anchor from its first page.
+
+These measurements precede integration with the Compass 0.4.0 main branch;
+they remain historical evidence for that candidate binary, not measurements
+of the merged build.
+
+This focused anchor-recall check is not an independent precision oracle or a
+population-wide accuracy claim. Compass's median query wall time was 3,843 ms,
+compared with 532 ms for Graphify. This run does not qualify a latency
+improvement, cold/warm cache behavior, peak RSS, or a production performance
+baseline; those remain governed by the baseline policy above.
+
 ## Community detection performance
 
 The 2026-09-12 Leiden hot-path qualification used Compass `0.3.24` candidate
@@ -1255,6 +1282,14 @@ with 3,400 communities and 10,500 aggregate edges; it requires the useful
 controls, the static layout, the 200-row community DOM bound, and the visible
 edge disclosure to appear within three seconds. These are runner-specific
 diagnostic observations, not a cross-platform latency guarantee.
+
+Browser wall-clock qualification runs in the single-worker
+`chromium-performance` Playwright project after the functional Chromium tests
+finish, so concurrent test pages cannot consume its startup budget. The
+one-second small-graph and three-second large-graph limits and readiness
+assertions remain unchanged. Run only this qualification with
+`npm run test:performance -w @compass/viewer-tests`; the normal `npm run test:js`
+includes both projects in order.
 
 ### Django parallel fact-state qualification
 

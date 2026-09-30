@@ -75,6 +75,39 @@ fn ask_preserves_typed_operands_in_agent_and_text_answers() -> Result<(), Box<dy
 }
 
 #[test]
+fn ask_dependency_intent_keeps_a_symbol_operand_and_witnessed_calls() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("ask"),
+            OsString::from("what does Caller depend on?"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--format"),
+            OsString::from("agent-json"),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    let view = AgentQueryView::from_json(outcome.stdout.as_bytes())?;
+    assert_eq!(view.request.operation, AgentOperation::Explore);
+    assert_eq!(view.request.operands.len(), 1);
+    assert_eq!(
+        view.request.operands[0].role,
+        compass_output::AgentOperandRole::Symbol
+    );
+    assert_eq!(view.request.operands[0].value, "Caller");
+    assert!(
+        view.relationships
+            .iter()
+            .any(|edge| { edge.source.id == "n:caller" && edge.target.id == "n:target" })
+    );
+    Ok(())
+}
+
+#[test]
 fn ask_resolves_a_unique_owner_suffix_without_guessing_a_short_name() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
@@ -95,7 +128,7 @@ fn ask_resolves_a_unique_owner_suffix_without_guessing_a_short_name() -> Result<
     for (question, expected_code, expected_edges) in [
         ("what does Controller.Caller call?", None, 1),
         ("what does Controller::Caller call?", None, 1),
-        ("what does Caller call?", Some("ambiguous_match"), 0),
+        ("what does Caller call?", Some("ambiguous_match"), 1),
         ("what does Missing.Caller call?", Some("no_match"), 0),
         ("what does Missing::Caller call?", Some("no_match"), 0),
     ] {
@@ -978,7 +1011,7 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "--format <text|agent-json|json>",
         "--result-envelope",
         "--text-budget <N>",
-        "default: 8000",
+        "default: 800",
         "--evidence",
         "full provenance",
         "--cursor <TOKEN>",
@@ -1266,7 +1299,8 @@ fn natural_and_typed_queries_signal_missing_exact_matches_before_fallbacks()
         );
         assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
         assert!(
-            outcome.stdout.starts_with("RESULT no_match"),
+            (outcome.stdout.starts_with("RESULT candidates")
+                || outcome.stdout.starts_with("RESULT answered")),
             "{command}: {}",
             outcome.stdout
         );
@@ -1792,11 +1826,7 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
         "{}",
         outcome.stdout
     );
-    for argv in [
-        vec!["callers", "run"],
-        vec!["callees", "run"],
-        vec!["ask", "who calls run"],
-    ] {
+    for argv in [vec!["callers", "run"], vec!["callees", "run"]] {
         let mut args = argv.into_iter().map(OsString::from).collect::<Vec<_>>();
         args.extend([OsString::from("--graph"), graph.as_os_str().to_owned()]);
         let text = run(Frontend::Compass, args);
@@ -1815,6 +1845,29 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
         );
         assert!(!text.stdout.contains("No exact match"), "{}", text.stdout);
     }
+    let auto_picked = run(
+        Frontend::Compass,
+        [
+            OsString::from("ask"),
+            OsString::from("who calls run"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--format"),
+            OsString::from("agent-json"),
+        ],
+    );
+    assert_eq!(auto_picked.code, 0, "{}", auto_picked.stderr);
+    let view: Value = serde_json::from_str(&auto_picked.stdout)?;
+    assert_eq!(view["status"]["resultState"], "candidates");
+    assert_eq!(view["status"]["matchState"], "ambiguous");
+    assert!(view["answer"]["headline"].as_str().is_some_and(|text| {
+        text.contains("Auto-picked") && text.contains("multiple candidates")
+    }));
+    assert!(view["caveats"].as_array().is_some_and(|caveats| {
+        caveats
+            .iter()
+            .any(|caveat| caveat["nodeId"] == "n:alpha-run")
+    }));
     Ok(())
 }
 

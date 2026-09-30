@@ -712,14 +712,22 @@ pub fn build_discovery_query_view(
     );
     let match_state = if ambiguous {
         AgentMatch::Ambiguous
-    } else if no_match {
+    } else if no_match && response.seeds.is_empty() {
         AgentMatch::None
+    } else if !response.seeds.is_empty()
+        && response.seeds.iter().all(|seed| {
+            matches!(
+                seed.candidate_source,
+                compass_model::query_contract::DiscoverySeedSource::ExactId
+                    | compass_model::query_contract::DiscoverySeedSource::ExactName
+            )
+        })
+    {
+        AgentMatch::Exact
     } else {
         AgentMatch::Fuzzy
     };
-    let result_state = if ambiguous {
-        AgentResultState::NeedsResolution
-    } else if no_match {
+    let result_state = if no_match && response.seeds.is_empty() {
         AgentResultState::NoMatch
     } else {
         AgentResultState::Candidates
@@ -744,13 +752,33 @@ pub fn build_discovery_query_view(
     } else {
         AgentCoverage::Unknown
     };
-    let answer = answer_for_discovery(
+    let mut answer = answer_for_discovery(
         result_state,
         &response.question,
         response.seeds.len(),
         relationships.len(),
         &primary_results,
     );
+    if !response.seeds.is_empty() {
+        let labels = response
+            .seeds
+            .iter()
+            .filter_map(|seed| nodes.get(&seed.node_id))
+            .map(|node| display_label(node))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let basis = if ambiguous {
+            "Auto-picked"
+        } else if match_state == AgentMatch::Exact {
+            "Exact"
+        } else {
+            "Approximate — reached by traversal from"
+        };
+        answer.headline = format!(
+            "{basis}: {labels}; {} relationship(s).",
+            response.edges.len()
+        );
+    }
     let next_actions = next_actions_for_discovery(&context, &primary_results, source_truncated);
     let mut view = AgentQueryView {
         schema: AGENT_QUERY_VIEW_SCHEMA.to_owned(),
@@ -2469,6 +2497,9 @@ fn resolution_rank(value: ResolutionState) -> u8 {
 
 fn agent_caveat(diagnostic: &QueryDiagnostic) -> AgentCaveat {
     let (severity, statement) = match diagnostic.code {
+        QueryDiagnosticCode::AmbiguousMatch if diagnostic.node_id.is_some() => {
+            (AgentSeverity::Warning, diagnostic.message.clone())
+        }
         QueryDiagnosticCode::AmbiguousMatch => (
             AgentSeverity::Blocker,
             format!(
@@ -2483,6 +2514,9 @@ fn agent_caveat(diagnostic: &QueryDiagnostic) -> AgentCaveat {
                 diagnostic.message
             ),
         ),
+        QueryDiagnosticCode::NoMatch if diagnostic.node_id.is_some() => {
+            (AgentSeverity::Warning, diagnostic.message.clone())
+        }
         QueryDiagnosticCode::NoMatch => (
             AgentSeverity::Blocker,
             format!(
@@ -2584,7 +2618,17 @@ fn code_match_state(
         response.diagnostics.as_slice(),
         QueryDiagnosticCode::NoMatch,
     ) {
-        return AgentMatch::None;
+        return if response.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == QueryDiagnosticCode::NoMatch
+                && diagnostic
+                    .node_id
+                    .as_ref()
+                    .is_some_and(|id| nodes.contains_key(id))
+        }) {
+            AgentMatch::Fuzzy
+        } else {
+            AgentMatch::None
+        };
     }
     if response.operation == CodeQueryOperation::Search {
         let query = context
@@ -2631,7 +2675,17 @@ fn code_result_state(
     response: &CodeQueryResponse,
 ) -> AgentResultState {
     if match_state == AgentMatch::Ambiguous {
-        return AgentResultState::NeedsResolution;
+        return if response.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
+                && diagnostic
+                    .node_id
+                    .as_ref()
+                    .is_some_and(|id| response.nodes.iter().any(|node| &node.id == id))
+        }) {
+            AgentResultState::Candidates
+        } else {
+            AgentResultState::NeedsResolution
+        };
     }
     if match_state == AgentMatch::None {
         return AgentResultState::NoMatch;
@@ -2699,6 +2753,26 @@ fn answer_for_code(
     if result_state == AgentResultState::NeedsResolution {
         return AgentAnswer {
             headline: "The query matches multiple candidates; retry with an exact node ID for each ambiguous operand.".to_owned(),
+            basis: vec![AgentBasis {
+                kind: "operation".to_owned(),
+                id: context.operation.label().to_owned(),
+            }],
+        };
+    }
+    if match_state == AgentMatch::Ambiguous
+        && let Some(selected) = response.diagnostics.iter().find_map(|diagnostic| {
+            (diagnostic.code == QueryDiagnosticCode::AmbiguousMatch)
+                .then_some(diagnostic.node_id.as_ref())
+                .flatten()
+                .and_then(|id| response.nodes.iter().find(|node| &node.id == id))
+        })
+    {
+        return AgentAnswer {
+            headline: format!(
+                "Auto-picked {} from multiple candidates; returned {} relationship(s).",
+                display_label(selected),
+                response.edges.len()
+            ),
             basis: vec![AgentBasis {
                 kind: "operation".to_owned(),
                 id: context.operation.label().to_owned(),

@@ -609,3 +609,18 @@ compass install --platform codex --project
 ```
 
 Keep the old Graphify installation and `graphify-out/` directory until the new `compass-out/` graph has passed your project checks. The two tools don't share runtime output paths.
+
+## Natural-language candidate selection
+
+`compass query` and `compass ask` now continue with a ranked symbol when a
+natural-language operand has multiple matches. Review the auto-picked or
+approximate label and the alternatives before attributing the result to the
+original question. Use an exact node ID to override the choice. Explicit
+structured commands retain their strict matching behavior. No graph rebuild
+is needed for this query change; cursors created for a different semantic
+answer fail explicitly and must be restarted.
+
+Discovery text cursors now use version 3 because compact pages show relationships
+before declarations. Restart a query if a saved version 2 cursor is rejected.
+Natural discovery pages default to 800 tokens. Increase `--text-budget` or
+follow the printed `--cursor` to retrieve more of the same bounded answer.

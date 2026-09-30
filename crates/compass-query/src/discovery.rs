@@ -130,6 +130,215 @@ impl<'a> DiscoveryGuard<'a> {
 }
 
 impl CodeQueryEngine {
+    fn structured_discovery_answer(
+        &self,
+        request: &DiscoveryQueryRequest,
+    ) -> Result<Option<DiscoveryQueryResponse>, QueryError> {
+        use crate::intent::{NaturalQueryIntent, NaturalQueryRequest, plan_natural_query};
+        use compass_model::query_contract::CodeQueryLimits;
+        // Explicit traversal controls remain authoritative. They use scoped
+        // discovery rather than silently losing their filters in a typed API.
+        if request.limits.max_expanded_relationships
+            < compass_model::query_contract::MAX_DISCOVERY_EXPANDED_RELATIONSHIPS
+            || request.direction != DiscoveryDirection::Auto
+            || !request.scope.is_empty()
+            || !request.relation_contexts.is_empty()
+            || request.traversal != compass_model::query_contract::DiscoveryTraversal::Bfs
+        {
+            return Ok(None);
+        }
+        let Ok(plan) = plan_natural_query(&request.question) else {
+            return Ok(None);
+        };
+        if !plan.routes_to_typed_query()
+            || matches!(
+                plan.intent(),
+                NaturalQueryIntent::Search | NaturalQueryIntent::Fallback
+            )
+        {
+            return Ok(None);
+        }
+        if plan.intent() == NaturalQueryIntent::NodeTrail && request.limits.max_seeds < 2 {
+            return Ok(None);
+        }
+        let (profiled, selections) = self.query_natural_with_selections(NaturalQueryRequest {
+            question: request.question.clone(),
+            include_heuristic: request.include_heuristic,
+            limits: CodeQueryLimits {
+                max_depth: request.limits.max_depth,
+                max_nodes: request.limits.max_nodes,
+                max_edges: request.limits.max_edges,
+                max_candidates: request.limits.max_candidates,
+                max_response_bytes: request.limits.max_response_bytes,
+                ..CodeQueryLimits::default()
+            },
+        })?;
+        let typed = profiled.response;
+        if typed.nodes.is_empty() {
+            return Ok(None);
+        }
+        if profiled.profile.work.edges_expanded > request.limits.max_expanded_relationships {
+            return Err(QueryError::new(
+                QueryErrorKind::ExpansionLimit,
+                "natural_relationship_limit",
+                "Structured natural-language execution exceeded --max-expanded-relationships; increase the limit or narrow the question",
+            ));
+        }
+        let mut seeds = Vec::new();
+        let backend = self.backend.pin_discovery()?;
+        for operand in plan.operands() {
+            let normalized = normalize_symbol(operand);
+            let selected = selections
+                .iter()
+                .find(|(original, _)| original == operand)
+                .and_then(|(_, id)| typed.nodes.iter().find(|node| &node.id == id))
+                .or_else(|| {
+                    typed.nodes.iter().find(|node| {
+                        node.id == *operand
+                            || normalize_symbol(&node.qualified_name) == normalized
+                            || normalize_symbol(&node.name) == normalized
+                    })
+                });
+            let Some(selected) = selected else {
+                continue;
+            };
+            let id_match = selected.id == *operand;
+            let exact = id_match
+                || normalize_symbol(&selected.name) == normalized
+                || normalize_symbol(&selected.qualified_name) == normalized;
+            let (others, truncated) = backend.nodes_by_normalized_name(&normalized, 5)?;
+            let alternatives = others
+                .into_iter()
+                .filter(|node| node.id != selected.id)
+                .take(MAX_DISCOVERY_ALTERNATIVES_PER_SEED)
+                .map(|node| DiscoveryAlternative {
+                    node_id: node.id,
+                    qualified_name: node.qualified_name,
+                    source: node.source,
+                    score: "exact".to_owned(),
+                })
+                .collect::<Vec<_>>();
+            seeds.push(DiscoverySeed {
+                node_id: selected.id.clone(),
+                score: if exact { "exact" } else { "approximate" }.to_owned(),
+                score_tier: if id_match {
+                    DiscoveryScoreTier::ExactId
+                } else if exact {
+                    DiscoveryScoreTier::ExactName
+                } else {
+                    DiscoveryScoreTier::Lexical
+                },
+                rank: u32::try_from(seeds.len() + 1).unwrap_or(u32::MAX),
+                matched_terms: vec![operand.clone()],
+                matched_fields: vec![format!("intent:{:?}", plan.intent())],
+                source: selected.source.clone(),
+                candidate_source: if id_match {
+                    DiscoverySeedSource::ExactId
+                } else if exact {
+                    DiscoverySeedSource::ExactName
+                } else {
+                    DiscoverySeedSource::Fuzzy
+                },
+                ambiguous: !alternatives.is_empty() || truncated,
+                alternatives,
+            });
+        }
+        if seeds.is_empty() {
+            return Ok(None);
+        }
+        let ids = typed
+            .edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut edge_records = backend.edges_by_ids(&ids)?;
+        // Keep the nearest dependency facts ahead of owner context on the
+        // first page. Exact IDs still break every tie deterministically.
+        let mut distances = seeds
+            .iter()
+            .map(|seed| (seed.node_id.clone(), 0_usize))
+            .collect::<BTreeMap<_, _>>();
+        let mut pending = distances.keys().cloned().collect::<VecDeque<_>>();
+        while let Some(node) = pending.pop_front() {
+            self.check_deadline()?;
+            let next_depth = distances[&node] + 1;
+            for edge in &edge_records {
+                let neighbor = if edge.source == node {
+                    Some(&edge.target)
+                } else if edge.target == node {
+                    Some(&edge.source)
+                } else {
+                    None
+                };
+                if let Some(neighbor) = neighbor
+                    && !distances.contains_key(neighbor)
+                {
+                    distances.insert(neighbor.clone(), next_depth);
+                    pending.push_back(neighbor.clone());
+                }
+            }
+        }
+        let edge_distance = |edge: &EdgeRecord| {
+            distances
+                .get(&edge.source)
+                .into_iter()
+                .chain(distances.get(&edge.target))
+                .copied()
+                .min()
+                .unwrap_or(usize::MAX)
+        };
+        edge_records.sort_by(|left, right| {
+            edge_distance(left)
+                .cmp(&edge_distance(right))
+                .then_with(|| {
+                    left.kind
+                        .dependency_strength()
+                        .cmp(&right.kind.dependency_strength())
+                })
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let edges = edge_records.iter().map(discovery_edge).collect();
+        let (selected_direction, direction_source) = infer_discovery_direction(&request.question);
+        let mut diagnostics = typed.diagnostics;
+        if let Some(message) = &self.partial_graph_message {
+            diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::IncompleteCoverage,
+                message: message.clone(),
+                node_id: None,
+                path: None,
+            });
+        }
+        let complete = !typed.truncated;
+        Ok(Some(DiscoveryQueryResponse {
+            schema: DISCOVERY_QUERY_SCHEMA_V1.to_owned(),
+            question: request.question.clone(),
+            selected_direction,
+            direction_source,
+            relation_contexts: Vec::new(),
+            scope: Vec::new(),
+            traversal: request.traversal,
+            seeds,
+            nodes: typed.nodes,
+            edges,
+            diagnostics,
+            limits: request.limits.clone(),
+            stats: DiscoveryStats {
+                candidate_nodes: profiled.profile.work.candidates_read,
+                expanded_relationships: profiled.profile.work.edges_expanded,
+                visited_nodes: profiled.profile.work.nodes_expanded,
+                ..DiscoveryStats::default()
+            },
+            omissions: DiscoveryOmissions {
+                candidates: complete.then_some(0),
+                alternatives: None,
+                nodes: complete.then_some(0),
+                edges: complete.then_some(0),
+                expanded_relationships: complete.then_some(0),
+            },
+            truncated: typed.truncated,
+        }))
+    }
+
     /// Discover likely code-graph seeds and a bounded structural neighborhood.
     pub fn discover(
         &self,
@@ -147,10 +356,25 @@ impl CodeQueryEngine {
         validate_request(&request)?;
         let guard = DiscoveryGuard::new(request.limits.timeout_ms, cancelled);
         guard.check()?;
+        if cancelled.is_none()
+            && let Some(mut response) = self.structured_discovery_answer(&request)?
+        {
+            finish_response(&guard, &mut response)?;
+            return Ok(response);
+        }
+        self.discover_neighborhood(request, &guard)
+    }
+
+    fn discover_neighborhood(
+        &self,
+        request: DiscoveryQueryRequest,
+        guard: &DiscoveryGuard<'_>,
+    ) -> Result<DiscoveryQueryResponse, QueryError> {
+        guard.check()?;
         let backend = self.backend.pin_discovery()?;
 
         let relation_contexts = validate_and_normalize_contexts(&request.relation_contexts)?;
-        let resolved_scope = self.resolve_scopes(&backend, &request.scope, &guard)?;
+        let resolved_scope = self.resolve_scopes(&backend, &request.scope, guard)?;
         let term_selection = discovery_term_selection(&request.question);
         let exact_operands = exact_match_operands(&request.question);
         let mut exact_check = check_exact_operands(
@@ -158,7 +382,7 @@ impl CodeQueryEngine {
             &exact_operands,
             &resolved_scope,
             &request.limits,
-            &guard,
+            guard,
         )?;
         let (selected_direction, direction_source) = match request.direction {
             DiscoveryDirection::Auto => infer_discovery_direction(&request.question),
@@ -188,7 +412,7 @@ impl CodeQueryEngine {
             &response.scope,
             selected_direction,
             &request.limits,
-            &guard,
+            guard,
         )?;
         let trimmed_question = request.question.trim();
         if exact_operands.is_empty()
@@ -272,7 +496,7 @@ impl CodeQueryEngine {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::AmbiguousMatch,
                 message: format!(
-                    "Seed {} is ambiguous; retry with an exact node ID or run `compass explain {}`",
+                    "Auto-picked {}; also matched the listed alternatives. Traversal continues from this ranked seed; use `compass explain {}` to switch candidates",
                     seed.node_id, seed.node_id
                 ),
                 node_id: Some(seed.node_id.clone()),
@@ -312,11 +536,11 @@ impl CodeQueryEngine {
                     path: None,
                 });
             };
-            finish_response(&guard, &mut response)?;
+            finish_response(guard, &mut response)?;
             return Ok(response);
         }
 
-        self.expand_reference_neighborhood(&backend, &request, &guard, &mut response)?;
+        self.expand_reference_neighborhood(&backend, &request, guard, &mut response)?;
         if !backend.supports_identifier_subwords()? {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::IncompleteCoverage,
@@ -333,7 +557,7 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
-        finish_response(&guard, &mut response)?;
+        finish_response(guard, &mut response)?;
         Ok(response)
     }
 
@@ -1494,7 +1718,26 @@ fn retain_specific_discovery_candidates(
     terms: &[String],
     ranked: &mut Vec<crate::ranking::RankedSearchResult>,
 ) -> bool {
-    if crate::intent::plan_natural_query(question).is_ok_and(|plan| plan.routes_to_typed_query()) {
+    if let Ok(plan) = crate::intent::plan_natural_query(question)
+        && plan.routes_to_typed_query()
+    {
+        // A structural operand that failed typed resolution must not fall
+        // back to unrelated code sharing only a generic identifier subword.
+        if plan
+            .operands()
+            .iter()
+            .any(|operand| search_tokens(operand).len() >= 3)
+        {
+            ranked.retain(|candidate| {
+                plan.operands().iter().any(|operand| {
+                    crate::natural_answers::natural_fuzzy_relevant(
+                        operand,
+                        &query_node(&candidate.node),
+                    )
+                })
+            });
+            return ranked.is_empty();
+        }
         return false;
     }
     let distinct_terms = terms.iter().collect::<BTreeSet<_>>().len();
@@ -1807,6 +2050,12 @@ fn infer_discovery_direction(question: &str) -> (DiscoveryDirection, DiscoveryDi
                 );
             }
             crate::intent::NaturalQueryIntent::Callees => {
+                return (
+                    DiscoveryDirection::Outgoing,
+                    DiscoveryDirectionSource::Heuristic,
+                );
+            }
+            crate::intent::NaturalQueryIntent::Dependencies => {
                 return (
                     DiscoveryDirection::Outgoing,
                     DiscoveryDirectionSource::Heuristic,
@@ -2251,6 +2500,7 @@ fn finish_response(
             .then_with(|| left.message.cmp(&right.message))
             .then_with(|| left.node_id.cmp(&right.node_id))
     });
+    response.diagnostics.dedup();
     ensure_truncation_diagnostic(response);
     enforce_response_bytes(response)?;
     Ok(())

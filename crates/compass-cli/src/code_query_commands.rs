@@ -282,6 +282,7 @@ fn execute(
                         let role = match plan.intent() {
                             NaturalQueryIntent::Callers
                             | NaturalQueryIntent::Callees
+                            | NaturalQueryIntent::Dependencies
                             | NaturalQueryIntent::Impact => AgentOperandRole::Symbol,
                             NaturalQueryIntent::NodeTrail if index == 0 => AgentOperandRole::Source,
                             NaturalQueryIntent::NodeTrail => AgentOperandRole::Target,

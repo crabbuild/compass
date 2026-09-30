@@ -477,3 +477,52 @@ fn impact_includes_inbound_renderers_without_promoting_them_to_callers()
     );
     Ok(())
 }
+
+#[test]
+fn partial_owner_coverage_does_not_stop_the_witnessed_direct_frontier()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph
+        .nodes
+        .push(support::node("n:owner", NodeKind::Class, "Store", "Store"));
+    graph.nodes.push(support::node(
+        "n:file",
+        NodeKind::File,
+        "lib.rs",
+        "src/lib.rs",
+    ));
+    graph.links.extend([
+        edge("n:file", EdgeKind::Contains, "n:owner"),
+        edge("n:owner", EdgeKind::Contains, "n:callee"),
+        // Three edges through the file and class exceed the requested depth.
+        edge("n:dependent", EdgeKind::Imports, "n:file"),
+    ]);
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let engine = open(&path, None, &directory.path().join("cache"))?;
+    let response = engine.impact(ImpactRequest {
+        symbol: "n:callee".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits {
+            max_depth: 2,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    assert!(
+        response.truncated,
+        "the excluded owner trail must stay disclosed"
+    );
+    assert!(
+        response.nodes.iter().any(|node| node.id == "n:caller"),
+        "the second-hop direct caller must remain reachable"
+    );
+    assert!(
+        response
+            .edges
+            .iter()
+            .any(|edge| edge.source == "n:caller" && edge.target == "n:list")
+    );
+    Ok(())
+}

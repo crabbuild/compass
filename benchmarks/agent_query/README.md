@@ -9,11 +9,12 @@ question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
 source or design-quality judgments.
 
-Four suites share the harness:
+Five suites share the harness:
 
 | Suite | Questions | Shape |
 | --- | ---: | --- |
 | `suite.toml` | 47 | The first five-repository suite, including Compass's compact and paged projections |
+| `suite_natural.toml` | 25 | Same natural-language question on both tools, source-reviewed v2 oracles, 800-token pages, no follow-ups |
 | `suite_v2.toml` | 50 | A blackbox-fair extension: same questions for both tools, default output forms, no tool-specific projections |
 | `suite_fd.toml` | 12 | Separate pinned `sharkdp/fd` sample, recorded from source before either tool's first extraction/query run |
 | `suite_ask.toml` | 10 | Same natural-language caller/callee questions and 2,000-token budget for Compass `ask` and Graphify `query` across five languages |

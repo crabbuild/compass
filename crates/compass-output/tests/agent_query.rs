@@ -854,6 +854,47 @@ fn legacy_page_cursor_encoding_is_rejected_with_a_version_error() -> Result<(), 
 }
 
 #[test]
+fn auto_picked_ambiguity_is_a_valid_candidate_answer_with_retained_relationships()
+-> Result<(), Box<dyn Error>> {
+    let source = anchor("src/lib.rs", 1);
+    let mut response = response(CodeQueryOperation::Callees);
+    response.nodes = vec![
+        node("n:chosen", "Chosen.run", &source),
+        node("n:target", "Target", &source),
+    ];
+    response.edges.push(QueryEdge {
+        id: "e:chosen-target".to_owned(),
+        source: "n:chosen".to_owned(),
+        target: "n:target".to_owned(),
+        kind: EdgeKind::Calls,
+        relationship_site: Some(source.clone()),
+        details: None,
+        evidence: vec![evidence(&source)],
+    });
+    response.diagnostics.push(QueryDiagnostic {
+        code: QueryDiagnosticCode::AmbiguousMatch,
+        message: "Auto-picked Chosen.run; also matched Other.run".to_owned(),
+        node_id: Some("n:chosen".to_owned()),
+        path: None,
+    });
+    let view = build_code_query_view(
+        &response,
+        context(AgentOperation::Callees)
+            .with_operand(compass_output::AgentOperandRole::Symbol, "run"),
+    )?;
+    assert_eq!(view.status.result_state, AgentResultState::Candidates);
+    assert_eq!(view.status.match_state, AgentMatch::Ambiguous);
+    assert!(
+        view.answer
+            .headline
+            .contains("Auto-picked Fixture.Chosen.run")
+    );
+    assert_eq!(view.relationships.len(), 1);
+    assert!(render_agent_query_text(&view)?.contains("also matched Other.run"));
+    Ok(())
+}
+
+#[test]
 fn ambiguity_never_selects_a_headline_subject_or_claims_no_path() -> Result<(), Box<dyn Error>> {
     for (operation, agent_operation) in [
         (CodeQueryOperation::Callers, AgentOperation::Callers),

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "test:performance": "playwright test performance.spec.ts"
+    "test:performance": "playwright test --project chromium-performance --no-deps"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.0",

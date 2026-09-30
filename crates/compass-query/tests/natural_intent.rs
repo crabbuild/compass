@@ -12,7 +12,7 @@ use compass_model::query_contract::{
 };
 use compass_query::{
     EngineSelection, NaturalQueryIntent, NaturalQueryRequest, ProfiledCodeQueryResponse,
-    QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V1, QueryErrorKind,
+    QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V2, QUERY_RANKER_PROFILE_V1, QueryErrorKind,
     open_with_engine, plan_natural_query,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -105,7 +105,7 @@ fn natural_intents_route_to_typed_operations_with_backend_parity()
 }
 
 #[test]
-fn owner_qualified_calls_resolve_only_a_proven_unique_suffix()
+fn owner_qualified_calls_rank_matching_owners_and_reject_missing_or_bounded_owners()
 -> Result<(), Box<dyn std::error::Error>> {
     for duplicate_owner in [false, true] {
         let directory = tempfile::tempdir()?;
@@ -160,11 +160,18 @@ fn owner_qualified_calls_resolve_only_a_proven_unique_suffix()
                 let short_owner =
                     engine.query_natural(request(&format!("what does {owner} call?")))?;
                 if duplicate_owner {
-                    assert!(short_owner.edges.is_empty());
+                    assert!(
+                        short_owner
+                            .edges
+                            .iter()
+                            .any(|edge| { edge.source == "n:caller" && edge.target == "n:list" })
+                    );
                     assert!(short_owner.diagnostics.iter().any(|diagnostic| {
                         diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
+                            && diagnostic.node_id.as_deref() == Some("n:caller")
+                            && diagnostic.message.contains("Auto-picked")
+                            && diagnostic.message.contains("docs.APIRoute")
                     }));
-                    assert_eq!(short_owner.nodes.len(), 2);
                 } else {
                     assert!(
                         short_owner
@@ -274,11 +281,18 @@ fn contradictory_and_ambiguous_questions_never_invent_direction()
             .iter()
             .any(|diagnostic| { diagnostic.code == QueryDiagnosticCode::AmbiguousMatch })
     );
-    // Ambiguity retains the exact-name candidates so the next request can
-    // disambiguate in one step, and still invents no usage relationship.
-    assert_eq!(ambiguous.nodes.len(), 2);
-    assert_eq!(ambiguous.results.len(), 2);
-    assert!(ambiguous.edges.is_empty());
+    // Natural language selects the connected declaration, keeps the other
+    // identity in the diagnostic, and executes its witnessed relationships.
+    assert!(ambiguous.nodes.iter().any(|node| node.id == "n:caller"));
+    assert!(
+        ambiguous
+            .edges
+            .iter()
+            .any(|edge| edge.source == "n:caller" && edge.target == "n:list")
+    );
+    assert!(ambiguous.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("Auto-picked") && diagnostic.message.contains("Other.list")
+    }));
     assert!(ambiguous.paths.is_empty());
     Ok(())
 }
@@ -344,7 +358,7 @@ fn profiled_natural_queries_report_real_stage_work_without_changing_the_response
     assert_eq!(profiled.response, ordinary);
     assert_eq!(profiled.response, repeated.response);
     assert_eq!(profiled.profile.schema, QUERY_EXECUTION_PROFILE_V1);
-    assert_eq!(profiled.profile.planner_profile, QUERY_PLANNER_PROFILE_V1);
+    assert_eq!(profiled.profile.planner_profile, QUERY_PLANNER_PROFILE_V2);
     assert_eq!(profiled.profile.ranker_profile, QUERY_RANKER_PROFILE_V1);
     assert!(profiled.profile.work.candidates_read > 0);
     assert_eq!(
@@ -496,7 +510,7 @@ fn planner_profile_covers_reviewed_phrase_variants_and_safe_fallbacks()
     ];
     for (question, expected, auto_route) in cases {
         let plan = plan_natural_query(question)?;
-        assert_eq!(plan.profile(), QUERY_PLANNER_PROFILE_V1, "{question:?}");
+        assert_eq!(plan.profile(), QUERY_PLANNER_PROFILE_V2, "{question:?}");
         assert_eq!(plan.intent(), expected, "{question:?}");
         assert_eq!(plan.routes_to_typed_query(), auto_route, "{question:?}");
         assert_eq!(

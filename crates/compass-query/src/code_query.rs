@@ -62,6 +62,12 @@ const RELATIONSHIP_TERM_LIMIT: usize = 128;
 const RELATIONSHIP_SOURCE_EDGE_SCAN_LIMIT: usize = 256;
 type ContainmentPath = (Vec<String>, Vec<EdgeRecord>);
 
+pub(crate) struct OwnerQualifiedCandidates {
+    pub(crate) nodes: Vec<NodeRecord>,
+    pub(crate) truncated: bool,
+    pub(crate) has_leaf_candidates: bool,
+}
+
 const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::Contains,
     EdgeKind::Embeds,
@@ -1242,7 +1248,14 @@ impl PinnedDiscoveryBackend<'_> {
                 })
             }
             Self::Store(reader) => {
-                let read_limits = snapshot_limits(limit)?;
+                // Store postings are encoded in chunks. Decode at least one
+                // whole chunk, then apply the caller's logical candidate cap.
+                // A sub-chunk cap otherwise reports truncation even when the
+                // posting does not exist, prematurely stopping impact walks.
+                let read_envelope = limit
+                    .div_ceil(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+                    .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+                let read_limits = snapshot_limits(read_envelope)?;
                 let (mut source_ids, truncated, work) = if reader
                     .supports_relationship_search_terms()
                     .map_err(snapshot_error)?
@@ -1556,6 +1569,32 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 }
 
 impl CodeQueryEngine {
+    pub(crate) fn finish_natural_response(
+        &self,
+        mut response: CodeQueryResponse,
+    ) -> Result<CodeQueryResponse, QueryError> {
+        response.sort_stable();
+        self.enforce_graph_bounds(&mut response);
+        if response.truncated
+            && !response
+                .diagnostics
+                .iter()
+                .any(|d| d.code == QueryDiagnosticCode::BoundedTruncation)
+        {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: "Natural-language candidate or response bounds withheld results"
+                    .to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
+        response.sort_stable();
+        response.diagnostics.dedup();
+        enforce_response_size(&mut response)?;
+        Ok(response)
+    }
+
     /// Bound every following typed query with an absolute deadline.
     ///
     /// The CLI arms one deadline per command and reuses it across retries so a
@@ -3068,7 +3107,10 @@ impl CodeQueryEngine {
                     queue.push_back((edge.source.clone(), nodes, edges));
                 }
             }
-            if response.truncated {
+            // A withheld owner-level posting or over-depth trail does not
+            // exhaust the graph budget. Continue the already witnessed direct
+            // frontier so unrelated partial coverage cannot hide its callers.
+            if selected_edges.len() >= max_edges || included_nodes.len() >= max_nodes {
                 break;
             }
         }
@@ -3311,6 +3353,43 @@ impl CodeQueryEngine {
         &self.build_generation_identity
     }
 
+    pub(crate) fn owner_qualified_candidates(
+        &self,
+        normalized: &str,
+        candidate_limit: usize,
+        instrumentation: &mut QueryInstrumentation,
+    ) -> Result<Option<OwnerQualifiedCandidates>, QueryError> {
+        self.check_deadline()?;
+        let qualified_query = normalized.replace("::", ".");
+        let Some((_, leaf)) = qualified_query.rsplit_once('.') else {
+            return Ok(None);
+        };
+        if leaf.is_empty() {
+            return Ok(None);
+        }
+        let (leaf_nodes, truncated) = self
+            .backend
+            .nodes_by_normalized_name(leaf, candidate_limit)?;
+        instrumentation.work.candidates_read = instrumentation
+            .work
+            .candidates_read
+            .saturating_add(u64::try_from(leaf_nodes.len()).unwrap_or(u64::MAX));
+        let has_leaf_candidates = !leaf_nodes.is_empty();
+        let suffix = format!(".{qualified_query}");
+        let nodes = leaf_nodes
+            .into_iter()
+            .filter(|node| {
+                let qualified_name = normalize_symbol(&node.qualified_name).replace("::", ".");
+                qualified_name == qualified_query || qualified_name.ends_with(&suffix)
+            })
+            .collect();
+        Ok(Some(OwnerQualifiedCandidates {
+            nodes,
+            truncated,
+            has_leaf_candidates,
+        }))
+    }
+
     fn resolve_symbol(
         &self,
         query: &str,
@@ -3337,28 +3416,14 @@ impl CodeQueryEngine {
         // prefix or the stored `::` separator. Verify that suffix against the
         // complete bounded leaf-name posting, never against a ranked prefix.
         // If the posting is truncated, uniqueness cannot be proved.
-        let qualified_query = normalized.replace("::", ".");
         if exact_nodes.is_empty()
             && !exact_truncated
-            && let Some((_, leaf)) = qualified_query.rsplit_once('.')
-            && !leaf.is_empty()
+            && let Some(qualified_candidates) =
+                self.owner_qualified_candidates(&normalized, candidate_limit, instrumentation)?
         {
-            let (leaf_nodes, leaf_truncated) = self
-                .backend
-                .nodes_by_normalized_name(leaf, candidate_limit)?;
-            instrumentation.work.candidates_read = instrumentation
-                .work
-                .candidates_read
-                .saturating_add(u64::try_from(leaf_nodes.len()).unwrap_or(u64::MAX));
-            let leaf_has_exact_candidates = !leaf_nodes.is_empty();
-            let suffix = format!(".{qualified_query}");
-            let qualified = leaf_nodes
-                .into_iter()
-                .filter(|node| {
-                    let qualified_name = normalize_symbol(&node.qualified_name).replace("::", ".");
-                    qualified_name == qualified_query || qualified_name.ends_with(&suffix)
-                })
-                .collect::<Vec<_>>();
+            let qualified = qualified_candidates.nodes;
+            let leaf_truncated = qualified_candidates.truncated;
+            let leaf_has_exact_candidates = qualified_candidates.has_leaf_candidates;
             if leaf_truncated {
                 response.truncated = true;
                 response.diagnostics.push(QueryDiagnostic {

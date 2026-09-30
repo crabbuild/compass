@@ -14,6 +14,7 @@ mod export_binding;
 mod graph_engine;
 mod index;
 mod intent;
+mod natural_answers;
 mod neighbors;
 mod program_join;
 mod ranking;
@@ -57,7 +58,7 @@ pub use index::{
 };
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
-    plan_natural_query,
+    QUERY_PLANNER_PROFILE_V2, plan_natural_query,
 };
 pub use neighbors::{
     MAX_NEIGHBOR_ADJACENCY_ENTRIES, MAX_NEIGHBOR_RECORDS, MAX_NEIGHBOR_RESPONSE_BYTES,

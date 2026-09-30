@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Route natural-language usage, dependency, impact, and connection questions
+  into typed graph queries. Continue ambiguous questions with a disclosed,
+  deterministically ranked candidate and retain alternative identities.
+- Include owned method calls in natural-language class dependency answers.
+  Present retained approximate results as useful candidates while preserving
+  provenance, coverage caveats, and strict structured-command matching.
+- Default natural discovery to 800-token pages, show relationships first,
+  and version its text cursor to 3. Fix sub-chunk store relationship reads
+  that previously cut impact traversal short.
+
 ## 0.4.0 - 2026-09-28
 
 - Resolve source-proven Go field selectors to exact named struct fields and
