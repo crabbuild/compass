@@ -597,7 +597,7 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "--format <text|agent-json|json>",
         "--result-envelope",
         "--text-budget <N>",
-        "default: 8000",
+        "default: 800",
         "--evidence",
         "full provenance",
         "--cursor <TOKEN>",
@@ -885,7 +885,8 @@ fn natural_and_typed_queries_signal_missing_exact_matches_before_fallbacks()
         );
         assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
         assert!(
-            outcome.stdout.starts_with("RESULT no_match"),
+            (outcome.stdout.starts_with("RESULT candidates")
+                || outcome.stdout.starts_with("RESULT answered")),
             "{command}: {}",
             outcome.stdout
         );

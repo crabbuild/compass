@@ -24,6 +24,29 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Natural-language answer cost qualification
+
+The developer-side [agent query harness](benchmarks/agent_query/README.md)
+qualifies answer recall and output cost separately from runtime performance.
+Run `suite_natural.toml` on its five pinned repositories with the same question
+and an 800-token first page for each tool; no follow-up pages are counted.
+The harness records binary identities, source revisions, bounded stdout,
+source-reviewed oracle results, and query wall time. Token estimates use
+UTF-8 output bytes divided by four, rather than a model tokenizer.
+
+On 2026-09-30, a macOS debug build of Compass 0.3.29 with natural-language
+candidate selection passed 24 of 25 questions, compared with 17 of 25 for
+Graphify 0.9.67. Mean output cost across all questions was 544 versus 757
+estimated tokens. On the 17 questions both tools answered, median output cost
+was 746 versus 754 estimated tokens. One broad Cobra question still omitted
+a required anchor from its first page.
+
+This focused anchor-recall check is not an independent precision oracle or a
+population-wide accuracy claim. Compass's median query wall time was 3,843 ms,
+compared with 532 ms for Graphify. This run does not qualify a latency
+improvement, cold/warm cache behavior, peak RSS, or a production performance
+baseline; those remain governed by the baseline policy above.
+
 ## Community detection performance
 
 The 2026-09-12 Leiden hot-path qualification used Compass `0.3.24` candidate

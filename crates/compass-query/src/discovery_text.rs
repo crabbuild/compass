@@ -12,8 +12,8 @@ use crate::text_cursor::{
     CursorTokenError, decode_cursor_token, encode_cursor_token, is_cursor_digest,
 };
 
-pub const DISCOVERY_TEXT_PAGE_VERSION: &str = "compass.query.discovery-text-page/2";
-pub const DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET: usize = 8_000;
+pub const DISCOVERY_TEXT_PAGE_VERSION: &str = "compass.query.discovery-text-page/3";
+pub const DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET: usize = 800;
 const MAX_CURSOR_BYTES: usize = 4_096;
 const MIN_TEXT_BUDGET: usize = 256;
 const MAX_TEXT_BUDGET: usize = 65_536;
@@ -123,7 +123,7 @@ struct CursorEnvelope {
 }
 
 /// Cursor wire version. Older encodings fail with an explicit version error.
-const CURSOR_WIRE_VERSION: u8 = 2;
+const CURSOR_WIRE_VERSION: u8 = 3;
 /// Hex characters stored for each digest the cursor binds.
 const CURSOR_DIGEST_CHARS: usize = 16;
 /// Fields this cursor carries behind its wire version.
@@ -213,7 +213,7 @@ pub fn render_discovery_text_page(
 /// Render a discovery page using caller-owned, already escaped prefix lines.
 ///
 /// Cursor validation and the ordered entry ledger remain owned by this crate;
-/// the prefix is presentation-only and therefore cannot change a v2 cursor's
+/// the prefix is presentation-only and therefore cannot change a v3 cursor's
 /// semantic position. The ordinary renderer above keeps the historical prefix
 /// for library callers that do not opt into the Agent View.
 pub fn render_discovery_text_page_with_prefix(
@@ -577,15 +577,23 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                 )
             } else {
                 format!(
-                    "SEED {} [source={}; matched={}]",
+                    "SEED {} [{}]",
                     rendered_scalar(
                         labels
                             .get(seed.node_id.as_str())
                             .copied()
                             .unwrap_or(seed.node_id.as_str()),
                     ),
-                    seed_source_name(seed.candidate_source),
-                    rendered_values(&seed.matched_terms),
+                    if seed.ambiguous {
+                        "auto-picked"
+                    } else if matches!(
+                        seed.candidate_source,
+                        DiscoverySeedSource::ExactId | DiscoverySeedSource::ExactName
+                    ) {
+                        "exact"
+                    } else {
+                        "approximate"
+                    },
                 )
             },
         });
@@ -608,7 +616,7 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                     )
                 } else {
                     format!(
-                        "ALTERNATIVE {} @ {}",
+                        "ALSO MATCHED {} @ {}",
                         rendered_scalar(&alternative.qualified_name),
                         alternative
                             .source
@@ -728,19 +736,38 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
         entries.push(Entry {
             section: "diagnostics",
             item,
-            text: format!(
-                "! {:?}: {} node={} path={}",
-                diagnostic.code,
-                rendered_scalar(&diagnostic.message),
-                diagnostic
-                    .node_id
-                    .as_deref()
-                    .map_or_else(|| "none".to_owned(), rendered_scalar),
-                diagnostic
-                    .path
-                    .as_deref()
-                    .map_or_else(|| "none".to_owned(), rendered_scalar),
-            ),
+            text: if !include_evidence {
+                format!(
+                    "! {:?}: {}",
+                    diagnostic.code,
+                    rendered_scalar(&diagnostic.message)
+                )
+            } else {
+                format!(
+                    "! {:?}: {} node={} path={}",
+                    diagnostic.code,
+                    rendered_scalar(&diagnostic.message),
+                    diagnostic
+                        .node_id
+                        .as_deref()
+                        .map_or_else(|| "none".to_owned(), rendered_scalar),
+                    diagnostic
+                        .path
+                        .as_deref()
+                        .map_or_else(|| "none".to_owned(), rendered_scalar),
+                )
+            },
+        });
+    }
+    if !include_evidence {
+        // Relationships carry the answer; declarations supply locations.
+        // Keep the complete ledger pageable while showing facts on page one.
+        entries.sort_by_key(|entry| match entry.section {
+            "seeds" => 0,
+            "alternatives" => 1,
+            "edges" => 2,
+            "nodes" => 3,
+            _ => 4,
         });
     }
     entries
@@ -752,7 +779,14 @@ fn match_signal_lines(response: &DiscoveryQueryResponse) -> Vec<String> {
             && diagnostic.message.starts_with("NO EXACT MATCH")
     }) {
         return vec![
-            "match_confidence: none".to_owned(),
+            format!(
+                "match_confidence: {}",
+                if response.seeds.is_empty() {
+                    "none"
+                } else {
+                    "approximate"
+                }
+            ),
             rendered_scalar(&diagnostic.message),
         ];
     }
@@ -1172,7 +1206,7 @@ mod tests {
     }
 
     #[test]
-    fn an_oversized_entry_is_truncated_instead_of_failing_the_page()
+    fn an_oversized_compact_diagnostic_is_capped_instead_of_failing_the_page()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut response = response()?;
         response.diagnostics[0].message = "x".repeat(4_000);
@@ -1180,9 +1214,8 @@ mod tests {
         let page = render_discovery_text_page(
             &response,
             DiscoveryTextPageOptions {
-                // The minimum budget: the page's fixed lines plus one capped
-                // entry exceed it, so the oversized entry must be shortened
-                // instead of failing the page.
+                // The minimum budget must fit visibly capped compact
+                // diagnostics rather than failing on oversized source text.
                 token_budget: MIN_TEXT_BUDGET,
                 cursor: None,
                 request_digest: &"a".repeat(64),
@@ -1192,16 +1225,13 @@ mod tests {
             },
         )?;
         assert!(
-            page.text
-                .contains("[truncated: entry exceeds --text-budget]"),
-            "entries {}..{} of {}: {}",
-            page.entry_start,
-            page.entry_end,
-            page.entry_total,
-            page.text.chars().take(400).collect::<String>()
+            page.text.contains('…'),
+            "oversized scalar must be visibly capped"
         );
+        assert!(page.text.chars().count() <= MIN_TEXT_BUDGET * 4);
         assert!(page.entry_end > page.entry_start);
-        assert!(page.next_cursor.is_some());
+        // Compact diagnostics fit on one page after their scalar cap; the
+        // evidence renderer still exercises oversized-entry pagination below.
         Ok(())
     }
 

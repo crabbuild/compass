@@ -1222,7 +1222,14 @@ impl PinnedDiscoveryBackend<'_> {
                 })
             }
             Self::Store(reader) => {
-                let read_limits = snapshot_limits(limit)?;
+                // Store postings are encoded in chunks. Decode at least one
+                // whole chunk, then apply the caller's logical candidate cap.
+                // A sub-chunk cap otherwise reports truncation even when the
+                // posting does not exist, prematurely stopping impact walks.
+                let read_envelope = limit
+                    .div_ceil(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+                    .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+                let read_limits = snapshot_limits(read_envelope)?;
                 let (mut source_ids, truncated, work) = if reader
                     .supports_relationship_search_terms()
                     .map_err(snapshot_error)?
@@ -1536,6 +1543,32 @@ fn sort_edge_indices(edges: &mut [usize], graph: &GraphDocument) {
 }
 
 impl CodeQueryEngine {
+    pub(crate) fn finish_natural_response(
+        &self,
+        mut response: CodeQueryResponse,
+    ) -> Result<CodeQueryResponse, QueryError> {
+        response.sort_stable();
+        self.enforce_graph_bounds(&mut response);
+        if response.truncated
+            && !response
+                .diagnostics
+                .iter()
+                .any(|d| d.code == QueryDiagnosticCode::BoundedTruncation)
+        {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::BoundedTruncation,
+                message: "Natural-language candidate or response bounds withheld results"
+                    .to_owned(),
+                node_id: None,
+                path: None,
+            });
+        }
+        response.sort_stable();
+        response.diagnostics.dedup();
+        enforce_response_size(&mut response)?;
+        Ok(response)
+    }
+
     /// Bound every following typed query with an absolute deadline.
     ///
     /// The CLI arms one deadline per command and reuses it across retries so a
@@ -2950,7 +2983,10 @@ impl CodeQueryEngine {
                     queue.push_back((edge.source.clone(), nodes, edges));
                 }
             }
-            if response.truncated {
+            // A withheld owner-level posting or over-depth trail does not
+            // exhaust the graph budget. Continue the already witnessed direct
+            // frontier so unrelated partial coverage cannot hide its callers.
+            if selected_edges.len() >= max_edges || included_nodes.len() >= max_nodes {
                 break;
             }
         }

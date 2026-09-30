@@ -12,6 +12,7 @@ mod discovery_text;
 mod graph_engine;
 mod index;
 mod intent;
+mod natural_answers;
 mod program_join;
 mod ranking;
 mod recall;
@@ -48,7 +49,7 @@ pub use index::{
 };
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
-    plan_natural_query,
+    QUERY_PLANNER_PROFILE_V2, plan_natural_query,
 };
 pub use program_join::join_program_evidence;
 pub use ranking::QUERY_RANKER_PROFILE_V1;

@@ -107,8 +107,12 @@ remain unresolved rather than being guessed.
 Compass adds the additive strict projection `compass.query.agent-view/1` for
 typed CLI and MCP consumers. It is derived from, and digest-bound to, the raw
 `compass.query/1` or `compass.query.discovery/1` response. The raw CLI `json`
-shape, MCP `structuredContent.result`, graph schemas, and discovery
-`compass.query.discovery-text-page/2` cursor meaning are unchanged.
+shape, MCP `structuredContent.result`, and graph schemas are unchanged.
+Discovery text pagination now uses
+`compass.query.discovery-text-page/3`: compact pages show relationships before
+node inventories. Older discovery cursors fail with an explicit version error;
+restart the query to obtain a new cursor. Natural discovery text now defaults
+to an 800-token page; `--text-budget N` and `--cursor` retain caller control.
 
 The typed commands accept `--format agent-json`; default text is an
 answer-first presentation. MCP keeps `compass.mcp.tool-result/1` and adds the
@@ -122,6 +126,25 @@ The additive `relationship_inconsistency` diagnostic extends the strict
 `compass.query/1` diagnostic enum and changes its contract fingerprint. Strict
 TypeScript consumers and the checked-in manifest must accept the new value
 before interpreting a relationship result that carries it.
+
+### Natural-language answer selection
+
+Natural-language queries use `query-planner/2` to recognize dependency, usage,
+impact, and connection phrases. `compass query` preserves its
+`compass.query.discovery/1` envelope while delegating recognized, unfiltered
+questions to typed execution. Explicit direction, scope, context, and DFS
+controls continue through filtered discovery. `compass ask` uses the same
+operand selection policy.
+
+Natural language may select a ranked candidate when the name is ambiguous.
+The selected identity and alternative names remain explicit; inferred operand
+matching does not change the provenance of structural edges. Explicit
+`callers`, `callees`, `impact`, `node`, and `search` commands retain strict
+identity behavior. Consumers must distinguish a useful candidate answer from
+an exact match using the retained seeds and diagnostics. Discovery Agent View
+now presents retained fuzzy/ambiguous neighborhoods as candidates, instead of
+requiring resolution before showing their results. No graph or query schema
+major changes. Existing cursors reject a changed semantic result by digest.
 
 ### Typed text pages and store self-check
 

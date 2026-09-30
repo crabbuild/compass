@@ -610,7 +610,7 @@ def prepare_repository(
         for path in (compass_root, graphify_root):
             if path.exists():
                 shutil.rmtree(path)
-    if not (compass_root / "compass-out").is_dir():
+    if not (compass_root / "compass-out" / "current-snapshot").is_file():
         started = time.monotonic()
         result = run_bounded(
             (

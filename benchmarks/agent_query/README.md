@@ -4,11 +4,12 @@
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
-Two suites share the harness:
+Three suites share the harness:
 
 | Suite | Questions | Shape |
 | --- | ---: | --- |
 | `suite.toml` | 47 | The first five-repository suite, including Compass's compact and paged projections |
+| `suite_natural.toml` | 25 | Same natural-language question on both tools, source-reviewed v2 oracles, 800-token pages, no follow-ups |
 | `suite_v2.toml` | 50 | A blackbox-fair extension: same questions for both tools, default output forms, no tool-specific projections |
 
 `suite_v2.toml` states its fairness contract inline and keeps it in the rows:
