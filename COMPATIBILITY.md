@@ -31,6 +31,141 @@ not maintain command-specific fallbacks for older releases.
 Compass 0.3.0 itself remains supported. The extension adapts typed call-query
 results for the known nested-anchor limitation in that stable release.
 
+## Graph cache identity and MCP request snapshots
+
+Graph query, impact and traversal caches now bind to the SHA-256 of the bounded
+JSON bytes read, including when file size and modification time are unchanged.
+Their disposable header versions advance to `TRAILG02`, `TRAILA03` and
+`TRAILT07`. Typed content caches use `.content-v2.cache` and `CGRPHV02`; their
+cache key, schema admission and decoded document come from one byte snapshot.
+Older cache formats are ignored and rebuilt from the graph.
+
+For standalone JSON graph paths, each MCP request checks current graph content
+and holds an immutable context. Communities, hubs, neighbors, paths and typed
+query identities within that context derive from the same captured bytes. A
+later request observes a replacement or reports a missing, corrupt, unsupported
+or oversized graph. A request already holding a valid context may finish using
+that context after the path changes. Published SQLite queries retain their
+existing store-reference validation path. Sidecars retain their own existing
+loading policies; this graph snapshot does not make arbitrary external writes
+transactional. Publishers should use atomic replacement.
+
+Graph schemas, source identities, query-result schemas, historical realizations
+and AST cache semantics are unchanged. Content reads use the configured graph
+byte cap; this correctness correction makes no latency or memory improvement
+claim.
+
+## Go struct field declarations
+
+The universal Go producer now publishes one `field` declaration per explicitly
+named direct struct field, with its identifier source range and a directed
+`contains` relation from the owning `struct`. A declaration with multiple
+names creates distinct fields. Embedded fields, blank identifiers, and fields
+inside anonymous nested structs do not become direct named members of the
+outer struct. Existing type-reference and receiver-binding evidence remains.
+This adds graph nodes and containment edges, so graph digests, communities,
+hub degrees and hub member counts can change after a rebuild. It does not
+assert field-access target resolution or god-object classification. Disposable
+AST cache semantics advance from 11 to 12; old cache entries are ignored and
+recomputed. Graph schema and package version remain unchanged.
+
+## Go field-access evidence
+
+The Go producer emits source-anchored `MemberAccess` occurrences for selector
+expressions outside direct call targets. When bounded receiver typing establishes
+an exact owner, it also emits an `AccessesMember` candidate restricted to a
+source field declaration with the same qualified owner and name. Resolution
+looks up that field before following its type alias; missing or ambiguous fields
+remain unresolved. The graph projects resolved contacts as directed `references`
+with exact occurrence provenance. These records do not claim read/write effects,
+runtime aliases, promoted members or complete field-use coverage.
+
+Rebuild graphs to see the additive references. Disposable AST cache semantics
+advance from 12 to 13; old entries are ignored and recomputed. Existing graph
+and evidence schemas and package version remain unchanged. Added references can
+change degrees, navigation, clusters and communities. Historical realizations
+remain immutable.
+
+## Java field-access evidence
+
+Java emits `MemberAccess` occurrences for ordinary fields and enum constants,
+including supported unqualified references. A bounded AST lexical index distinguishes
+parameters, locals, block/loop lifetimes, lambda/catch/resource bindings and
+source type names. Receiver typing supports declared nominal values, source-local
+field chains, arrays, casts, direct constructors and single generic bounds.
+Simple `instanceof` branches and abrupt guards retain their flow scope. Visible
+source types take precedence over imports and package prefixes. A qualified
+field lookup requires one receiver type declaration; field availability cannot
+select between duplicate nominal types. Exact declaration evidence remains
+authoritative.
+
+For an already established Java nominal receiver, resolution joins dotted
+source type names to canonical nested declarations using the complete qualified
+name. Imported nested types can therefore supply field and enum-member targets.
+Package/type spelling collisions and duplicate enclosing types retain ambiguity;
+member availability cannot select an owner. Nominal lookup work shares the
+existing candidate budget. This does not infer a type from an arbitrary expression
+chain. Rebuild stored graphs for the resolver correction; existing version-10
+extraction facts remain usable because the emitted evidence is unchanged.
+
+Unknown receivers, ambiguous names, unsupported pattern flow, inherited fields,
+unregistered local/anonymous class owners and exhausted inference remain
+unresolved or unrepresented. Unsupported flow masks a possibly shadowed field;
+it never establishes a convenient outer-field target. Cross-file field chains
+and general hierarchy/accessibility/type-checking are not inferred. Existing
+qualified universal resolution selects field or enum-member declarations. Bare
+enum switch labels use the selector type and permit only enum-member targets;
+unknown selectors remain unresolved. Registered constant-specific bodies retain
+their method/field owners and field shadowing. Their body-specific fields are
+visible only through lexical ownership, not through an enum-typed value.
+Type parameters and local values/types shadow same-named enum receivers. Graph v1 emits
+`references` with exact member-access provenance, preserving occurrences without
+read/write or runtime-alias claims. Method names are not field accesses.
+
+Rebuild graphs to obtain these facts. AST cache semantics advance from 9 to 10;
+evidence/graph schemas, producer capabilities and package version are unchanged.
+Historical realizations remain immutable. Additional references can change
+navigation and community assignments; neither implies improved community
+quality or god-object classification.
+
+## Rust field-access evidence
+
+Rust extraction emits member-access occurrences for explicit field expressions,
+including fields in method receivers and scalar-indexed receiver chains when
+bounded source-type evidence establishes the nominal owner. Existing universal
+resolution selects only field declarations, preserving parallel occurrences.
+Graph v1 publishes these as `references` with member-access provenance, not as
+read/write-effect or runtime-alias proofs. Method-selector syntax is excluded.
+
+Unknown or shadowed receivers, ambiguous type paths, unsupported expressions,
+raw pointers and exhausted receiver-depth inference remain unresolved. These
+facts do not establish complete field-use coverage, class cohesion or god-object
+defects. Rebuild graphs to obtain the additive access records. AST cache semantics
+advance from 7 to 8; evidence/graph schemas, existing producer capabilities and
+package version are unchanged. Historical realizations remain immutable.
+
+## Rust indexed method receivers
+
+Rust call extraction follows bounded field and scalar-index receiver syntax
+when source types establish a standard `Vec`, array, or slice and a decimal integer
+literal or `usize` index. Supported reference and standard `Box`/`Rc`/`Arc`
+wrappers preserve the element type. Field types retain their declaration scope,
+and repeated calls retain distinct source anchors. Type-path qualification
+retains every intermediate module when expanding a local or imported alias.
+Explicit standard-vector
+and element imports may be resolved by existing import evidence.
+
+Custom `Index` implementations, range indexes, unknown index types, raw
+pointers, ambiguous or shadowed type names, and unsupported expressions do not
+establish an element-method target. Prelude-vector inference is disabled by
+visible wildcard imports or source attributes that may disable the standard
+prelude. Generic field substitution and cross-file field layout discovery are
+not compiler inference capabilities of this rule.
+
+Disposable AST cache semantics advance from 6 to 7 for these extraction facts.
+Rebuild a graph to obtain them; published history, evidence schema, producer
+capabilities, graph schema, and package version remain unchanged.
+
 ## Compatibility evidence
 
 Compass changes are verified with native evidence:
@@ -94,6 +229,186 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### Owner-qualified symbol lookup
+
+Typed callers, callees, impact and node-trail queries now accept a unique
+owner/member suffix such as `APIRoute.get_route_handler` or
+`APIRoute::get_route_handler` when the stored
+qualified name is `fastapi.routing.APIRoute::get_route_handler`. An exact ID or
+full normalized name still takes precedence. The lookup reads the bounded
+exact leaf-name posting and verifies every candidate's full owner suffix;
+multiple matches or an exhausted candidate bound remain ambiguous. If the
+leaf name exists but the owner does not, no fuzzy winner is chosen. Existing
+fuzzy fallback remains available for a misspelled leaf with no exact leaf-name
+candidate. JSON response schema and graph artifacts are unchanged; previously
+fuzzy or unresolved typed queries may now return a source-identifiable direct
+answer. This behavior applies to `ask` when it routes to those typed queries.
+Legacy `explain` and `path` also accept the unique owner suffix after checking
+exact IDs and full names. Their existing candidate-list behavior preserves
+multiple matches. No graph rebuild or package-version change is required.
+
+### MCP paths
+
+`shortest_path` resolves exact node IDs or normalized symbol/qualified names.
+It no longer substitutes a scored fuzzy endpoint. Ambiguous matches return at
+most 20 candidates, ordered by ID, with an omission count; callers choose an
+exact ID before requesting a path. Both endpoints resolving to the same node
+continues to produce a diagnostic rather than a positive path.
+
+Search remains undirected and minimum-hop. Among equal-hop routes it now uses
+the query engine's structural relation costs and deterministic path keys.
+`max_hops` is enforced during traversal, accepts 0–64, and defaults to 8.
+The same 1,000,000-adjacency-entry and 16 MiB cumulative path-key budgets as
+the CLI path engine apply. Exhaustion fails explicitly. A depth-limited miss
+does not assert global disconnection or the length of an unsearched route.
+
+Uniquely resolved, distinct endpoints add `compass.mcp.path/1` in the existing
+structured transport envelope. It distinguishes `found`, `depth_limit`, and
+`disconnected` and retains exact ordered node/edge identities. Resolution
+diagnostics retain their text form. Legacy text is still available, including
+through the non-transport `invoke` helper. Graph schemas are unchanged.
+
+### MCP hub identities
+
+Each hub now also carries an additive `connectivity` object with schema
+`compass.hub-connectivity/1`, and text includes its node kind and relation
+breakdown. Hub eligibility, degree, and ranking are unchanged. Incident record
+counts retain parallel records; they are not distinct-neighbor degree or
+independently verified source occurrences. At most 16 relation categories are
+shown, ordered by record count then name, with explicit omission totals.
+Undirected artifacts do not acquire inferred directions in this summary.
+Their `ranking` metadata now correctly says
+`distinct-undirected-endpoint-degree`; directed artifacts retain
+`distinct-directed-endpoint-degree`.
+
+MCP `god_nodes` adds `structuredContent` using the existing
+`compass.mcp.tool-result/1` envelope and the result schema
+`compass.mcp.hubs/1`. The ranked records preserve exact IDs, kinds, degrees,
+and available source anchors. Text and the `compass://god-nodes` resource add
+an ID/source/location line beneath each entry; string values are JSON-escaped
+so IDs remain recoverable without injecting extra lines. Missing anchors are
+null. Inputs, eligibility, degree calculation, and ranking are unchanged.
+An additive `memberEvidence` object with schema `compass.hub-members/1` now
+appears for directed typed class and struct hubs. It counts uniquely owned
+direct methods/fields, ambiguous direct members, and stored method-to-own-field
+`references` records, pairs and participating methods. It is null for other
+kinds and undirected graphs. Parallel records remain in the record count;
+ambiguous owners cannot contribute to own-field counts. These observations
+include stored reference records regardless of their confidence and carry
+`sourceCoverage: "unverified"`; they are neither validated reference targets,
+complete source-access coverage nor a god-object classification.
+Exact node lookup checks the original ID before the existing whitespace-trimmed
+fallback, preserving distinct legacy IDs that differ by surrounding whitespace.
+The non-transport `CompassMcp::invoke` compatibility helper still returns text
+for this tool. Machine consumers should use the structured projection rather
+than parse display labels. See [output contracts](docs/reference/outputs.md#mcp-hub-results).
+
+### MCP community and neighbor lookup
+
+The disposable traversal cache now retains a labeled community's numeric ID
+as well as its name. Cache magic advances from `TRAILT04` to `TRAILT05` so old
+projections rebuild from their unchanged graph. MCP membership, statistics,
+and other traversal consumers can now observe those stored communities.
+Graph schemas and published historical graphs are unchanged.
+
+MCP `get_neighbors` first resolves an exact ID or normalized symbol/qualified
+name using the shared exact lookup, including its evidence-gated export-binding
+handling. Prefix/substring fallback applies only when no exact candidate exists.
+A unique exact `term_len()` therefore remains navigable when `test_term_len()`
+exists. Multiple exact candidates remain ambiguous; ranking never chooses one.
+The ambiguity list is ordered by exact ID with at most 20 displayed candidates
+and an omission count. Retry with an exact ID to choose a declaration. Exact IDs
+retain their case. The tool's input schema and the MCP result envelope are
+unchanged. This corrects unnecessarily ambiguous lookups; no migration is needed.
+Relationship filters apply before repeated neighbors are grouped, so a stored
+call remains visible when a containment/reference edge precedes it. The tool
+continues to display distinct neighbors. Successful results now add the versioned
+`compass.query.neighbors/1` structured result inside the existing MCP transport
+envelope. Each direction/neighbor group carries its exact node record and all
+matching relationship records, including IDs, source sites, provenance and
+parallel occurrences. Missing legacy edge IDs remain absent. Directions describe
+stored endpoints; `graphDirected` preserves the artifact metadata, so an
+undirected artifact does not become proof of a directed call. Text adds escaped
+ID/source/location lines; the displayed relation represents the first canonical
+record in the group. Use structured records for all relations and occurrences.
+
+Neighbor lookup reads one full snapshot to avoid losing fields in the compact
+traversal cache. It is bounded by 1,000,000 examined adjacency entries, 10,000
+matching incident records, a 4,096-byte filter and a 1 MiB structured result.
+Exhaustion is an explicit error, never an empty or silently partial success.
+Groups sort by outgoing/incoming direction then exact ID; records sort by
+canonical JSON. Self loops appear in both directions and count once against
+the incident-record budget. Published graphs and historical artifacts are unchanged.
+
+### Calls-only directed trails
+
+`node --calls-only`, MCP `get_node` with `calls_only: true`, and explicit
+`ask "call path from SOURCE to TARGET"` / `"call chain from SOURCE to TARGET"`
+restrict trails to stored directed `calls` edges. Structural shortcuts cannot
+satisfy this request. The typed `NodeTrailRequest` adds optional boolean
+`callsOnly`; omission defaults to false and false is omitted when serialized.
+Rust struct-literal callers must initialize the new `calls_only` field.
+
+The policy applies to endpoint relationship-role probes, traversal, depth
+frontiers and undirected direction diagnostics. Exact-name ambiguity remains
+unresolved. Existing heuristic opt-in, occurrence provenance, deterministic
+ties, node/edge/byte bounds and partial-graph diagnostics remain effective.
+The undirected diagnostic charges examined structural records to its work
+budget even though they cannot form a call path. Empty bounded results remain
+incomplete, never proof of no call path.
+
+Existing structural trail and natural `path from` requests retain their
+behavior. The response stays `compass.query/1`; Agent View request metadata
+records the explicit call-path question. No graph, extraction/cache, history,
+or package version changes are needed. These are static call relationships,
+not a guarantee that the chain executes for every input.
+
+### Directed trail depth diagnostics
+
+Typed `node`/`get_node` trails now report `truncated: true` with
+`bounded_truncation` when an unsuccessful search reaches its depth bound and
+cannot prove the reachable frontier is closed. They do not use a shorter
+undirected route to assert a global direction mismatch while an unexplored
+forward continuation remains. Frontier checks share the declared work budget
+and run only after the bounded path search fails, preserving positive paths
+within the requested depth. Closed dead ends and cycles can still yield complete
+negative results. The `compass.query/1` schema is unchanged; consumers should
+continue to distinguish incomplete searches from negative answers.
+
+`explore` / `explore_code` also retain incomplete-search status when no connecting
+path was found; previously that status could be lost with the absent path.
+
+### Bounded node trails
+
+The undirected `path` command also retains nondominated cost/depth states.
+Each weighted or alternative search is bounded to 1,000,000 adjacency entries
+and 16 MiB of cumulative path-key bytes. Exceeding either returns a nonzero
+work-limit error, never `NO PATH FOUND`. Previously expensive requests may now
+need a smaller depth or graph. Relation weights and output schemas are unchanged.
+
+Typed `node`/node-trail queries keep nondominated arrivals by node and depth,
+so a cheaper but longer prefix cannot hide a valid trail within `max_depth`.
+Rejected nodes are not considered admitted on a later visit. Existing cost
+weights, direction, deterministic tie rules, work limits and response schema
+remain unchanged. Previously missing trails can now be returned; incomplete
+responses no longer include nodes admitted after their budget was exhausted.
+
+### Hub ranking
+
+New god-node analyses order equal-degree candidates by stable node ID instead
+of input record order. Source-located declarations named `Path`, `Counter`,
+`Enum`, or other names also used by libraries are no longer suppressed by name
+alone. Explicit canonical node kinds take precedence over display-label
+heuristics throughout topology analysis: a `.method()` label does not turn a
+method into a file, and file nodes remain excluded even with descriptive labels.
+Typed structural nodes with nonempty source paths are not classified as concepts
+merely because their source filename has no extension.
+Legacy records without a recognized kind retain the existing label fallback.
+Isolated declarations are omitted. The serialized `id`, `label`, and
+`degree` fields and degree calculation are unchanged; the candidate list can
+change. Published historical artifacts are not rewritten. Hub rank describes
+connectivity, not a verified god-object design defect.
+
 
 Rust structural evidence now uses producer version 2. The evidence and graph
 schema majors are unchanged, but Rust extraction caches from producer version
@@ -101,6 +416,80 @@ schema majors are unchanged, but Rust extraction caches from producer version
 evaluating local macro inputs can publish newly recovered exact calls.
 Unsupported macro shapes, non-evaluating inputs, and ambiguous receiver owners
 remain unresolved rather than being guessed.
+
+Rust receiver lookup now respects local shadowing in lets, loops, closures,
+match arms/guards, and conditional lets. An unknown inner type cannot inherit
+an outer parameter's alias. A let initializer still sees the previous binding;
+an `else` branch does not see bindings from a failed condition. Previously
+incorrect call edges can disappear and remain unresolved until the receiver
+type is proven. The advertised producer capabilities and evidence/graph schemas
+are unchanged. AST cache semantics advance from 2 to 3, rebuilding prior AST
+facts automatically across languages. Published historical graphs are unchanged.
+
+Rust extraction now follows a bounded source-proven `Result<Vec<_>>` collected
+from a standard vector iterator and a constructor declared to return standard
+`Result<Self>`. Its `Ok` match binding, vector loop variables, and `iter().map`
+closure parameters can gain exact method-call targets. Local aliases and
+unsupported iterator or constructor forms remain unresolved. AST cache
+semantics advance from 10 to 11, rebuilding disposable facts; graph and
+evidence schema majors and published historical graphs are unchanged.
+
+Go receiver lookup now includes `if` and switch initializers alongside loop
+initializers. Block locals, range variables, and closure parameters are resolved
+in lexical order; an unsupported nearer binding cannot inherit an outer
+parameter's receiver type. Local callbacks and shadowed package names cannot
+provide a same-named global factory's return type. Type-switch aliases block
+outer types but do not yet infer case-specific narrowing. Invoking a returned
+callback retains the inner factory call without treating the outer invocation
+as a reference to the factory receiver's type. Newly recovered and
+corrected call edges require rebuilding the graph. AST cache semantics advance
+from 3 to 4, invalidating older disposable AST facts across languages. Producer
+capabilities and evidence/graph schemas are unchanged; published history remains
+immutable.
+
+Java method receivers now use constructor syntax evidence for direct named
+object creation, including qualified type names and bounded parentheses.
+Overload selection still requires the existing argument evidence. Anonymous
+subclasses, explicit enclosing-instance creation, arrays, casts, and chained
+results retain unresolved method candidates when their receiver ownership is
+not proven. Arbitrary expression text no longer becomes an external type name.
+An enclosing-instance construction also retains its receiver qualifier instead
+of selecting a same-named imported class. AST cache semantics advance from 4
+to 5, rebuilding older disposable facts across languages and invalidating old
+build seals. Producer capabilities, graph/evidence schemas, and published
+historical realizations are unchanged.
+
+Java varargs signatures now retain their spread parameter, and canonical
+parameter types represent it as an array. Explicit array arguments and trailing
+parameter dimensions preserve their rank. Supported overloads are considered
+in strict fixed-arity, loose fixed-arity, then variable-arity phases. Missing
+argument/hierarchy evidence and incomparable overloads remain unresolved;
+unequal variadic prefixes do not establish a most-specific target. Rebuilding
+can change signature metadata and call targets. AST
+cache semantics advance from 5 to 6; published history, producer capabilities,
+and graph/evidence schemas remain unchanged.
+
+### Framework route hierarchy
+
+Framework route hierarchy now requires a recognized filesystem-convention fact
+from its owning framework producer. A receiver name such as `r` or `app` does
+not establish parentage between programmatic routes in separate source files.
+Framework composition rules still own programmatic mounts and groups. The
+framework-pack semantics identity initially advanced from 6 to 7, and build-state seals
+now include that identity. Rebuild existing graphs to remove unsupported
+containment edges and recompute affected paths, degrees, and communities.
+Graph/evidence schema majors and immutable historical realizations are unchanged.
+
+Framework semantics 8 additionally replaces first-file directory selection with
+framework-specific nesting. Next App Router parents must be layout modules;
+flat route parents use filename segments, including pathless and non-nesting
+markers; Nuxt parents require a matching page module above a child directory.
+Index pages and sibling modules cannot become parents merely through ordering.
+Ambiguous nearest parents remain unresolved instead of falling back outward.
+Rebuild graphs to correct containment, degrees, paths, and communities. These
+rules do not infer custom router configuration, runtime mounts, or an omitted
+layout declaration. See the supported boundaries in the
+[framework graph reference](docs/reference/react-framework-graph.md).
 
 ### Agent Query View
 
@@ -146,6 +535,12 @@ now presents retained fuzzy/ambiguous neighborhoods as candidates, instead of
 requiring resolution before showing their results. No graph or query schema
 major changes. Existing cursors reject a changed semantic result by digest.
 
+Typed Agent View also uses `resultState: "candidates"` with
+`matchState: "ambiguous"` for disclosed auto-picked answers; their witnessed
+relationships remain available. Strict unresolved ambiguity still uses
+`needs_resolution`. Owner-qualified operands retain suffix validation and
+reject missing owners or incomplete leaf-name postings before ranking.
+
 ### Typed text pages and store self-check
 
 Typed commands (`ask`, `search`, `callers`, `callees`, `impact`, `explore`, and
@@ -178,6 +573,30 @@ that parsed caveat text from continuation pages must read it from page one.
 
 ### TypeScript path aliases and file-shaped path input
 
+Exact name lookup can identify both an export binding and its declaration.
+When complete, bounded graph evidence proves that the binding's exact source
+range belongs to one owner and exports one matching declaration, lookup removes
+the redundant binding candidate. Both records retain their graph identities;
+an exact export ID still selects the binding. The declaration must already be
+in the exact-name candidate set and share the binding's qualified name,
+normalized name, and source file. This applies to typed relationship/trail
+queries and the exact lookup used by paths, explanations, and MCP navigation.
+
+Different declarations, multiple export targets, incomplete source ranges,
+inferred/ambiguous/deferred evidence, and incomplete candidate sets keep their
+ambiguity. Additional proof examines at most 256 candidates and 1,024 adjacency
+entries plus a truncation probe. Exhaustion retains the original candidates;
+typed responses report truncation and an ambiguity diagnostic. Graph schemas,
+stored identities, and extraction are unchanged. Existing graphs can receive
+this lookup correction without re-extraction.
+
+Traversal cache format `TRAILT07` retains deferred relationship flags and the
+weakest confidence across all evidence (introduced in `TRAILT06`), including
+explicit compatibility confidence. Missing or unknown confidence values in an
+evidence item cannot establish an exact fact. Older disposable traversal
+caches rebuild from the authoritative graph; published historical graphs are
+not rewritten.
+
 A TypeScript or JavaScript project that is the `extends` base of another
 project keeps its own `compilerOptions.paths` when it declares `files` or
 `include`. Only a base config without its own file set stays excluded, and a
@@ -193,6 +612,86 @@ the same source file. The answer names the module and its source file, so the
 endpoint remains identifiable. Languages that already connect their file nodes
 (for example Go, Python, and Rust) keep the existing behavior, and an ambiguous
 or multi-module file still fails closed.
+
+When a graph publishes no separate `file` node, a repository-relative source
+path now resolves through the source-backed node index: one module owner is
+selected when unique, while multiple modules or declarations remain an explicit
+ambiguity. This lets path traversal follow the same stored workspace import
+edges used by `callers`.
+
+`compass explain` includes a bounded source excerpt by default for a uniquely
+resolved source-backed declaration. When a stored symbol digest matches the
+complete recorded byte span, the excerpt is labeled `digest-verified`. A graph
+without that digest can still supply a current excerpt, explicitly labeled
+`unverified: no recorded source digest`; an anchor alone cannot establish
+freshness. A mismatching or malformed digest prevents source output. This
+corrects the earlier unconditional verification label, including text inside
+shared JSON output envelopes. The query library exposes `digest_verified` on
+`ExplainedSource`; machine schemas and graph artifacts are unchanged.
+`--no-source` restores a metadata-only answer; `--source` remains accepted.
+Ambiguous or unsourced targets do not produce source text.
+
+### Exact symbol search
+
+`search --exact` and MCP `search_symbols` with `exact: true` use the existing
+bounded exact ID/name index without lexical or fuzzy recall. Optional CLI
+`--file`, `--line`, `--kind` filters correspond to MCP `source_file`,
+`start_line`, `kind`. Filters require exact mode; a line also requires a file.
+File strings match stored paths exactly and are not opened or canonicalized.
+Selectors and file filters accept 1..4096 non-control bytes; lines are positive
+32-bit integers and kinds use the stored node-kind spellings.
+
+Exact IDs take precedence over name lookup, then must satisfy every supplied
+filter. Names use the existing normalization (trim whitespace, trailing `()`,
+leading `.`, and lowercase); file paths and IDs remain case-sensitive. All
+matching records remain visible, including overloads and export bindings.
+Scores are uniformly 1 and order is stable by ID. This mode does not select a
+winner or collapse a binding into its declaration.
+
+The candidate cap applies before filtering. A truncated prefix cannot prove
+uniqueness or absence, even when filtering returns one or zero nodes. Node and
+response bounds and coverage diagnostics still apply. Exact CLI text requests
+do not automatically widen candidate bounds. Default ranked search and the
+`compass.query/1` response schema remain unchanged. The query API adds
+`search_exact(SearchRequest, ExactSearchFilter)` without changing `SearchRequest`.
+Agent View uses typed name normalization when identifying exact search matches.
+An empty bounded search without a no-match diagnostic retains `match=unknown`
+and partial execution instead of asserting absence or failing view validation.
+
+### Explanation member source
+
+`explain --source-members` replaces the declaration excerpt with callable member
+excerpts reached through outgoing recorded `contains` / `method` relationships.
+It follows nested type containers, preserving recorded direction and parallel
+membership evidence in the query library. It does not infer ownership from
+names or file proximity, follow calls/references, or promote inferred/deferred
+membership. Ambiguous roots remain unresolved and undirected graphs are refused.
+Default `explain` behavior is unchanged; `--source-members` conflicts with
+`--no-source`.
+
+Members are ordered by source file, byte range, and exact ID. They share
+`--max-source-bytes` (default 4096; maximum 1 MiB in member mode). Discovery has
+separate limits of 128 callables, 128 containers, depth 4, 10,000 adjacency
+entries and 1 MiB of metadata. Verification attempts share a 16 MiB recorded-span
+budget. Discovery-bound failures report unavailable member source; source/work
+exhaustion reports truncation and omitted member counts. Individual source
+failures remain visible without suppressing other valid excerpts. Stored
+source digests and containment checks use the existing source reader.
+
+Optional `--member-focus TEXT` requires member mode. It ranks callables by the
+number of distinct normalized focus terms in their recorded names, then by the
+original source order. Existing query-term and identifier normalization apply;
+input is limited to 4,096 bytes and 32 distinct searchable terms. Empty or
+unsearchable focus is rejected. Duplicate terms do not add weight. No matches
+preserve source order; unmatched members remain candidates. Source is not read
+to rank, and focus does not resolve ambiguous roots or relax any existing limit.
+The report names focus terms and each retained member's lexical matches. These
+matches do not establish responsibility, behavior or semantic relevance.
+
+This is an additive CLI option and query API, with no graph or shared-output
+schema change. The text reports exact member IDs, source anchors, verification
+status, retained source bytes, and unavailable/omitted counts. It is structural
+source evidence, not a synthesized explanation or a god-object diagnosis.
 
 ### Typed query deadlines
 
@@ -513,6 +1012,23 @@ Membership records are compact validated indexes into the deterministic node
 and per-projection group arrays. Documentation is a first-class All-code source
 scope and cannot influence Production architecture.
 
+`compass architecture --format json` may return
+`compass.architecture.summary/1` when a declared detail-projection limit is
+exceeded. Detailed output is capped at 5,000 nodes and 20,000 relationships.
+The summary contains exact graph totals, exact counts for listed kinds,
+aggregate counts for omitted kinds, the exceeded limit, and a deterministic
+sample of up to 12 largest communities with at most 3 nodes each; ties use
+ascending community IDs and node IDs. `kindCountPolicy` orders each kind map by
+ascending name and caps it at 64 safe names; counts for omitted kinds are
+aggregated exactly as `otherNodes` and `otherRelationships`. Sampled IDs are at
+most 1,024 bytes. Sample text fields
+are bounded to 512 characters, escape control and bidi characters, and list
+changed fields in `boundedFields`; unrepresentable sampled IDs are counted in
+`omittedSampleNodes`. It sets `detailsOmitted` and does not reuse the viewer
+schema for incomplete data. Agent JSON reports
+`compass.architecture.summary-agent-view/1` and includes the underlying schema
+as `summarySchema`.
+
 Before the first compatibility-stable release, Compass hard-resets active
 internal extraction, cache, publication, store-index, query-index/ranker,
 overview, qualification, and semantic-diff identities to v1. Provisional
@@ -612,7 +1128,22 @@ realizations of the backend-neutral `compass-store` contract, not a stable SQL
 schema or pointer format that consumers may query directly.
 
 The additive `compass ask` command continues to route bounded questions to the
-typed `compass.query/1` operations. Plain `compass query` against a typed graph
+typed `compass.query/1` operations. Its agent projections now retain the parsed
+symbol/source/target operands used by that operation, with the original question
+in `request.question`. This corrects headlines, evidence basis, and follow-up
+actions that previously treated the whole question as a symbol. Agent-answer
+subject lookup shares the query engine's existing name normalization (case,
+leading dots, and trailing empty parentheses), retaining exact node-ID lookup
+and requiring a unique normalized name. Existing schema
+majors and raw query responses are unchanged. Text cursors whose primary ordering
+changed are rejected by the existing prefix check; reissue the question.
+Ambiguous typed answers now use the operation as their answer basis and ask
+for exact node IDs, with IDs printed for every retained ambiguity candidate.
+They no longer describe the first candidate as a fallback answer or imply
+that an ambiguous path request proved disconnection. Schema majors and raw
+query responses are unchanged. Existing text cursor prefix checks reject
+pages whose candidate rendering changed; restart that query from page one.
+Plain `compass query` against a typed graph
 now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
 with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
 preserve the established text traversal and reject discovery controls.
@@ -717,11 +1248,22 @@ persistence, dispatch, invocation, processing, recognition, refresh,
 resolution, and scheduling) affect ranking only: they cannot add a posting,
 candidate, relationship concept, or relation eligibility. Equal evidence
 vectors remain explicitly ambiguous.
-Natural-query alternatives now require the same channel, operation,
+Lexical natural-query alternatives require the same channel, operation,
 relationship, and calibrated score rank before they are labeled ambiguous.
 This removes false ambiguity between a specifically ranked operation or
 representation and a weaker same-name/helper candidate. Equal-rank candidates
-and duplicate exact-name lookups remain explicit ambiguity.
+and duplicate exact-name lookups remain explicit ambiguity. Exact matches to
+the same source-backed declaration name remain ambiguous across differences
+in kind, signature, owner, and ranking evidence; ranking does not prove which
+declaration the user meant.
+
+Within prose, underscore spellings and mixed-case internal capitals receive
+bounded literal-name lookup before behavior recall. Only declared-name matches
+receive exact-name priority. This changes candidate ordering without changing
+the discovery schema or graph format. Truncated name postings or candidate
+admission cannot prove uniqueness, and generic operation ranking cannot
+override that uncertainty. Single-word capitalized names continue through the
+existing ranking unless the whole question is an exact name.
 
 For explicit action predicates, discovery first reads one compact exact-term
 index restricted to source-backed operation-role declarations. It may finish

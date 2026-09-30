@@ -1,0 +1,68 @@
+{
+  "schema": "compass.source-first-hub-three-language-registration/1",
+  "scope": "Source-first selected Go/Python/Rust hub-retrieval and graph-consistency development check on already captured graphs. Source roles are not independent god-object defect labels or a representative sample.",
+  "sourceRun": "source-first-3lang-01",
+  "sourceSuiteSha256": "13338a37b219b82d6b0a99f5a8b884cc27efa8043b1a38d5a32dcfa88a53da0e",
+  "toolRequest": {
+    "transport": "public stdio MCP",
+    "method": "god_nodes",
+    "arguments": {"top_n": 100},
+    "timeoutSeconds": 120,
+    "maxResponseBytes": 16777216
+  },
+  "binarySha256": {
+    "compass": "17620181b2ca2fb051b234fa022c1fe1bd03913fad2246f48b643603fe85c623",
+    "graphifyMcpPython": "bc9a27bd52c265e86fcd73ef1d4165ec8a47695cffb7624cb0ee618dca83e6c0",
+    "graphifyCli": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3"
+  },
+  "graphifyMcpEnvironmentSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+  "reviewRules": [
+    "Run the same public god_nodes(top_n=100) request on each frozen graph; report top-10, top-50 and top-100 prefixes without changing either output.",
+    "Join each preregistered witness to the exact graph declaration by repository-relative file, declaration start line and source symbol. A missing graph declaration is extraction unavailable, not a ranking miss.",
+    "Give retrieval credit only for an exact returned graph ID or a globally unique returned label with independently checked source identity. Ambiguous labels remain unresolved.",
+    "Recompute a returned row's distinct endpoint-pair degree on that tool's own graph. This checks graph consistency, not source correctness or semantic quality.",
+    "Keep source-role descriptions separate from god-object defect judgments. No source role, file length or high degree is a positive or negative defect label; do not compute god-object precision or superiority from this panel.",
+    "Retain raw requests, responses, transport errors, graph and source hashes, bounds and unavailable outcomes. Do not pool this selected panel with the Java MLCQ rating cohort."
+  ],
+  "repositories": [
+    {
+      "name": "litestream",
+      "language": "Go",
+      "commit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+      "graphSha256": {
+        "compass": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db",
+        "graphify": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e"
+      },
+      "witnesses": [
+        {"file": "store.go", "fileSha256": "56b3da1cdd69e7a3e30b4982f93fcfc4377f7572497c60ac3371cf4b867f7a17", "line": 87, "symbol": "Store", "sourceLine": "type Store struct {", "sourceRole": "Coordinates database lifecycle, compaction, retention, validation and heartbeat work."},
+        {"file": "heartbeat.go", "fileSha256": "ef90f2e79f1a8f89bd34a9cada9e3c399a410cf774b5c2b3233863dc7cbf2581", "line": 17, "symbol": "HeartbeatClient", "sourceLine": "type HeartbeatClient struct {", "sourceRole": "Stores heartbeat HTTP timing and ping state."}
+      ]
+    },
+    {
+      "name": "fastapi",
+      "language": "Python",
+      "commit": "0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4",
+      "graphSha256": {
+        "compass": "1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a",
+        "graphify": "5ffe3ae56c206c0031fdda3d4f1d8ddaa6d270b9be54b5f3e5c086689829c8ab"
+      },
+      "witnesses": [
+        {"file": "fastapi/applications.py", "fileSha256": "38dccb19b2a0b0b984c8d7541263842954a37c087cf96b4463aea17873c6183c", "line": 42, "symbol": "FastAPI", "sourceLine": "class FastAPI(Starlette):", "sourceRole": "Framework application facade for initialization, middleware, OpenAPI and route registration."},
+        {"file": "fastapi/datastructures.py", "fileSha256": "5cfba09e88c7738374ede1795e9d534e774fda032fd5f1b893ed0be1576beca7", "line": 153, "symbol": "DefaultPlaceholder", "sourceLine": "class DefaultPlaceholder:", "sourceRole": "Tracks whether a default value was overwritten, including truthy values."}
+      ]
+    },
+    {
+      "name": "celld",
+      "language": "Rust",
+      "commit": "10cb1303dac710dcb3b557e318e08c855261f68b",
+      "graphSha256": {
+        "compass": "6db996ad031824f7b476c16145cc94287738eaba1e63f1802011f70559cfd1d6",
+        "graphify": "950caea25518bc7e44baa215d2cfcb8dd14c457ef283276b01b6eacf5ba0d750"
+      },
+      "witnesses": [
+        {"file": "crates/celld/peer_auth.rs", "fileSha256": "916bff6785a787db68f6dd62e4ac39c983280b3a4a6850e2010653c63dee54f9", "line": 60, "symbol": "PeerAuth", "sourceLine": "pub struct PeerAuth {", "sourceRole": "Signs and verifies peer requests and tracks replay state."},
+        {"file": "crates/celld/lib.rs", "fileSha256": "ff26ac585c9da922e3dd38481371601abcc5b73f15bab35001ce6b8ae5d29f12", "line": 439, "symbol": "CellActivityGuard", "sourceLine": "pub struct CellActivityGuard {", "sourceRole": "Completion token that releases a cell activity reservation on drop."}
+      ]
+    }
+  ]
+}

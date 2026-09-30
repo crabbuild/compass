@@ -1,0 +1,274 @@
+{
+  "delta": {
+    "addedEdgeRecords": 993,
+    "addedNodeCount": 993,
+    "addedNodeKinds": {
+      "field": 993
+    },
+    "baselinePublicationOmittedNodes": 59,
+    "candidatePublicationOmittedNodes": 59,
+    "changedOldNodeIdsIgnoringCommunity": [],
+    "publicationOmissionsUnchanged": true,
+    "removedEdgeRecords": 0,
+    "removedNodeIds": []
+  },
+  "graphs": [
+    {
+      "directed": true,
+      "edgeRecordCount": 9828,
+      "fieldTypeContextRecords": 0,
+      "nodeCount": 2808,
+      "nonmatchedCount": 993,
+      "nonmatchedExamples": [
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "mu",
+            47
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "client",
+            48
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "logger",
+            49
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "AccountName",
+            52
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "AccountKey",
+            53
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "SASToken",
+            54
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Endpoint",
+            55
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Bucket",
+            58
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Path",
+            59
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ltxFileIterator",
+            356,
+            "ctx",
+            357
+          ],
+          "status": "missing-field"
+        }
+      ],
+      "sha256": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db",
+      "statusCounts": {
+        "missing-field": 993
+      },
+      "tool": "compass-baseline"
+    },
+    {
+      "directed": false,
+      "edgeRecordCount": 12518,
+      "fieldTypeContextRecords": 323,
+      "nodeCount": 2853,
+      "nonmatchedCount": 993,
+      "nonmatchedExamples": [
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "mu",
+            47
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "client",
+            48
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "logger",
+            49
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "AccountName",
+            52
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "AccountKey",
+            53
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "SASToken",
+            54
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Endpoint",
+            55
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Bucket",
+            58
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ReplicaClient",
+            46,
+            "Path",
+            59
+          ],
+          "status": "missing-field"
+        },
+        {
+          "source": [
+            "abs/replica_client.go",
+            "ltxFileIterator",
+            356,
+            "ctx",
+            357
+          ],
+          "status": "missing-field"
+        }
+      ],
+      "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e",
+      "statusCounts": {
+        "missing-field": 993
+      },
+      "tool": "graphify"
+    },
+    {
+      "directed": true,
+      "edgeRecordCount": 10821,
+      "fieldTypeContextRecords": 0,
+      "nodeCount": 3801,
+      "nonmatchedCount": 0,
+      "nonmatchedExamples": [],
+      "sha256": "3aed3fe0dab1fec6e1a9e197474ae3727f4c74dd6f3b68ff7cd91462cb4d29e4",
+      "statusCounts": {
+        "matched": 993
+      },
+      "tool": "compass-candidate"
+    }
+  ],
+  "limitations": [
+    "One known Go development repository cannot establish cross-language extraction quality or broad superiority.",
+    "Publication exclusions and parser recovery remain visible; source fields in excluded files count as unavailable or missing rather than disappearing from the denominator.",
+    "A matching declaration identity does not prove field-access target precision, cohesion, responsibility count or user-facing explanation quality."
+  ],
+  "oracleSha256": "4955dd2800824f99da91bfd5bcd03df3aaba011e101ce3f03993426068f984e6",
+  "rawSha256": "4833f22adf492490e3d3ae33884bf81b7ef3a73e50ed0a3f829ce8b40acdb6df",
+  "registrationSha256": "3beb1693382f278730f083a43bc8e6444f893ae12967ee0339d3139a3ce4c84d",
+  "schema": "compass.go-full-field-review/1",
+  "sourceBlankFieldCount": 0,
+  "sourceCommit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+  "sourceEmbeddedFieldCount": 27,
+  "sourceNamedFieldCount": 993,
+  "sourceStructCount": 167,
+  "trackedGoFileCount": 146,
+  "unexpectedAddedNodes": []
+}

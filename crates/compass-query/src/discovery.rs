@@ -687,6 +687,38 @@ impl CodeQueryEngine {
             }
         }
 
+        // Preserve identifier spellings embedded in prose before generic
+        // behavior postings can fill the recall pool. The name index also
+        // contains aliases, so only a declared name equal to the literal earns
+        // exact-name rank. Every lookup and pool omission participates in the
+        // completeness proof; a bounded collision set is never unique.
+        for literal in literal_identifier_terms(question) {
+            guard.check()?;
+            if probes >= candidate_probe_limit || nodes_read >= candidate_read_limit {
+                exact_name_recall_complete = false;
+                truncated = true;
+                break;
+            }
+            probes += 1;
+            let remaining = candidate_read_limit.saturating_sub(nodes_read).min(64);
+            let (nodes, read_truncated) =
+                backend.nodes_by_normalized_name(&literal, remaining.max(1))?;
+            nodes_read = nodes_read.saturating_add(nodes.len());
+            exact_name_recall_complete &= !read_truncated;
+            truncated |= read_truncated;
+            for node in nodes {
+                if discovery_scope_matches(&node, scope)
+                    && crate::ranking::normalize_symbol_name(&node.name) == literal
+                {
+                    let id = node.id.clone();
+                    let matches = operation_indexed_matches(&node, &prepared.ranking_terms);
+                    let _ = pool.add(CandidateSource::ExactName, node);
+                    let _ = pool.add_indexed_matches(&id, matches);
+                }
+            }
+        }
+        exact_name_recall_complete &= !pool.is_truncated();
+
         // An absent composite identifier is intentionally exact-only: the
         // final specificity gate below rejects every alias, term,
         // relationship, and fuzzy candidate for this query shape. Finish a
@@ -742,7 +774,8 @@ impl CodeQueryEngine {
                 role_pool.into_vec(),
                 candidate_limit,
             );
-            if !read.truncated
+            if exact_name_recall_complete
+                && !read.truncated
                 && !role_pool_truncated
                 && ranked.first().is_some_and(|candidate| {
                     candidate
@@ -810,7 +843,8 @@ impl CodeQueryEngine {
             let required_seed_count = usize::try_from(limits.max_seeds)
                 .unwrap_or(usize::MAX)
                 .min(usize::try_from(limits.max_nodes).unwrap_or(usize::MAX));
-            if !read.truncated
+            if exact_name_recall_complete
+                && !read.truncated
                 && !declaration_pool_truncated
                 && ranked.len() >= required_seed_count
                 && ranked
@@ -1349,7 +1383,8 @@ impl CodeQueryEngine {
                 || (candidate.channel_rank == 5 && exact_name_recall_complete)
         });
         let operation_dominance_complete = ranked.first().is_some_and(|candidate| {
-            candidate.operation_root.is_some()
+            candidate.channel_rank < 5
+                && candidate.operation_root.is_some()
                 && operation_predicate_posting_complete(
                     &candidate.node,
                     &prepared.ranking_terms,
@@ -1753,6 +1788,26 @@ fn is_explicit_binary_path_question(
         .collect::<BTreeSet<_>>()
         .len()
         >= 2
+}
+
+fn literal_identifier_terms(question: &str) -> BTreeSet<String> {
+    // Standalone names already use the full-query exact lookup. In prose,
+    // underscores and mixed-case internal capitals distinguish code spellings
+    // from ordinary words such as "Explain", "close", or "HTTP". This is a
+    // retrieval hint, not a claim that a named declaration exists or is unique.
+    if !question.chars().any(char::is_whitespace) {
+        return BTreeSet::new();
+    }
+    question
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter(|token| {
+            token.chars().any(char::is_alphanumeric)
+                && (token.contains('_')
+                    || (token.chars().any(char::is_lowercase)
+                        && token.chars().skip(1).any(char::is_uppercase)))
+        })
+        .map(crate::ranking::normalize_symbol_name)
+        .collect()
 }
 
 fn is_composite_identifier_query(question: &str, terms: &[String]) -> bool {
@@ -2248,16 +2303,19 @@ fn discovery_seeds(
                 .iter()
                 .filter(|other| {
                     other.node.id != candidate.node.id
-                        && other.channel_rank == candidate.channel_rank
-                        && other.relation_evidence == candidate.relation_evidence
-                        && ((other.operation_root == candidate.operation_root
-                            && (other.score.total_cmp(&candidate.score).is_eq()
-                                || calibrated_low_margin(candidate.score, other.score)
-                                || (candidate.source == DiscoverySeedSource::ExactName
-                                    && other.source == DiscoverySeedSource::ExactName
-                                    && source_backed_name_collision(candidate, other))))
-                            || (other.score.total_cmp(&candidate.score).is_eq()
-                                && source_backed_callable_name_collision(candidate, other)))
+                        // Ranking evidence orders declarations; it cannot
+                        // disambiguate identical exact names across kinds,
+                        // signatures, or owners.
+                        && ((candidate.source == DiscoverySeedSource::ExactName
+                            && other.source == DiscoverySeedSource::ExactName
+                            && source_backed_name_collision(candidate, other))
+                            || (other.channel_rank == candidate.channel_rank
+                                && other.relation_evidence == candidate.relation_evidence
+                                && ((other.operation_root == candidate.operation_root
+                                    && (other.score.total_cmp(&candidate.score).is_eq()
+                                        || calibrated_low_margin(candidate.score, other.score)))
+                                    || (other.score.total_cmp(&candidate.score).is_eq()
+                                        && source_backed_callable_name_collision(candidate, other)))))
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -3263,6 +3321,170 @@ mod tests {
             response.seeds[0].candidate_source,
             DiscoverySeedSource::ExactName
         );
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_keep_exact_name_priority()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for name in [
+            "_BufferedSink",
+            "openSession",
+            "PendingQueue",
+            "flush_buffer",
+        ] {
+            let engine = engine(
+                vec![
+                    anchored_node("n:subject", name, "src/subject.rs", 1),
+                    anchored_node("n:close", "close", "src/other.rs", 2),
+                    anchored_node("n:context", "context", "src/context.rs", 3),
+                ],
+                vec![edge("e:context", "n:close", "n:context")],
+            );
+            let mut query = request(DiscoveryDirection::Both);
+            query.question =
+                format!("Explain {name} ownership, close behavior and context cleanup.");
+            query.limits.max_candidates = 1;
+            let response = engine.discover(query)?;
+            assert_eq!(response.seeds[0].node_id, "n:subject", "{name}");
+            assert!(!response.seeds[0].matched_terms.is_empty(), "{name}");
+            assert_eq!(
+                response.seeds[0].candidate_source,
+                DiscoverySeedSource::ExactName
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_preserve_collisions() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let engine = engine(
+            vec![
+                anchored_node("n:a", "openSession", "src/a.rs", 1),
+                anchored_node("n:b", "openSession", "src/b.rs", 2),
+            ],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "Explain openSession cleanup".to_owned();
+        let response = engine.discover(query)?;
+        assert!(response.seeds[0].ambiguous);
+        assert_eq!(
+            response.seeds[0].candidate_source,
+            DiscoverySeedSource::ExactName
+        );
+        assert!(
+            response.seeds[0]
+                .alternatives
+                .iter()
+                .any(|other| other.node_id != response.seeds[0].node_id)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_keep_collisions_across_rank_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut declaration = anchored_node("n:struct", "PendingQueue", "src/queue.rs", 1);
+        declaration.kind = NodeKind::Struct;
+        let engine = engine(
+            vec![
+                declaration,
+                anchored_node("n:factory", "PendingQueue", "src/factory.rs", 2),
+            ],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "Explain PendingQueue ownership".to_owned();
+        let response = engine.discover(query)?;
+        assert_eq!(response.seeds.len(), 2);
+        assert!(response.seeds.iter().all(|seed| seed.ambiguous));
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_keep_multiple_subjects_and_report_pool_limits()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:a", "openSession", "src/a.rs", 1),
+                anchored_node("n:b", "closeSession", "src/b.rs", 2),
+            ],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "Compare openSession and closeSession behavior".to_owned();
+        let response = engine.discover(query.clone())?;
+        assert_eq!(response.seeds.len(), 2);
+        assert!(
+            response
+                .seeds
+                .iter()
+                .all(|seed| seed.candidate_source == DiscoverySeedSource::ExactName)
+        );
+        query.limits.max_candidates = 1;
+        let limited = engine.discover(query)?;
+        assert!(limited.truncated);
+        assert!(limited.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_report_incomplete_name_postings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nodes = (0..70)
+            .map(|index| {
+                anchored_node(
+                    &format!("n:{index:03}"),
+                    "openSession",
+                    &format!("src/{index}.rs"),
+                    1,
+                )
+            })
+            .collect();
+        let engine = engine(nodes, Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "Explain openSession cleanup".to_owned();
+        // Only the first declaration is in scope. Truncated global postings
+        // still cannot prove that it is the only matching declaration here.
+        query.scope = vec![DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "src/0.rs".to_owned(),
+        }];
+        let response = engine.discover(query)?;
+        assert!(response.truncated);
+        assert_eq!(response.seeds.len(), 1);
+        assert_eq!(response.seeds[0].node_id, "n:000");
+        assert!(response.seeds[0].ambiguous);
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_do_not_promote_plain_words_or_partial_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![
+                anchored_node("n:close", "close", "src/close.rs", 1),
+                anchored_node("n:explain", "Explain", "src/explain.rs", 2),
+                anchored_node("n:partial", "Session", "src/session.rs", 3),
+            ],
+            Vec::new(),
+        );
+        for question in [
+            "Explain close behavior",
+            "Explain missingSession close behavior",
+        ] {
+            let mut query = request(DiscoveryDirection::Both);
+            query.question = question.to_owned();
+            let response = engine.discover(query)?;
+            assert!(
+                response
+                    .seeds
+                    .iter()
+                    .all(|seed| seed.candidate_source != DiscoverySeedSource::ExactName)
+            );
+        }
         Ok(())
     }
 

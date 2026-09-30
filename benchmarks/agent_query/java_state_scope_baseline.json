@@ -1,0 +1,1608 @@
+{
+  "schema": "compass.java-state-scope-baseline/1",
+  "registrationSha256": "3a12b108736b5341ed09f0f9c66aa874e2612ef8d8e26afc542692fe0bdf445a",
+  "scriptSha256": "9a7f160a8c2a4a4ae9ed1c33d978aee953f2b9aafe9b8467d5b141a220272123",
+  "supportSha256": {
+    "runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "state_access_audit.py": "2bf95b707f18f34c9df4461a26f011b83d86f166efacfaab652f8e6231161058"
+  },
+  "oracleSha256": "38fb8d38bccbc395cd06e5ec42fa7edcd7735f9ef4839e9a727d4a2af851a1e7",
+  "graphManifestSha256": "2073c22e8c0a2fcfe456f0ec837c3d1451b305501950e4f63d81ee052e795e66",
+  "scope": "Source-authored synthetic development challenge for Java field scope and receiver selection. Not a real-repository result, held-out evaluation, query benchmark or god-object classifier.",
+  "limitations": [
+    "Target/line diagnostic only; caller ownership and positive edge precision are unscored.",
+    "The compiler confirms this nonconstant fixture, not a general source-access oracle.",
+    "Graphify stored endpoint order is preserved; an undirected graph is not directed path proof.",
+    "Synthetic controls do not replace the five real-repository comparisons or prove god-object quality."
+  ],
+  "inputs": {
+    "registrationSha256": "3a12b108736b5341ed09f0f9c66aa874e2612ef8d8e26afc542692fe0bdf445a",
+    "sourceSha256": "bfc306296dbc95809b0d0171ed770785ce442ba6253dd98ecbbf37cff9730335",
+    "compassBinary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/rust-state-access-01/compass",
+    "compassBinarySha256": "a1692336191eff63849846eb91c1804798381d9e9f1a4ff1180a73a37c61f505",
+    "graphifyBinary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/graphify-mcp-env/bin/graphify",
+    "graphifyBinarySha256": "ed90e12baa7ef1820eb6ab994850cecae3b8dd0c9e35ee43cd8763bc5603dcb6",
+    "graphifyEnvironmentSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+    "tools": {
+      "compass": {
+        "argv": [
+          "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/rust-state-access-01/compass",
+          "extract",
+          "/Users/haipingfu/.codex/worktrees/58baf490-704c-4d67-9c65-a00a1ca7e005/compass/benchmarks/agent_query/fixtures/java_state_access",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/java-state-scope-01/graphs/compass"
+        ],
+        "exitCode": 0,
+        "graph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/java-state-scope-01/graphs/compass/compass-out/snapshots/snapshot-1790511939362120000-67292-0/graph.json",
+        "graphSha256": "667eb129744eee412c13201f261541cd2bb8a2ab5bb9413e095feb8bee683b82",
+        "stdoutSha256": "c47196698414352df28b4065f3ed15a9f493690b4371bb48cd052e98fb5ab852",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "graphify": {
+        "argv": [
+          "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/graphify-mcp-env/bin/graphify",
+          "extract",
+          "/Users/haipingfu/.codex/worktrees/58baf490-704c-4d67-9c65-a00a1ca7e005/compass/benchmarks/agent_query/fixtures/java_state_access",
+          "--code-only",
+          "--out",
+          "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/java-state-scope-01/graphs/graphify"
+        ],
+        "exitCode": 0,
+        "graph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/java-state-scope-01/graphs/graphify/graphify-out/graph.json",
+        "graphSha256": "161b065248da2f4407e6827761dde90841bba37e984be7c975795a65b2c8aa2d",
+        "stdoutSha256": "20b38f2f49563f331e37f38e13fecf67966d986ffdaabe291d8775f463b375d3",
+        "stderrSha256": "5819273003575662cf88b98550563254d739ebd612abe4ee788c1bc4e15a1ceb"
+      }
+    }
+  },
+  "tools": {
+    "compass": {
+      "graphDirected": true,
+      "nodes": 53,
+      "edges": 78,
+      "fieldCandidates": {
+        "scope_value": [
+          {
+            "id": "sha256:c120391c9804991eb001a0931b57304659226e7d01ffc53085f83fe821e14682",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.ScopeFixture::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 231,
+              "endByte": 236,
+              "startLine": 8,
+              "startColumn": 8,
+              "endLine": 8,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 231,
+                    "endByte": 236,
+                    "startLine": 8,
+                    "startColumn": 8,
+                    "endLine": 8,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 0,
+              "label": "ScopeFixture"
+            }
+          }
+        ],
+        "scope_slot": [
+          {
+            "id": "sha256:c619e464c6b19595928732033a66d53458db7fd9700cf706335d5d847f02946f",
+            "kind": "field",
+            "name": "slot",
+            "qualifiedName": "audit.ScopeFixture::slot",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 268,
+              "endByte": 272,
+              "startLine": 9,
+              "startColumn": 9,
+              "endLine": 9,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 268,
+                    "endByte": 272,
+                    "startLine": 9,
+                    "startColumn": 9,
+                    "endLine": 9,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 1,
+              "label": "Cell"
+            }
+          }
+        ],
+        "scope_items": [
+          {
+            "id": "sha256:2bdbd3f28c364d1b40e7ea4ba2b34dfef3ad736d42f4aa63e8ef4e0d9e5c54c7",
+            "kind": "field",
+            "name": "items",
+            "qualifiedName": "audit.ScopeFixture::items",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 305,
+              "endByte": 310,
+              "startLine": 10,
+              "startColumn": 11,
+              "endLine": 10,
+              "endColumn": 16
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 305,
+                    "endByte": 310,
+                    "startLine": 10,
+                    "startColumn": 11,
+                    "endLine": 10,
+                    "endColumn": 16
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 1,
+              "label": "Cell"
+            }
+          }
+        ],
+        "scope_failure": [
+          {
+            "id": "sha256:a9c547361cad58532c1cd08f804ac8b9f3d2bb8a6f5af12119d5bef15cda7224",
+            "kind": "field",
+            "name": "failure",
+            "qualifiedName": "audit.ScopeFixture::failure",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 354,
+              "endByte": 361,
+              "startLine": 11,
+              "startColumn": 21,
+              "endLine": 11,
+              "endColumn": 28
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 354,
+                    "endByte": 361,
+                    "startLine": 11,
+                    "startColumn": 21,
+                    "endLine": 11,
+                    "endColumn": 28
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 0,
+              "label": "ScopeFixture"
+            }
+          }
+        ],
+        "scope_resource": [
+          {
+            "id": "sha256:73ad1f600b37b11263bfa5f1cfad9147cf7df45d0fe8090aa008bb0e744bfe76",
+            "kind": "field",
+            "name": "resource",
+            "qualifiedName": "audit.ScopeFixture::resource",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 396,
+              "endByte": 404,
+              "startLine": 12,
+              "startColumn": 10,
+              "endLine": 12,
+              "endColumn": 18
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 396,
+                    "endByte": 404,
+                    "startLine": 12,
+                    "startColumn": 10,
+                    "endLine": 12,
+                    "endColumn": 18
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 4,
+              "label": "Token"
+            }
+          }
+        ],
+        "scope_pattern": [
+          {
+            "id": "sha256:86a48a4109ea79da64074189aecc6511576c8e008da8236323a2f6bef2b857c5",
+            "kind": "field",
+            "name": "pattern",
+            "qualifiedName": "audit.ScopeFixture::pattern",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 441,
+              "endByte": 448,
+              "startLine": 13,
+              "startColumn": 11,
+              "endLine": 13,
+              "endColumn": 18
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 441,
+                    "endByte": 448,
+                    "startLine": 13,
+                    "startColumn": 11,
+                    "endLine": 13,
+                    "endColumn": 18
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 0,
+              "label": "ScopeFixture"
+            }
+          }
+        ],
+        "scope_static": [
+          {
+            "id": "sha256:9640b33e89ef020d7198a0109a8603256f072cd8cae801cf6e06794f2a5febe6",
+            "kind": "field",
+            "name": "staticValue",
+            "qualifiedName": "audit.ScopeFixture::staticValue",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 488,
+              "endByte": 499,
+              "startLine": 14,
+              "startColumn": 15,
+              "endLine": 14,
+              "endColumn": 26
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 488,
+                    "endByte": 499,
+                    "startLine": 14,
+                    "startColumn": 15,
+                    "endLine": 14,
+                    "endColumn": 26
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 0,
+              "label": "ScopeFixture"
+            }
+          }
+        ],
+        "inner_value": [
+          {
+            "id": "sha256:6b7ddf31e47588cb7e38e5d2b7af2fbea587db26b6451eb25a278747be7c5d42",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.ScopeFixture::Inner::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 4410,
+              "endByte": 4415,
+              "startLine": 123,
+              "startColumn": 12,
+              "endLine": 123,
+              "endColumn": 17
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 4410,
+                    "endByte": 4415,
+                    "startLine": 123,
+                    "startColumn": 12,
+                    "endLine": 123,
+                    "endColumn": 17
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 3,
+              "label": "Inner"
+            }
+          }
+        ],
+        "anonymous_value": [],
+        "local_value": [],
+        "base_value": [
+          {
+            "id": "sha256:c4d7ec7b8bfad6392d33d030ed93419e9d930010f75a6d724f028bde9945b66a",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.Base::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 5384,
+              "endByte": 5389,
+              "startLine": 156,
+              "startColumn": 8,
+              "endLine": 156,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 5384,
+                    "endByte": 5389,
+                    "startLine": 156,
+                    "startColumn": 8,
+                    "endLine": 156,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 0,
+              "label": "ScopeFixture"
+            }
+          }
+        ],
+        "cell_value": [
+          {
+            "id": "sha256:00c165a1eecef001df211ee8af6590b433183f710703bf96f08a6f4749b651b7",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.Cell::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 5434,
+              "endByte": 5439,
+              "startLine": 159,
+              "startColumn": 8,
+              "endLine": 159,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 5434,
+                    "endByte": 5439,
+                    "startLine": 159,
+                    "startColumn": 8,
+                    "endLine": 159,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 1,
+              "label": "Cell"
+            }
+          }
+        ],
+        "shadow_value": [
+          {
+            "id": "sha256:4f1db07ec624d79cb8530c7b864ae5e92a35b32a2a59ac2eed1efb570d8fc295",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.Shadow::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 5499,
+              "endByte": 5504,
+              "startLine": 162,
+              "startColumn": 8,
+              "endLine": 162,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 5499,
+                    "endByte": 5504,
+                    "startLine": 162,
+                    "startColumn": 8,
+                    "endLine": 162,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 1,
+              "label": "Cell"
+            }
+          }
+        ],
+        "token_value": [
+          {
+            "id": "sha256:f806daf2ddfcccec2f458b73414b365d04a23954587c8ada5efa398fdfcd6d0d",
+            "kind": "field",
+            "name": "value",
+            "qualifiedName": "audit.Token::value",
+            "language": "java",
+            "source": {
+              "file": "ScopeFixture.java",
+              "startByte": 5577,
+              "endByte": 5582,
+              "startLine": 165,
+              "startColumn": 8,
+              "endLine": 165,
+              "endColumn": 13
+            },
+            "details": {
+              "type": "symbol",
+              "data": {}
+            },
+            "evidence": [
+              {
+                "origin": "ast",
+                "extractor": "compass.languages.java.universal",
+                "confidence": "exact",
+                "anchors": [
+                  {
+                    "file": "ScopeFixture.java",
+                    "startByte": 5577,
+                    "endByte": 5582,
+                    "startLine": 165,
+                    "startColumn": 8,
+                    "endLine": 165,
+                    "endColumn": 13
+                  }
+                ]
+              }
+            ],
+            "community": {
+              "id": 4,
+              "label": "Token"
+            }
+          }
+        ]
+      },
+      "allContactRecords": [],
+      "cases": [
+        {
+          "id": "constructor",
+          "line": 17,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "explicit_this",
+          "line": 20,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "implicit_this",
+          "line": 23,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "repeated",
+          "line": 26,
+          "expectedFields": [
+            "scope_value",
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "parameter_shadow",
+          "line": 29,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_before",
+          "line": 32,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_shadow",
+          "line": 35,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_after",
+          "line": 37,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "before_local",
+          "line": 40,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "after_local",
+          "line": 42,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "for_shadow",
+          "line": 46,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "for_after",
+          "line": 48,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_iterable",
+          "line": 51,
+          "expectedFields": [
+            "scope_items"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_binding",
+          "line": 52,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_after",
+          "line": 54,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_shadow",
+          "line": 57,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_this",
+          "line": 58,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_implicit",
+          "line": 59,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "catch_shadow",
+          "line": 65,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "catch_after",
+          "line": 67,
+          "expectedFields": [
+            "scope_failure"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_binding",
+          "line": 71,
+          "expectedFields": [
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_catch",
+          "line": 73,
+          "expectedFields": [
+            "scope_resource",
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_after",
+          "line": 75,
+          "expectedFields": [
+            "scope_resource",
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_true",
+          "line": 79,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_after",
+          "line": 81,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_input",
+          "line": 84,
+          "expectedFields": [
+            "scope_pattern"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_flow",
+          "line": 85,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "typed_parameter",
+          "line": 88,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "cast_receiver",
+          "line": 91,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "field_chain",
+          "line": 94,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "array_receiver",
+          "line": 97,
+          "expectedFields": [
+            "scope_items",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "super_field",
+          "line": 100,
+          "expectedFields": [
+            "base_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declared_receiver",
+          "line": 103,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "hiding_receiver",
+          "line": 106,
+          "expectedFields": [
+            "shadow_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "generic_bound",
+          "line": 109,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "static_fields",
+          "line": 112,
+          "expectedFields": [
+            "scope_static",
+            "scope_static"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "method_not_field",
+          "line": 116,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declarator_order",
+          "line": 119,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declarator_shadow",
+          "line": 120,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "inner_own",
+          "line": 125,
+          "expectedFields": [
+            "inner_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "qualified_this",
+          "line": 128,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "inherited_beats_outer",
+          "line": 133,
+          "expectedFields": [
+            "base_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "anonymous_this",
+          "line": 140,
+          "expectedFields": [
+            "anonymous_value",
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "local_class_this",
+          "line": 148,
+          "expectedFields": [
+            "local_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        }
+      ],
+      "summary": {
+        "fieldDeclarations": 14,
+        "uniqueFields": 12,
+        "missingFields": 2,
+        "ambiguousFields": 0,
+        "fieldContactRecords": 0,
+        "registeredFieldOccurrences": 45,
+        "occurrenceTargetsMatched": 0,
+        "negativeCases": 8,
+        "negativeCasesWithContact": 0,
+        "callerOwnershipScored": false,
+        "edgePrecision": null
+      }
+    },
+    "graphify": {
+      "graphDirected": false,
+      "nodes": 43,
+      "edges": 62,
+      "fieldCandidates": {
+        "scope_value": [],
+        "scope_slot": [],
+        "scope_items": [],
+        "scope_failure": [],
+        "scope_resource": [],
+        "scope_pattern": [],
+        "scope_static": [],
+        "inner_value": [],
+        "anonymous_value": [],
+        "local_value": [],
+        "base_value": [],
+        "cell_value": [],
+        "shadow_value": [],
+        "token_value": []
+      },
+      "allContactRecords": [],
+      "cases": [
+        {
+          "id": "constructor",
+          "line": 17,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "explicit_this",
+          "line": 20,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "implicit_this",
+          "line": 23,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "repeated",
+          "line": 26,
+          "expectedFields": [
+            "scope_value",
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "parameter_shadow",
+          "line": 29,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_before",
+          "line": 32,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_shadow",
+          "line": 35,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "block_after",
+          "line": 37,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "before_local",
+          "line": 40,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "after_local",
+          "line": 42,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "for_shadow",
+          "line": 46,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "for_after",
+          "line": 48,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_iterable",
+          "line": 51,
+          "expectedFields": [
+            "scope_items"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_binding",
+          "line": 52,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "enhanced_after",
+          "line": 54,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_shadow",
+          "line": 57,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_this",
+          "line": 58,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "lambda_implicit",
+          "line": 59,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "catch_shadow",
+          "line": 65,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "catch_after",
+          "line": 67,
+          "expectedFields": [
+            "scope_failure"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_binding",
+          "line": 71,
+          "expectedFields": [
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_catch",
+          "line": 73,
+          "expectedFields": [
+            "scope_resource",
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "resource_after",
+          "line": 75,
+          "expectedFields": [
+            "scope_resource",
+            "token_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_true",
+          "line": 79,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_after",
+          "line": 81,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_input",
+          "line": 84,
+          "expectedFields": [
+            "scope_pattern"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "pattern_flow",
+          "line": 85,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "typed_parameter",
+          "line": 88,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "cast_receiver",
+          "line": 91,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "field_chain",
+          "line": 94,
+          "expectedFields": [
+            "scope_slot",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "array_receiver",
+          "line": 97,
+          "expectedFields": [
+            "scope_items",
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "super_field",
+          "line": 100,
+          "expectedFields": [
+            "base_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declared_receiver",
+          "line": 103,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "hiding_receiver",
+          "line": 106,
+          "expectedFields": [
+            "shadow_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "generic_bound",
+          "line": 109,
+          "expectedFields": [
+            "cell_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "static_fields",
+          "line": 112,
+          "expectedFields": [
+            "scope_static",
+            "scope_static"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "method_not_field",
+          "line": 116,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declarator_order",
+          "line": 119,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "declarator_shadow",
+          "line": 120,
+          "expectedFields": [],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "inner_own",
+          "line": 125,
+          "expectedFields": [
+            "inner_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "qualified_this",
+          "line": 128,
+          "expectedFields": [
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "inherited_beats_outer",
+          "line": 133,
+          "expectedFields": [
+            "base_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "anonymous_this",
+          "line": 140,
+          "expectedFields": [
+            "anonymous_value",
+            "scope_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        },
+        {
+          "id": "local_class_this",
+          "line": 148,
+          "expectedFields": [
+            "local_value"
+          ],
+          "observedUniqueTargets": [],
+          "connectingRecords": [],
+          "targetOccurrencesMatched": 0,
+          "unexpectedTargets": []
+        }
+      ],
+      "summary": {
+        "fieldDeclarations": 14,
+        "uniqueFields": 0,
+        "missingFields": 14,
+        "ambiguousFields": 0,
+        "fieldContactRecords": 0,
+        "registeredFieldOccurrences": 45,
+        "occurrenceTargetsMatched": 0,
+        "negativeCases": 8,
+        "negativeCasesWithContact": 0,
+        "callerOwnershipScored": false,
+        "edgePrecision": null
+      }
+    }
+  }
+}

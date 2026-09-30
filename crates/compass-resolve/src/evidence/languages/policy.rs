@@ -66,7 +66,9 @@ impl LanguagePolicyKind {
                     candidate,
                 ))
             }
-            Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
+            Self::Java => db
+                .resolve_java_field_receiver(candidate)
+                .or_else(|| db.resolve_java_same_package_builtin_collision(candidate)),
             Self::Kotlin => db.resolve_kotlin_candidate(candidate),
             Self::Ruby | Self::Swift | Self::Dart | Self::Scala | Self::Groovy | Self::Generic => {
                 None

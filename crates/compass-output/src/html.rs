@@ -780,6 +780,15 @@ pub(crate) fn node_values(
     communities: &Communities,
     options: &HtmlOptions<'_>,
 ) -> Vec<Value> {
+    node_values_bounded(document, communities, options, usize::MAX)
+}
+
+pub(crate) fn node_values_bounded(
+    document: &GraphDocument,
+    communities: &Communities,
+    options: &HtmlOptions<'_>,
+    limit: usize,
+) -> Vec<Value> {
     let node_community = communities
         .iter()
         .flat_map(|(community, members)| {
@@ -796,7 +805,7 @@ pub(crate) fn node_values(
         .unwrap_or(1)
         .max(1);
     let mut nodes = Vec::new();
-    for node in &document.nodes {
+    for node in document.nodes.iter().take(limit) {
         let community = node_community.get(node.id.as_str()).copied().unwrap_or(0);
         let color = community_color(community);
         let label = sanitize_label(&node_label(node));

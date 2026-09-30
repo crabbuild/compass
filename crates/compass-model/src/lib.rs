@@ -3,6 +3,7 @@
 /// Default bounded size accepted by current graph readers.
 pub const DEFAULT_GRAPH_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 
+mod artifact;
 pub mod code_graph;
 mod document;
 mod error;
@@ -16,6 +17,7 @@ mod query_index;
 pub mod search;
 mod validation;
 
+pub use artifact::GraphArtifact;
 pub use document::{EdgeRecord, GraphDocument, NodeRecord};
 pub use error::GraphError;
 pub use graph::{EdgeIndex, Graph, NodeIndex};

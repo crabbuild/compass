@@ -1,0 +1,170 @@
+{
+  "schema": "compass.heldout-path-diagnostics/1",
+  "scope": "Post-output diagnostics on the original frozen binaries and graphs. Prepared endpoints do not measure node retrieval or establish an end-to-end workflow cost advantage. Neither arm replaces the original confirmation score. Graphify path help does not promise exact-ID semantics.",
+  "arms": [
+    {
+      "arm": "stored_ids",
+      "artifact": "heldout-a-explicit-path-diagnostic-01",
+      "auditDigest": "a955696961842c00576155bb8d6cc1ed970f6667e974a30e45933f9b913318f9",
+      "inputDigest": "d5bdd613377644feac078827f7cc5a5b43ce36309579be721b3e706a0933feb3",
+      "results": [
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-forward",
+          "tool": "compass",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "a2d25eba2c1848d27c99659d3c66c690a14f57eb95872097ca2612ec123d3a0b"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-forward",
+          "tool": "graphify",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "317bc379d4a10fe6b621471754b2619265f392bfa85f4343075925022dc4dbc6"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-reverse",
+          "tool": "compass",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "114e4cd102e00074a384f50f792981bdeb6578f6dedc24d85a4bbf9799ad8930"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-reverse",
+          "tool": "graphify",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "74baa786104a9342fa52e86a0ca550920bb0f29a380237c0b40ebf1ee25e2c6d"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-forward",
+          "tool": "compass",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "fa9d7fd0d98551e1bf1c73dd520f9cea07d6c5205e8052ec7aa617a9427568e2"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-forward",
+          "tool": "graphify",
+          "matched": false,
+          "failures": [
+            "route length differs from reviewed witness"
+          ],
+          "stdoutSha256": "dceff48f7dcf0eb1aebcd94c482f629e7ad35c1095f395a693cca52bc532cea5"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-reverse",
+          "tool": "compass",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "a4a1b0b112b9d1761590ae71752d69b4b1f3807e04097ea74054a9ba53a27043"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-reverse",
+          "tool": "graphify",
+          "matched": false,
+          "failures": [
+            "route length differs from reviewed witness"
+          ],
+          "stdoutSha256": "1daec3b41504b36036dbf6a8338a05d9d4d53a837a863ead7302f96f042baeee"
+        }
+      ]
+    },
+    {
+      "arm": "display_labels",
+      "artifact": "heldout-a-label-path-diagnostic-01",
+      "auditDigest": "33197715aa55be793ae3612af827dd7cb2d1729a3bc31b81c0a2753e4d918628",
+      "inputDigest": "6f95aefaf813919be5baef2e4ae97c91e5bc7eafd839eecd65c4c1b3803e65f6",
+      "results": [
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-forward",
+          "tool": "compass",
+          "matched": false,
+          "failures": [
+            "expected exactly one rendered path header",
+            "command exited 1"
+          ],
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-forward",
+          "tool": "graphify",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "317bc379d4a10fe6b621471754b2619265f392bfa85f4343075925022dc4dbc6"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-reverse",
+          "tool": "compass",
+          "matched": false,
+          "failures": [
+            "expected exactly one rendered path header",
+            "command exited 1"
+          ],
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "repository": "redux",
+          "question": "redux-holdout-path-reverse",
+          "tool": "graphify",
+          "matched": true,
+          "failures": [],
+          "stdoutSha256": "74baa786104a9342fa52e86a0ca550920bb0f29a380237c0b40ebf1ee25e2c6d"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-forward",
+          "tool": "compass",
+          "matched": false,
+          "failures": [
+            "expected exactly one rendered path header",
+            "command exited 1"
+          ],
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-forward",
+          "tool": "graphify",
+          "matched": false,
+          "failures": [
+            "route length differs from reviewed witness"
+          ],
+          "stdoutSha256": "2ffc33bac6667a18b7979e75b064ca2730fd19a7e93e977b28bc31382cea35f6"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-reverse",
+          "tool": "compass",
+          "matched": false,
+          "failures": [
+            "expected exactly one rendered path header",
+            "command exited 1"
+          ],
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "repository": "walkdir",
+          "question": "walkdir-holdout-path-reverse",
+          "tool": "graphify",
+          "matched": false,
+          "failures": [
+            "route length differs from reviewed witness"
+          ],
+          "stdoutSha256": "736636244cca57cf06ce86a293a15b530c3c610b889eb1b14ff694458ae47ac7"
+        }
+      ]
+    }
+  ]
+}

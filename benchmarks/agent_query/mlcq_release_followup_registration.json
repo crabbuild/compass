@@ -1,0 +1,62 @@
+{
+  "schema": "compass.mlcq-release-followup-registration/1",
+  "originalRegistrationSha256": "a08e6a0970c605154b329acbfebaa0d9684859f1fad2fa0ed8e8717772866ef1",
+  "purpose": "Re-run the same eight-class development audit after the registered complete-source release follow-up; preserve both previous admission attempts and all failures.",
+  "disclosure": "Both prior native ranking panels and source-assisted diagnostics were inspected. The classes, labels, queries, cutoffs and limits remain unchanged. This is development follow-up, not held-out or independent adjudication.",
+  "maxGraphBytes": 1073741824,
+  "otherLimits": {
+    "maxSourceFileBytes": 4194304,
+    "maxGraphBytes": 1073741824,
+    "maxExtractSeconds": 1200,
+    "maxExtractStreamBytes": 16777216,
+    "maxMcpSessionBytes": 67108864
+  },
+  "nativeHubCapture": {
+    "method": "god_nodes",
+    "arguments": {
+      "top_n": 100
+    },
+    "timeoutSeconds": 120,
+    "maxResponseBytes": 16777216
+  },
+  "primarySampleIds": [
+    6374724,
+    6391534,
+    6406137,
+    6413795,
+    8528735,
+    8537138,
+    8538037,
+    8539645
+  ],
+  "frozenSuccessfulGraphs": [
+    {
+      "repository": "apache/cloudstack",
+      "tool": "graphify",
+      "graphBytes": 227334534,
+      "graphSha256": "8ef3ace655bb60a001851e911737b7995d7da081b04459441b02ab6b68242f72"
+    },
+    {
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "compass",
+      "graphBytes": 477211091,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+    },
+    {
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "graphify",
+      "graphBytes": 189557807,
+      "graphSha256": "cfdc1f9f8db069df24854f5a0786d8777a9daa2e33615ed44ae39e1189b1cdef"
+    }
+  ],
+  "compassCloudStack": "Use only the candidate result of sql-regex-cache-01/whole/run.json after both declared release extractions terminate and repeated whole-run verification agrees. Require candidate success and the existing 1 GiB graph bound; otherwise retain it as unavailable, without fallback to the baseline or a reduced scope.",
+  "requests": "Fresh MCP sessions: same god_nodes(top_n=100), same public exact source-coordinate resolvers and one unfiltered neighbor call per resolved primary class. Graphify neighbor token_budget=262144; both tools retain the same 120-second request timeout, 16 MiB response and 64 MiB session caps. Keep raw requests/responses, failed and partial captures, native IDs, ambiguous labels and graph omission warnings.",
+  "judgment": "At fixed cutoffs 10/50/100 report consensus-positive class retrieval out of four and consensus-none class retrieval out of four separately. Nonreturned, missing extraction and unresolved output identity remain distinct. Unlabeled hubs cannot become false positives or true negatives. No precision-at-k, population accuracy or classifier score from this partial label set. Preserve every candidate and rating disagreement.",
+  "forbiddenClaims": "Do not replace original failed outcomes, tune on these eight classes and call them held-out, substitute source-assisted neighbors for the ranking score, or claim population precision/overall superiority.",
+  "priorAdmissionRegistrationSha256": "1fc72b0ef22d980041eebeb104124ffdf23efd4e53e5eecc39a602f67160ee5d",
+  "wholeReleaseRegistrationSha256": "085d9148f4beb624a69f140fc103c7c18248d5b404be436177606332216c110b",
+  "compassServerBinarySha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+  "frozenEclipseGraph": "The Compass Eclipse graph was produced by the earlier frozen development binary. Its producer hash/provenance remains unchanged. Query it using the same release server as CloudStack, and disclose the graph-producer/server distinction. Do not call it a fresh extraction by this candidate.",
+  "queryTiming": "Record operational request times, with identical request bounds but no repeated query timing experiment or speed ranking. No extraction or compilation by this task may overlap capture.",
+  "graphifyCoverageDisclosure": "The frozen Graphify CloudStack extraction skipped all 119 SQL files because the optional parser was absent. Keep that environment and graph unchanged, disclose unequal emitted language coverage, and do not derive a runtime ranking."
+}

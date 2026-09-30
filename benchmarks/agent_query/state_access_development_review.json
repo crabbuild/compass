@@ -1,0 +1,2815 @@
+{
+  "schema": "compass.state-access-development-review/1",
+  "registrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "auditScriptSha256": "2bf95b707f18f34c9df4461a26f011b83d86f166efacfaab652f8e6231161058",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "summary": {
+    "compass": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 6,
+      "contactSupported": 0,
+      "selectedLineSupported": 0,
+      "status": {
+        "missing_state": 8,
+        "no_contact_edge": 12
+      }
+    },
+    "graphify": {
+      "accessSites": 20,
+      "uniqueCallableSites": 20,
+      "uniqueStateSlots": 0,
+      "contactSupported": 0,
+      "selectedLineSupported": 0,
+      "status": {
+        "missing_state": 20
+      }
+    }
+  },
+  "inputs": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "graphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "graphDirected": true,
+      "bytes": 2488750,
+      "nodes": 729,
+      "edges": 1914
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "graphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "graphDirected": false,
+      "bytes": 1066128,
+      "nodes": 674,
+      "edges": 2563
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "graphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "graphDirected": true,
+      "bytes": 9607995,
+      "nodes": 4264,
+      "edges": 6387
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "graphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "graphDirected": false,
+      "bytes": 2855866,
+      "nodes": 2867,
+      "edges": 5257
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "graphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "graphDirected": true,
+      "bytes": 26063627,
+      "nodes": 6116,
+      "edges": 21110
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "graphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "graphDirected": false,
+      "bytes": 11153389,
+      "nodes": 5361,
+      "edges": 20456
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "graphDirected": true,
+      "bytes": 8047006,
+      "nodes": 3503,
+      "edges": 5653
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "graphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "graphDirected": false,
+      "bytes": 902536,
+      "nodes": 996,
+      "edges": 1597
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "graphSha256": "e68fbe798dcf7422184736971dcdfc29d577e1e37269ea9c43456b9f6af54cb3",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "graphDirected": true,
+      "bytes": 1316088,
+      "nodes": 288,
+      "edges": 1206
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "graphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "graphDirected": false,
+      "bytes": 212674,
+      "nodes": 247,
+      "edges": 457
+    }
+  ],
+  "results": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Mux",
+      "state": "handler",
+      "file": "mux.go",
+      "declarationLine": 24,
+      "access": {
+        "method": "Use",
+        "methodLine": 100,
+        "line": 101,
+        "column": 5,
+        "expression": "mx.handler",
+        "operation": "read",
+        "text": "\tif mx.handler != nil {"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "kind": "method",
+          "name": ".Use()",
+          "qualifiedName": "chi.Mux::Use",
+          "language": "go",
+          "source": {
+            "file": "mux.go",
+            "startByte": 3098,
+            "endByte": 3323,
+            "startLine": 100,
+            "startColumn": 0,
+            "endLine": 105,
+            "endColumn": 1
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "func (mx *Mux) Use(middlewares ...func(http.Handler) http.Handler)",
+              "signatureDigest": "659f46b12b16aad7608083957e6fae567b04419465f28ead26a3fed332042e5e",
+              "implementationDigest": "90b90e0dc2512b2eaa1dde6c97ce763901114da265768319579d335e0f808dd5",
+              "sourceDigest": "245aefc44e489ad148dd12f50ed3d4cc4c2906ac1f0a7f9910971c08d775e488"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.go.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "mux.go",
+                  "startByte": 3113,
+                  "endByte": 3116,
+                  "startLine": 100,
+                  "startColumn": 15,
+                  "endLine": 100,
+                  "endColumn": 18
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "NewRouter"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Mux",
+      "state": "handler",
+      "file": "mux.go",
+      "declarationLine": 24,
+      "access": {
+        "method": "With",
+        "methodLine": 242,
+        "line": 245,
+        "column": 19,
+        "expression": "mx.handler",
+        "operation": "read",
+        "text": "\tif !mx.inline && mx.handler == nil {"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "kind": "method",
+          "name": ".With()",
+          "qualifiedName": "chi.Mux::With",
+          "language": "go",
+          "source": {
+            "file": "mux.go",
+            "startByte": 7987,
+            "endByte": 8669,
+            "startLine": 242,
+            "startColumn": 0,
+            "endLine": 263,
+            "endColumn": 1
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "func (mx *Mux) With(middlewares ...func(http.Handler) http.Handler) Router",
+              "signatureDigest": "76785d02f71f43d41c2a72a89469f4245987421904054cfd01ea9d57b1df7446",
+              "implementationDigest": "67bd9b2192bc28c5f2e6fef637fa8ff9173a41dbe1406c1241cdaeae7b15cb37",
+              "sourceDigest": "c56a25f59fbbb7c878e3767265be7bf8c74fae9278fd616e64fb9eed8a0a70b0"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.go.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "mux.go",
+                  "startByte": 8002,
+                  "endByte": 8006,
+                  "startLine": 242,
+                  "startColumn": 15,
+                  "endLine": 242,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 5,
+            "label": "Mux"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Mux",
+      "state": "middlewares",
+      "file": "mux.go",
+      "declarationLine": 43,
+      "access": {
+        "method": "Use",
+        "methodLine": 100,
+        "line": 104,
+        "column": 2,
+        "expression": "mx.middlewares",
+        "operation": "write",
+        "text": "\tmx.middlewares = append(mx.middlewares, middlewares...)"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:f592c330a46544e8c614e234af51ff29c320c18c021fc1bc1b5410a58761786b",
+          "kind": "method",
+          "name": ".Use()",
+          "qualifiedName": "chi.Mux::Use",
+          "language": "go",
+          "source": {
+            "file": "mux.go",
+            "startByte": 3098,
+            "endByte": 3323,
+            "startLine": 100,
+            "startColumn": 0,
+            "endLine": 105,
+            "endColumn": 1
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "func (mx *Mux) Use(middlewares ...func(http.Handler) http.Handler)",
+              "signatureDigest": "659f46b12b16aad7608083957e6fae567b04419465f28ead26a3fed332042e5e",
+              "implementationDigest": "90b90e0dc2512b2eaa1dde6c97ce763901114da265768319579d335e0f808dd5",
+              "sourceDigest": "245aefc44e489ad148dd12f50ed3d4cc4c2906ac1f0a7f9910971c08d775e488"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.go.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "mux.go",
+                  "startByte": 3113,
+                  "endByte": 3116,
+                  "startLine": 100,
+                  "startColumn": 15,
+                  "endLine": 100,
+                  "endColumn": 18
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "NewRouter"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Mux",
+      "state": "middlewares",
+      "file": "mux.go",
+      "declarationLine": 43,
+      "access": {
+        "method": "With",
+        "methodLine": 242,
+        "line": 252,
+        "column": 31,
+        "expression": "mx.middlewares",
+        "operation": "read",
+        "text": "\t\tmws = make(Middlewares, len(mx.middlewares))"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:8b2e84e1fc793772014c2d4ab2775681cef7c9e3f005e37905794d12600d4162",
+          "kind": "method",
+          "name": ".With()",
+          "qualifiedName": "chi.Mux::With",
+          "language": "go",
+          "source": {
+            "file": "mux.go",
+            "startByte": 7987,
+            "endByte": 8669,
+            "startLine": 242,
+            "startColumn": 0,
+            "endLine": 263,
+            "endColumn": 1
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "func (mx *Mux) With(middlewares ...func(http.Handler) http.Handler) Router",
+              "signatureDigest": "76785d02f71f43d41c2a72a89469f4245987421904054cfd01ea9d57b1df7446",
+              "implementationDigest": "67bd9b2192bc28c5f2e6fef637fa8ff9173a41dbe1406c1241cdaeae7b15cb37",
+              "sourceDigest": "c56a25f59fbbb7c878e3767265be7bf8c74fae9278fd616e64fb9eed8a0a70b0"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.go.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "mux.go",
+                  "startByte": 8002,
+                  "endByte": 8006,
+                  "startLine": 242,
+                  "startColumn": 15,
+                  "endLine": 242,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 5,
+            "label": "Mux"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Mux",
+      "state": "handler",
+      "file": "mux.go",
+      "declarationLine": 24,
+      "access": {
+        "method": "Use",
+        "methodLine": 100,
+        "line": 101,
+        "column": 5,
+        "expression": "mx.handler",
+        "operation": "read",
+        "text": "\tif mx.handler != nil {"
+      },
+      "methodCandidates": [
+        {
+          "id": "chi_mux_use",
+          "label": ".Use()",
+          "_origin": "ast",
+          "community": 3,
+          "file_type": "code",
+          "norm_label": ".use()",
+          "source_file": "mux.go",
+          "source_location": "L100"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Mux",
+      "state": "handler",
+      "file": "mux.go",
+      "declarationLine": 24,
+      "access": {
+        "method": "With",
+        "methodLine": 242,
+        "line": 245,
+        "column": 19,
+        "expression": "mx.handler",
+        "operation": "read",
+        "text": "\tif !mx.inline && mx.handler == nil {"
+      },
+      "methodCandidates": [
+        {
+          "id": "chi_mux_with",
+          "label": ".With()",
+          "_origin": "ast",
+          "community": 3,
+          "file_type": "code",
+          "norm_label": ".with()",
+          "source_file": "mux.go",
+          "source_location": "L242"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Mux",
+      "state": "middlewares",
+      "file": "mux.go",
+      "declarationLine": 43,
+      "access": {
+        "method": "Use",
+        "methodLine": 100,
+        "line": 104,
+        "column": 2,
+        "expression": "mx.middlewares",
+        "operation": "write",
+        "text": "\tmx.middlewares = append(mx.middlewares, middlewares...)"
+      },
+      "methodCandidates": [
+        {
+          "id": "chi_mux_use",
+          "label": ".Use()",
+          "_origin": "ast",
+          "community": 3,
+          "file_type": "code",
+          "norm_label": ".use()",
+          "source_file": "mux.go",
+          "source_location": "L100"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Mux",
+      "state": "middlewares",
+      "file": "mux.go",
+      "declarationLine": 43,
+      "access": {
+        "method": "With",
+        "methodLine": 242,
+        "line": 252,
+        "column": 31,
+        "expression": "mx.middlewares",
+        "operation": "read",
+        "text": "\t\tmws = make(Middlewares, len(mx.middlewares))"
+      },
+      "methodCandidates": [
+        {
+          "id": "chi_mux_with",
+          "label": ".With()",
+          "_origin": "ast",
+          "community": 3,
+          "file_type": "code",
+          "norm_label": ".with()",
+          "source_file": "mux.go",
+          "source_location": "L242"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "_AtomicFile",
+      "state": "closed",
+      "file": "src/click/_compat.py",
+      "declarationLine": 460,
+      "access": {
+        "method": "__init__",
+        "methodLine": 456,
+        "line": 460,
+        "column": 9,
+        "expression": "self.closed",
+        "operation": "write",
+        "text": "        self.closed = False"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "kind": "method",
+          "name": ".__init__()",
+          "qualifiedName": "src.click._compat._AtomicFile::__init__",
+          "language": "python",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 14270,
+            "endByte": 14486,
+            "startLine": 456,
+            "startColumn": 4,
+            "endLine": 460,
+            "endColumn": 27
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "def __init__(self, f: t.IO[t.Any], tmp_filename: str, real_filename: str) -> None",
+              "signatureDigest": "d84173be446ee24b0a12066c2d90d512722920fecc637e3a1bb05a40a9b63a33",
+              "implementationDigest": "c97120b074ed32f1c7f0de7c7a565a07e2b80ed4bc6f37afd943d33aabb53526",
+              "sourceDigest": "b44d8fcfa6fc78850c1d26c3deabf0a5f5ed78498681b34002b2e8ea9bd13336"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.python.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/click/_compat.py",
+                  "startByte": 14274,
+                  "endByte": 14282,
+                  "startLine": 456,
+                  "startColumn": 8,
+                  "endLine": 456,
+                  "endColumn": 16
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 6,
+            "label": "_compat.py"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "_AtomicFile",
+      "state": "closed",
+      "file": "src/click/_compat.py",
+      "declarationLine": 460,
+      "access": {
+        "method": "close",
+        "methodLine": 466,
+        "line": 467,
+        "column": 12,
+        "expression": "self.closed",
+        "operation": "read",
+        "text": "        if self.closed:"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3",
+          "kind": "method",
+          "name": ".close()",
+          "qualifiedName": "src.click._compat._AtomicFile::close",
+          "language": "python",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 14569,
+            "endByte": 14769,
+            "startLine": 466,
+            "startColumn": 4,
+            "endLine": 471,
+            "endColumn": 26
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "def close(self, delete: bool = False) -> None",
+              "signatureDigest": "b4cbfe07542f1c9e9615bbbb74e8576072d57f76e4e67d8068501cb01829b335",
+              "implementationDigest": "57dc0e3d39394fa5b9d60ecfffc5549534ed5e32b5cbc67afbbd03ca67be4132",
+              "sourceDigest": "a0941ad915697320c72c55a4fc7a5e521681c08d9718bcddc5e1f6fa74e32443"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.python.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/click/_compat.py",
+                  "startByte": 14573,
+                  "endByte": 14578,
+                  "startLine": 466,
+                  "startColumn": 8,
+                  "endLine": 466,
+                  "endColumn": 13
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 6,
+            "label": "_compat.py"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "_AtomicFile",
+      "state": "_real_filename",
+      "file": "src/click/_compat.py",
+      "declarationLine": 459,
+      "access": {
+        "method": "__init__",
+        "methodLine": 456,
+        "line": 459,
+        "column": 9,
+        "expression": "self._real_filename",
+        "operation": "write",
+        "text": "        self._real_filename = real_filename"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:f2973c383f7639367620131c87a5de0b9e0845a87f6dadebdf32160c1463a936",
+          "kind": "method",
+          "name": ".__init__()",
+          "qualifiedName": "src.click._compat._AtomicFile::__init__",
+          "language": "python",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 14270,
+            "endByte": 14486,
+            "startLine": 456,
+            "startColumn": 4,
+            "endLine": 460,
+            "endColumn": 27
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "def __init__(self, f: t.IO[t.Any], tmp_filename: str, real_filename: str) -> None",
+              "signatureDigest": "d84173be446ee24b0a12066c2d90d512722920fecc637e3a1bb05a40a9b63a33",
+              "implementationDigest": "c97120b074ed32f1c7f0de7c7a565a07e2b80ed4bc6f37afd943d33aabb53526",
+              "sourceDigest": "b44d8fcfa6fc78850c1d26c3deabf0a5f5ed78498681b34002b2e8ea9bd13336"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.python.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/click/_compat.py",
+                  "startByte": 14274,
+                  "endByte": 14282,
+                  "startLine": 456,
+                  "startColumn": 8,
+                  "endLine": 456,
+                  "endColumn": 16
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 6,
+            "label": "_compat.py"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "_AtomicFile",
+      "state": "_real_filename",
+      "file": "src/click/_compat.py",
+      "declarationLine": 459,
+      "access": {
+        "method": "name",
+        "methodLine": 463,
+        "line": 464,
+        "column": 16,
+        "expression": "self._real_filename",
+        "operation": "read",
+        "text": "        return self._real_filename"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:e878c6438bdce958c03a089d80b07294ed83ae9ee2f0f0a633df5fbf50ae9e52",
+          "kind": "method",
+          "name": ".name()",
+          "qualifiedName": "src.click._compat._AtomicFile::name",
+          "language": "python",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 14506,
+            "endByte": 14563,
+            "startLine": 463,
+            "startColumn": 4,
+            "endLine": 464,
+            "endColumn": 34
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "def name(self) -> str",
+              "signatureDigest": "8a1643fce1c80fbaf299e8f34d0f11be952d7c2bcc90d418a3deccb866d100bb",
+              "implementationDigest": "3d6432f964f785a26f97a41f7ef7e63ff0a12a6ddbedb2a1076fd45d0b6ec4e9",
+              "sourceDigest": "e9954a4c6cda3a6ce002f3f95b71b4077db90e46f92dfd8c12a6f1539ec18f28"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.python.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/click/_compat.py",
+                  "startByte": 14510,
+                  "endByte": 14514,
+                  "startLine": 463,
+                  "startColumn": 8,
+                  "endLine": 463,
+                  "endColumn": 12
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 6,
+            "label": "_compat.py"
+          }
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "_AtomicFile",
+      "state": "closed",
+      "file": "src/click/_compat.py",
+      "declarationLine": 460,
+      "access": {
+        "method": "__init__",
+        "methodLine": 456,
+        "line": 460,
+        "column": 9,
+        "expression": "self.closed",
+        "operation": "write",
+        "text": "        self.closed = False"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_click_compat_atomicfile_init",
+          "label": ".__init__()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 24,
+          "file_type": "code",
+          "norm_label": ".__init__()",
+          "source_file": "src/click/_compat.py",
+          "source_location": "L456"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "_AtomicFile",
+      "state": "closed",
+      "file": "src/click/_compat.py",
+      "declarationLine": 460,
+      "access": {
+        "method": "close",
+        "methodLine": 466,
+        "line": 467,
+        "column": 12,
+        "expression": "self.closed",
+        "operation": "read",
+        "text": "        if self.closed:"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_click_compat_atomicfile_close",
+          "label": ".close()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 86,
+          "file_type": "code",
+          "norm_label": ".close()",
+          "source_file": "src/click/_compat.py",
+          "source_location": "L466"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "_AtomicFile",
+      "state": "_real_filename",
+      "file": "src/click/_compat.py",
+      "declarationLine": 459,
+      "access": {
+        "method": "__init__",
+        "methodLine": 456,
+        "line": 459,
+        "column": 9,
+        "expression": "self._real_filename",
+        "operation": "write",
+        "text": "        self._real_filename = real_filename"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_click_compat_atomicfile_init",
+          "label": ".__init__()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 24,
+          "file_type": "code",
+          "norm_label": ".__init__()",
+          "source_file": "src/click/_compat.py",
+          "source_location": "L456"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "_AtomicFile",
+      "state": "_real_filename",
+      "file": "src/click/_compat.py",
+      "declarationLine": 459,
+      "access": {
+        "method": "name",
+        "methodLine": 463,
+        "line": 464,
+        "column": 16,
+        "expression": "self._real_filename",
+        "operation": "read",
+        "text": "        return self._real_filename"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_click_compat_atomicfile_name",
+          "label": ".name()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 86,
+          "file_type": "code",
+          "norm_label": ".name()",
+          "source_file": "src/click/_compat.py",
+          "source_location": "L463"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Cleaner",
+      "state": "safelist",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 44,
+      "access": {
+        "method": "Cleaner",
+        "methodLine": 50,
+        "line": 52,
+        "column": 9,
+        "expression": "this.safelist",
+        "operation": "write",
+        "text": "        this.safelist = safelist;"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:66aaadb3479119cae227c0e51b5674eae36cb9b29e80428e2697aa7cb45518f0",
+          "kind": "constructor",
+          "name": "<init>",
+          "qualifiedName": "org.jsoup.safety.Cleaner::<init>",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 1862,
+            "endByte": 1973,
+            "startLine": 50,
+            "startColumn": 4,
+            "endLine": 53,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "<init>(Safelist)",
+              "signatureDigest": "badd69d3211600d45ddfbcf7377277a60ad61504ea3e020a22767d87fc96d6e8",
+              "implementationDigest": "f920ff6f090dca6d9bcd05476c7541243bb3b48f3e355822c2ebf5100aeb2cad",
+              "sourceDigest": "dbbac29bf7eb7e8bc862fd54e7e880df8ce1bcf29f4691bc63fba6ba9db20579"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 1869,
+                  "endByte": 1876,
+                  "startLine": 50,
+                  "startColumn": 11,
+                  "endLine": 50,
+                  "endColumn": 18
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 3,
+            "label": "Node"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:82d93a7cd4b92b3765fb539920bb5ca399119733f7cfc423203c4bebb16c1740",
+          "kind": "field",
+          "name": "safelist",
+          "qualifiedName": "org.jsoup.safety.Cleaner::safelist",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 1705,
+            "endByte": 1713,
+            "startLine": 44,
+            "startColumn": 27,
+            "endLine": 44,
+            "endColumn": 35
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 1705,
+                  "endByte": 1713,
+                  "startLine": 44,
+                  "startColumn": 27,
+                  "endLine": 44,
+                  "endColumn": 35
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "CleanerTest"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "Cleaner",
+      "state": "safelist",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 44,
+      "access": {
+        "method": "createSafeElement",
+        "methodLine": 188,
+        "line": 197,
+        "column": 17,
+        "expression": "safelist",
+        "operation": "read",
+        "text": "            if (safelist.isSafeAttribute(sourceTag, sourceEl, sourceAttr)) { // will keep this attr"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:7ce3db44fb899d894dd900ab8808bd0fdc411323a6276f4164fede39e46f8157",
+          "kind": "method",
+          "name": ".createSafeElement()",
+          "qualifiedName": "org.jsoup.safety.Cleaner::createSafeElement",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 8590,
+            "endByte": 11143,
+            "startLine": 188,
+            "startColumn": 4,
+            "endLine": 235,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "createSafeElement(Element)",
+              "signatureDigest": "99594481f6906a1e74b1aab1c5ce684e04ebbed4dbd02f7fe443ae0ebec1cef7",
+              "implementationDigest": "309927ce932885f2f766962666b1b592ba1df08c4f4d9ca0e2a520fc441f0761",
+              "sourceDigest": "e62cb7d5f499dc6cb58a7af0e341574806d9f9798b3b502e20ddadd9d7ec603e"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 8610,
+                  "endByte": 8627,
+                  "startLine": 188,
+                  "startColumn": 24,
+                  "endLine": 188,
+                  "endColumn": 41
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 5,
+            "label": "Attributes"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:82d93a7cd4b92b3765fb539920bb5ca399119733f7cfc423203c4bebb16c1740",
+          "kind": "field",
+          "name": "safelist",
+          "qualifiedName": "org.jsoup.safety.Cleaner::safelist",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 1705,
+            "endByte": 1713,
+            "startLine": 44,
+            "startColumn": 27,
+            "endLine": 44,
+            "endColumn": 35
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 1705,
+                  "endByte": 1713,
+                  "startLine": 44,
+                  "startColumn": 27,
+                  "endLine": 44,
+                  "endColumn": 35
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "CleanerTest"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 141,
+      "access": {
+        "method": "CleaningVisitor",
+        "methodLine": 143,
+        "line": 145,
+        "column": 13,
+        "expression": "this.destination",
+        "operation": "write",
+        "text": "            this.destination = destination;"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:d82578355e71b0d55f68499706f70276db9cf44a16bf283bba6360df410deec5",
+          "kind": "constructor",
+          "name": "<init>",
+          "qualifiedName": "org.jsoup.safety.Cleaner::CleaningVisitor::<init>",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 6544,
+            "endByte": 6688,
+            "startLine": 143,
+            "startColumn": 8,
+            "endLine": 146,
+            "endColumn": 9
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "<init>(Element,Element)",
+              "signatureDigest": "e8e92c45736788a17f106233dcb3198f7600101e4473e1fdf64b5f574c4e9780",
+              "implementationDigest": "6b2203f949da6991f90e660a94339fc571fcd632b7322801cc03a36a7d19109e",
+              "sourceDigest": "6c6a467c8a4ad1109775e3bef2e38139fab559e1c6a3ee4fb6d454739fb8efcc"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 6552,
+                  "endByte": 6567,
+                  "startLine": 143,
+                  "startColumn": 16,
+                  "endLine": 143,
+                  "endColumn": 31
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 10,
+            "label": "Element"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:b8452deb51561a6e6e1e8620c5ef9dcb5dae0f681633a87c34063a772975be8c",
+          "kind": "field",
+          "name": "destination",
+          "qualifiedName": "org.jsoup.safety.Cleaner::CleaningVisitor::destination",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 6484,
+            "endByte": 6495,
+            "startLine": 141,
+            "startColumn": 24,
+            "endLine": 141,
+            "endColumn": 35
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 6484,
+                  "endByte": 6495,
+                  "startLine": 141,
+                  "startColumn": 24,
+                  "endLine": 141,
+                  "endColumn": 35
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 10,
+            "label": "Element"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 141,
+      "access": {
+        "method": "head",
+        "methodLine": 148,
+        "line": 158,
+        "column": 21,
+        "expression": "destination",
+        "operation": "write",
+        "text": "                    destination = destChild;"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:65912eb3660f15092355589775d874a7a702efcf0336e9865cf93b4fb56aaa29",
+          "kind": "method",
+          "name": ".head()",
+          "qualifiedName": "org.jsoup.safety.Cleaner::CleaningVisitor::head",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 6698,
+            "endByte": 8069,
+            "startLine": 148,
+            "startColumn": 8,
+            "endLine": 173,
+            "endColumn": 9
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "head(Node,int)",
+              "signatureDigest": "24041a46421d0170da7792402b63bfa06929d85ab9c7638648aabc3d7e6bc2bd",
+              "implementationDigest": "774186cc1e9706f6b22c053466513e970f55a68870e00ac677b1d2f6a4d4f75d",
+              "sourceDigest": "ff7dc01047765a1f468d43c800ac2f31c2ab0c608b8df791c0e4e35a134baa69"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 6720,
+                  "endByte": 6724,
+                  "startLine": 148,
+                  "startColumn": 30,
+                  "endLine": 148,
+                  "endColumn": 34
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": ".parse"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:b8452deb51561a6e6e1e8620c5ef9dcb5dae0f681633a87c34063a772975be8c",
+          "kind": "field",
+          "name": "destination",
+          "qualifiedName": "org.jsoup.safety.Cleaner::CleaningVisitor::destination",
+          "language": "java",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 6484,
+            "endByte": 6495,
+            "startLine": 141,
+            "startColumn": 24,
+            "endLine": 141,
+            "endColumn": 35
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.java.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+                  "startByte": 6484,
+                  "endByte": 6495,
+                  "startLine": 141,
+                  "startColumn": 24,
+                  "endLine": 141,
+                  "endColumn": 35
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 10,
+            "label": "Element"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Cleaner",
+      "state": "safelist",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 44,
+      "access": {
+        "method": "Cleaner",
+        "methodLine": 50,
+        "line": 52,
+        "column": 9,
+        "expression": "this.safelist",
+        "operation": "write",
+        "text": "        this.safelist = safelist;"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_main_java_org_jsoup_safety_cleaner_cleaner_cleaner",
+          "label": ".Cleaner()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 129,
+          "file_type": "code",
+          "norm_label": ".cleaner()",
+          "source_file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "source_location": "L50"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "Cleaner",
+      "state": "safelist",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 44,
+      "access": {
+        "method": "createSafeElement",
+        "methodLine": 188,
+        "line": 197,
+        "column": 17,
+        "expression": "safelist",
+        "operation": "read",
+        "text": "            if (safelist.isSafeAttribute(sourceTag, sourceEl, sourceAttr)) { // will keep this attr"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_main_java_org_jsoup_safety_cleaner_cleaner_createsafeelement",
+          "label": ".createSafeElement()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 96,
+          "file_type": "code",
+          "metadata": {
+            "unresolved_calls": [
+              {
+                "callee": "getHost",
+                "receiver_type": "URL",
+                "lang": "java",
+                "line": "L221"
+              }
+            ]
+          },
+          "norm_label": ".createsafeelement()",
+          "source_file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "source_location": "L188"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 141,
+      "access": {
+        "method": "CleaningVisitor",
+        "methodLine": 143,
+        "line": 145,
+        "column": 13,
+        "expression": "this.destination",
+        "operation": "write",
+        "text": "            this.destination = destination;"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_main_java_org_jsoup_safety_cleaner_cleaningvisitor_cleaningvisitor",
+          "label": ".CleaningVisitor()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 80,
+          "file_type": "code",
+          "norm_label": ".cleaningvisitor()",
+          "source_file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "source_location": "L143"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "declarationLine": 141,
+      "access": {
+        "method": "head",
+        "methodLine": 148,
+        "line": 158,
+        "column": 21,
+        "expression": "destination",
+        "operation": "write",
+        "text": "                    destination = destChild;"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_main_java_org_jsoup_safety_cleaner_cleaningvisitor_head",
+          "label": ".head()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 80,
+          "file_type": "code",
+          "norm_label": ".head()",
+          "source_file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "source_location": "L148"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "createStore",
+      "state": "currentState",
+      "file": "src/createStore.ts",
+      "declarationLine": 137,
+      "access": {
+        "method": "getState",
+        "methodLine": 166,
+        "line": 175,
+        "column": 12,
+        "expression": "currentState",
+        "operation": "read",
+        "text": "    return currentState as S"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:ac32c352aac7217b9b481c36ebdbd1304d84593968416c35058a0445860f30e2",
+          "kind": "function",
+          "name": "getState()",
+          "qualifiedName": "createStore.createStore.getState",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 5459,
+            "endByte": 5816,
+            "startLine": 166,
+            "startColumn": 2,
+            "endLine": 176,
+            "endColumn": 3
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "|params:|return:S"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 5468,
+                  "endByte": 5476,
+                  "startLine": 166,
+                  "startColumn": 11,
+                  "endLine": 166,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:f60e291b4921b2348cf32026034d2b812be220e0aca0765a380a634ce9799336",
+          "kind": "variable",
+          "name": "currentState",
+          "qualifiedName": "createStore.createStore.currentState",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 4579,
+            "endByte": 4591,
+            "startLine": 137,
+            "startColumn": 6,
+            "endLine": 137,
+            "endColumn": 18
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 4579,
+                  "endByte": 4591,
+                  "startLine": 137,
+                  "startColumn": 6,
+                  "endLine": 137,
+                  "endColumn": 18
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "createStore",
+      "state": "currentState",
+      "file": "src/createStore.ts",
+      "declarationLine": 137,
+      "access": {
+        "method": "dispatch",
+        "methodLine": 270,
+        "line": 299,
+        "column": 7,
+        "expression": "currentState",
+        "operation": "write",
+        "text": "      currentState = currentReducer(currentState, action)"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:ee27944e9b61e75b17b685fb67d51cccd459621e8ed9db30b18f5c7b02094612",
+          "kind": "function",
+          "name": "dispatch()",
+          "qualifiedName": "createStore.createStore.dispatch",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 9622,
+            "endByte": 11000,
+            "startLine": 270,
+            "startColumn": 2,
+            "endLine": 309,
+            "endColumn": 3
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "|params:A"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 9631,
+                  "endByte": 9639,
+                  "startLine": 270,
+                  "startColumn": 11,
+                  "endLine": 270,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:f60e291b4921b2348cf32026034d2b812be220e0aca0765a380a634ce9799336",
+          "kind": "variable",
+          "name": "currentState",
+          "qualifiedName": "createStore.createStore.currentState",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 4579,
+            "endByte": 4591,
+            "startLine": 137,
+            "startColumn": 6,
+            "endLine": 137,
+            "endColumn": 18
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 4579,
+                  "endByte": 4591,
+                  "startLine": 137,
+                  "startColumn": 6,
+                  "endLine": 137,
+                  "endColumn": 18
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "createStore",
+      "state": "isDispatching",
+      "file": "src/createStore.ts",
+      "declarationLine": 143,
+      "access": {
+        "method": "getState",
+        "methodLine": 166,
+        "line": 167,
+        "column": 9,
+        "expression": "isDispatching",
+        "operation": "read",
+        "text": "    if (isDispatching) {"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:ac32c352aac7217b9b481c36ebdbd1304d84593968416c35058a0445860f30e2",
+          "kind": "function",
+          "name": "getState()",
+          "qualifiedName": "createStore.createStore.getState",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 5459,
+            "endByte": 5816,
+            "startLine": 166,
+            "startColumn": 2,
+            "endLine": 176,
+            "endColumn": 3
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "|params:|return:S"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 5468,
+                  "endByte": 5476,
+                  "startLine": 166,
+                  "startColumn": 11,
+                  "endLine": 166,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:e624ded2e63d3070d23b0928b66dd153fcd656a4155b1d5522c6560b8dca5c38",
+          "kind": "variable",
+          "name": "isDispatching",
+          "qualifiedName": "createStore.createStore.isDispatching",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 4827,
+            "endByte": 4840,
+            "startLine": 143,
+            "startColumn": 6,
+            "endLine": 143,
+            "endColumn": 19
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 4827,
+                  "endByte": 4840,
+                  "startLine": 143,
+                  "startColumn": 6,
+                  "endLine": 143,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "createStore",
+      "state": "isDispatching",
+      "file": "src/createStore.ts",
+      "declarationLine": 143,
+      "access": {
+        "method": "dispatch",
+        "methodLine": 270,
+        "line": 298,
+        "column": 7,
+        "expression": "isDispatching",
+        "operation": "write",
+        "text": "      isDispatching = true"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:ee27944e9b61e75b17b685fb67d51cccd459621e8ed9db30b18f5c7b02094612",
+          "kind": "function",
+          "name": "dispatch()",
+          "qualifiedName": "createStore.createStore.dispatch",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 9622,
+            "endByte": 11000,
+            "startLine": 270,
+            "startColumn": 2,
+            "endLine": 309,
+            "endColumn": 3
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "|params:A"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 9631,
+                  "endByte": 9639,
+                  "startLine": 270,
+                  "startColumn": 11,
+                  "endLine": 270,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:e624ded2e63d3070d23b0928b66dd153fcd656a4155b1d5522c6560b8dca5c38",
+          "kind": "variable",
+          "name": "isDispatching",
+          "qualifiedName": "createStore.createStore.isDispatching",
+          "language": "typescript",
+          "source": {
+            "file": "src/createStore.ts",
+            "startByte": 4827,
+            "endByte": 4840,
+            "startLine": 143,
+            "startColumn": 6,
+            "endLine": 143,
+            "endColumn": 19
+          },
+          "details": {
+            "type": "symbol",
+            "data": {}
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.typescript.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/createStore.ts",
+                  "startByte": 4827,
+                  "endByte": 4840,
+                  "startLine": 143,
+                  "startColumn": 6,
+                  "endLine": 143,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 15,
+            "label": "createStore (src/createStore.ts:L86)"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "createStore",
+      "state": "currentState",
+      "file": "src/createStore.ts",
+      "declarationLine": 137,
+      "access": {
+        "method": "getState",
+        "methodLine": 166,
+        "line": 175,
+        "column": 12,
+        "expression": "currentState",
+        "operation": "read",
+        "text": "    return currentState as S"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_createstore_createstore_getstate",
+          "label": "getState()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 25,
+          "file_type": "code",
+          "norm_label": "getstate()",
+          "source_file": "src/createStore.ts",
+          "source_location": "L166"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "createStore",
+      "state": "currentState",
+      "file": "src/createStore.ts",
+      "declarationLine": 137,
+      "access": {
+        "method": "dispatch",
+        "methodLine": 270,
+        "line": 299,
+        "column": 7,
+        "expression": "currentState",
+        "operation": "write",
+        "text": "      currentState = currentReducer(currentState, action)"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_createstore_createstore_dispatch",
+          "label": "dispatch()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 25,
+          "file_type": "code",
+          "norm_label": "dispatch()",
+          "source_file": "src/createStore.ts",
+          "source_location": "L270"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "createStore",
+      "state": "isDispatching",
+      "file": "src/createStore.ts",
+      "declarationLine": 143,
+      "access": {
+        "method": "getState",
+        "methodLine": 166,
+        "line": 167,
+        "column": 9,
+        "expression": "isDispatching",
+        "operation": "read",
+        "text": "    if (isDispatching) {"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_createstore_createstore_getstate",
+          "label": "getState()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 25,
+          "file_type": "code",
+          "norm_label": "getstate()",
+          "source_file": "src/createStore.ts",
+          "source_location": "L166"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "createStore",
+      "state": "isDispatching",
+      "file": "src/createStore.ts",
+      "declarationLine": 143,
+      "access": {
+        "method": "dispatch",
+        "methodLine": 270,
+        "line": 298,
+        "column": 7,
+        "expression": "isDispatching",
+        "operation": "write",
+        "text": "      isDispatching = true"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_createstore_createstore_dispatch",
+          "label": "dispatch()",
+          "_callable": true,
+          "_origin": "ast",
+          "community": 25,
+          "file_type": "code",
+          "norm_label": "dispatch()",
+          "source_file": "src/createStore.ts",
+          "source_location": "L270"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "IntoIter",
+      "state": "deferred_dirs",
+      "file": "src/lib.rs",
+      "declarationLine": 598,
+      "access": {
+        "method": "handle_entry",
+        "methodLine": 840,
+        "line": 875,
+        "column": 13,
+        "expression": "self.deferred_dirs",
+        "operation": "receiver",
+        "text": "            self.deferred_dirs.push(dent);"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "kind": "method",
+          "name": ".handle_entry()",
+          "qualifiedName": "walkdir::IntoIter::handle_entry",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 29143,
+            "endByte": 30869,
+            "startLine": 840,
+            "startColumn": 4,
+            "endLine": 882,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "fn handle_entry( &mut self, mut dent: DirEntry, ) -> Option<Result<DirEntry>>",
+              "signatureDigest": "310808d8882a85c24aded6c0eb9116d92403a8056cef0c155e27044ca844eff3",
+              "implementationDigest": "97e2e9dfc3833955d8153f6420bf6cc8aaaa10f2517086fda9d91f68f4c1c173",
+              "sourceDigest": "70d33c8bd4eae5883f1a1af831cd18d5caa5711bc2cc33a8c14f851f7305768b"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 29146,
+                  "endByte": 29158,
+                  "startLine": 840,
+                  "startColumn": 7,
+                  "endLine": 840,
+                  "endColumn": 19
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:413c3c0dfae5a89e15e2e094ec8961c9ef4acfb4c7a56fb06f4d6943734862c1",
+          "kind": "field",
+          "name": "deferred_dirs",
+          "qualifiedName": "walkdir::IntoIter::deferred_dirs",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 20224,
+            "endByte": 20237,
+            "startLine": 598,
+            "startColumn": 4,
+            "endLine": 598,
+            "endColumn": 17
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "deferred_dirs: Vec<DirEntry>",
+              "signatureDigest": "37906d395875d925db71ec7a0bd3e75893f147caf02be49839f7147d6668a281",
+              "sourceDigest": "6ee20049871a0b0aa99d93b490c4579d2909a7e7f9cbd415778b8e2f0cdf9d86"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 20224,
+                  "endByte": 20237,
+                  "startLine": 598,
+                  "startColumn": 4,
+                  "endLine": 598,
+                  "endColumn": 17
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "IntoIter",
+      "state": "deferred_dirs",
+      "file": "src/lib.rs",
+      "declarationLine": 598,
+      "access": {
+        "method": "get_deferred_dir",
+        "methodLine": 884,
+        "line": 886,
+        "column": 29,
+        "expression": "self.deferred_dirs",
+        "operation": "read",
+        "text": "            if self.depth < self.deferred_dirs.len() {"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867",
+          "kind": "method",
+          "name": ".get_deferred_dir()",
+          "qualifiedName": "walkdir::IntoIter::get_deferred_dir",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 30875,
+            "endByte": 31482,
+            "startLine": 884,
+            "startColumn": 4,
+            "endLine": 899,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "fn get_deferred_dir(&mut self) -> Option<DirEntry>",
+              "signatureDigest": "7fed725f8244f07e0a984c8f87df3675c999315adb2015ff9fbd2e1e0569d6ba",
+              "implementationDigest": "0a593159692ab4c497de9873715dbd786d66320b28ce7cc0b47189042ea48b6a",
+              "sourceDigest": "2b7edf004c0eb7c3996b3b1d045dc30e1251559b0352fec36bc53304160f334e"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 30878,
+                  "endByte": 30894,
+                  "startLine": 884,
+                  "startColumn": 7,
+                  "endLine": 884,
+                  "endColumn": 23
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:413c3c0dfae5a89e15e2e094ec8961c9ef4acfb4c7a56fb06f4d6943734862c1",
+          "kind": "field",
+          "name": "deferred_dirs",
+          "qualifiedName": "walkdir::IntoIter::deferred_dirs",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 20224,
+            "endByte": 20237,
+            "startLine": 598,
+            "startColumn": 4,
+            "endLine": 598,
+            "endColumn": 17
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "deferred_dirs: Vec<DirEntry>",
+              "signatureDigest": "37906d395875d925db71ec7a0bd3e75893f147caf02be49839f7147d6668a281",
+              "sourceDigest": "6ee20049871a0b0aa99d93b490c4579d2909a7e7f9cbd415778b8e2f0cdf9d86"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 20224,
+                  "endByte": 20237,
+                  "startLine": 598,
+                  "startColumn": 4,
+                  "endLine": 598,
+                  "endColumn": 17
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "IntoIter",
+      "state": "oldest_opened",
+      "file": "src/lib.rs",
+      "declarationLine": 591,
+      "access": {
+        "method": "push",
+        "methodLine": 901,
+        "line": 945,
+        "column": 13,
+        "expression": "self.oldest_opened",
+        "operation": "write",
+        "text": "            self.oldest_opened = self.oldest_opened.checked_add(1).unwrap();"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45",
+          "kind": "method",
+          "name": ".push()",
+          "qualifiedName": "walkdir::IntoIter::push",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 31488,
+            "endByte": 33947,
+            "startLine": 901,
+            "startColumn": 4,
+            "endLine": 948,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "fn push(&mut self, dent: &DirEntry) -> Result<()>",
+              "signatureDigest": "cb10b4c8df4099b3ca4e1436d2b521ca35a83bbaf1fc95b74e90a582ed0d4b51",
+              "implementationDigest": "e8e95f68d459cb51b8ba9e86b13def3c4a5324058be52b2ff950c1352c0aa048",
+              "sourceDigest": "14aa7a18f314d62746ec2e5b1d3b947ba4f4e270760b4224db5e127645e9faff"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 31491,
+                  "endByte": 31495,
+                  "startLine": 901,
+                  "startColumn": 7,
+                  "endLine": 901,
+                  "endColumn": 11
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:b127352da415182e7b8716381b845e7ae6093fe6b79ceb9e0a48ebbffaeae1d3",
+          "kind": "field",
+          "name": "oldest_opened",
+          "qualifiedName": "walkdir::IntoIter::oldest_opened",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 19882,
+            "endByte": 19895,
+            "startLine": 591,
+            "startColumn": 4,
+            "endLine": 591,
+            "endColumn": 17
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "oldest_opened: usize",
+              "signatureDigest": "b21b147403ccbf752075dc8deafc452ca756f8a458d6b87ebd58bd769acf4bbb",
+              "sourceDigest": "e21fc19d3741ff510e45f6238b1be153c24fb3899c0896a7ee0960a690f8c319"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 19882,
+                  "endByte": 19895,
+                  "startLine": 591,
+                  "startColumn": 4,
+                  "endLine": 591,
+                  "endColumn": 17
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "graphDirected": true,
+      "owner": "IntoIter",
+      "state": "oldest_opened",
+      "file": "src/lib.rs",
+      "declarationLine": 591,
+      "access": {
+        "method": "pop",
+        "methodLine": 950,
+        "line": 958,
+        "column": 9,
+        "expression": "self.oldest_opened",
+        "operation": "write",
+        "text": "        self.oldest_opened = min(self.oldest_opened, self.stack_list.len());"
+      },
+      "methodCandidates": [
+        {
+          "id": "sha256:3d843599c82e0cf88d7512278cc2b4f2ffc87c5797785e0c9caad89ab4af8f98",
+          "kind": "method",
+          "name": ".pop()",
+          "qualifiedName": "walkdir::IntoIter::pop",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 33953,
+            "endByte": 34437,
+            "startLine": 950,
+            "startColumn": 4,
+            "endLine": 959,
+            "endColumn": 5
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "fn pop(&mut self)",
+              "signatureDigest": "0fa51313f817eed32447ebd07cb6dcda1265a55558a49a35712231b89d0f8c25",
+              "implementationDigest": "55581b03dfee9d578e5c5cc50db986a587f795e0f0bd1cf4b60769627bba0549",
+              "sourceDigest": "1553775e6184fbdc67a0491e65098678af0c0dad5631134e7737adeef7d5bd70"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 33956,
+                  "endByte": 33959,
+                  "startLine": 950,
+                  "startColumn": 7,
+                  "endLine": 950,
+                  "endColumn": 10
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "stateCandidates": [
+        {
+          "id": "sha256:b127352da415182e7b8716381b845e7ae6093fe6b79ceb9e0a48ebbffaeae1d3",
+          "kind": "field",
+          "name": "oldest_opened",
+          "qualifiedName": "walkdir::IntoIter::oldest_opened",
+          "language": "rust",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 19882,
+            "endByte": 19895,
+            "startLine": 591,
+            "startColumn": 4,
+            "endLine": 591,
+            "endColumn": 17
+          },
+          "details": {
+            "type": "symbol",
+            "data": {
+              "signature": "oldest_opened: usize",
+              "signatureDigest": "b21b147403ccbf752075dc8deafc452ca756f8a458d6b87ebd58bd769acf4bbb",
+              "sourceDigest": "e21fc19d3741ff510e45f6238b1be153c24fb3899c0896a7ee0960a690f8c319"
+            }
+          },
+          "evidence": [
+            {
+              "origin": "ast",
+              "extractor": "compass.languages.rust.universal",
+              "confidence": "exact",
+              "anchors": [
+                {
+                  "file": "src/lib.rs",
+                  "startByte": 19882,
+                  "endByte": 19895,
+                  "startLine": 591,
+                  "startColumn": 4,
+                  "endLine": 591,
+                  "endColumn": 17
+                }
+              ]
+            }
+          ],
+          "community": {
+            "id": 0,
+            "label": "DirEntry"
+          }
+        }
+      ],
+      "connectingRecords": [],
+      "status": "no_contact_edge",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "IntoIter",
+      "state": "deferred_dirs",
+      "file": "src/lib.rs",
+      "declarationLine": 598,
+      "access": {
+        "method": "handle_entry",
+        "methodLine": 840,
+        "line": 875,
+        "column": 13,
+        "expression": "self.deferred_dirs",
+        "operation": "receiver",
+        "text": "            self.deferred_dirs.push(dent);"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_lib_intoiter_handle_entry",
+          "label": ".handle_entry()",
+          "_origin": "ast",
+          "community": 2,
+          "file_type": "code",
+          "norm_label": ".handle_entry()",
+          "source_file": "src/lib.rs",
+          "source_location": "L840"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "IntoIter",
+      "state": "deferred_dirs",
+      "file": "src/lib.rs",
+      "declarationLine": 598,
+      "access": {
+        "method": "get_deferred_dir",
+        "methodLine": 884,
+        "line": 886,
+        "column": 29,
+        "expression": "self.deferred_dirs",
+        "operation": "read",
+        "text": "            if self.depth < self.deferred_dirs.len() {"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_lib_intoiter_get_deferred_dir",
+          "label": ".get_deferred_dir()",
+          "_origin": "ast",
+          "community": 2,
+          "file_type": "code",
+          "norm_label": ".get_deferred_dir()",
+          "source_file": "src/lib.rs",
+          "source_location": "L884"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "IntoIter",
+      "state": "oldest_opened",
+      "file": "src/lib.rs",
+      "declarationLine": 591,
+      "access": {
+        "method": "push",
+        "methodLine": 901,
+        "line": 945,
+        "column": 13,
+        "expression": "self.oldest_opened",
+        "operation": "write",
+        "text": "            self.oldest_opened = self.oldest_opened.checked_add(1).unwrap();"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_lib_intoiter_push",
+          "label": ".push()",
+          "_origin": "ast",
+          "community": 2,
+          "file_type": "code",
+          "norm_label": ".push()",
+          "source_file": "src/lib.rs",
+          "source_location": "L901"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "graphDirected": false,
+      "owner": "IntoIter",
+      "state": "oldest_opened",
+      "file": "src/lib.rs",
+      "declarationLine": 591,
+      "access": {
+        "method": "pop",
+        "methodLine": 950,
+        "line": 958,
+        "column": 9,
+        "expression": "self.oldest_opened",
+        "operation": "write",
+        "text": "        self.oldest_opened = min(self.oldest_opened, self.stack_list.len());"
+      },
+      "methodCandidates": [
+        {
+          "id": "src_lib_intoiter_pop",
+          "label": ".pop()",
+          "_origin": "ast",
+          "community": 2,
+          "file_type": "code",
+          "norm_label": ".pop()",
+          "source_file": "src/lib.rs",
+          "source_location": "L950"
+        }
+      ],
+      "stateCandidates": [],
+      "connectingRecords": [],
+      "status": "missing_state",
+      "contactSupported": false,
+      "selectedLineSupported": false
+    }
+  ]
+}

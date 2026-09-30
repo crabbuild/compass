@@ -157,7 +157,7 @@ describe("graphReducer", () => {
     });
     const spaced = graphReducer(directed, {
       type: "setLayoutSpacing",
-      spacing: 1.5
+      spacing: 2.25
     });
     const hiddenMap = graphReducer(spaced, {
       type: "setMinimap",
@@ -168,7 +168,7 @@ describe("graphReducer", () => {
       isolateSelection: true,
       neighborhoodDepth: 4,
       edgeDirection: "outgoing",
-      layoutSpacing: 1.5,
+      layoutSpacing: 2.25,
       showMinimap: false
     });
   });

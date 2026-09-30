@@ -11,7 +11,7 @@ use compass_model::query_contract::{
 };
 use compass_query::{
     CursorTokenError, code_query_response_digest, decode_cursor_token, discovery_response_digest,
-    encode_cursor_token,
+    encode_cursor_token, normalize_code_query_symbol,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -1991,20 +1991,18 @@ fn duplicated_entity_labels(entities: &[AgentEntity]) -> HashSet<&str> {
 
 /// Whether a page must print the stable identifier of one entity.
 ///
-/// A page needs the identifier only where the page is resolving a name and the
-/// name it printed is not unique enough to address the row, which is when two
-/// retained rows share that label. A row that a caller can name - the resolved
-/// answers, and every distinct label in a candidate list - stays addressed by
-/// the qualified name and source anchor it already prints, which keeps the
-/// answer's evidence per token high; a duplicated label cannot be repeated back
-/// to the tool alone, so those rows carry the identity that separates them. The
-/// candidate list, its order, and every identifier stay in `--format json`.
+/// An ambiguous query asks the user to select an exact ID, so every retained
+/// candidate carries that ID even when its qualified label is distinct. Other
+/// unresolved candidate lists need IDs only for colliding labels. Resolved
+/// answers stay compact; JSON carries every identifier unchanged.
 fn entity_needs_identity(
     entity: &AgentEntity,
     match_state: AgentMatch,
     duplicated_labels: &HashSet<&str>,
 ) -> bool {
-    !matches!(match_state, AgentMatch::Exact) && duplicated_labels.contains(entity.label.as_str())
+    match_state == AgentMatch::Ambiguous
+        || (!matches!(match_state, AgentMatch::Exact)
+            && duplicated_labels.contains(entity.label.as_str()))
 }
 
 fn render_relationship(relationship: &AgentRelationship) -> String {
@@ -2239,9 +2237,13 @@ fn unique_node_id(value: &str, nodes: &BTreeMap<String, &QueryNode>) -> Option<S
     if nodes.contains_key(value) {
         return Some(value.to_owned());
     }
+    let normalized = normalize_code_query_symbol(value);
     let mut matches = nodes
         .values()
-        .filter(|node| node.name == value || node.qualified_name == value)
+        .filter(|node| {
+            normalize_code_query_symbol(&node.name) == normalized
+                || normalize_code_query_symbol(&node.qualified_name) == normalized
+        })
         .map(|node| node.id.clone())
         .collect::<Vec<_>>();
     matches.sort();
@@ -2637,13 +2639,26 @@ fn code_match_state(
         if query.is_some_and(|query| {
             response.results.first().is_some_and(|hit| {
                 nodes.get(&hit.node_id).is_some_and(|node| {
-                    node.id == query || node.name == query || node.qualified_name == query
+                    node.id == query
+                        || normalize_code_query_symbol(&node.name)
+                            == normalize_code_query_symbol(query)
+                        || normalize_code_query_symbol(&node.qualified_name)
+                            == normalize_code_query_symbol(query)
                 })
             })
         }) {
             AgentMatch::Exact
         } else if response.results.is_empty() {
-            AgentMatch::None
+            if response.truncated
+                || has_diagnostic(
+                    &response.diagnostics,
+                    QueryDiagnosticCode::BoundedTruncation,
+                )
+            {
+                AgentMatch::Unknown
+            } else {
+                AgentMatch::None
+            }
         } else {
             AgentMatch::Fuzzy
         }
@@ -2659,16 +2674,18 @@ fn code_result_state(
     match_state: AgentMatch,
     response: &CodeQueryResponse,
 ) -> AgentResultState {
-    if match_state == AgentMatch::Ambiguous
-        && !response.diagnostics.iter().any(|diagnostic| {
+    if match_state == AgentMatch::Ambiguous {
+        return if response.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
                 && diagnostic
                     .node_id
                     .as_ref()
                     .is_some_and(|id| response.nodes.iter().any(|node| &node.id == id))
-        })
-    {
-        return AgentResultState::NeedsResolution;
+        }) {
+            AgentResultState::Candidates
+        } else {
+            AgentResultState::NeedsResolution
+        };
     }
     if match_state == AgentMatch::None {
         return AgentResultState::NoMatch;
@@ -2685,7 +2702,9 @@ fn code_result_state(
     {
         return AgentResultState::NoPath;
     }
-    if operation == AgentOperation::Search && match_state == AgentMatch::Fuzzy {
+    if operation == AgentOperation::Search
+        && matches!(match_state, AgentMatch::Fuzzy | AgentMatch::Unknown)
+    {
         AgentResultState::Candidates
     } else {
         AgentResultState::Answered
@@ -2731,12 +2750,48 @@ fn answer_for_code(
         .first()
         .map(|operand| operand.value.clone())
         .unwrap_or_else(|| "the requested query".to_owned());
+    if result_state == AgentResultState::NeedsResolution {
+        return AgentAnswer {
+            headline: "The query matches multiple candidates; retry with an exact node ID for each ambiguous operand.".to_owned(),
+            basis: vec![AgentBasis {
+                kind: "operation".to_owned(),
+                id: context.operation.label().to_owned(),
+            }],
+        };
+    }
+    if match_state == AgentMatch::Ambiguous
+        && let Some(selected) = response.diagnostics.iter().find_map(|diagnostic| {
+            (diagnostic.code == QueryDiagnosticCode::AmbiguousMatch)
+                .then_some(diagnostic.node_id.as_ref())
+                .flatten()
+                .and_then(|id| response.nodes.iter().find(|node| &node.id == id))
+        })
+    {
+        return AgentAnswer {
+            headline: format!(
+                "Auto-picked {} from multiple candidates; returned {} relationship(s).",
+                display_label(selected),
+                response.edges.len()
+            ),
+            basis: vec![AgentBasis {
+                kind: "operation".to_owned(),
+                id: context.operation.label().to_owned(),
+            }],
+        };
+    }
     let subject = primary_results
         .first()
         .map(|entity| entity.label.clone())
         .unwrap_or_else(|| requested.clone());
     let headline = match context.operation {
         AgentOperation::Search => match result_state {
+            AgentResultState::Candidates
+                if match_state == AgentMatch::Unknown && response.results.is_empty() =>
+            {
+                format!(
+                    "Search stopped at its bound before a match or absence could be established for \"{requested}\"."
+                )
+            }
             AgentResultState::NoMatch => {
                 format!("No exact match for \"{requested}\"; fallback candidates are shown.")
             }

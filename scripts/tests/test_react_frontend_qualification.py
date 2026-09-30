@@ -19,6 +19,19 @@ PINNED_SPEC.loader.exec_module(PINNED)
 
 
 class ReactFrontendQualificationTests(unittest.TestCase):
+    def test_fixture_hierarchy_requires_layout_parents_and_rejects_page_parents(self) -> None:
+        files = ["src/app/layout.tsx", "src/app/page.tsx", "src/app/admin/layout.tsx", "src/app/admin/page.tsx", "src/app/admin/settings/page.tsx"]
+        nodes = [{"id": name, "kind": "route", "framework": "next", "source": {"file": name}} for name in files]
+        pairs = [(0, 1), (0, 2), (2, 3), (2, 4)]
+        edges = [{"source": files[a], "target": files[b]} for a, b in pairs]
+        MODULE.assert_fixture_route_hierarchy(nodes, edges)
+        with self.assertRaisesRegex(SystemExit, "source layout roles"):
+            MODULE.assert_fixture_route_hierarchy(nodes, edges[:-1])
+        with self.assertRaisesRegex(SystemExit, "source layout roles"):
+            MODULE.assert_fixture_route_hierarchy(nodes, edges + [{"source": files[3], "target": files[4]}])
+        with self.assertRaisesRegex(SystemExit, "source layout roles"):
+            MODULE.assert_fixture_route_hierarchy(nodes, edges + [edges[0]])
+
     def test_capability_matching_preserves_duplicate_occurrences(self) -> None:
         graph = {
             "nodes": [
@@ -155,11 +168,14 @@ class ReactFrontendQualificationTests(unittest.TestCase):
         manifest_path = PINNED.ROOT / "tests/qualification/react-frontend-repositories.toml"
         manifest = PINNED.load_manifest(manifest_path)
         policy_path = PINNED.ROOT / manifest["expectationPolicy"]
-        policy = PINNED.load_expectation_policy(
-            policy_path,
-            manifest,
-            PINNED.digest_file(manifest_path),
-        )
+        # Historical hierarchy rows are deliberately invalidated after source
+        # review. They must block pinned qualification until re-reviewed.
+        with self.assertRaisesRegex(PINNED.QualificationError, "record is not reviewed"):
+            PINNED.load_expectation_policy(policy_path, manifest, PINNED.digest_file(manifest_path))
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        invalidated = [record for repository in policy["repositories"] for record in repository["capabilities"].values() if record["reviewStatus"] == "invalidated"]
+        self.assertEqual(len(invalidated), 3)
+        self.assertTrue(all(record.get("invalidationReason") for record in invalidated))
         self.assertEqual(policy["schema"], PINNED.EXPECTATION_POLICY_SCHEMA)
         self.assertEqual(
             {item["id"] for item in policy["repositories"]},

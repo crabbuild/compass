@@ -11,8 +11,8 @@ use compass_output::{
     render_code_query_text_page,
 };
 use compass_query::{
-    EngineSelection, NaturalQueryRequest, QueryError, QueryErrorKind, open_with_engine,
-    open_with_verified_document,
+    EngineSelection, ExactSearchFilter, NaturalQueryIntent, NaturalQueryRequest, QueryError,
+    QueryErrorKind, open_with_engine, open_with_verified_document, plan_natural_query,
 };
 
 use crate::{Outcome, SharedOutputFormat, parse_shared_output_format};
@@ -133,7 +133,10 @@ fn execute_paged(
     let mut scale = 1_u32;
     loop {
         let execution = execute(operation, args, scale, deadline)?;
-        if !execution.response.truncated || scale >= MAX_PAGE_WIDENING_SCALE {
+        if !execution.response.truncated
+            || scale >= MAX_PAGE_WIDENING_SCALE
+            || args.iter().any(|arg| arg == "--exact")
+        {
             return Ok(execution);
         }
         scale = scale.saturating_mul(4);
@@ -146,7 +149,53 @@ fn execute(
     page_scale: u32,
     deadline: Instant,
 ) -> Result<QueryExecution, String> {
+    let calls_only = args.iter().any(|arg| arg == "--calls-only");
+    if args.iter().any(|arg| arg.starts_with("--calls-only=")) {
+        return Err("--calls-only is a flag and does not accept a value".to_owned());
+    }
+    if calls_only && operation != "node" {
+        return Err("--calls-only requires node".to_owned());
+    }
+    if args.iter().filter(|arg| *arg == "--calls-only").count() > 1 {
+        return Err("--calls-only may be supplied only once".to_owned());
+    }
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut exact_filter = ExactSearchFilter::default();
+    for name in ["--file", "--line", "--kind"] {
+        let present = args
+            .iter()
+            .any(|arg| arg == name || arg.starts_with(&format!("{name}=")));
+        if present && (!exact || operation != "search") {
+            return Err(format!("{name} requires search --exact"));
+        }
+        if present {
+            let value = option(args, name)
+                .filter(|value| !value.starts_with("--"))
+                .ok_or_else(|| format!("{name} requires a value"))?;
+            match name {
+                "--file" => exact_filter.source_file = Some(value.to_owned()),
+                "--line" => {
+                    exact_filter.start_line = Some(
+                        value
+                            .parse()
+                            .map_err(|_| "--line requires a positive integer")?,
+                    )
+                }
+                "--kind" => exact_filter.kind =
+                    Some(serde_json::from_value(serde_json::json!(value)).map_err(
+                        |_| "--kind requires a stored node kind such as function, class, or struct",
+                    )?),
+                _ => {}
+            }
+        }
+    }
+    if exact && operation != "search" {
+        return Err("--exact requires search".to_owned());
+    }
     let positional = positional(args);
+    if calls_only && positional.len() != 2 {
+        return Err("node --calls-only requires exactly SOURCE and TARGET".to_owned());
+    }
     let graph_option = option(args, "--graph");
     let revision = option(args, "--at");
     if graph_option.is_some() && revision.is_some() {
@@ -222,6 +271,31 @@ fn execute(
     let (response, question, operands) = match operation {
         "ask" => {
             let question = required(&positional, 0, "ask <QUESTION>")?.to_owned();
+            let plan = plan_natural_query(&question).map_err(query_error)?;
+            // The renderer needs the same operands the query engine executes.
+            // The full question is retained separately as request metadata.
+            let operands = if plan.routes_to_typed_query() {
+                plan.operands()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let role = match plan.intent() {
+                            NaturalQueryIntent::Callers
+                            | NaturalQueryIntent::Callees
+                            | NaturalQueryIntent::Dependencies
+                            | NaturalQueryIntent::Impact => AgentOperandRole::Symbol,
+                            NaturalQueryIntent::NodeTrail if index == 0 => AgentOperandRole::Source,
+                            NaturalQueryIntent::NodeTrail => AgentOperandRole::Target,
+                            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback => {
+                                AgentOperandRole::Query
+                            }
+                        };
+                        (role, value.clone())
+                    })
+                    .collect()
+            } else {
+                vec![(AgentOperandRole::Query, question.clone())]
+            };
             let response = engine
                 .query_natural(NaturalQueryRequest {
                     question: question.clone(),
@@ -229,20 +303,20 @@ fn execute(
                     limits,
                 })
                 .map_err(query_error)?;
-            (
-                response,
-                Some(question.clone()),
-                vec![(AgentOperandRole::Query, question)],
-            )
+            (response, Some(question), operands)
         }
         "search" => {
             let query = required(&positional, 0, "search <QUERY>")?.to_owned();
-            let response = engine
-                .search(SearchRequest {
-                    query: query.clone(),
-                    limits,
-                })
-                .map_err(query_error)?;
+            let request = SearchRequest {
+                query: query.clone(),
+                limits,
+            };
+            let response = if exact {
+                engine.search_exact(request, exact_filter)
+            } else {
+                engine.search(request)
+            }
+            .map_err(query_error)?;
             (response, None, vec![(AgentOperandRole::Query, query)])
         }
         "callers" | "callees" | "impact" => {
@@ -292,6 +366,7 @@ fn execute(
             let target = required(&positional, 1, "node <SOURCE> <TARGET>")?.to_owned();
             let response = engine
                 .node_trail(NodeTrailRequest {
+                    calls_only,
                     source: source.clone(),
                     target: target.clone(),
                     include_heuristic,
@@ -300,7 +375,7 @@ fn execute(
                 .map_err(query_error)?;
             (
                 response,
-                None,
+                calls_only.then(|| format!("call path from {source} to {target}")),
                 vec![
                     (AgentOperandRole::Source, source),
                     (AgentOperandRole::Target, target),
@@ -410,6 +485,9 @@ fn positional(args: &[String]) -> Vec<String> {
         "--text-budget",
         "--cursor",
         "--timeout-ms",
+        "--file",
+        "--line",
+        "--kind",
     ];
     let mut values = Vec::new();
     let mut skip = false;

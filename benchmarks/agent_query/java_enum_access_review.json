@@ -1,0 +1,1120 @@
+{
+  "schema": "compass.java-enum-access-review/1",
+  "scope": "Compiler-backed source-reference census for the unchanged 88-file Java 8 jsoup development cohort, plus paired preservation controls on the other four known language repositories. No held-out or overall superiority claim.",
+  "productionCommit": "a8b4a490eddeccb210d1e3c4390979c80d1e678a",
+  "packageVersion": "0.3.30",
+  "astCacheSemantics": "10",
+  "registrationSha256": "eaaa3c887089c339ba29d84cd5dab84a180a074b67e870bc2165667614623107",
+  "controlRegistrationSha256": "defa895e00191e1cc57a2f16cc8194a62584d8d489b811e01a50eb6a2702cc4a",
+  "originalReviewSha256": "db2e7b95b95b7a156f0f8fe5ea614d4c92b6acf1123cfd4c9b904b1e0b087195",
+  "binaries": {
+    "baseline": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+    "candidate": "28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889"
+  },
+  "productionAndBuildInputSha256": {
+    "crates/compass-languages/src/evidence/build/java_fields.rs": "57e15e6e9d373e149471f9789becf39ef1e5a33edc3557747918021520e658cc",
+    "crates/compass-resolve/src/evidence/languages/java.rs": "0f36021b7917526badf031d576cddd3c1baf9b2096c8c4abe709b342077eb6a8",
+    "crates/compass-files/src/cache.rs": "65ba2b1b7ce46e6b0db049de80bc1aacc74466914833a6a5403ecf2ebf1931d4",
+    "Cargo.toml": "fe4c17809055a12229a5bb55ac9c950d0ebe1d465958673390b73e408d71ee20",
+    "Cargo.lock": "cc35464cdeafe61a095ef46886eb3bc3943b1abbd9aa25118f07b4140c24978b",
+    "rust-toolchain.toml": "3617e46e3a6e60e653a4ee823df314534ab7d54c83c1b0fd866e008e3fee1bba"
+  },
+  "testSha256": {
+    "crates/compass-languages/tests/java_enum_access.rs": "13a73d2f1ee7c5ff96ef65ab1141b876e496a55ab18edb870c84ada6f6cf383c",
+    "crates/compass-languages/tests/java_field_access.rs": "83e263526a23d4e34b1b90d50eda6de3c2885ca023db952ca2c326184a04a15e",
+    "crates/compass-resolve/tests/java_enum_access.rs": "6ad7fe691eb410c763eb283635fc0783f0ff0eafc39292782a279305cb5502df",
+    "crates/compass-resolve/tests/java_field_access.rs": "2658e695530f3b7b10d71094761370dbda9a82127a292edc3ff8565118c3effe",
+    "crates/compass-files/tests/contracts.rs": "9eb55d454e8b094f632f1ea7dc6f6a876f7cb8050afab30dd31dc50e487729cf"
+  },
+  "results": {
+    "baseline": {
+      "contactStatus": {
+        "verified_target_and_owner": 3047
+      },
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            81
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            24
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InHead",
+            15
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTable",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            10
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Comment",
+            10
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BeforeAttributeName",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptDataEscaped",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BogusDoctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTableBody",
+            8
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::AttributeName",
+            7
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            51
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            47
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            41
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            32
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            31
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::replacementChar",
+            26
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::normalName",
+            21
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::settings",
+            16
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::key",
+            14
+          ],
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            13
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::tokeniser",
+            13
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::attributes",
+            13
+          ],
+          [
+            "org.jsoup.select.StructuralEvaluator::evaluator",
+            11
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceSvg",
+            10
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::doc",
+            10
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::value",
+            10
+          ],
+          [
+            "::i",
+            9
+          ],
+          [
+            "org.jsoup.internal.SharedConstants::DefaultBufferSize",
+            8
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceMathml",
+            8
+          ],
+          [
+            "org.jsoup.helper.DataUtil::UTF_8",
+            7
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 0,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 3047,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    },
+    "candidate": {
+      "contactStatus": {
+        "verified_target_and_owner": 3461
+      },
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            10
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            10
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            8
+          ],
+          [
+            "org.jsoup.Connection.Method::GET",
+            6
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::STOP",
+            5
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            5
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            4
+          ],
+          [
+            "org.jsoup.Connection.Method::POST",
+            3
+          ],
+          [
+            "org.jsoup.Connection.Method::HEAD",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::base",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::extended",
+            3
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Document.QuirksMode::quirks",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::xhtml",
+            2
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            51
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            40
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            38
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::normalName",
+            21
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::settings",
+            16
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::key",
+            14
+          ],
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            13
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::tokeniser",
+            13
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::attributes",
+            13
+          ],
+          [
+            "org.jsoup.select.StructuralEvaluator::evaluator",
+            11
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceSvg",
+            10
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::doc",
+            10
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::value",
+            10
+          ],
+          [
+            "::i",
+            9
+          ],
+          [
+            "org.jsoup.internal.SharedConstants::DefaultBufferSize",
+            8
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceMathml",
+            8
+          ],
+          [
+            "org.jsoup.helper.DataUtil::UTF_8",
+            7
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::currentToken",
+            7
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 355,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 3106,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    },
+    "graphify": {
+      "contactStatus": {},
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            81
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            24
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InHead",
+            15
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTable",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            10
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Comment",
+            10
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BeforeAttributeName",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptDataEscaped",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BogusDoctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTableBody",
+            8
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::AttributeName",
+            7
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            78
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            67
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::bufPos",
+            62
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::doctypePending",
+            52
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::tagPending",
+            49
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            48
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::reader",
+            45
+          ],
+          [
+            "org.jsoup.helper.HttpConnection::req",
+            41
+          ],
+          [
+            "org.jsoup.nodes.Attributes::size",
+            41
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            41
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::charBuf",
+            39
+          ],
+          [
+            "org.jsoup.nodes.Element::childNodes",
+            38
+          ],
+          [
+            "org.jsoup.nodes.Element::attributes",
+            36
+          ],
+          [
+            "org.jsoup.select.QueryParser::tq",
+            36
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::bufLength",
+            33
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            33
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            32
+          ],
+          [
+            "org.jsoup.nodes.Attributes::keys",
+            30
+          ],
+          [
+            "org.jsoup.nodes.Attributes::vals",
+            30
+          ],
+          [
+            "org.jsoup.nodes.Element::tag",
+            30
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 0,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 0,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 0,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    }
+  },
+  "observations": [
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 4929,
+      "stdout_bytes": 493,
+      "stderr_bytes": 114,
+      "output_limited": false,
+      "name": "baseline",
+      "loadAverageBefore": [
+        4.02978515625,
+        8.2822265625,
+        7.908203125
+      ],
+      "loadAverageAfter": [
+        3.787109375,
+        8.1611328125,
+        7.86767578125
+      ],
+      "stdoutSha256": "a7a5be81f225b763c6d7714a3dfc08de1e35d0f7c8cd23b2f90d664ca543464f",
+      "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+      "graphBytes": 29638966,
+      "admitted": true,
+      "graphSha256": "2a9216926b1c5dfc82e4f88df0cce24a7a14ac67aa2a350158eff39018145314",
+      "equalsOriginalCompassGraph": true,
+      "reviewSha256": "7a0275882b32656c194207d5491d5ac7a50f5c33692bb7d905c9183a1470161f",
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 0,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 3047,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {
+        "verified_target_and_owner": 3047
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 5090,
+      "stdout_bytes": 494,
+      "stderr_bytes": 114,
+      "output_limited": false,
+      "name": "candidate",
+      "loadAverageBefore": [
+        3.787109375,
+        8.1611328125,
+        7.86767578125
+      ],
+      "loadAverageAfter": [
+        3.7236328125,
+        8.0751953125,
+        7.8388671875
+      ],
+      "stdoutSha256": "7a6fc540ba965595c567ed7082a72cde12cb948318442fef34d273bbd688b494",
+      "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+      "graphBytes": 30256465,
+      "admitted": true,
+      "graphSha256": "300f9afd2bf1f3c04d11b7f4563e464fd85d4a95da6de68d940d42d9f99f6227",
+      "equalsOriginalCompassGraph": false,
+      "reviewSha256": "5c993b36e2a0a2429e2fe8f06659cc701ebd32eb922231b9e6cbd86907fec465",
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 355,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 3106,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {
+        "verified_target_and_owner": 3461
+      }
+    }
+  ],
+  "originalMatchedReferencesRetained": 3047,
+  "lostOriginalMatchedReferences": [],
+  "newVerifiedReferences": 414,
+  "wholeGraphDelta": {
+    "links": {
+      "added": 670,
+      "addedKinds": {
+        "references": 670
+      },
+      "addedOccurrenceScopes": {
+        "outside-registered-source-or-unanchored": 256,
+        "registered-source": 414
+      },
+      "baseline": 25006,
+      "candidate": 25676,
+      "changed": 0,
+      "changedFieldCounts": {},
+      "removed": 0,
+      "removedKinds": {}
+    },
+    "nodes": {
+      "added": 0,
+      "baseline": 6116,
+      "candidate": 6116,
+      "changed": 4111,
+      "changedFieldCounts": {
+        "community": 4111
+      },
+      "removed": 0
+    }
+  },
+  "sourceAnchorChecks": {
+    "checkedRecords": 670,
+    "allPassed": true,
+    "outsideCompilerCohortFiles": {
+      "src/test/java/org/jsoup/helper/AuthenticationHandlerTest.java": 1,
+      "src/test/java/org/jsoup/helper/DataUtilTest.java": 3,
+      "src/test/java/org/jsoup/helper/HttpConnectionTest.java": 1,
+      "src/test/java/org/jsoup/helper/W3CDomTest.java": 2,
+      "src/test/java/org/jsoup/integration/ConnectTest.java": 7,
+      "src/test/java/org/jsoup/integration/ProxyTest.java": 6,
+      "src/test/java/org/jsoup/integration/netty/NettyProxyServer.java": 3,
+      "src/test/java/org/jsoup/integration/netty/NettyTestServer.java": 5,
+      "src/test/java/org/jsoup/integration/netty/TestResponse.java": 16,
+      "src/test/java/org/jsoup/internal/ControllableInputStreamTest.java": 5,
+      "src/test/java/org/jsoup/internal/SoftPoolTest.java": 2,
+      "src/test/java/org/jsoup/internal/StringUtilTest.java": 1,
+      "src/test/java/org/jsoup/nodes/BuildEntities.java": 1,
+      "src/test/java/org/jsoup/parser/CharacterReaderTest.java": 9,
+      "src/test/java/org/jsoup/parser/HtmlParserTest.java": 55,
+      "src/test/java/org/jsoup/parser/HtmlTextHandlingTest.java": 5,
+      "src/test/java/org/jsoup/parser/HtmlTreeBuilderTest.java": 18,
+      "src/test/java/org/jsoup/parser/NameNormalizationTest.java": 14,
+      "src/test/java/org/jsoup/parser/ParserTest.java": 5,
+      "src/test/java/org/jsoup/parser/PositionTest.java": 3,
+      "src/test/java/org/jsoup/parser/StreamParserTest.java": 2,
+      "src/test/java/org/jsoup/parser/TagSetTest.java": 30,
+      "src/test/java/org/jsoup/parser/TagTest.java": 31,
+      "src/test/java/org/jsoup/parser/TokeniserStateTest.java": 16,
+      "src/test/java/org/jsoup/parser/TokeniserTest.java": 4,
+      "src/test/java/org/jsoup/parser/XmlTreeBuilderTest.java": 11
+    },
+    "scope": "Checks graph/source byte anchors, provenance and callable containment only. Same-spelled wrong bindings can pass these checks; the 256 test-source references outside the Java 8 compiler cohort remain semantically unscored."
+  },
+  "partialGraphWarnings": [
+    {
+      "admitted": true,
+      "diagnostics": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+      "name": "baseline",
+      "successful": true
+    },
+    {
+      "admitted": true,
+      "diagnostics": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+      "name": "candidate",
+      "successful": true
+    }
+  ],
+  "graphifyEnvironmentVerification": {
+    "manifestSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+    "checkedGraphifyPackageFiles": 227,
+    "changedFiles": [],
+    "checkedFrozenPackageVersions": 58,
+    "versionMismatches": {},
+    "additionalDistributions": []
+  },
+  "controls": {
+    "panels": [
+      {
+        "admitted": 2,
+        "allThreeEqual": true,
+        "completePair": true,
+        "fullPairByteEquality": true,
+        "repository": "chi"
+      },
+      {
+        "admitted": 2,
+        "allThreeEqual": true,
+        "completePair": true,
+        "fullPairByteEquality": true,
+        "repository": "click"
+      },
+      {
+        "admitted": 2,
+        "allThreeEqual": true,
+        "completePair": true,
+        "fullPairByteEquality": true,
+        "repository": "redux"
+      },
+      {
+        "admitted": 2,
+        "allThreeEqual": true,
+        "completePair": true,
+        "fullPairByteEquality": true,
+        "repository": "walkdir"
+      }
+    ],
+    "observations": [
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "chi",
+        "stderr": "",
+        "successful": true,
+        "tool": "baseline"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "chi",
+        "stderr": "",
+        "successful": true,
+        "tool": "candidate"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "click",
+        "stderr": "",
+        "successful": true,
+        "tool": "baseline"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "click",
+        "stderr": "",
+        "successful": true,
+        "tool": "candidate"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "redux",
+        "stderr": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+        "successful": true,
+        "tool": "baseline"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "redux",
+        "stderr": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+        "successful": true,
+        "tool": "candidate"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "walkdir",
+        "stderr": "",
+        "successful": true,
+        "tool": "baseline"
+      },
+      {
+        "admitted": true,
+        "equalsOriginalGraph": true,
+        "repository": "walkdir",
+        "stderr": "",
+        "successful": true,
+        "tool": "candidate"
+      }
+    ],
+    "graphifyPolicy": "Frozen graphs and environment retained; no new Graphify query capture or timing comparison."
+  },
+  "communityReplay": {
+    "scope": "Post-change diagnostic after observing changed community labels. Replay every unchanged source task pair from the existing known development cohort; no new selection, tuning, preregistered quality outcome, functional-cohesion or superiority claim.",
+    "pairs": 75,
+    "allOutcomesUnchanged": true,
+    "repositories": [
+      {
+        "repository": "chi",
+        "baselineCommunities": 154,
+        "candidateCommunities": 154,
+        "pairOutcomesUnchanged": true
+      },
+      {
+        "repository": "click",
+        "baselineCommunities": 173,
+        "candidateCommunities": 173,
+        "pairOutcomesUnchanged": true
+      },
+      {
+        "repository": "jsoup",
+        "baselineCommunities": 42,
+        "candidateCommunities": 40,
+        "pairOutcomesUnchanged": true
+      },
+      {
+        "repository": "redux",
+        "baselineCommunities": 845,
+        "candidateCommunities": 845,
+        "pairOutcomesUnchanged": true
+      },
+      {
+        "repository": "walkdir",
+        "baselineCommunities": 10,
+        "candidateCommunities": 10,
+        "pairOutcomesUnchanged": true
+      }
+    ]
+  },
+  "verification": {
+    "repeats": {
+      "verified-evaluation.json": {
+        "byteIdentical": true,
+        "sha256": "541a2a058c6241393556b85b20d2ea97c25f2fde1f3ac54f67681f0f546147f1"
+      },
+      "verified-controls.json": {
+        "byteIdentical": true,
+        "sha256": "8a15f71b3988dd45700548441d0d547aaa14970c9f2d0af5820d4df3a40209c3"
+      },
+      "community-replay.json": {
+        "byteIdentical": true,
+        "sha256": "64e699241018a37d84fa6c6cf42c0c81decbf5ae4403a27d90a69341cb7ff018"
+      }
+    },
+    "nativeSteps": [
+      {
+        "name": "fmt",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 3863,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "compass-languages-java",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 16892,
+        "stdoutSha256": "769214247b89d8c86fa29c65113e0a57a2f4055f11f6c70bbbc1b7d80ff4d195",
+        "stderrSha256": "6175565a037ef74e3168e3b57019bb5f47a0f119d637e18c9de4e1e4bf42dfeb"
+      },
+      {
+        "name": "compass-resolve-java",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 21047,
+        "stdoutSha256": "e08dcda52b2aba3d094fc8b3536b59c2ca952c74adfd17978f91da76f77bd708",
+        "stderrSha256": "03e57de4e03eacabad198527d4d5c07adf5c6ed43e9a26a87b69fdbf1d4cc801"
+      },
+      {
+        "name": "cache-contracts",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 12330,
+        "stdoutSha256": "636123b095f122fed2be1c140334f841331ac4017193734cbd36b535050f75cf",
+        "stderrSha256": "707da2a8eeaa8510bf64716ce3550805c5d4da6fa176422b6cf7dd0bc1c29a48"
+      },
+      {
+        "name": "focused-clippy",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 51618,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "4a9dfff97954803ca47798c7dbb8b6ac65cb6111398d89d8cf505bdf7d48d923"
+      },
+      {
+        "name": "workspace-clippy",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 16226,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "143107eddda218a0952ead20d9ffdb33111d4f70017f4a3d7cc9029a93339885"
+      },
+      {
+        "name": "workspace-tests",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 261319,
+        "stdoutSha256": "72ec8b79c7bf32b7f7e0c51ae4e853472f5e73efe2804bfa8314cbe209305e00",
+        "stderrSha256": "6212f8d00ac38d8f3b6aa4808a3bf7edc80baf5616d581b70288c9e4b90d6dc3"
+      },
+      {
+        "name": "product",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 249901,
+        "stdoutSha256": "e1d3eb4a2731b1a067164fc1d5c0705a8d4e89dccfc395361d6d4bd77174e710",
+        "stderrSha256": "eaac1c76b9ddef037dbf77fefd664376a7d1cbe609f7f7347c56bbed53297dc5"
+      },
+      {
+        "name": "fixtures",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 1002012,
+        "stdoutSha256": "1f54e54732b8485068c32ba4dfd366080a76f162113cbf18ae0ea783aa8ed0bc",
+        "stderrSha256": "5612a25c1abfbcf5ba7b43b4aba7935b6a3883c7ba635388f1a32163ffa45ff0"
+      },
+      {
+        "name": "benchmark-tests",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 2030,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "580aed35f056e6709444bcf67a5732188c35f7d54bf0ecc1d02720b16b24482b"
+      },
+      {
+        "name": "boundary",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 53,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "release-build",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 1051,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "7ad127ac731c4ba62cead7a8d4306abe207718ed5901bbca3e6535cffcfee8d9"
+      },
+      {
+        "name": "fmt",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 3765,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "resolver-tests",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 75985,
+        "stdoutSha256": "a106d447b2a7b073e2a8b57c4fe81537b41f7a003647a17e7a4573f9b77a4f23",
+        "stderrSha256": "cabc30efc267dc7f1cce245530c2e02de6272cb2513ebff72bc5d9920d4f0533"
+      },
+      {
+        "name": "scope-test-clippy",
+        "exit_code": 0,
+        "timed_out": false,
+        "output_limited": false,
+        "wall_ms": 1457,
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "40968d6684235a5d3285d9175b0baf88fab3213dc4da4294c40eaf8218e27176"
+      }
+    ],
+    "counts": {
+      "javaLanguageIntegration": 38,
+      "fullResolverTests": 533,
+      "cacheContracts": 33,
+      "workspacePassed": 1109,
+      "workspaceIgnored": 2,
+      "productTests": 9,
+      "benchmarkTests": 238
+    },
+    "nativeCountNote": "Suites overlap; do not sum these into one unique-test count. The full resolver run includes the corrected missing-scope and existing-module-scope cases."
+  },
+  "retainedCorrections": [
+    "Unchanged production first failed seven of eight language and three of six resolver regressions.",
+    "An initial initializer fixture used an invalid enum-static access during construction. The valid own-field initializer also failed before the ownership fix; six positive fixtures compile under javac 17 with --release 8.",
+    "The initial receiver implementation regressed source-type precedence over imports. A new nested-enum regression reproduced it; source-type precedence is restored.",
+    "The first scope negative looked for a nonexistent file-kind scope and tested a missing scope. It now separately checks the existing module scope and missing scope; all 533 resolver tests and focused Clippy pass."
+  ],
+  "limitations": [
+    "The 4314 internal occurrences retain all 3785 ordinary field and 529 enum references. Candidate still misses 679 ordinary and 174 enum references. No denominator was reselected.",
+    "All 3461 returned in-cohort field/enum contacts agree with the compiler on target and owner. Graphify has zero such contacts and no positive-contact precision denominator.",
+    "Of 670 added graph references, 414 belong to the compiler cohort; 256 are in test sources outside it. All 670 pass source-token, provenance and applicable callable-containment checks, but those checks cannot establish semantic binding correctness for the 256 unscored test references.",
+    "No original edge is removed or changed. All 6116 node identities remain; 4111 community attributes change. jsoup communities move from 42 to 40 while all 75 existing task-pair outcomes remain unchanged. This post-change diagnostic does not establish functional cohesion or clustering quality.",
+    "Both jsoup graphs retain the warning for two omitted edges. Redux controls retain their original warnings. Known development source, build configuration and previously observed misses prevent a held-out claim.",
+    "The frozen candidate was built before the production commit was recorded; its source/build inputs and corrected test digests match this commit. Original failed attempts, baseline graph and prior outcomes remain preserved.",
+    "Graphify graphs and package environment remain unchanged. These field-reference results do not measure authored answers, query usability, longer walks, god-object classification or broad cross-language superiority.",
+    "No standalone browser/platform/packaging matrix was rerun locally. The production fixture gate includes its React/JavaScript qualification. No merge, release or version bump was performed."
+  ],
+  "artifactDirectory": "java-enum-access-01",
+  "artifactSha256": {
+    "checks.py": "009ce14d258aef53f71fe16755a958fe364d63dfaf40d6ce9396f0775f414501",
+    "checks.json": "268da7556c6b9f1a3159079a3720699018798d178e5db9973f8e955d3f9424c9",
+    "supplemental.py": "c257bea2d5ed8fb0ada1069290f8404fa96f6bd55df73c70e2b5b184bbefdae7",
+    "supplemental.json": "7fb644ed42a4d18edbc50ae0015aeedd8b4b7b3c6324ab6c11a263dced4dc650",
+    "baseline.py": "5189c19a4ce399c229d39d77856a68b308ccd188a51da33ea33a7b60e9753011",
+    "baseline.json": "72554dbb7d220a5d5ac9529b24e1703252832a128cdb0d80b3908f1e79c68d72",
+    "compiler-fixtures.json": "8b63465fb44a23f00f6dda2a3769c96b18efa8da76e09cbc2ca199627294a843",
+    "initializer-before.stdout": "e2ec8f0be364074e9459d7b8fe82b8fdc559e14d6ff4afe4ced94a883bebebc7",
+    "valid-initializer-before.stdout": "3bc4c21571c4d6420a4dd860cae51c14e9f26de95308e811dc01ca9c0daf4894",
+    "import-before.stdout": "15b198d24496a8d73303b88f4a8ad4b93e7793cb195b55e17a81b63368427629",
+    "evaluate.py": "e304cef89009149670486c004d65eb631296d64f27babfd753528afe7da94505",
+    "evaluation/run.json": "a2fe6e4d8c789a9f42080e4d42bad2d6f96de982104480072afe7dcbd7b2c1ce",
+    "evaluation/baseline-review.json": "7a0275882b32656c194207d5491d5ac7a50f5c33692bb7d905c9183a1470161f",
+    "evaluation/candidate-review.json": "5c993b36e2a0a2429e2fe8f06659cc701ebd32eb922231b9e6cbd86907fec465",
+    "evaluation/graphify-review.json": "dc5cbeea887a267d5a6f9a39860efc924e4be3a09fabb5a7c447de9e6a7ab0b2",
+    "verify_evaluation.py": "ac890acc22e3ed8f50c79dc114f0ec997e952db36a71d0e76954f82741e33d81",
+    "verified-evaluation.json": "541a2a058c6241393556b85b20d2ea97c25f2fde1f3ac54f67681f0f546147f1",
+    "verified-evaluation-repeat.json": "541a2a058c6241393556b85b20d2ea97c25f2fde1f3ac54f67681f0f546147f1",
+    "control_runs.py": "33af7a59bb9861dcd256e8f99c2006d08bdb84e431ac4cd01cf6062788e990e2",
+    "controls/run.json": "c4da882401849c12281ca76cb3eaa549c0951ccaaf7912584d8147c3094c291a",
+    "verify_controls.py": "e1c1e6920d5296c38e581a8ed5d4c7f3d7de7167399287bb1a7b7da55025849c",
+    "verified-controls.json": "8a15f71b3988dd45700548441d0d547aaa14970c9f2d0af5820d4df3a40209c3",
+    "verified-controls-repeat.json": "8a15f71b3988dd45700548441d0d547aaa14970c9f2d0af5820d4df3a40209c3",
+    "check_added_anchors.py": "ac04093a87379b760f79bc91ca77394004662273b53d006f6841a3e427b7893e",
+    "added-anchor-review.json": "4d1e8e2dfcffe478887709912ebdca3b9104356832b7a1ff02c55586a29fd6f8",
+    "replay_communities.py": "143a8c0e8acf4344d4e502cb73ea85a630d416835d5cc3558ac1c7a285169249",
+    "community-replay.json": "64e699241018a37d84fa6c6cf42c0c81decbf5ae4403a27d90a69341cb7ff018",
+    "community-replay-repeat.json": "64e699241018a37d84fa6c6cf42c0c81decbf5ae4403a27d90a69341cb7ff018",
+    "nested-enum-oracle/verified-source.json": "48ba18c7613b8d39ec35da0ff40916848a557fc40ddbf2108a32546f7b295b02",
+    "graphify-environment-verification.json": "939046876e0ffdeaa5ad4ba413a5ef91e0796acbad500126a0d543940763a0fc",
+    "publish.py": "09eced5168ecd220f94745854b65d94d73ac631ecb713c1ea7224bf31645a3cd"
+  }
+}

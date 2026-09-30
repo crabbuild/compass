@@ -31,12 +31,51 @@ impl CodeQueryEngine {
             return Ok((Some(node.id), Vec::new(), false));
         }
         let normalized = normalize_symbol(operand);
-        let (exact_nodes, exact_truncated) = self.backend.nodes_by_normalized_name(
+        let (mut exact_nodes, exact_truncated) = self.backend.nodes_by_normalized_name(
             &normalized,
             usize::try_from(limits.max_candidates).unwrap_or(usize::MAX),
         )?;
         instrumentation.work.candidates_read +=
             u64::try_from(exact_nodes.len()).unwrap_or(u64::MAX);
+        // Preserve owner-qualified matching before lexical ranking. A missing
+        // owner must never silently select the same method on another owner.
+        if exact_nodes.is_empty()
+            && !exact_truncated
+            && let Some(qualified) = self.owner_qualified_candidates(
+                &normalized,
+                usize::try_from(limits.max_candidates).unwrap_or(usize::MAX),
+                instrumentation,
+            )?
+        {
+            if qualified.truncated {
+                return Ok((
+                    None,
+                    vec![QueryDiagnostic {
+                        code: QueryDiagnosticCode::AmbiguousMatch,
+                        message: format!(
+                            "Owner-qualified symbol {operand:?} cannot be resolved within the {}-candidate leaf-name bound",
+                            limits.max_candidates
+                        ),
+                        node_id: None,
+                        path: None,
+                    }],
+                    true,
+                ));
+            }
+            if qualified.nodes.is_empty() && qualified.has_leaf_candidates {
+                return Ok((
+                    None,
+                    vec![QueryDiagnostic {
+                        code: QueryDiagnosticCode::NoMatch,
+                        message: format!("NO OWNER-QUALIFIED MATCH for {operand:?}"),
+                        node_id: None,
+                        path: None,
+                    }],
+                    false,
+                ));
+            }
+            exact_nodes = qualified.nodes;
+        }
         let has_exact = !exact_nodes.is_empty();
         let (mut candidates, mut diagnostics, mut candidate_truncated) = if has_exact {
             (

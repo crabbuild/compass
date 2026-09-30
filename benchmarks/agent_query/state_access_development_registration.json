@@ -1,0 +1,321 @@
+{
+  "schema": "compass.state-access-development-registration/1",
+  "baselineCommit": "7aef6a0c41dd82d3db0a1a74aff1d5c7f956c363",
+  "scope": "Known development subjects; prior graph inventories were observed, including missing reads/writes. Source-selected diagnostic, not blinded, held-out, representative, a query benchmark, or a god-object classifier.",
+  "graphRun": "rust-index-receiver-03/run.json",
+  "graphRunSha256": "9a6e670114f5be83773176e54bf0c4faf45582389164dea79ad17306eee1c50c",
+  "protocol": {
+    "denominator": "20 explicit state-access sites, two state slots with two different accessing methods in each of five repositories. Java includes a nested visitor; Redux uses closure variables, not object fields. Python first assignments serve as field introduction witnesses. These are not equivalent class-level cohesion samples.",
+    "identity": "Resolve callable and state nodes using exact pinned file, source declaration line and source symbol identity. Preserve all candidates; parameter shadowing and export/coincident nodes must not be silently collapsed. Missing or ambiguous endpoints remain failures for directly usable state evidence.",
+    "coverage": "For a uniquely identified callable and state slot, retain ALL graph records between the endpoints in either direction. A forward references/reads/writes edge is generic state-contact evidence. Separately require occurrence provenance matching the selected source access line. Calls to a field value type, owner type references, node containment, member names alone, and source snippets do not constitute state-access edges. Report absent state nodes separately from absent access links; do not interpret either as independence or low cohesion.",
+    "bounds": "Use the complete frozen graph (max 512 MiB each) equally for both tools. This is a representation diagnostic, not public query success, timing or response-efficiency evidence. Save exact candidate nodes and connecting records, input hashes and replayable verifier.",
+    "limitations": [
+      "No interprocedural dataflow or runtime object identity inference.",
+      "No read/write precision score; receiver mutation is not automatically a field assignment.",
+      "Same-agent source judgment; no independent adjudication.",
+      "No god-object, LCOM, whole-class cohesion, extraction precision or broad superiority claim."
+    ]
+  },
+  "cases": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "file": "mux.go",
+      "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+      "groups": [
+        {
+          "owner": "Mux",
+          "state": "handler",
+          "declarationLine": 24,
+          "declarationText": "\thandler http.Handler",
+          "accesses": [
+            {
+              "method": "Use",
+              "methodLine": 100,
+              "line": 101,
+              "column": 5,
+              "expression": "mx.handler",
+              "operation": "read",
+              "text": "\tif mx.handler != nil {"
+            },
+            {
+              "method": "With",
+              "methodLine": 242,
+              "line": 245,
+              "column": 19,
+              "expression": "mx.handler",
+              "operation": "read",
+              "text": "\tif !mx.inline && mx.handler == nil {"
+            }
+          ]
+        },
+        {
+          "owner": "Mux",
+          "state": "middlewares",
+          "declarationLine": 43,
+          "declarationText": "\tmiddlewares []func(http.Handler) http.Handler",
+          "accesses": [
+            {
+              "method": "Use",
+              "methodLine": 100,
+              "line": 104,
+              "column": 2,
+              "expression": "mx.middlewares",
+              "operation": "write",
+              "text": "\tmx.middlewares = append(mx.middlewares, middlewares...)"
+            },
+            {
+              "method": "With",
+              "methodLine": 242,
+              "line": 252,
+              "column": 31,
+              "expression": "mx.middlewares",
+              "operation": "read",
+              "text": "\t\tmws = make(Middlewares, len(mx.middlewares))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "file": "src/click/_compat.py",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "groups": [
+        {
+          "owner": "_AtomicFile",
+          "state": "closed",
+          "declarationLine": 460,
+          "declarationText": "        self.closed = False",
+          "accesses": [
+            {
+              "method": "__init__",
+              "methodLine": 456,
+              "line": 460,
+              "column": 9,
+              "expression": "self.closed",
+              "operation": "write",
+              "text": "        self.closed = False"
+            },
+            {
+              "method": "close",
+              "methodLine": 466,
+              "line": 467,
+              "column": 12,
+              "expression": "self.closed",
+              "operation": "read",
+              "text": "        if self.closed:"
+            }
+          ]
+        },
+        {
+          "owner": "_AtomicFile",
+          "state": "_real_filename",
+          "declarationLine": 459,
+          "declarationText": "        self._real_filename = real_filename",
+          "accesses": [
+            {
+              "method": "__init__",
+              "methodLine": 456,
+              "line": 459,
+              "column": 9,
+              "expression": "self._real_filename",
+              "operation": "write",
+              "text": "        self._real_filename = real_filename"
+            },
+            {
+              "method": "name",
+              "methodLine": 463,
+              "line": 464,
+              "column": 16,
+              "expression": "self._real_filename",
+              "operation": "read",
+              "text": "        return self._real_filename"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "groups": [
+        {
+          "owner": "Cleaner",
+          "state": "safelist",
+          "declarationLine": 44,
+          "declarationText": "    private final Safelist safelist;",
+          "accesses": [
+            {
+              "method": "Cleaner",
+              "methodLine": 50,
+              "line": 52,
+              "column": 9,
+              "expression": "this.safelist",
+              "operation": "write",
+              "text": "        this.safelist = safelist;"
+            },
+            {
+              "method": "createSafeElement",
+              "methodLine": 188,
+              "line": 197,
+              "column": 17,
+              "expression": "safelist",
+              "operation": "read",
+              "text": "            if (safelist.isSafeAttribute(sourceTag, sourceEl, sourceAttr)) { // will keep this attr"
+            }
+          ]
+        },
+        {
+          "owner": "CleaningVisitor",
+          "state": "destination",
+          "declarationLine": 141,
+          "declarationText": "        private Element destination; // current element to append nodes to",
+          "accesses": [
+            {
+              "method": "CleaningVisitor",
+              "methodLine": 143,
+              "line": 145,
+              "column": 13,
+              "expression": "this.destination",
+              "operation": "write",
+              "text": "            this.destination = destination;"
+            },
+            {
+              "method": "head",
+              "methodLine": 148,
+              "line": 158,
+              "column": 21,
+              "expression": "destination",
+              "operation": "write",
+              "text": "                    destination = destChild;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "file": "src/createStore.ts",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "groups": [
+        {
+          "owner": "createStore",
+          "state": "currentState",
+          "declarationLine": 137,
+          "declarationText": "  let currentState: S | PreloadedState | undefined = preloadedState as",
+          "accesses": [
+            {
+              "method": "getState",
+              "methodLine": 166,
+              "line": 175,
+              "column": 12,
+              "expression": "currentState",
+              "operation": "read",
+              "text": "    return currentState as S"
+            },
+            {
+              "method": "dispatch",
+              "methodLine": 270,
+              "line": 299,
+              "column": 7,
+              "expression": "currentState",
+              "operation": "write",
+              "text": "      currentState = currentReducer(currentState, action)"
+            }
+          ]
+        },
+        {
+          "owner": "createStore",
+          "state": "isDispatching",
+          "declarationLine": 143,
+          "declarationText": "  let isDispatching = false",
+          "accesses": [
+            {
+              "method": "getState",
+              "methodLine": 166,
+              "line": 167,
+              "column": 9,
+              "expression": "isDispatching",
+              "operation": "read",
+              "text": "    if (isDispatching) {"
+            },
+            {
+              "method": "dispatch",
+              "methodLine": 270,
+              "line": 298,
+              "column": 7,
+              "expression": "isDispatching",
+              "operation": "write",
+              "text": "      isDispatching = true"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "file": "src/lib.rs",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "groups": [
+        {
+          "owner": "IntoIter",
+          "state": "deferred_dirs",
+          "declarationLine": 598,
+          "declarationText": "    deferred_dirs: Vec<DirEntry>,",
+          "accesses": [
+            {
+              "method": "handle_entry",
+              "methodLine": 840,
+              "line": 875,
+              "column": 13,
+              "expression": "self.deferred_dirs",
+              "operation": "receiver",
+              "text": "            self.deferred_dirs.push(dent);"
+            },
+            {
+              "method": "get_deferred_dir",
+              "methodLine": 884,
+              "line": 886,
+              "column": 29,
+              "expression": "self.deferred_dirs",
+              "operation": "read",
+              "text": "            if self.depth < self.deferred_dirs.len() {"
+            }
+          ]
+        },
+        {
+          "owner": "IntoIter",
+          "state": "oldest_opened",
+          "declarationLine": 591,
+          "declarationText": "    oldest_opened: usize,",
+          "accesses": [
+            {
+              "method": "push",
+              "methodLine": 901,
+              "line": 945,
+              "column": 13,
+              "expression": "self.oldest_opened",
+              "operation": "write",
+              "text": "            self.oldest_opened = self.oldest_opened.checked_add(1).unwrap();"
+            },
+            {
+              "method": "pop",
+              "methodLine": 950,
+              "line": 958,
+              "column": 9,
+              "expression": "self.oldest_opened",
+              "operation": "write",
+              "text": "        self.oldest_opened = min(self.oldest_opened, self.stack_list.len());"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

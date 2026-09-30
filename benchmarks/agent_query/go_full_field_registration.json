@@ -1,0 +1,48 @@
+{
+  "schema": "compass.go-full-field-registration/1",
+  "purpose": "Evaluate source-backed named Go struct-field declaration coverage and unexpected additions across every tracked Go file in the pinned Litestream repository, using one Go standard-library parser oracle and the frozen graphs.",
+  "declaredBeforeCapture": true,
+  "developmentStatus": "The selected two-file 33-field result and candidate graph were inspected before this full-repository registration. This is broader development qualification, not an unseen holdout.",
+  "sourceRepository": "litestream",
+  "sourceCommit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+  "sourceFiles": "All tracked paths ending in .go from git ls-files, including tests and generated files; no post-hoc file exclusions.",
+  "sourcePathCount": 146,
+  "sourcePathListSha256": "f6b7d8c500a270ef83e87ce48d4108293eb1505ea0ae7abde85d450800f1d0be",
+  "sourceOracle": "Go standard-library go/parser and go/ast; include top-level named StructType TypeSpecs and each explicit Field.Names identifier except the blank identifier. Keep embedded and blank fields separate. Exclude anonymous nested struct fields from the outer direct-member denominator. Preserve full repository-relative file path and exact 1-based identifier line.",
+  "join": "Use the same exact source file, owner name/start line, field name/identifier line and source-owner-to-target-field contains/defines record rule as go_struct_field_registration.json. Require a distinct field declaration node for each source identifier. Do not credit field-type context references as declarations. Report missing or ambiguous owner and field identities separately. Candidate graph additions require a matching source field under this rule; inspect every added field node and its owner.",
+  "priorSelectedRegistrationSha256": "3166a00fa59fa1cd40bb4584cdda1f62576f933304d94cdb763cccc6e4fb4f05",
+  "graphs": [
+    {
+      "tool": "compass-baseline",
+      "bytes": 11490932,
+      "sha256": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db"
+    },
+    {
+      "tool": "graphify",
+      "bytes": 5333935,
+      "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e"
+    },
+    {
+      "tool": "compass-candidate",
+      "bytes": 12971447,
+      "sha256": "3aed3fe0dab1fec6e1a9e197474ae3727f4c74dd6f3b68ff7cd91462cb4d29e4",
+      "binarySha256": "bf376d60745175e5ac91851ce45d9fd9ace287e9093de21be7c5068c9e4e12c9"
+    }
+  ],
+  "bounds": {
+    "maxSourcePaths": 200,
+    "maxSourceBytesPerFile": 1048576,
+    "maxGraphBytes": 16777216,
+    "maxGraphNodes": 100000,
+    "maxGraphEdges": 100000,
+    "maxStructs": 5000,
+    "maxNamedFields": 10000,
+    "maxSecondsForOracle": 60
+  },
+  "report": "Retain all source declarations and per-graph exact/ambiguous/missing statuses, every unexpected candidate field node, unchanged baseline node/edge checks, source/graph/binary hashes, diagnostics and unavailable outcomes. Separate declaration coverage from field-access correctness and god-object diagnosis.",
+  "limitations": [
+    "One known Go development repository cannot establish cross-language extraction quality or broad superiority.",
+    "Publication exclusions and parser recovery remain visible; source fields in excluded files count as unavailable or missing rather than disappearing from the denominator.",
+    "A matching declaration identity does not prove field-access target precision, cohesion, responsibility count or user-facing explanation quality."
+  ]
+}

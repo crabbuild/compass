@@ -1,0 +1,488 @@
+{
+  "schema": "compass.community-task-pairs/1",
+  "scope": "Source-defined task-local community diagnostic on reused development repositories. Frozen before inspecting assignments for these selected declarations. Prior unrelated graph outputs have been observed; this is not held-out or independent review.",
+  "sourceRun": "java-varargs-panel-a-02",
+  "sourceRunSha256": "c2bc04366343fbd32bbdf84ccfb1db7aaad2e2ed38b38f979065c6755432d792",
+  "policy": {
+    "unit": "Exact file, declaration start and terminal symbol; retain every matching node identity. Missing, ambiguous or unassigned declarations are unresolved, never a successful separation.",
+    "artifactComparison": "Inspect each tool native-only stored community assignments on its unchanged captured graph. This is an artifact-quality diagnostic, not a timed CLI/MCP workflow or synthesized answer.",
+    "pairSelection": "All unordered pairs among the six selected declarations per repository: three within-task collaborator pairs and twelve cross-task pairs. No output selects or drops a pair.",
+    "metrics": "Report same-community, different-community and unresolved counts separately for within-task and cross-task pairs, stratified by same-file versus cross-file. Report whole-community sizes and source-file diversity for context. Never combine these into an accuracy or superiority score.",
+    "interpretation": "Within-task co-location measures one way to retain a reviewed collaborator. Cross-task co-location describes grouping granularity, not an automatic defect: tasks can share helpers and state or belong to one coherent subsystem. Different community IDs have no cross-tool meaning.",
+    "bounds": {
+      "maxGraphBytes": 268435456,
+      "maxNodes": 200000,
+      "maxEdges": 1000000
+    },
+    "counterevidence": [
+      "Click help-table measurement calls term_len, linking two named tasks directly; putting them together may be useful.",
+      "WalkDir tasks are cooperating parts of one iterator and share configuration or traversal state. Separating all of them is not a required architecture.",
+      "Chi router construction and pattern handling both support routing; a large core community can be coherent.",
+      "jsoup parsing, safe copying and whitespace classification can cooperate in HTML processing.",
+      "Redux action validation supports store behavior as well as standalone checks; the small pairs do not partition all responsibilities."
+    ],
+    "limitations": [
+      "Only 30 purposively selected declarations and 75 pairs; two within-task pairs cross files. Results are not population precision or a whole-system architecture oracle.",
+      "Task annotations are source-backed reviewer judgments. They do not establish exclusive ownership, refactoring need, god-object positives/negatives, or independently confirmed semantic labels.",
+      "Graph edge/source correctness outside the exact declaration witnesses remains unaudited in this arm.",
+      "No cluster algorithm may be tuned merely to maximize these co-location counts; review actual source mechanisms and granularity tradeoffs first."
+    ]
+  },
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "graphSha256": {
+        "compass": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "graphify": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+      },
+      "tasks": [
+        {
+          "id": "chi-router-construction",
+          "task": "Construct the router exposed by the public factory.",
+          "sourceReason": "NewRouter delegates directly to NewMux, which initializes its routing tree and context pool.",
+          "declarations": [
+            {
+              "id": "chi-router-construction-NewRouter",
+              "symbol": "NewRouter",
+              "ownerContext": "package chi",
+              "file": "chi.go",
+              "startLine": 62,
+              "witnessEndLine": 64,
+              "sourceFileSha256": "47c70ececcbb9d71f973eda3cbadad0a46c8cc2261b285f7049b5261f337d678",
+              "witness": "func NewRouter() *Mux {\n\treturn NewMux()\n}"
+            },
+            {
+              "id": "chi-router-construction-NewMux",
+              "symbol": "NewMux",
+              "ownerContext": "package chi",
+              "file": "mux.go",
+              "startLine": 52,
+              "witnessEndLine": 59,
+              "sourceFileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d",
+              "witness": "func NewMux() *Mux {\n\tmux := &Mux{tree: &node{}, pool: &sync.Pool{}}\n\tmux.pool.New = func() any {\n\t\treturn NewRouteContext()\n\t}\n\treturn mux\n}\n"
+            }
+          ]
+        },
+        {
+          "id": "chi-request-identity",
+          "task": "Attach and retrieve an HTTP request identifier.",
+          "sourceReason": "RequestID stores a value under RequestIDKey; GetReqID retrieves that same context value.",
+          "declarations": [
+            {
+              "id": "chi-request-identity-RequestID",
+              "symbol": "RequestID",
+              "ownerContext": "package middleware",
+              "file": "middleware/request_id.go",
+              "startLine": 67,
+              "witnessEndLine": 80,
+              "sourceFileSha256": "31b21034dd5cd6393fa9abc9ce1207acc78fea1e162d866edf6bb2a7badd288b",
+              "witness": "func RequestID(next http.Handler) http.Handler {\n\tfn := func(w http.ResponseWriter, r *http.Request) {\n\t\tctx := r.Context()\n\t\trequestID := r.Header.Get(RequestIDHeader)\n\t\tif requestID == \"\" {\n\t\t\tmyid := reqid.Add(1)\n\t\t\trequestID = fmt.Sprintf(\"%s-%06d\", prefix, myid)\n\t\t}\n\t\tctx = context.WithValue(ctx, RequestIDKey, requestID)\n\t\tnext.ServeHTTP(w, r.WithContext(ctx))\n\t}\n\treturn http.HandlerFunc(fn)\n}\n"
+            },
+            {
+              "id": "chi-request-identity-GetReqID",
+              "symbol": "GetReqID",
+              "ownerContext": "package middleware",
+              "file": "middleware/request_id.go",
+              "startLine": 83,
+              "witnessEndLine": 91,
+              "sourceFileSha256": "31b21034dd5cd6393fa9abc9ce1207acc78fea1e162d866edf6bb2a7badd288b",
+              "witness": "func GetReqID(ctx context.Context) string {\n\tif ctx == nil {\n\t\treturn \"\"\n\t}\n\tif reqID, ok := ctx.Value(RequestIDKey).(string); ok {\n\t\treturn reqID\n\t}\n\treturn \"\"\n}"
+            }
+          ]
+        },
+        {
+          "id": "chi-route-pattern-parameters",
+          "task": "Read parameter keys from a route pattern.",
+          "sourceReason": "patParamKeys repeatedly calls patNextSegment, checks duplicate keys and advances through the pattern.",
+          "declarations": [
+            {
+              "id": "chi-route-pattern-parameters-patParamKeys",
+              "symbol": "patParamKeys",
+              "ownerContext": "package chi",
+              "file": "tree.go",
+              "startLine": 803,
+              "witnessEndLine": 819,
+              "sourceFileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79",
+              "witness": "func patParamKeys(pattern string) []string {\n\tpat := pattern\n\tparamKeys := []string{}\n\tfor {\n\t\tptyp, paramKey, _, _, _, e := patNextSegment(pat)\n\t\tif ptyp == ntStatic {\n\t\t\treturn paramKeys\n\t\t}\n\t\tfor i := 0; i < len(paramKeys); i++ {\n\t\t\tif paramKeys[i] == paramKey {\n\t\t\t\tpanic(fmt.Sprintf(\"chi: routing pattern '%s' contains duplicate param key, '%s'\", pattern, paramKey))\n\t\t\t}\n\t\t}\n\t\tparamKeys = append(paramKeys, paramKey)\n\t\tpat = pat[e:]\n\t}\n}"
+            },
+            {
+              "id": "chi-route-pattern-parameters-patNextSegment",
+              "symbol": "patNextSegment",
+              "ownerContext": "package chi",
+              "file": "tree.go",
+              "startLine": 735,
+              "witnessEndLine": 801,
+              "sourceFileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79",
+              "witness": "func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int) {\n\tps := strings.Index(pattern, \"{\")\n\tws := strings.Index(pattern, \"*\")\n\n\tif ps < 0 && ws < 0 {\n\t\treturn ntStatic, \"\", \"\", 0, 0, len(pattern) // we return the entire thing\n\t}\n\n\t// Sanity check\n\tif ps >= 0 && ws >= 0 && ws < ps {\n\t\tpanic(\"chi: wildcard '*' must be the last pattern in a route, otherwise use a '{param}'\")\n\t}\n\n\tvar tail byte = '/' // Default endpoint tail to / byte\n\n\tif ps >= 0 {\n\t\t// Param/Regexp pattern is next\n\t\tnt := ntParam\n\n\t\t// Read to closing } taking into account opens and closes in curl count (cc)\n\t\tcc := 0\n\t\tpe := ps\n\t\tfor i, c := range pattern[ps:] {\n\t\t\tif c == '{' {\n\t\t\t\tcc++\n\t\t\t} else if c == '}' {\n\t\t\t\tcc--\n\t\t\t\tif cc == 0 {\n\t\t\t\t\tpe = ps + i\n\t\t\t\t\tbreak\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tif pe == ps {\n\t\t\tpanic(\"chi: route param closing delimiter '}' is missing\")\n\t\t}\n\n\t\tkey := pattern[ps+1 : pe]\n\t\tpe++ // set end to next position\n\n\t\tif pe < len(pattern) {\n\t\t\ttail = pattern[pe]\n\t\t}\n\n\t\tkey, rexpat, isRegexp := strings.Cut(key, \":\")\n\t\tif isRegexp {\n\t\t\tnt = ntRegexp\n\t\t}\n\n\t\tif len(rexpat) > 0 {\n\t\t\tif rexpat[0] != '^' {\n\t\t\t\trexpat = \"^\" + rexpat\n\t\t\t}\n\t\t\tif rexpat[len(rexpat)-1] != '$' {\n\t\t\t\trexpat += \"$\"\n\t\t\t}\n\t\t}\n\n\t\treturn nt, key, rexpat, tail, ps, pe\n\t}\n\n\t// Wildcard pattern as finale\n\tif ws < len(pattern)-1 {\n\t\tpanic(\"chi: wildcard '*' must be the last value in a route. trim trailing text or use a '{param}' instead\")\n\t}\n\treturn ntCatchAll, \"*\", \"\", 0, ws, len(pattern)\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "graphSha256": {
+        "compass": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "graphify": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+      },
+      "tasks": [
+        {
+          "id": "click-atomic-close",
+          "task": "Follow atomic-file replacement and context cleanup.",
+          "sourceReason": "The context exit delegates to close; close checks closed, closes the wrapped stream and replaces the destination. The delete parameter does not implement rollback.",
+          "declarations": [
+            {
+              "id": "click-atomic-close-__exit__",
+              "symbol": "__exit__",
+              "ownerContext": "_AtomicFile",
+              "file": "src/click/_compat.py",
+              "startLine": 479,
+              "witnessEndLine": 485,
+              "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "witness": "    def __exit__(\n        self,\n        exc_type: type[BaseException] | None,\n        exc_value: BaseException | None,\n        tb: TracebackType | None,\n    ) -> None:\n        self.close(delete=exc_type is not None)"
+            },
+            {
+              "id": "click-atomic-close-close",
+              "symbol": "close",
+              "ownerContext": "_AtomicFile",
+              "file": "src/click/_compat.py",
+              "startLine": 466,
+              "witnessEndLine": 471,
+              "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "witness": "    def close(self, delete: bool = False) -> None:\n        if self.closed:\n            return\n        self._f.close()\n        os.replace(self._tmp_filename, self._real_filename)\n        self.closed = True"
+            }
+          ]
+        },
+        {
+          "id": "click-terminal-string-width",
+          "task": "Measure visible terminal text without ANSI escapes.",
+          "sourceReason": "term_len takes the length after strip_ansi removes escape sequences.",
+          "declarations": [
+            {
+              "id": "click-terminal-string-width-term_len",
+              "symbol": "term_len",
+              "ownerContext": "module",
+              "file": "src/click/_compat.py",
+              "startLine": 536,
+              "witnessEndLine": 537,
+              "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "witness": "def term_len(x: str) -> int:\n    return len(strip_ansi(x))"
+            },
+            {
+              "id": "click-terminal-string-width-strip_ansi",
+              "symbol": "strip_ansi",
+              "ownerContext": "module",
+              "file": "src/click/_compat.py",
+              "startLine": 491,
+              "witnessEndLine": 492,
+              "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "witness": "def strip_ansi(value: str) -> str:\n    return _ansi_re.sub(\"\", value)"
+            }
+          ]
+        },
+        {
+          "id": "click-help-definition-layout",
+          "task": "Calculate columns when formatting option and command help.",
+          "sourceReason": "HelpFormatter.write_dl materializes rows and invokes measure_table to calculate column widths.",
+          "declarations": [
+            {
+              "id": "click-help-definition-layout-write_dl",
+              "symbol": "write_dl",
+              "ownerContext": "HelpFormatter",
+              "file": "src/click/formatting.py",
+              "startLine": 229,
+              "witnessEndLine": 248,
+              "sourceFileSha256": "f125b628692f8dfcfd43535b7a88cc1ee64137471f9d0243b389aa0cfea85e6b",
+              "witness": "    def write_dl(\n        self,\n        rows: cabc.Iterable[tuple[str, str]],\n        col_max: int = 30,\n        col_spacing: int = 2,\n    ) -> None:\n        \"\"\"Writes a definition list into the buffer.  This is how options\n        and commands are usually formatted.\n\n        :param rows: a list of two item tuples for the terms and values.\n        :param col_max: the maximum width of the first column.\n        :param col_spacing: the number of spaces between the first and\n                            second column.\n        \"\"\"\n        rows = list(rows)\n        widths = measure_table(rows)\n        if len(widths) != 2:\n            raise TypeError(\"Expected two columns for definition list\")\n\n        first_col = min(widths[0], col_max) + col_spacing"
+            },
+            {
+              "id": "click-help-definition-layout-measure_table",
+              "symbol": "measure_table",
+              "ownerContext": "module",
+              "file": "src/click/formatting.py",
+              "startLine": 14,
+              "witnessEndLine": 21,
+              "sourceFileSha256": "f125b628692f8dfcfd43535b7a88cc1ee64137471f9d0243b389aa0cfea85e6b",
+              "witness": "def measure_table(rows: cabc.Iterable[tuple[str, str]]) -> tuple[int, ...]:\n    widths: dict[int, int] = {}\n\n    for row in rows:\n        for idx, col in enumerate(row):\n            widths[idx] = max(widths.get(idx, 0), term_len(col))\n\n    return tuple(y for x, y in sorted(widths.items()))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "graphSha256": {
+        "compass": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+        "graphify": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+      },
+      "tasks": [
+        {
+          "id": "jsoup-safe-document-copy",
+          "task": "Copy allowed body content into a separate clean document.",
+          "sourceReason": "clean creates a shell and delegates body copying to copySafeNodes; that helper traverses a CleaningVisitor and returns its discarded count.",
+          "declarations": [
+            {
+              "id": "jsoup-safe-document-copy-clean",
+              "symbol": "clean",
+              "ownerContext": "Cleaner",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 62,
+              "witnessEndLine": 71,
+              "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+              "witness": "    public Document clean(Document dirtyDocument) {\n        Validate.notNull(dirtyDocument);\n\n        Document clean = Document.createShell(dirtyDocument.baseUri());\n        copySafeNodes(dirtyDocument.body(), clean.body());\n        clean.outputSettings(dirtyDocument.outputSettings().clone());\n\n        return clean;\n    }\n"
+            },
+            {
+              "id": "jsoup-safe-document-copy-copySafeNodes",
+              "symbol": "copySafeNodes",
+              "ownerContext": "Cleaner",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 182,
+              "witnessEndLine": 186,
+              "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+              "witness": "    private int copySafeNodes(Element source, Element dest) {\n        CleaningVisitor cleaningVisitor = new CleaningVisitor(source, dest);\n        cleaningVisitor.traverse(source);\n        return cleaningVisitor.numDiscarded;\n    }"
+            }
+          ]
+        },
+        {
+          "id": "jsoup-html-fragment-parse",
+          "task": "Parse an HTML fragment into a document body.",
+          "sourceReason": "parseBodyFragment constructs the body context and calls the three-argument parseFragment overload, which invokes HtmlTreeBuilder.",
+          "declarations": [
+            {
+              "id": "jsoup-html-fragment-parse-parseBodyFragment",
+              "symbol": "parseBodyFragment",
+              "ownerContext": "Parser",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 338,
+              "witnessEndLine": 344,
+              "sourceFileSha256": "2b8baa95140fbf12fad9c874b42d8d31e24b186fd7c665c1708395e6d852ba98",
+              "witness": "    public static Document parseBodyFragment(String bodyHtml, String baseUri) {\n        Document doc = Document.createShell(baseUri);\n        Element body = doc.body();\n        List<Node> nodeList = parseFragment(bodyHtml, body, baseUri);\n        body.appendChildren(nodeList);\n        return doc;\n    }"
+            },
+            {
+              "id": "jsoup-html-fragment-parse-parseFragment",
+              "symbol": "parseFragment",
+              "ownerContext": "Parser",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 295,
+              "witnessEndLine": 298,
+              "sourceFileSha256": "2b8baa95140fbf12fad9c874b42d8d31e24b186fd7c665c1708395e6d852ba98",
+              "witness": "    public static List<Node> parseFragment(String fragmentHtml, Element context, String baseUri) {\n        HtmlTreeBuilder treeBuilder = new HtmlTreeBuilder();\n        return treeBuilder.parseFragment(new StringReader(fragmentHtml), context, baseUri, new Parser(treeBuilder));\n    }"
+            }
+          ]
+        },
+        {
+          "id": "jsoup-html-whitespace",
+          "task": "Determine whether text consists of HTML whitespace.",
+          "sourceReason": "isBlank checks each code point through isWhitespace; isWhitespace implements the specific HTML whitespace character set.",
+          "declarations": [
+            {
+              "id": "jsoup-html-whitespace-isBlank",
+              "symbol": "isBlank",
+              "ownerContext": "StringUtil",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 151,
+              "witnessEndLine": 162,
+              "sourceFileSha256": "7e61ba7e8630f101f0a74d56fb91237c8588fceeb5c472166c60926dd6047881",
+              "witness": "    public static boolean isBlank(@Nullable String string) {\n        if (string == null || string.isEmpty())\n            return true;\n\n        int l = string.length();\n        for (int i = 0; i < l; i++) {\n            if (!StringUtil.isWhitespace(string.codePointAt(i)))\n                return false;\n        }\n        return true;\n    }\n"
+            },
+            {
+              "id": "jsoup-html-whitespace-isWhitespace",
+              "symbol": "isWhitespace",
+              "ownerContext": "StringUtil",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 205,
+              "witnessEndLine": 207,
+              "sourceFileSha256": "7e61ba7e8630f101f0a74d56fb91237c8588fceeb5c472166c60926dd6047881",
+              "witness": "    public static boolean isWhitespace(int c){\n        return c == ' ' || c == '\\t' || c == '\\n' || c == '\\f' || c == '\\r';\n    }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "graphSha256": {
+        "compass": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "graphify": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+      },
+      "tasks": [
+        {
+          "id": "redux-listener-registration",
+          "task": "Register and unregister listeners without rewriting the active listener map.",
+          "sourceReason": "subscribe invokes ensureCanMutateNextListeners before adding and removing listeners; the helper copies the map when it aliases currentListeners.",
+          "declarations": [
+            {
+              "id": "redux-listener-registration-subscribe",
+              "symbol": "subscribe",
+              "ownerContext": "createStore implementation",
+              "file": "src/createStore.ts",
+              "startLine": 201,
+              "witnessEndLine": 243,
+              "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+              "witness": "  function subscribe(listener: () => void) {\n    if (typeof listener !== 'function') {\n      throw new Error(\n        `Expected the listener to be a function. Instead, received: '${kindOf(\n          listener\n        )}'`\n      )\n    }\n\n    if (isDispatching) {\n      throw new Error(\n        'You may not call store.subscribe() while the reducer is executing. ' +\n          'If you would like to be notified after the store has been updated, subscribe from a ' +\n          'component and invoke store.getState() in the callback to access the latest state. ' +\n          'See https://redux.js.org/api/store#subscribelistener for more details.'\n      )\n    }\n\n    let isSubscribed = true\n\n    ensureCanMutateNextListeners()\n    const listenerId = listenerIdCounter++\n    nextListeners.set(listenerId, listener)\n\n    return function unsubscribe() {\n      if (!isSubscribed) {\n        return\n      }\n\n      if (isDispatching) {\n        throw new Error(\n          'You may not unsubscribe from a store listener while the reducer is executing. ' +\n            'See https://redux.js.org/api/store#subscribelistener for more details.'\n        )\n      }\n\n      isSubscribed = false\n\n      ensureCanMutateNextListeners()\n      nextListeners.delete(listenerId)\n      currentListeners = null\n    }\n  }"
+            },
+            {
+              "id": "redux-listener-registration-ensureCanMutateNextListeners",
+              "symbol": "ensureCanMutateNextListeners",
+              "ownerContext": "createStore implementation",
+              "file": "src/createStore.ts",
+              "startLine": 152,
+              "witnessEndLine": 159,
+              "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+              "witness": "  function ensureCanMutateNextListeners() {\n    if (nextListeners === currentListeners) {\n      nextListeners = new Map()\n      currentListeners.forEach((listener, key) => {\n        nextListeners.set(key, listener)\n      })\n    }\n  }"
+            }
+          ]
+        },
+        {
+          "id": "redux-action-shape-validation",
+          "task": "Check that an action is a plain object with a string type.",
+          "sourceReason": "isAction first calls isPlainObject, then checks the type property; isPlainObject examines the object prototype chain.",
+          "declarations": [
+            {
+              "id": "redux-action-shape-validation-isAction",
+              "symbol": "isAction",
+              "ownerContext": "module",
+              "file": "src/utils/isAction.ts",
+              "startLine": 4,
+              "witnessEndLine": 10,
+              "sourceFileSha256": "2cf7a3b535cb14b9bb2ac7648b5f103f2a80427d96c7eb391fd11f617944a8a2",
+              "witness": "export default function isAction(action: unknown): action is Action<string> {\n  return (\n    isPlainObject(action) &&\n    'type' in action &&\n    typeof (action as Record<'type', unknown>).type === 'string'\n  )\n}"
+            },
+            {
+              "id": "redux-action-shape-validation-isPlainObject",
+              "symbol": "isPlainObject",
+              "ownerContext": "module",
+              "file": "src/utils/isPlainObject.ts",
+              "startLine": 5,
+              "witnessEndLine": 16,
+              "sourceFileSha256": "30153dae9fd245b8574f96cf9c08cf33e7d12881b0ad4e4e458646bef5b32793",
+              "witness": "export default function isPlainObject(obj: any): obj is object {\n  if (typeof obj !== 'object' || obj === null) return false\n\n  let proto = obj\n  while (Object.getPrototypeOf(proto) !== null) {\n    proto = Object.getPrototypeOf(proto)\n  }\n\n  return (\n    Object.getPrototypeOf(obj) === proto || Object.getPrototypeOf(obj) === null\n  )\n}"
+            }
+          ]
+        },
+        {
+          "id": "redux-action-creator-binding",
+          "task": "Wrap action creators so their results are dispatched.",
+          "sourceReason": "The bindActionCreators implementation handles a function or a map and delegates each callable to bindActionCreator, whose wrapper dispatches the returned action.",
+          "declarations": [
+            {
+              "id": "redux-action-creator-binding-bindActionCreators",
+              "symbol": "bindActionCreators",
+              "ownerContext": "module",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 58,
+              "witnessEndLine": 83,
+              "sourceFileSha256": "53b834cc532443fcf9f392ea86b970b640bccea5dac7c2ef16516cbe99a176f1",
+              "witness": "export default function bindActionCreators(\n  actionCreators: ActionCreator<any> | ActionCreatorsMapObject,\n  dispatch: Dispatch\n) {\n  if (typeof actionCreators === 'function') {\n    return bindActionCreator(actionCreators, dispatch)\n  }\n\n  if (typeof actionCreators !== 'object' || actionCreators === null) {\n    throw new Error(\n      `bindActionCreators expected an object or a function, but instead received: '${kindOf(\n        actionCreators\n      )}'. ` +\n        `Did you write \"import ActionCreators from\" instead of \"import * as ActionCreators from\"?`\n    )\n  }\n\n  const boundActionCreators: ActionCreatorsMapObject = {}\n  for (const key in actionCreators) {\n    const actionCreator = actionCreators[key]\n    if (typeof actionCreator === 'function') {\n      boundActionCreators[key] = bindActionCreator(actionCreator, dispatch)\n    }\n  }\n  return boundActionCreators\n}"
+            },
+            {
+              "id": "redux-action-creator-binding-bindActionCreator",
+              "symbol": "bindActionCreator",
+              "ownerContext": "module",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 9,
+              "witnessEndLine": 16,
+              "sourceFileSha256": "53b834cc532443fcf9f392ea86b970b640bccea5dac7c2ef16516cbe99a176f1",
+              "witness": "function bindActionCreator<A extends Action>(\n  actionCreator: ActionCreator<A>,\n  dispatch: Dispatch<A>\n) {\n  return function (this: any, ...args: any[]) {\n    return dispatch(actionCreator.apply(this, args))\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "graphSha256": {
+        "compass": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+        "graphify": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+      },
+      "tasks": [
+        {
+          "id": "walkdir-directory-handle-budget",
+          "task": "Make room under the open-directory limit before opening another directory.",
+          "sourceReason": "IntoIter.push closes the oldest open DirList when max_open is reached. DirList.close drains an open stream into a closed in-memory iterator.",
+          "declarations": [
+            {
+              "id": "walkdir-directory-handle-budget-push",
+              "symbol": "push",
+              "ownerContext": "IntoIter",
+              "file": "src/lib.rs",
+              "startLine": 901,
+              "witnessEndLine": 914,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn push(&mut self, dent: &DirEntry) -> Result<()> {\n        // Make room for another open file descriptor if we've hit the max.\n        let free =\n            self.stack_list.len().checked_sub(self.oldest_opened).unwrap();\n        if free == self.opts.max_open {\n            self.stack_list[self.oldest_opened].close();\n        }\n        // Open a handle to reading the directory's entries.\n        let rd = fs::read_dir(dent.path()).map_err(|err| {\n            Some(Error::from_path(self.depth, dent.path().to_path_buf(), err))\n        });\n        let mut list = DirList::Opened { depth: self.depth, it: rd };\n        if let Some(ref mut cmp) = self.opts.sorter {\n            let mut entries: Vec<_> = list.collect();"
+            },
+            {
+              "id": "walkdir-directory-handle-budget-close",
+              "symbol": "close",
+              "ownerContext": "DirList",
+              "file": "src/lib.rs",
+              "startLine": 1008,
+              "witnessEndLine": 1012,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn close(&mut self) {\n        if let DirList::Opened { .. } = *self {\n            *self = DirList::Closed(self.collect::<Vec<_>>().into_iter());\n        }\n    }"
+            }
+          ]
+        },
+        {
+          "id": "walkdir-deferred-directory-depth",
+          "task": "Return deferred directory entries only at allowed depths.",
+          "sourceReason": "get_deferred_dir uses contents_first and the deferred stack, and asks skippable whether the current depth lies outside the configured bounds.",
+          "declarations": [
+            {
+              "id": "walkdir-deferred-directory-depth-get_deferred_dir",
+              "symbol": "get_deferred_dir",
+              "ownerContext": "IntoIter",
+              "file": "src/lib.rs",
+              "startLine": 884,
+              "witnessEndLine": 898,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn get_deferred_dir(&mut self) -> Option<DirEntry> {\n        if self.opts.contents_first {\n            if self.depth < self.deferred_dirs.len() {\n                // Unwrap is safe here because we've guaranteed that\n                // `self.deferred_dirs.len()` can never be less than 1\n                let deferred: DirEntry = self\n                    .deferred_dirs\n                    .pop()\n                    .expect(\"BUG: deferred_dirs should be non-empty\");\n                if !self.skippable() {\n                    return Some(deferred);\n                }\n            }\n        }\n        None"
+            },
+            {
+              "id": "walkdir-deferred-directory-depth-skippable",
+              "symbol": "skippable",
+              "ownerContext": "IntoIter",
+              "file": "src/lib.rs",
+              "startLine": 1000,
+              "witnessEndLine": 1002,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn skippable(&self) -> bool {\n        self.depth < self.opts.min_depth || self.depth > self.opts.max_depth\n    }"
+            }
+          ]
+        },
+        {
+          "id": "walkdir-symlink-loop-detection",
+          "task": "Check followed directory targets against ancestor handles.",
+          "sourceReason": "follow invokes check_loop only for directories; check_loop compares handles with ancestors and returns a loop error for a match.",
+          "declarations": [
+            {
+              "id": "walkdir-symlink-loop-detection-follow",
+              "symbol": "follow",
+              "ownerContext": "IntoIter",
+              "file": "src/lib.rs",
+              "startLine": 961,
+              "witnessEndLine": 971,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn follow(&self, mut dent: DirEntry) -> Result<DirEntry> {\n        dent =\n            DirEntry::from_path(self.depth, dent.path().to_path_buf(), true)?;\n        // The only way a symlink can cause a loop is if it points\n        // to a directory. Otherwise, it always points to a leaf\n        // and we can omit any loop checks.\n        if dent.is_dir() {\n            self.check_loop(dent.path())?;\n        }\n        Ok(dent)\n    }"
+            },
+            {
+              "id": "walkdir-symlink-loop-detection-check_loop",
+              "symbol": "check_loop",
+              "ownerContext": "IntoIter",
+              "file": "src/lib.rs",
+              "startLine": 973,
+              "witnessEndLine": 989,
+              "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+              "witness": "    fn check_loop<P: AsRef<Path>>(&self, child: P) -> Result<()> {\n        let hchild = Handle::from_path(&child)\n            .map_err(|err| Error::from_io(self.depth, err))?;\n        for ancestor in self.stack_path.iter().rev() {\n            let is_same = ancestor\n                .is_same(&hchild)\n                .map_err(|err| Error::from_io(self.depth, err))?;\n            if is_same {\n                return Err(Error::from_loop(\n                    self.depth,\n                    &ancestor.path,\n                    child.as_ref(),\n                ));\n            }\n        }\n        Ok(())\n    }"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

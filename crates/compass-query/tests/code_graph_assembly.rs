@@ -313,6 +313,7 @@ fn exact_and_remapped_duplicate_edges_are_order_independent_and_heuristic_gated(
             .any(|node| node.name == "Caller")
     );
     let trail = |include_heuristic| NodeTrailRequest {
+        calls_only: false,
         source: "crate::Caller".to_owned(),
         target: "crate::Target".to_owned(),
         include_heuristic,
@@ -394,6 +395,7 @@ fn trusted_incremental_rewrite_evidence_controls_heuristic_query_gating()
             .any(|node| node.qualified_name == "crate::Caller")
     );
     let trail = |include_heuristic| NodeTrailRequest {
+        calls_only: false,
         source: "crate::Caller".to_owned(),
         target: "crate::Alternate".to_owned(),
         include_heuristic,
@@ -540,6 +542,7 @@ fn lossy_normalized_alias_collisions_are_diagnostic_and_never_choose_a_node()
     assert!(
         engine
             .node_trail(NodeTrailRequest {
+                calls_only: false,
                 source: "crate::First".to_owned(),
                 target: "crate::Target".to_owned(),
                 include_heuristic: false,

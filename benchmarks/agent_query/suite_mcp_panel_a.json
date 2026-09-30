@@ -1,0 +1,65 @@
+{
+  "schema": "compass.mcp-comparison-inputs/1",
+  "scope": "Development MCP extension on panel A after its CLI outputs were observed. Use original frozen panel-A graphs and the hub-evidence Compass binary; commit these questions before MCP execution. Prepared IDs are not scored as node retrieval. Counts and membership measure stored-graph consistency, not source precision, functional community quality, or god-object diagnosis.",
+  "policy": {
+    "god_nodes": "Return top 10 hubs. Independently check displayed degree against distinct stored directed endpoint pairs, counting self-loops twice. Ambiguous labels do not verify identity. Report source-backed declarations separately; degree does not prove a god-object defect.",
+    "get_community": "Return every member of the largest stored community; break size ties by smallest numeric ID. Compare the exact multiset of displayed labels and source files with that tool's graph. Different partitions are allowed. Also query a community ID above the stored maximum and require not found.",
+    "get_neighbors": "Return calls adjacent to the exact source declaration identified below, using its tool-specific exact ID as input. Compare distinct direction/neighbor/relation triples with stored calls. Separately report repeated-site information and ambiguous labels. ID lookup is preparation, not a measured retrieval success.",
+    "ambiguous_neighbors": "The same unqualified label denotes multiple source declarations. Require explicit ambiguity or a candidate list; selecting one neighbor list silently fails.",
+    "graph_stats": "Compare node and community counts with the captured graph, and edge count with stored edge records. Report representation discrepancies rather than treating more edges as better.",
+    "bounds": "60 seconds per RPC; 16 MiB per response/stderr and 64 MiB per session. For full membership/neighbor enumeration, Graphify receives token_budget=262144; Compass exposes no equivalent option. Record truncation, requested bounds, actual text bytes, and protocol overhead separately. This arm measures complete enumeration, not equal 2000-token answers.",
+    "source_review": "Review every returned hub identity for source location and inspect its declared role. Review neighbor call directions against the previously reviewed source facts. Functional cluster and god-object judgments remain separate and cannot be inferred from consistency scores."
+  },
+  "repositories": [
+    {
+      "name": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "file": "context.go",
+      "line": 16,
+      "symbol": "URLParamFromCtx",
+      "sourceText": "func URLParamFromCtx(ctx context.Context, key string) string {",
+      "sourceFileSha256": "b19edcca252e2fe74e82802c4c7ce1a1c0855728f9ede1288f0224283dfc7e53",
+      "ambiguousLabel": "URLParam"
+    },
+    {
+      "name": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "file": "src/click/_compat.py",
+      "line": 374,
+      "symbol": "open_stream",
+      "sourceText": "def open_stream(",
+      "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+      "ambiguousLabel": "close"
+    },
+    {
+      "name": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "line": 124,
+      "symbol": "isValidBodyHtml",
+      "sourceText": "public boolean isValidBodyHtml(String bodyHtml) {",
+      "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+      "ambiguousLabel": "isValid"
+    },
+    {
+      "name": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "file": "src/createStore.ts",
+      "line": 201,
+      "symbol": "subscribe",
+      "sourceText": "function subscribe(listener: () => void) {",
+      "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+      "ambiguousLabel": "subscribe"
+    },
+    {
+      "name": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "file": "src/lib.rs",
+      "line": 456,
+      "symbol": "sort_by_file_name",
+      "sourceText": "pub fn sort_by_file_name(self) -> Self {",
+      "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+      "ambiguousLabel": "sort_by"
+    }
+  ]
+}

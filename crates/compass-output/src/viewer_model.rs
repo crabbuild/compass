@@ -5,7 +5,7 @@ use compass_model::GraphDocument;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::html::{HtmlOptions, edge_value, node_values};
+use crate::html::{HtmlOptions, edge_value, node_values, node_values_bounded};
 use crate::palette::community_color;
 
 pub const GRAPH_VIEWER_SCHEMA: &str = "compass.viewer.graph/1";
@@ -89,6 +89,76 @@ pub struct GraphViewNode {
     pub challenge: Option<compass_agent_graph::EffectiveChallenge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document: Option<GraphViewDocument>,
+}
+
+/// Compact, bounded directory of source nodes for navigation from an overview.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphSearchNode {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub community: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub community_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degree: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<GraphViewSource>,
+    pub preview_available: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphSearchIndex {
+    pub total_nodes: usize,
+    pub nodes: Vec<GraphSearchNode>,
+}
+
+pub const MAX_GRAPH_SEARCH_NODES: usize = 100_000;
+
+#[must_use]
+pub fn graph_search_index(
+    document: &GraphDocument,
+    communities: &Communities,
+    options: &HtmlOptions<'_>,
+    preview_ids: &BTreeSet<String>,
+) -> GraphSearchIndex {
+    let nodes = node_values_bounded(document, communities, options, MAX_GRAPH_SEARCH_NODES)
+        .into_iter()
+        .filter_map(|value| {
+            let object = value.as_object()?;
+            let id = string(object, "id")?;
+            let file = non_empty(object, "source_file");
+            Some(GraphSearchNode {
+                preview_available: preview_ids.contains(&id),
+                id,
+                label: string(object, "label").unwrap_or_default(),
+                kind: non_empty(object, "symbol_kind"),
+                community: object
+                    .get("community")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default() as usize,
+                community_name: non_empty(object, "community_name"),
+                degree: object
+                    .get("degree")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize),
+                source: file.map(|file| GraphViewSource {
+                    file,
+                    start_line: object.get("line_start").and_then(Value::as_u64),
+                    end_line: object.get("line_end").and_then(Value::as_u64),
+                    start_byte: object.get("start_byte").and_then(Value::as_u64),
+                    end_byte: object.get("end_byte").and_then(Value::as_u64),
+                }),
+            })
+        })
+        .collect();
+    GraphSearchIndex {
+        total_nodes: document.nodes.len(),
+        nodes,
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

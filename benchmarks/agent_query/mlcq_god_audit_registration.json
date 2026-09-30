@@ -1,0 +1,1484 @@
+{
+  "schema": "compass.mlcq-god-audit-registration/1",
+  "dataset": {
+    "title": "MLCQ: Industry-relevant code smell data set",
+    "authors": [
+      "Lech Madeyski",
+      "Tomasz Lewowski"
+    ],
+    "version": "1.1",
+    "doi": "10.5281/zenodo.3666840",
+    "paperDoi": "10.1145/3383219.3383264",
+    "recordUrl": "https://zenodo.org/records/3666840",
+    "license": "CC-BY-4.0",
+    "file": "MLCQCodeSmellSamples.csv",
+    "sha256": "8e05db55150a984f0b08ab211f5f612374790ea918ba08afc290cf122b63551b",
+    "publishedMd5": "9019beae88089838d2d13dc12e69241b"
+  },
+  "scope": "First externally rated Blob cohort for this audit. Java-only addition to the existing multilingual panel, not a cross-language god-object oracle. Selection uses published ratings and source coordinates, before extraction or query outputs.",
+  "selection": "Include every repository/revision with at least two distinct multi-reviewer unanimous none classes AND two distinct multi-reviewer all-major-or-critical classes. Same-reviewer repeats never add votes. Preserve all other Blob samples in selected revisions as secondary/uncertain. This purposive consensus-enriched selection is not population prevalence.",
+  "cohorts": [
+    {
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "classifications": {
+        "minor-or-disagreement": 11,
+        "single-reviewer": 13,
+        "unanimous-major-critical": 2,
+        "unanimous-none": 2
+      },
+      "eligible": true,
+      "sampleIds": [
+        8491397,
+        8494605,
+        8497585,
+        8497687,
+        8501968,
+        8501970,
+        8502684,
+        8507718,
+        8510347,
+        8511088,
+        8514954,
+        8515776,
+        8516029,
+        8517396,
+        8522716,
+        8526483,
+        8526485,
+        8528735,
+        8533230,
+        8533645,
+        8533750,
+        8533873,
+        8537138,
+        8538037,
+        8539540,
+        8539645,
+        8541418,
+        8547261
+      ]
+    },
+    {
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "classifications": {
+        "minor-or-disagreement": 5,
+        "single-reviewer": 18,
+        "unanimous-major-critical": 2,
+        "unanimous-none": 2
+      },
+      "eligible": true,
+      "sampleIds": [
+        6369779,
+        6371049,
+        6372633,
+        6374724,
+        6375252,
+        6375517,
+        6379553,
+        6383930,
+        6385711,
+        6387077,
+        6387249,
+        6388458,
+        6391534,
+        6393486,
+        6398820,
+        6404028,
+        6406137,
+        6412439,
+        6413248,
+        6413795,
+        6414719,
+        6416620,
+        6424656,
+        6424683,
+        6425142,
+        6427227,
+        6428158
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "sampleId": 6369779,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.views/src/org/eclipse/ui/views/properties/IPropertyDescriptor.java",
+      "startLine": 55,
+      "endLine": 154,
+      "codeName": "org.eclipse.ui.views.properties.IPropertyDescriptor",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 4804,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6371049,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.browser/src/org/eclipse/ui/internal/browser/BusyIndicator.java",
+      "startLine": 28,
+      "endLine": 175,
+      "codeName": "org.eclipse.ui.internal.browser.BusyIndicator",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 2,
+      "reviewRows": 2,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9330,
+          "reviewerId": 13,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 11787,
+          "reviewerId": 3,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 6372633,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.navigator/src/org/eclipse/ui/internal/navigator/wizards/WizardShortcutAction.java",
+      "startLine": 43,
+      "endLine": 116,
+      "codeName": "org.eclipse.ui.internal.navigator.wizards.WizardShortcutAction",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 8581,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6374724,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "startLine": 41,
+      "endLine": 462,
+      "codeName": "org.eclipse.ui.internal.keys.model.BindingModel",
+      "classification": "unanimous-major-critical",
+      "uniqueReviewers": 2,
+      "reviewRows": 2,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 10116,
+          "reviewerId": 3,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 10226,
+          "reviewerId": 16,
+          "severity": "major"
+        }
+      ]
+    },
+    {
+      "sampleId": 6375252,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/viewers/ColumnLabelProvider.java",
+      "startLine": 31,
+      "endLine": 71,
+      "codeName": "org.eclipse.jface.viewers.ColumnLabelProvider",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3332,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6375517,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.e4.ui.model.workbench/src/org/eclipse/e4/ui/model/application/ui/menu/impl/HandledMenuItemImpl.java",
+      "startLine": 49,
+      "endLine": 327,
+      "codeName": "org.eclipse.e4.ui.model.application.ui.menu.impl.HandledMenuItemImpl",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 4417,
+          "reviewerId": 5,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 11935,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 13737,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6379553,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/fieldassist/ContentProposalAdapter.java",
+      "startLine": 63,
+      "endLine": 2173,
+      "codeName": "org.eclipse.jface.fieldassist.ContentProposalAdapter",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 7354,
+          "reviewerId": 5,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 10127,
+          "reviewerId": 13,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 12241,
+          "reviewerId": 3,
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "sampleId": 6383930,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/api/MockEditorActionBarContributor.java",
+      "startLine": 22,
+      "endLine": 101,
+      "codeName": "org.eclipse.ui.tests.api.MockEditorActionBarContributor",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 824,
+          "reviewerId": 12,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 10162,
+          "reviewerId": 13,
+          "severity": "major"
+        },
+        {
+          "reviewId": 11994,
+          "reviewerId": 3,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13365,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6385711,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface.databinding/src/org/eclipse/jface/databinding/viewers/ObservableSetTreeContentProvider.java",
+      "startLine": 43,
+      "endLine": 215,
+      "codeName": "org.eclipse.jface.databinding.viewers.ObservableSetTreeContentProvider",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 802,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6387077,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/dom/properties/css2/ICSSPropertyPaddingHandler.java",
+      "startLine": 26,
+      "endLine": 113,
+      "codeName": "org.eclipse.e4.ui.css.core.dom.properties.css2.ICSSPropertyPaddingHandler",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6207,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6387249,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/commands/NotHandledException.java",
+      "startLine": 27,
+      "endLine": 62,
+      "codeName": "org.eclipse.ui.commands.NotHandledException",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9911,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6388458,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "examples/org.eclipse.jface.snippets/Eclipse JFace Snippets/org/eclipse/jface/snippets/wizard/Snippet071WizardWithProgressAndCancel.java",
+      "startLine": 43,
+      "endLine": 60,
+      "codeName": "org.eclipse.jface.snippets.wizard.Snippet071WizardWithProgressAndCancel.MyWizard.MyPage",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9468,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6391534,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/SimpleValueProperty.java",
+      "startLine": 54,
+      "endLine": 99,
+      "codeName": "org.eclipse.core.databinding.property.value.SimpleValueProperty",
+      "classification": "unanimous-none",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 7681,
+          "reviewerId": 3,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13126,
+          "reviewerId": 11,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13713,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6393486,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/util/VisualTextDirectionSegmentListener.java",
+      "startLine": 25,
+      "endLine": 58,
+      "codeName": "org.eclipse.jface.util.VisualTextDirectionSegmentListener",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 8500,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6398820,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/themes/WorkbenchThemeManager.java",
+      "startLine": 536,
+      "endLine": 602,
+      "codeName": "org.eclipse.ui.internal.themes.WorkbenchThemeManager.ThemeRegistryModifiedHandler",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 4424,
+          "reviewerId": 5,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6404028,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/bindings/keys/KeySequenceText.java",
+      "startLine": 402,
+      "endLine": 440,
+      "codeName": "org.eclipse.jface.bindings.keys.KeySequenceText.TraversalFilterManager",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2905,
+          "reviewerId": 5,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6406137,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSSValueListImpl.java",
+      "startLine": 24,
+      "endLine": 77,
+      "codeName": "org.eclipse.e4.ui.css.core.impl.dom.CSSValueListImpl",
+      "classification": "unanimous-none",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6262,
+          "reviewerId": 7,
+          "severity": "none"
+        },
+        {
+          "reviewId": 11432,
+          "reviewerId": 3,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13655,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6412439,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/themes/ThemeElementDefinition.java",
+      "startLine": 25,
+      "endLine": 168,
+      "codeName": "org.eclipse.ui.internal.themes.ThemeElementDefinition",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 807,
+          "reviewerId": 10,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6413248,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/AbstractEvaluationHandler.java",
+      "startLine": 30,
+      "endLine": 81,
+      "codeName": "org.eclipse.ui.internal.AbstractEvaluationHandler",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3539,
+          "reviewerId": 16,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6413795,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/dialogs/DeprecatedUIWizardsAuto.java",
+      "startLine": 45,
+      "endLine": 340,
+      "codeName": "org.eclipse.ui.tests.dialogs.DeprecatedUIWizardsAuto",
+      "classification": "unanimous-major-critical",
+      "uniqueReviewers": 2,
+      "reviewRows": 2,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3878,
+          "reviewerId": 17,
+          "severity": "major"
+        },
+        {
+          "reviewId": 10857,
+          "reviewerId": 4,
+          "severity": "major"
+        }
+      ]
+    },
+    {
+      "sampleId": 6414719,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/set/UnionSetProperty.java",
+      "startLine": 37,
+      "endLine": 94,
+      "codeName": "org.eclipse.core.databinding.property.set.UnionSetProperty",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 8033,
+          "reviewerId": 3,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6416620,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "examples/org.eclipse.ui.examples.readmetool/Eclipse UI Examples Readme Tool/org/eclipse/ui/examples/readmetool/ReadmeMarkerResolutionGenerator.java",
+      "startLine": 24,
+      "endLine": 37,
+      "codeName": "org.eclipse.ui.examples.readmetool.ReadmeMarkerResolutionGenerator",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5630,
+          "reviewerId": 6,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6424656,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/ReferenceCounter.java",
+      "startLine": 36,
+      "endLine": 74,
+      "codeName": "org.eclipse.ui.internal.ReferenceCounter.RefRec",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2748,
+          "reviewerId": 16,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6424683,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.jface/src/org/eclipse/jface/window/IShellProvider.java",
+      "startLine": 26,
+      "endLine": 34,
+      "codeName": "org.eclipse.jface.window.IShellProvider",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 780,
+          "reviewerId": 13,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6425142,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.e4.ui.css.swt/src/org/eclipse/e4/ui/css/swt/properties/custom/CSSPropertyOuterKeylineSWTHandler.java",
+      "startLine": 25,
+      "endLine": 50,
+      "codeName": "org.eclipse.e4.ui.css.swt.properties.custom.CSSPropertyOuterKeylineSWTHandler",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 7631,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 10275,
+          "reviewerId": 16,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13029,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6427227,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.ui.navigator/src/org/eclipse/ui/internal/navigator/sorters/SkeletonViewerSorter.java",
+      "startLine": 23,
+      "endLine": 30,
+      "codeName": "org.eclipse.ui.internal.navigator.sorters.SkeletonViewerSorter",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 798,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 6428158,
+      "repository": "eclipse/eclipse.platform.ui",
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "file": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/map/DelegatingMapProperty.java",
+      "startLine": 38,
+      "endLine": 149,
+      "codeName": "org.eclipse.core.databinding.property.map.DelegatingMapProperty",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5153,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8491397,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "engine/schema/src/main/java/com/cloud/vm/dao/VMInstanceDao.java",
+      "startLine": 34,
+      "endLine": 155,
+      "codeName": "com.cloud.vm.dao.VMInstanceDao",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5736,
+          "reviewerId": 25,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 10696,
+          "reviewerId": 13,
+          "severity": "none"
+        },
+        {
+          "reviewId": 11556,
+          "reviewerId": 3,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 13175,
+          "reviewerId": 11,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8494605,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/user/firewall/DeleteFirewallRuleCmd.java",
+      "startLine": 40,
+      "endLine": 126,
+      "codeName": "org.apache.cloudstack.api.command.user.firewall.DeleteFirewallRuleCmd",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5390,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8497585,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "engine/schema/src/main/java/com/cloud/user/dao/VmDiskStatisticsDaoImpl.java",
+      "startLine": 37,
+      "endLine": 130,
+      "codeName": "com.cloud.user.dao.VmDiskStatisticsDaoImpl",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6229,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8497687,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManager.java",
+      "startLine": 35,
+      "endLine": 103,
+      "codeName": "com.cloud.network.ExternalLoadBalancerDeviceManager",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2029,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 12812,
+          "reviewerId": 13,
+          "severity": "none"
+        },
+        {
+          "reviewId": 14536,
+          "reviewerId": 4,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8501968,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/xenserver/src/main/java/com/cloud/hypervisor/xenserver/resource/wrapper/xenbase/CitrixOvsFetchInterfaceCommandWrapper.java",
+      "startLine": 38,
+      "endLine": 73,
+      "codeName": "com.cloud.hypervisor.xenserver.resource.wrapper.xenbase.CitrixOvsFetchInterfaceCommandWrapper",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5272,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8501970,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "services/console-proxy/rdpconsole/src/main/java/rdpclient/clip/ServerFormatListPDU.java",
+      "startLine": 32,
+      "endLine": 237,
+      "codeName": "rdpclient.clip.ServerFormatListPDU",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 2,
+      "reviewRows": 2,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3495,
+          "reviewerId": 16,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 12407,
+          "reviewerId": 3,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8502684,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/admin/ca/RevokeCertificateCmd.java",
+      "startLine": 39,
+      "endLine": 116,
+      "codeName": "org.apache.cloudstack.api.command.admin.ca.RevokeCertificateCmd",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2036,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 13868,
+          "reviewerId": 15,
+          "severity": "none"
+        },
+        {
+          "reviewId": 14691,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8507718,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/kvm/src/main/java/com/cloud/hypervisor/kvm/resource/BridgeVifDriver.java",
+      "startLine": 44,
+      "endLine": 433,
+      "codeName": "com.cloud.hypervisor.kvm.resource.BridgeVifDriver",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5124,
+          "reviewerId": 20,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 12159,
+          "reviewerId": 3,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 13387,
+          "reviewerId": 1,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8510347,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/kvm/src/main/java/com/cloud/hypervisor/kvm/resource/wrapper/LibvirtCreateCommandWrapper.java",
+      "startLine": 39,
+      "endLine": 87,
+      "codeName": "com.cloud.hypervisor.kvm.resource.wrapper.LibvirtCreateCommandWrapper",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6231,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8511088,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "engine/schema/src/main/java/com/cloud/storage/dao/VolumeHostDao.java",
+      "startLine": 28,
+      "endLine": 41,
+      "codeName": "com.cloud.storage.dao.VolumeHostDao",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9957,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8514954,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/user/template/ExtractTemplateCmd.java",
+      "startLine": 39,
+      "endLine": 147,
+      "codeName": "org.apache.cloudstack.api.command.user.template.ExtractTemplateCmd",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2045,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 10612,
+          "reviewerId": 13,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13154,
+          "reviewerId": 11,
+          "severity": "none"
+        },
+        {
+          "reviewId": 14149,
+          "reviewerId": 21,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8515776,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "server/src/main/java/com/cloud/usage/UsageServiceImpl.java",
+      "startLine": 79,
+      "endLine": 438,
+      "codeName": "com.cloud.usage.UsageServiceImpl",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2039,
+          "reviewerId": 3,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 14936,
+          "reviewerId": 20,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 15207,
+          "reviewerId": 4,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8516029,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "server/src/main/java/com/cloud/servlet/ConsoleProxyClientParam.java",
+      "startLine": 20,
+      "endLine": 143,
+      "codeName": "com.cloud.servlet.ConsoleProxyClientParam",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6385,
+          "reviewerId": 7,
+          "severity": "none"
+        },
+        {
+          "reviewId": 11406,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 14093,
+          "reviewerId": 21,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8517396,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "core/src/main/java/com/cloud/agent/api/CheckHealthAnswer.java",
+      "startLine": 22,
+      "endLine": 30,
+      "codeName": "com.cloud.agent.api.CheckHealthAnswer",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2048,
+          "reviewerId": 3,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8522716,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/dedicated-resources/src/main/java/org/apache/cloudstack/dedicated/DedicatedService.java",
+      "startLine": 35,
+      "endLine": 63,
+      "codeName": "org.apache.cloudstack.dedicated.DedicatedService",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2050,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 14032,
+          "reviewerId": 20,
+          "severity": "none"
+        },
+        {
+          "reviewId": 14783,
+          "reviewerId": 21,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8526483,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/xenserver/src/main/java/com/cloud/hypervisor/xenserver/resource/wrapper/xenbase/CitrixOvsSetTagAndFlowCommandWrapper.java",
+      "startLine": 36,
+      "endLine": 74,
+      "codeName": "com.cloud.hypervisor.xenserver.resource.wrapper.xenbase.CitrixOvsSetTagAndFlowCommandWrapper",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9167,
+          "reviewerId": 20,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8526485,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "engine/orchestration/src/main/java/org/apache/cloudstack/engine/cloud/entity/api/VirtualMachineEntityImpl.java",
+      "startLine": 39,
+      "endLine": 272,
+      "codeName": "org.apache.cloudstack.engine.cloud.entity.api.VirtualMachineEntityImpl",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 6572,
+          "reviewerId": 13,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 10486,
+          "reviewerId": 5,
+          "severity": "none"
+        },
+        {
+          "reviewId": 11921,
+          "reviewerId": 3,
+          "severity": "minor"
+        }
+      ]
+    },
+    {
+      "sampleId": 8528735,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+      "startLine": 141,
+      "endLine": 1311,
+      "codeName": "com.cloud.network.ExternalLoadBalancerDeviceManagerImpl",
+      "classification": "unanimous-major-critical",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2053,
+          "reviewerId": 3,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 14461,
+          "reviewerId": 4,
+          "severity": "critical"
+        },
+        {
+          "reviewId": 15257,
+          "reviewerId": 21,
+          "severity": "major"
+        },
+        {
+          "reviewId": 15334,
+          "reviewerId": 20,
+          "severity": "major"
+        }
+      ]
+    },
+    {
+      "sampleId": 8533230,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "core/src/main/java/com/cloud/agent/api/storage/DestroyCommand.java",
+      "startLine": 27,
+      "endLine": 58,
+      "codeName": "com.cloud.agent.api.storage.DestroyCommand",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 7604,
+          "reviewerId": 3,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8533645,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/user/network/UpdateNetworkCmd.java",
+      "startLine": 45,
+      "endLine": 225,
+      "codeName": "org.apache.cloudstack.api.command.user.network.UpdateNetworkCmd",
+      "classification": "minor-or-disagreement",
+      "uniqueReviewers": 3,
+      "reviewRows": 3,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 4460,
+          "reviewerId": 16,
+          "severity": "none"
+        },
+        {
+          "reviewId": 12066,
+          "reviewerId": 3,
+          "severity": "minor"
+        },
+        {
+          "reviewId": 15182,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8533750,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/user/config/ListCapabilitiesCmd.java",
+      "startLine": 28,
+      "endLine": 72,
+      "codeName": "org.apache.cloudstack.api.command.user.config.ListCapabilitiesCmd",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9291,
+          "reviewerId": 13,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8533873,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "core/src/main/java/com/cloud/agent/resource/virtualnetwork/facade/SetMonitorServiceConfigItem.java",
+      "startLine": 31,
+      "endLine": 47,
+      "codeName": "com.cloud.agent.resource.virtualnetwork.facade.SetMonitorServiceConfigItem",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3998,
+          "reviewerId": 5,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8537138,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "startLine": 24,
+      "endLine": 60,
+      "codeName": "com.cloud.agent.api.HandleConfigDriveIsoCommand",
+      "classification": "unanimous-none",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5481,
+          "reviewerId": 6,
+          "severity": "none"
+        },
+        {
+          "reviewId": 10277,
+          "reviewerId": 16,
+          "severity": "none"
+        },
+        {
+          "reviewId": 10570,
+          "reviewerId": 13,
+          "severity": "none"
+        },
+        {
+          "reviewId": 11416,
+          "reviewerId": 3,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8538037,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/network-elements/brocade-vcs/src/main/java/com/cloud/network/brocade/BrocadeVcsApi.java",
+      "startLine": 63,
+      "endLine": 542,
+      "codeName": "com.cloud.network.brocade.BrocadeVcsApi",
+      "classification": "unanimous-major-critical",
+      "uniqueReviewers": 2,
+      "reviewRows": 2,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 2055,
+          "reviewerId": 3,
+          "severity": "major"
+        },
+        {
+          "reviewId": 14767,
+          "reviewerId": 4,
+          "severity": "major"
+        }
+      ]
+    },
+    {
+      "sampleId": 8539540,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/xenserver/src/main/java/com/cloud/hypervisor/xenserver/resource/wrapper/xenbase/CitrixAttachOrDettachConfigDriveCommandWrapper.java",
+      "startLine": 39,
+      "endLine": 95,
+      "codeName": "com.cloud.hypervisor.xenserver.resource.wrapper.xenbase.CitrixAttachOrDettachConfigDriveCommandWrapper",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 7255,
+          "reviewerId": 5,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8539645,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+      "startLine": 26,
+      "endLine": 38,
+      "codeName": "org.apache.cloudstack.api.response.DeploymentPlannersResponse",
+      "classification": "unanimous-none",
+      "uniqueReviewers": 4,
+      "reviewRows": 4,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 5989,
+          "reviewerId": 20,
+          "severity": "none"
+        },
+        {
+          "reviewId": 10617,
+          "reviewerId": 13,
+          "severity": "none"
+        },
+        {
+          "reviewId": 12468,
+          "reviewerId": 3,
+          "severity": "none"
+        },
+        {
+          "reviewId": 13411,
+          "reviewerId": 1,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8541418,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "api/src/main/java/org/apache/cloudstack/api/command/admin/ha/EnableHAForHostCmd.java",
+      "startLine": 44,
+      "endLine": 116,
+      "codeName": "org.apache.cloudstack.api.command.admin.ha.EnableHAForHostCmd",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 3048,
+          "reviewerId": 16,
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "sampleId": 8547261,
+      "repository": "apache/cloudstack",
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "file": "plugins/hypervisors/baremetal/src/main/java/com/cloud/baremetal/networkservice/BaremetalPingPxeResource.java",
+      "startLine": 47,
+      "endLine": 259,
+      "codeName": "com.cloud.baremetal.networkservice.BaremetalPingPxeResource",
+      "classification": "single-reviewer",
+      "uniqueReviewers": 1,
+      "reviewRows": 1,
+      "duplicateReviewerRows": 0,
+      "ratings": [
+        {
+          "reviewId": 9804,
+          "reviewerId": 4,
+          "severity": "none"
+        }
+      ]
+    }
+  ],
+  "primarySampleIds": [
+    6374724,
+    6391534,
+    6406137,
+    6413795,
+    8528735,
+    8537138,
+    8538037,
+    8539645
+  ],
+  "execution": "Use full clean pinned repository checkouts on the mounted workspace volume. Same whole-repository native-only extraction scope for both tools; no model-generated edges, credentials or project build execution. Record all file/scope counts, graph diagnostics, failures, commands, binary/environment and graph hashes. If source revision or exact sample source is unavailable, retain the failure and do not substitute latest source.",
+  "identity": "Before tool graph extraction, inspect each primary source span and freeze its exact class declaration line/name/file/hash separately from the annotated span. Preserve nested classes and test roles. Resolve result identities against source only after querying; ambiguous rendered labels remain unknown, never select by expected degree or rating.",
+  "nativeHubCapture": {
+    "method": "god_nodes",
+    "arguments": {
+      "top_n": 100
+    },
+    "timeoutSeconds": 120,
+    "maxResponseBytes": 16777216
+  },
+  "judgment": "At fixed cutoffs 10/50/100 report consensus-positive class retrieval out of four and consensus-none class retrieval out of four separately. Nonreturned, missing extraction and unresolved output identity remain distinct. Unlabeled hubs cannot become false positives or true negatives. No precision-at-k, population accuracy or classifier score from this partial label set. Preserve every candidate and rating disagreement.",
+  "secondary": "For each of the eight primary source classes, perform one public source-coordinate resolver and one unfiltered public get_neighbors call with returned ID when resolved. Graphify file::symbol lookup is source-coordinate checked; Compass exact scoped search. No oracle ID substitution or retries. Neighbor projection and source responsibilities may diagnose why hub degree diverges from labels; they cannot replace the native ranking score.",
+  "sourceReview": "Read the complete annotated primary spans plus necessary immediate context, retain their hashes and review rationale. Developer labels are external evidence with imperfect agreement, not unquestionable truth. Do not train or retune a classifier on these eight cases and call the same cases held-out confirmation.",
+  "limits": {
+    "maxSourceFileBytes": 4194304,
+    "maxGraphBytes": 268435456,
+    "maxExtractSeconds": 1200,
+    "maxExtractStreamBytes": 16777216,
+    "maxMcpSessionBytes": 67108864
+  },
+  "productVersion": "0.3.30",
+  "compassBinary": "calls-only-trails-01/compass",
+  "compassBinarySha256": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+  "graphify": "0.9.67, same verified 227-file MCP installation used by prior comparisons"
+}

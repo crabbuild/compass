@@ -1,0 +1,458 @@
+{
+  "schema": "compass.sql-regex-cache-whole-repeat-review/1",
+  "registrationSha256": "2a91c90209db4d19eeb825c5d3901ae215477472942d34835e61dac2e5883f4b",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "binaries": {
+    "baseline": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+    "candidate": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4"
+  },
+  "limits": {
+    "timeoutSeconds": 1200,
+    "streamBytes": 16777216,
+    "graphBytes": 1073741824
+  },
+  "initialReviewSha256": "4d694ec2cce46b9c2009b7b7af3beb8e8f884599df50199c848d264e2b23dab6",
+  "observations": [
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 235574,
+      "stdout_bytes": 510,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 0,
+      "tool": "baseline",
+      "startedAtUtc": "2026-09-27T19:14:04.555003+00:00",
+      "loadAverageBefore": [
+        9.2041015625,
+        9.6552734375,
+        9.8857421875
+      ],
+      "loadAverageAfter": [
+        3.65185546875,
+        7.0224609375,
+        8.728515625
+      ],
+      "stdoutSha256": "edcf7359d4c0895ddd60736e30ab37a1bcbf0335a837f20d5199eda69c5e13c4",
+      "stderrSha256": "39e912a9aa48cbd1cd976d67d62c64ae0f5b4214fdc23604ff00e7ba4450f013",
+      "processTimesSeconds": {
+        "real": 235.53,
+        "user": 260.56,
+        "sys": 23.68
+      },
+      "peakRssBytes": 6372573184,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 204082,
+      "stdout_bytes": 511,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 0,
+      "tool": "candidate",
+      "startedAtUtc": "2026-09-27T19:18:01.165042+00:00",
+      "loadAverageBefore": [
+        3.65185546875,
+        7.0224609375,
+        8.728515625
+      ],
+      "loadAverageAfter": [
+        4.8916015625,
+        6.0654296875,
+        7.96044921875
+      ],
+      "stdoutSha256": "90bc5b3303540acc8eb18a9b63673082bf9abb6bf4dc291fb38fb485193e3e14",
+      "stderrSha256": "f0d340fb179e81c4f1eeb312c0a862a420b36706633d6ab9a3c0a69a79e1b4ce",
+      "processTimesSeconds": {
+        "real": 204.06,
+        "user": 228.76,
+        "sys": 23.49
+      },
+      "peakRssBytes": 6357172224,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 210928,
+      "stdout_bytes": 511,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 1,
+      "tool": "candidate",
+      "startedAtUtc": "2026-09-27T19:21:26.036844+00:00",
+      "loadAverageBefore": [
+        4.8916015625,
+        6.0654296875,
+        7.96044921875
+      ],
+      "loadAverageAfter": [
+        5.89208984375,
+        6.36181640625,
+        7.7109375
+      ],
+      "stdoutSha256": "106bf180ec5f98921eaebbca13501169aa1e7258ca896a71c45a94d88fb776c8",
+      "stderrSha256": "98fa0dc294669b0f1c7c0e692bafc2c1889d4ae30cfb3676fa6a2ac1f38c73f7",
+      "processTimesSeconds": {
+        "real": 210.92,
+        "user": 223.63,
+        "sys": 23.12
+      },
+      "peakRssBytes": 6380470272,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 215288,
+      "stdout_bytes": 510,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 1,
+      "tool": "baseline",
+      "startedAtUtc": "2026-09-27T19:24:57.999100+00:00",
+      "loadAverageBefore": [
+        5.66015625,
+        6.3056640625,
+        7.68310546875
+      ],
+      "loadAverageAfter": [
+        7.3759765625,
+        6.9384765625,
+        7.6708984375
+      ],
+      "stdoutSha256": "f5ec4fa80af666c5065819d2e078f52b3568e901f8528467510d3d3fb7e8c58f",
+      "stderrSha256": "5a59a579a4fcbcdb33a10dad6e1aebb4e91b83291318a8f76cedab0cc657c774",
+      "processTimesSeconds": {
+        "real": 215.27,
+        "user": 262.09,
+        "sys": 25.77
+      },
+      "peakRssBytes": 6059245568,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 213526,
+      "stdout_bytes": 510,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 2,
+      "tool": "baseline",
+      "startedAtUtc": "2026-09-27T19:28:34.025708+00:00",
+      "loadAverageBefore": [
+        7.3759765625,
+        6.9384765625,
+        7.6708984375
+      ],
+      "loadAverageAfter": [
+        4.62353515625,
+        6.08349609375,
+        7.169921875
+      ],
+      "stdoutSha256": "020e6e0d8b13020cc0458eddf099792fb9e526bfdcc8032ef8c2186c37b73306",
+      "stderrSha256": "972e4c45d8a03282a440100a5366f52a74afab4bdd4cde362fe11f8f13f360aa",
+      "processTimesSeconds": {
+        "real": 213.51,
+        "user": 255.5,
+        "sys": 23.55
+      },
+      "peakRssBytes": 6362300416,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    },
+    {
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 203430,
+      "stdout_bytes": 511,
+      "stderr_bytes": 892,
+      "output_limited": false,
+      "repeat": 2,
+      "tool": "candidate",
+      "startedAtUtc": "2026-09-27T19:32:08.565581+00:00",
+      "loadAverageBefore": [
+        4.4931640625,
+        6.0322265625,
+        7.14501953125
+      ],
+      "loadAverageAfter": [
+        5.0029296875,
+        6.2412109375,
+        7.06982421875
+      ],
+      "stdoutSha256": "67f3043ecd93926604ee487773b77525507fec926d45518585a430df80e16f8f",
+      "stderrSha256": "215ac251cc61809cbfbda0535232deae2ccde5bc17732ccf4132faa1b22445ba",
+      "processTimesSeconds": {
+        "real": 203.42,
+        "user": 227.06,
+        "sys": 23.05
+      },
+      "peakRssBytes": 6367789056,
+      "graphBytes": 671502979,
+      "withinGraphBound": true,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "equalsInitialGraph": true,
+      "reportedCounts": {
+        "files": 6783,
+        "extracted": 6783,
+        "cached": 0,
+        "nodes": 173689,
+        "edges": 502158,
+        "communities": 2153
+      },
+      "reportedPublicationOmissions": {
+        "nodes": 1,
+        "edges": 45,
+        "identityCollisions": 0
+      }
+    }
+  ],
+  "verification": {
+    "allSixEqualInitialGraph": true,
+    "candidateToBaselineMedianRatio": 0.9479487941733864,
+    "exceedsTenPercentMedianRegression": false,
+    "runSha256": "e4c088b9d89345ca8e0d3c57b48a96e05ad9b445da80d50a81298d727d844286",
+    "schema": "compass.sql-regex-cache-whole-repeat-verification/1",
+    "scope": "Known development repository, three observations per frozen release binary with ordinary OS caches and unrelated host work. No Graphify, whole-product or held-out claim.",
+    "tools": {
+      "baseline": {
+        "medianSystemCpuSeconds": 23.68,
+        "medianUserCpuSeconds": 260.56,
+        "medianWallMs": 215288,
+        "observations": [
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6372573184,
+            "processTimesSeconds": {
+              "real": 235.53,
+              "sys": 23.68,
+              "user": 260.56
+            },
+            "repeat": 0,
+            "successful": true,
+            "tool": "baseline",
+            "wallMs": 235574
+          },
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6059245568,
+            "processTimesSeconds": {
+              "real": 215.27,
+              "sys": 25.77,
+              "user": 262.09
+            },
+            "repeat": 1,
+            "successful": true,
+            "tool": "baseline",
+            "wallMs": 215288
+          },
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6362300416,
+            "processTimesSeconds": {
+              "real": 213.51,
+              "sys": 23.55,
+              "user": 255.5
+            },
+            "repeat": 2,
+            "successful": true,
+            "tool": "baseline",
+            "wallMs": 213526
+          }
+        ],
+        "successful": 3
+      },
+      "candidate": {
+        "medianSystemCpuSeconds": 23.12,
+        "medianUserCpuSeconds": 227.06,
+        "medianWallMs": 204082,
+        "observations": [
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6357172224,
+            "processTimesSeconds": {
+              "real": 204.06,
+              "sys": 23.49,
+              "user": 228.76
+            },
+            "repeat": 0,
+            "successful": true,
+            "tool": "candidate",
+            "wallMs": 204082
+          },
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6380470272,
+            "processTimesSeconds": {
+              "real": 210.92,
+              "sys": 23.12,
+              "user": 223.63
+            },
+            "repeat": 1,
+            "successful": true,
+            "tool": "candidate",
+            "wallMs": 210928
+          },
+          {
+            "admitted": true,
+            "diagnosticLinesOmitted": 0,
+            "diagnostics": [
+              "warning: Compass published a partial graph after omitting 1 nodes and 45 edges; 0 identity collisions quarantined."
+            ],
+            "equalsInitialGraph": true,
+            "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+            "peakRssBytes": 6367789056,
+            "processTimesSeconds": {
+              "real": 203.42,
+              "sys": 23.05,
+              "user": 227.06
+            },
+            "repeat": 2,
+            "successful": true,
+            "tool": "candidate",
+            "wallMs": 203430
+          }
+        ],
+        "successful": 3
+      }
+    },
+    "verifierSha256": "bf58b63f11f431be6c378647ba2308bc01fc3d7eac68056d8daaad2ed716c1e6"
+  },
+  "verificationRepeat": {
+    "byteIdentical": true,
+    "sha256": "a42cd0718dcc81119df0344d62d35564ba2cd8800727ce4120d39271a361660f"
+  },
+  "artifacts": {
+    "run.py": "799e24d38a77691d1676fb13fd494e38a7f0d0d9b82fcb57b35c132b441f0f62",
+    "run.json": "e4c088b9d89345ca8e0d3c57b48a96e05ad9b445da80d50a81298d727d844286",
+    "verify.py": "bf58b63f11f431be6c378647ba2308bc01fc3d7eac68056d8daaad2ed716c1e6",
+    "verified.json": "a42cd0718dcc81119df0344d62d35564ba2cd8800727ce4120d39271a361660f",
+    "verified-repeat.json": "a42cd0718dcc81119df0344d62d35564ba2cd8800727ce4120d39271a361660f",
+    "publish.py": "9a796110e86b94e09a209ae67138fc7d6312dece71ca61916f2e87a2bb668464"
+  },
+  "externalRun": "sql-regex-cache-01/whole-repeat",
+  "interpretation": [
+    "All six observations belong to a separately registered alternating panel; the initial 193.966-second baseline and 280.053-second candidate remain unchanged outside it.",
+    "Three observations per frozen release binary on one known development repository do not establish a general speedup, confidence interval or approved release performance baseline.",
+    "Ordinary OS caches and unrelated host work were uncontrolled. No own compilation, other extraction, query capture or large-graph verification ran alongside this panel. Timing variation has no established cause.",
+    "Byte equality preserves the original partial graph, including one omitted node and 45 omitted edges. It does not establish complete extraction, source correctness, useful communities or god-object diagnosis.",
+    "Both artifacts exceed the original 256 MiB bound and fit the separately declared 1 GiB bound. Original admission failures, development-build timeouts and all Graphify results remain unchanged."
+  ]
+}

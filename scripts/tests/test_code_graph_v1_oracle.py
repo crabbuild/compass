@@ -18,6 +18,7 @@ from code_graph_v1_oracle import (  # noqa: E402
     assert_coverage,
     assert_flows,
     assert_negatives,
+    assert_route_containment_negatives,
     assert_topology,
     canonical_bytes,
     endpoint_allowed,
@@ -247,6 +248,60 @@ class OracleTests(unittest.TestCase):
         }]}
         with self.assertRaisesRegex(QualificationError, "false_coverage"):
             assert_coverage(graph, manifest)
+
+    def test_route_containment_negatives_require_present_endpoints_and_direction(self) -> None:
+        source, target = node("route:a", "route"), node("route:b", "route")
+        source["source"]["file"] = "a.py"
+        target["source"]["file"] = "b.py"
+        manifest = {"routeContainmentNegatives": [{
+            "id": "independent", "sourceFile": "a.py", "targetFile": "b.py",
+            "reason": "Independent apps; neither imports or mounts the other.",
+        }]}
+        graph = self.graph([source, target])
+        self.assertEqual(assert_route_containment_negatives(graph, manifest), {
+            "route_containment_negatives": 1,
+        })
+        for endpoints in ([source], [target], []):
+            with self.subTest(endpoints=endpoints), self.assertRaisesRegex(
+                QualificationError, "route_containment_missing_endpoint"
+            ):
+                assert_route_containment_negatives(self.graph(endpoints), manifest)
+        edge = {"id": "false-parent", "kind": "contains", "source": source["id"], "target": target["id"]}
+        with self.assertRaisesRegex(QualificationError, "route_containment_negative"):
+            assert_route_containment_negatives(self.graph([source, target], [edge]), manifest)
+        edge["source"], edge["target"] = edge["target"], edge["source"]
+        assert_route_containment_negatives(self.graph([source, target], [edge]), manifest)
+        edge["source"], edge["target"] = edge["target"], edge["source"]
+        edge["kind"] = "references"
+        assert_route_containment_negatives(self.graph([source, target], [edge]), manifest)
+
+    def test_route_containment_manifest_rejects_duplicate_or_unexplained_pairs(self) -> None:
+        declared_sources = {
+            item["path"] for item in load_json(ROOT / "tests/qualification/code-graph-v1-corpus.json")["files"]
+        }
+        load_manifest(ROOT / "tests/qualification/code-graph-v1-semantic.json", ROOT, declared_sources)
+        for mutation in ("duplicate", "empty_reason", "unknown_field", "same_file", "non_list", "non_object"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                manifest = copy.deepcopy(self.manifest)
+                item = manifest["routeContainmentNegatives"][0]
+                if mutation == "duplicate":
+                    duplicate = dict(item, id="different-id-same-pair")
+                    manifest["routeContainmentNegatives"].append(duplicate)
+                elif mutation == "empty_reason":
+                    item["reason"] = ""
+                elif mutation == "unknown_field":
+                    item["typo"] = ""
+                elif mutation == "non_list":
+                    manifest["routeContainmentNegatives"] = None
+                elif mutation == "non_object":
+                    manifest["routeContainmentNegatives"] = [None]
+                else:
+                    item["targetFile"] = item["sourceFile"]
+                path = Path(directory) / "manifest.json"
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                expected_error = "manifest_unknown_field" if mutation == "unknown_field" else "manifest_route_containment"
+                with self.assertRaisesRegex(QualificationError, expected_error):
+                    load_manifest(path, ROOT, declared_sources)
 
     def test_topology_separates_occurrences_from_unique_typed_connections(self) -> None:
         first = node("function:first", "function")

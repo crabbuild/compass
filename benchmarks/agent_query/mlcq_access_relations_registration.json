@@ -1,0 +1,34 @@
+{
+  "schema": "compass.mlcq-access-relations-registration/1",
+  "declaredBeforeExecution": true,
+  "purpose": "Determine the endpoint kinds and unique-class-owner coverage of reads/writes edges in the frozen CloudStack Java graph. Do not combine these edges with references, infer source truth or score god objects.",
+  "priorRelationReviewSha256": "8271f1777fbeaa81e51cdcaf551b009d8eec0cc231805e0eabc57e4f7baef8d3",
+  "graph": {
+    "repository": "apache/cloudstack",
+    "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "graphBytes": 671502979,
+    "producerBinarySha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+    "producerNote": "Original release extraction; one omitted node and 45 omitted edges. No new extraction."
+  },
+  "bounds": {
+    "graphBytes": 1073741824,
+    "recordBytes": 8388608,
+    "maxNodes": 1000000,
+    "maxEdges": 1000000,
+    "maxClasses": 100000,
+    "maxOwnerCandidates": 1000000,
+    "maxSeconds": 300
+  },
+  "method": {
+    "input": "Read the frozen typed graph only; verify graph, producer and prior-review hashes before and after. Do not modify source or graph.",
+    "ownership": "The direct directed contains edge from class to method or field supplies owner candidates. Only one distinct class owner is usable; zero or multiple owners are unavailable. Do not choose a first owner.",
+    "relations": "For every reads or writes edge, count its exact source-kind/target-kind pair, evidence-confidence category and exact AST source anchor. Count missing endpoints separately. For method-to-field edges only, split field targets into same-class, other uniquely owned class, and unavailable owner; preserve record multiplicity and distinct source methods/field targets.",
+    "samples": "Reuse all 55 prior reviewed class joins unchanged. Report observed own, foreign and unresolved method-to-field reads/writes by each uniquely joined class; keep seven unavailable joins unavailable."
+  },
+  "outputs": "Full endpoint-kind and evidence totals for reads and writes, all 13,001-class source cohort only where applicable, all 55 unchanged sample joins, exact source-anchor counts, ambiguity and limit outcomes, raw graph and producer SHA-256s, repeated verification. Do not calculate ATFD, TCC, WMC, a ranking or Graphify score.",
+  "interpretation": [
+    "The preceding inventory observed 1,042 reads and 6,161 writes edges in this CloudStack artifact and none in the older Eclipse artifact; their endpoint semantics and source coverage are unknown at registration.",
+    "A stored edge is producer evidence, not an independent source oracle. Missing edges are not evidence that a class has no foreign-state access or is cohesive.",
+    "This remains known Java development data; no independent holdout or cross-language conclusion."
+  ]
+}

@@ -328,9 +328,9 @@ judgment = "Gson.java:565 declares public String toJson(Object src)."
 
 [[repository.anchor]]
 file = "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
-line = 527
+line = 526
 symbol = "value(String)"
-judgment = "JsonWriter.java:527 declares public JsonWriter value(String value)."
+judgment = "JsonWriter.java:526 starts the @CanIgnoreReturnValue annotation on public JsonWriter value(String value), whose method header is line 527."
 
 [[repository.anchor]]
 file = "gson/src/main/java/com/google/gson/TypeAdapter.java"

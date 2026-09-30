@@ -3,13 +3,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-use crate::GraphError;
+use crate::artifact::GraphSignature;
+use crate::{GraphArtifact, GraphError};
 
 /// One node in `NetworkX` node-link form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -741,151 +741,23 @@ pub struct GraphDocument {
 impl GraphDocument {
     /// Load a node-link document under the extension and size guards.
     pub fn load(path: &Path) -> Result<Self, GraphError> {
-        if path.extension().and_then(|part| part.to_str()) != Some("json") {
-            return Err(GraphError::InvalidExtension(path.to_path_buf()));
-        }
-        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
-            return Err(GraphError::TooLarge {
-                path: crate::graph::absolute_path(path),
-                size,
-                cap,
-            });
-        }
-        let before = graph_signature(path);
-        if let Some(signature) = before
-            && let Some(document) = load_query_cache(path, signature)
-            && graph_signature(path) == Some(signature)
-        {
-            let _ = write_affected_cache(path, signature, &document);
-            return Ok(document);
-        }
-        let document = Self::load_for_recluster(path)?;
-        if let Some(signature) = before
-            && graph_signature(path) == Some(signature)
-        {
-            let _ = write_query_cache(path, signature, &document);
-            let _ = write_affected_cache(path, signature, &document);
-        }
-        Ok(document)
+        GraphArtifact::load(path)?.document()
     }
 
-    /// Load the bounded projection used by focused graph traversal commands.
-    ///
-    /// The projection preserves every value read by label scoring, seed
-    /// tie-breaking, traversal filtering, and text rendering while omitting
-    /// unrelated publication attributes. It is disposable and keyed by the
-    /// graph file signature; the JSON graph remains authoritative.
+    /// Load the bounded traversal projection, keyed by exact graph content.
     pub fn load_for_traversal(path: &Path) -> Result<Self, GraphError> {
-        if path.extension().and_then(|part| part.to_str()) != Some("json") {
-            return Err(GraphError::InvalidExtension(path.to_path_buf()));
-        }
-        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
-            return Err(GraphError::TooLarge {
-                path: crate::graph::absolute_path(path),
-                size,
-                cap,
-            });
-        }
-        let signature = graph_signature(path);
-        if let Some(signature) = signature
-            && let Some(document) = load_traversal_cache(path, signature)
-            && graph_signature(path) == Some(signature)
-        {
-            return Ok(document);
-        }
-        let compact = load_traversal_projection(path)?.into_cache();
-        if let Some(signature) = signature
-            && graph_signature(path) == Some(signature)
-            && !cache_is_valid(
-                &traversal_cache_path(path),
-                TRAVERSAL_CACHE_MAGIC,
-                signature,
-            )
-        {
-            let _ = write_traversal_cache(path, signature, &compact);
-        }
-        Ok(compact.into_document())
+        GraphArtifact::load(path)?.traversal_document()
     }
 
     /// Load the compact, lossless projection required by `graph affected`.
-    ///
-    /// The projection retains every node endpoint and edge relation while
-    /// omitting attributes that cannot influence seed resolution, traversal,
-    /// or rendering. Other graph commands continue to load the full document.
     pub fn load_for_affected(path: &Path) -> Result<Self, GraphError> {
-        if path.extension().and_then(|part| part.to_str()) != Some("json") {
-            return Err(GraphError::InvalidExtension(path.to_path_buf()));
-        }
-        if let Some((size, cap)) = Self::size_cap_exceeded(path) {
-            return Err(GraphError::TooLarge {
-                path: crate::graph::absolute_path(path),
-                size,
-                cap,
-            });
-        }
-        let signature = graph_signature(path);
-        if let Some(signature) = signature
-            && let Some(document) = load_affected_cache(path, signature)
-            && graph_signature(path) == Some(signature)
-        {
-            return Ok(document);
-        }
-        let document = Self::load(path)?;
-        if let Some(signature) = signature
-            && let Some(compact) = load_affected_cache(path, signature)
-            && graph_signature(path) == Some(signature)
-        {
-            return Ok(compact);
-        }
-        let compact = document.compact_for_affected();
-        if let Some(signature) = signature
-            && graph_signature(path) == Some(signature)
-        {
-            let _ = write_compact_cache(path, signature, &compact);
-        }
-        Ok(compact)
+        GraphArtifact::load(path)?.affected_document()
     }
 
-    /// Load a node-link document for re-clustering without requiring a `.json`
-    /// extension. The same configured graph-size bound applies to this path.
+    /// Load without requiring a `.json` extension, under the same byte bound.
     pub fn load_for_recluster(path: &Path) -> Result<Self, GraphError> {
-        if !path.exists() {
-            return Err(GraphError::NotFound(crate::graph::absolute_path(path)));
-        }
-        let file = File::open(path).map_err(|source| GraphError::Read {
-            path: crate::graph::absolute_path(path),
-            source,
-        })?;
-        let cap = crate::graph::graph_size_cap();
-        let size = file
-            .metadata()
-            .map_err(|source| GraphError::Read {
-                path: crate::graph::absolute_path(path),
-                source,
-            })?
-            .len();
-        if size > cap {
-            return Err(GraphError::TooLarge {
-                path: crate::graph::absolute_path(path),
-                size,
-                cap,
-            });
-        }
-        let mut bytes = Vec::new();
-        file.take(cap.saturating_add(1))
-            .read_to_end(&mut bytes)
-            .map_err(|source| GraphError::Read {
-                path: crate::graph::absolute_path(path),
-                source,
-            })?;
-        if bytes.len() as u64 > cap {
-            return Err(GraphError::TooLarge {
-                path: crate::graph::absolute_path(path),
-                size: bytes.len() as u64,
-                cap,
-            });
-        }
-        serde_json::from_slice(&bytes).map_err(GraphError::Corrupt)
+        let artifact = GraphArtifact::load_for_recluster(path)?;
+        serde_json::from_slice(&artifact.bytes).map_err(GraphError::Corrupt)
     }
 
     #[must_use]
@@ -957,10 +829,10 @@ impl GraphDocument {
     }
 }
 
-const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
-const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
-const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT04";
-const QUERY_CACHE_HEADER_LEN: usize = 28;
+const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG02";
+const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA03";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT07";
+const QUERY_CACHE_HEADER_LEN: usize = 48;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Streaming input for natural traversal. Unlike [`GraphDocument`], these
@@ -1012,6 +884,7 @@ struct TraversalRawEdge {
     source_location: Option<Value>,
     relationship_site: Option<Value>,
     evidence_confidence: Option<Value>,
+    deferred: Option<Value>,
 }
 
 #[derive(Default)]
@@ -1115,17 +988,17 @@ impl<'de> Deserialize<'de> for TraversalRawEdge {
                         "kind" => edge.kind = Some(map.next_value()?),
                         "confidence" => edge.confidence = Some(map.next_value()?),
                         "context" => edge.context = Some(map.next_value()?),
+                        "deferred" => edge.deferred = Some(map.next_value()?),
                         "source_file" => edge.source_file = Some(map.next_value()?),
                         "source_location" => edge.source_location = Some(map.next_value()?),
                         "relationshipSite" => edge.relationship_site = Some(map.next_value()?),
                         "evidence" => {
-                            let first_confidence = map
-                                .next_value::<TraversalEvidenceItems>()?
-                                .0
-                                .into_iter()
-                                .next()
-                                .and_then(|evidence| evidence.confidence);
-                            edge.evidence_confidence = first_confidence;
+                            edge.evidence_confidence = weakest_traversal_confidence(
+                                map.next_value::<TraversalEvidenceItems>()?
+                                    .0
+                                    .into_iter()
+                                    .map(|evidence| evidence.confidence.unwrap_or(Value::Null)),
+                            );
                         }
                         _ => {
                             let _: IgnoredAny = map.next_value()?;
@@ -1315,6 +1188,7 @@ struct TraversalCacheEdge(
     Option<Value>,
     Option<Value>,
     Option<Value>,
+    Option<Value>,
 );
 
 impl TraversalRawGraphDocument {
@@ -1388,12 +1262,11 @@ impl TraversalRawNode {
                     .map(|label| Value::String(label.to_owned()))
             })
             .or(community_name);
-        let community = community.filter(|value| {
-            value
-                .as_object()
-                .and_then(|community| community.get("label"))
-                .and_then(Value::as_str)
-                .is_none()
+        // Compact labeled communities to their identity rather than dropping
+        // the whole record after extracting the display name.
+        let community = community.and_then(|value| match value {
+            Value::Object(mut fields) => fields.remove("id"),
+            scalar => Some(scalar),
         });
         let label = label
             .filter(|value| value_as_python_string(value).is_some())
@@ -1430,20 +1303,10 @@ impl TraversalRawEdge {
             source_location,
             relationship_site,
             evidence_confidence,
+            deferred,
         } = self;
-        let confidence = confidence
-            .as_ref()
-            .and_then(value_as_python_string)
-            .map(Value::String)
-            .or_else(|| {
-                evidence_confidence.map(|value| match value.as_str() {
-                    Some("exact") => Value::String("EXTRACTED".to_owned()),
-                    Some("inferred") => Value::String("INFERRED".to_owned()),
-                    Some("ambiguous") => Value::String("AMBIGUOUS".to_owned()),
-                    Some("unresolved") => Value::String("UNRESOLVED".to_owned()),
-                    Some(_) | None => value,
-                })
-            });
+        let confidence =
+            weakest_traversal_confidence(confidence.into_iter().chain(evidence_confidence));
         TraversalCacheEdge(
             source,
             target,
@@ -1472,8 +1335,23 @@ impl TraversalRawEdge {
                     .and_then(Value::as_object)
                     .and_then(source_anchor_location),
             ),
+            deferred,
         )
     }
+}
+
+// Traversal consumes the conservative confidence of the complete evidence set.
+// Unknown or malformed confidence must not become an exact structural fact.
+fn weakest_traversal_confidence(values: impl Iterator<Item = Value>) -> Option<Value> {
+    values
+        .map(|value| match value.as_str() {
+            Some("exact" | "EXTRACTED") => "EXTRACTED",
+            Some("inferred" | "INFERRED") => "INFERRED",
+            Some("ambiguous" | "AMBIGUOUS") => "AMBIGUOUS",
+            _ => "UNRESOLVED",
+        })
+        .max_by_key(|value| (confidence_rank(value), *value))
+        .map(|value| Value::String(value.to_owned()))
 }
 
 fn projected_string_value(direct: Option<&Value>, fallback: Option<String>) -> Option<Value> {
@@ -1540,6 +1418,7 @@ impl TraversalCacheDocument {
                     context,
                     source_file,
                     source_location,
+                    deferred,
                 ) = edge;
                 let mut attributes = Map::new();
                 insert_optional_value(&mut attributes, "relation", relation);
@@ -1547,6 +1426,7 @@ impl TraversalCacheDocument {
                 insert_optional_value(&mut attributes, "context", context);
                 insert_optional_value(&mut attributes, "source_file", source_file);
                 insert_optional_value(&mut attributes, "source_location", source_location);
+                insert_optional_value(&mut attributes, "deferred", deferred);
                 EdgeRecord {
                     source,
                     target,
@@ -1565,21 +1445,39 @@ impl TraversalCacheDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct GraphSignature {
-    len: u64,
-    modified_secs: u64,
-    modified_nanos: u32,
-}
+impl GraphArtifact {
+    /// Decode the full compatibility document from this artifact's exact bytes.
+    /// Disposable caches are accepted only for the same content digest.
+    pub fn document(&self) -> Result<GraphDocument, GraphError> {
+        if let Some(document) = load_query_cache(self.path(), self.signature) {
+            let _ = write_affected_cache(self.path(), self.signature, &document);
+            return Ok(document);
+        }
+        let document = serde_json::from_slice(&self.bytes).map_err(GraphError::Corrupt)?;
+        let _ = write_query_cache(self.path(), self.signature, &document);
+        let _ = write_affected_cache(self.path(), self.signature, &document);
+        Ok(document)
+    }
 
-fn graph_signature(path: &Path) -> Option<GraphSignature> {
-    let metadata = path.metadata().ok()?;
-    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(GraphSignature {
-        len: metadata.len(),
-        modified_secs: modified.as_secs(),
-        modified_nanos: modified.subsec_nanos(),
-    })
+    /// Derive the existing compact traversal projection from this same snapshot.
+    pub fn traversal_document(&self) -> Result<GraphDocument, GraphError> {
+        if let Some(document) = load_traversal_cache(self.path(), self.signature) {
+            return Ok(document);
+        }
+        let raw: TraversalRawGraphDocument =
+            serde_json::from_slice(&self.bytes).map_err(GraphError::Corrupt)?;
+        let compact = raw.into_cache();
+        let _ = write_traversal_cache(self.path(), self.signature, &compact);
+        Ok(compact.into_document())
+    }
+
+    fn affected_document(&self) -> Result<GraphDocument, GraphError> {
+        if let Some(document) = load_affected_cache(self.path(), self.signature) {
+            return Ok(document);
+        }
+        let document = self.document()?;
+        Ok(document.compact_for_affected())
+    }
 }
 
 fn query_cache_path(graph_path: &Path) -> PathBuf {
@@ -1622,8 +1520,7 @@ fn encode_cache_header(magic: &[u8; 8], signature: GraphSignature) -> [u8; QUERY
     let mut header = [0_u8; QUERY_CACHE_HEADER_LEN];
     header[..8].copy_from_slice(magic);
     header[8..16].copy_from_slice(&signature.len.to_le_bytes());
-    header[16..24].copy_from_slice(&signature.modified_secs.to_le_bytes());
-    header[24..28].copy_from_slice(&signature.modified_nanos.to_le_bytes());
+    header[16..48].copy_from_slice(&signature.digest);
     header
 }
 
@@ -1643,22 +1540,9 @@ fn load_traversal_cache(path: &Path, signature: GraphSignature) -> Option<GraphD
     if !cache_header_matches(&cache_path, TRAVERSAL_CACHE_MAGIC, signature, &header) {
         return None;
     }
-    let cache: TraversalCacheDocument = rmp_serde::from_read(reader).ok()?;
+    let cache: TraversalCacheDocument =
+        rmp_serde::from_read(reader.take(cache_read_limit(signature))).ok()?;
     Some(cache.into_document())
-}
-
-fn load_traversal_projection(path: &Path) -> Result<TraversalRawGraphDocument, GraphError> {
-    let file = File::open(path).map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            GraphError::NotFound(crate::graph::absolute_path(path))
-        } else {
-            GraphError::Read {
-                path: crate::graph::absolute_path(path),
-                source,
-            }
-        }
-    })?;
-    serde_json::from_reader(BufReader::new(file)).map_err(GraphError::Corrupt)
 }
 
 fn load_cache(
@@ -1672,7 +1556,11 @@ fn load_cache(
     if !cache_header_matches(cache_path, magic, signature, &header) {
         return None;
     }
-    rmp_serde::from_read(reader).ok()
+    rmp_serde::from_read(reader.take(cache_read_limit(signature))).ok()
+}
+
+fn cache_read_limit(signature: GraphSignature) -> u64 {
+    signature.len.saturating_mul(2).saturating_add(1024 * 1024)
 }
 
 fn cache_header_matches(
@@ -1684,7 +1572,7 @@ fn cache_header_matches(
     let Some(cache_size) = cache_path.metadata().ok().map(|metadata| metadata.len()) else {
         return false;
     };
-    let maximum = signature.len.saturating_mul(2).saturating_add(1024 * 1024);
+    let maximum = cache_read_limit(signature);
     cache_size <= maximum && header == &encode_cache_header(magic, signature)
 }
 
@@ -1889,6 +1777,42 @@ mod tests {
     use super::{
         GraphDocument, NodeRecord, affected_cache_path, query_cache_path, traversal_cache_path,
     };
+
+    #[test]
+    fn traversal_cache_preserves_labeled_community_ids() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        fs::create_dir(directory.path().join("cache"))?;
+        fs::write(
+            &path,
+            r#"{"nodes":[
+            {"id":"a","name":"A","community":{"id":4,"label":"Core"}},
+            {"id":"b","name":"B","community":{"id":7}},
+            {"id":"c","label":"C","community":9}],"links":[]}"#,
+        )?;
+        for _ in 0..2 {
+            let graph = GraphDocument::load_for_traversal(&path)?;
+            assert_eq!(graph.nodes[0].unsigned("community"), Some(4));
+            assert_eq!(graph.nodes[0].string("community_name"), "Core");
+            assert_eq!(graph.nodes[1].unsigned("community"), Some(7));
+            assert_eq!(graph.nodes[2].unsigned("community"), Some(9));
+        }
+        // Old disposable caches can contain the label but lack its ID.
+        let mut stale = serde_json::from_slice::<super::TraversalRawGraphDocument>(
+            &super::GraphArtifact::load(&path)?.bytes,
+        )?
+        .into_cache();
+        stale.2[0].8 = None;
+        let signature = super::GraphArtifact::load(&path)?.signature;
+        super::write_traversal_cache(&path, signature, &stale)?;
+        let cache = traversal_cache_path(&path);
+        let mut bytes = fs::read(&cache)?;
+        bytes[..8].copy_from_slice(b"TRAILT04");
+        fs::write(cache, bytes)?;
+        let graph = GraphDocument::load_for_traversal(&path)?;
+        assert_eq!(graph.nodes[0].unsigned("community"), Some(4));
+        Ok(())
+    }
 
     #[test]
     fn omitted_multigraph_uses_networkx_legacy_default() {

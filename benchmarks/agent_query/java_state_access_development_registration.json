@@ -1,0 +1,17 @@
+{
+  "schema": "compass.java-state-access-development-registration/1",
+  "baselineCommit": "716446141d8c1e9e0d945487b041d03f5e72e423",
+  "sourceRegistration": "benchmarks/agent_query/state_access_development_registration.json",
+  "sourceRegistrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "scopeRegistration": "benchmarks/agent_query/java_state_scope_registration.json",
+  "scopeRegistrationSha256": "3a12b108736b5341ed09f0f9c66aa874e2612ef8d8e26afc542692fe0bdf445a",
+  "scope": "Java production field-access correction on known development subjects. Retain all 44 compiler scope cases and all 20 five-repository access sites; unsupported cases remain failures. Not held-out or god-object classification.",
+  "contract": "Emit exact field-only member-access occurrences using lexical value bindings and source-proven receiver types. Scope exit restores outer bindings; unsupported/ambiguous receivers never select an outer or same-named field. Keep qualified universal resolution and existing graph References projection. Preserve occurrences, method-selector exclusion and source anchors. Bounded inference; source/compiler limitations remain explicit.",
+  "evaluation": "Rebuild all five Compass graphs from the same pinned read-only sources; reuse unchanged Graphify graphs. Replay the unchanged 20-site auditor. Rebuild the compiler fixture and compare all 44 cases against the saved compiler oracle, retaining all extra/missing targets. Report complete graph deltas and community changes. Inspect every newly published jsoup field occurrence for field target/source-anchor consistency; this does not prove compiler-grade precision.",
+  "verification": [
+    "Fail-before native regressions, lexical scope and ambiguous/unknown negatives",
+    "Cross-file resolution and publication tests with exact caller, field, direction, multiplicity and byte anchors",
+    "Cache invalidation and native baseline; production fixture qualification",
+    "Compiler scope fixture rerun and full five-repository state diagnostic with exact source/binary/graph hashes"
+  ]
+}

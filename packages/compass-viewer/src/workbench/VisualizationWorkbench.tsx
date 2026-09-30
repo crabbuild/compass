@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BoxesIcon,
   BracesIcon,
@@ -11,12 +11,11 @@ import {
   RouteIcon,
   SearchCodeIcon,
   ShieldCheckIcon,
-  SlidersHorizontalIcon,
-  WaypointsIcon
+  SlidersHorizontalIcon
 } from "lucide-react";
 import type { ArchitectureLens, ArchitectureOverview, ArchitectureViewModel } from "../contracts/architecture";
 import type { GraphViewModel } from "../contracts/graph";
-import type { WorkbenchModel, WorkbenchView } from "../contracts/workbench";
+import type { GraphSearchIndex, WorkbenchModel, WorkbenchView } from "../contracts/workbench";
 import type { ThemePreference } from "../lib/theme";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
 import { architectureOverview } from "../architecture/projection";
@@ -26,6 +25,7 @@ import {
   type GraphHost
 } from "../graph/CompassGraph";
 import { codeQueryGraphViewModel } from "../graph/codeQueryGraph";
+import { CompassBrandMark } from "../graph/CompassBrandMark";
 import { embeddedCommunityBound } from "../graph/communityBound";
 import { GraphToolbarSlotContext } from "../graph/GraphToolbarSlot";
 import type { InspectorLayout } from "../graph/inspectorLayout";
@@ -98,7 +98,7 @@ export function VisualizationWorkbench({
         aria-label="Compass navigation"
       >
         <header>
-          <span className="visualization-bearing" aria-hidden="true"><WaypointsIcon /></span>
+          <span className="visualization-bearing" aria-hidden="true"><CompassBrandMark className="compass-navigation-logo" variant="app" /></span>
           <span>
             <strong>Compass</strong>
             <small title={workbench.title}>{workbench.title}</small>
@@ -147,10 +147,12 @@ export function VisualizationWorkbench({
       </aside>
       <main className="visualization-main">
         <header className="visualization-context">
-          <div className="visualization-context-title">
-            <span>{viewEyebrow(activeView)}</span>
-            <strong>{activeView.title}</strong>
-          </div>
+          {activeView.kind !== "code" && (
+            <div className="visualization-context-title">
+              <span>{viewEyebrow(activeView)}</span>
+              <strong>{activeView.title}</strong>
+            </div>
+          )}
           <div className="visualization-controls" ref={setControlSlot} />
           <div className="visualization-coverage" data-status={activeView.coverage.status}>
             {activeView.kind !== "call" && (
@@ -276,6 +278,7 @@ function WorkbenchView({
       host={host}
       preferredLayout={preferredLayout}
       communityDetails={view.kind === "code" ? view.communityDetails : undefined}
+      searchIndex={view.kind === "code" ? view.searchIndex : undefined}
       hierarchy={view.kind === "code" ? view.hierarchy : undefined}
       initialLevel={view.kind === "code" ? view.hierarchy?.initialLevel : undefined}
       communityDetail={view.kind === "code" ? communityDetail : undefined}
@@ -329,6 +332,7 @@ function FilteredGraph({
   sourceRevisions,
   preferredLayout,
   communityDetails,
+  searchIndex,
   hierarchy,
   initialLevel,
   communityDetail,
@@ -346,6 +350,7 @@ function FilteredGraph({
   sourceRevisions?: Parameters<typeof CompassGraph>[0]["sourceRevisions"];
   preferredLayout: Parameters<typeof CompassGraph>[0]["preferredLayout"];
   communityDetails?: Record<string, GraphViewModel> | undefined;
+  searchIndex?: GraphSearchIndex | undefined;
   hierarchy?: Parameters<typeof CompassGraph>[0]["hierarchy"];
   initialLevel?: number | undefined;
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
@@ -366,6 +371,7 @@ function FilteredGraph({
   const filterPanelId = useId();
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const restoreFilterFocusRef = useRef(false);
   const embeddedDetailModel = communityId === undefined
     ? undefined
     : communityDetails?.[String(communityId)];
@@ -392,11 +398,16 @@ function FilteredGraph({
     setFiltersOpen(false);
   }, [activeGraphKey]);
   useEffect(() => {
+    if (filtersOpen || !restoreFilterFocusRef.current) return;
+    restoreFilterFocusRef.current = false;
+    filterButtonRef.current?.focus();
+  }, [filtersOpen]);
+  useEffect(() => {
     if (!filtersOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      restoreFilterFocusRef.current = true;
       setFiltersOpen(false);
-      filterButtonRef.current?.focus();
     };
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -412,6 +423,34 @@ function FilteredGraph({
       document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, [filtersOpen]);
+  useLayoutEffect(() => {
+    if (!filtersOpen) return;
+    const placePanel = () => {
+      const button = filterButtonRef.current;
+      const panel = filterPanelRef.current;
+      if (!button || !panel) return;
+      const anchor = button.getBoundingClientRect();
+      const margin = 12;
+      const width = Math.min(310, window.innerWidth - margin * 2);
+      const top = Math.min(anchor.bottom + 8, window.innerHeight - margin);
+      panel.style.width = `${width}px`;
+      panel.style.left = `${Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))}px`;
+      panel.style.top = `${top}px`;
+      panel.style.maxHeight = `${Math.max(0, window.innerHeight - top - margin)}px`;
+    };
+    placePanel();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(placePanel);
+    if (filterButtonRef.current) observer?.observe(filterButtonRef.current);
+    const toolbar = filterButtonRef.current?.closest(".compass-graph-toolbar");
+    if (toolbar) observer?.observe(toolbar);
+    window.addEventListener("resize", placePanel);
+    document.addEventListener("scroll", placePanel, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", placePanel);
+      document.removeEventListener("scroll", placePanel, true);
+    };
+  }, [filtersOpen, activeGraphKey]);
   const clearFilters = useCallback(() => {
     setRelation("");
     setEvidence("");
@@ -425,6 +464,8 @@ function FilteredGraph({
     <div className="workbench-graph-lens">
       <CompassGraph
         model={activeCommunityDetail ? model : filtered}
+        searchIndex={searchIndex}
+        onClearSearchFilters={clearFilters}
         hierarchy={hierarchy}
         initialLevel={initialLevel}
         communityDetail={activeCommunityDetail ? {

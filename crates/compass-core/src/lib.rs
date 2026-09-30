@@ -193,6 +193,19 @@ impl LoadedGraph {
         Ok(Self { graph, overlay })
     }
 
+    /// Build a directed traversal view from an already captured graph artifact.
+    /// Adjacent learning data retains the existing application-sidecar policy.
+    pub fn from_artifact_directed(
+        artifact: &compass_model::GraphArtifact,
+    ) -> Result<Self, GraphError> {
+        let mut document = artifact.traversal_document()?;
+        document.directed = true;
+        Ok(Self {
+            graph: Graph::from_traversal_document(document)?,
+            overlay: load_learning_overlay(artifact.path()),
+        })
+    }
+
     pub fn load_directed(path: &Path) -> Result<Self, GraphError> {
         let graph = Graph::load_traversal_directed(path)?;
         let overlay = load_learning_overlay(path);

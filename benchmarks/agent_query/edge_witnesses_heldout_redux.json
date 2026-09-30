@@ -1,0 +1,127 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "redux",
+  "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+  "scope": "Pre-execution source-reviewed selected direct edges and occurrences on held-out panel A; no model output used as gold, no whole-repository precision/recall claim.",
+  "witnesses": [
+    {
+      "id": "redux-source-edge-1",
+      "source": {
+        "file": "src/utils/kindOf.ts",
+        "line": 2,
+        "symbol": "miniKindOf",
+        "text": "export function miniKindOf(val: any): string {"
+      },
+      "target": {
+        "file": "src/utils/kindOf.ts",
+        "line": 40,
+        "symbol": "ctorName",
+        "text": "function ctorName(val: any): string | null {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 21,
+          "text": "const constructorName = ctorName(val)"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "redux-source-edge-2",
+      "source": {
+        "file": "src/utils/kindOf.ts",
+        "line": 2,
+        "symbol": "miniKindOf",
+        "text": "export function miniKindOf(val: any): string {"
+      },
+      "target": {
+        "file": "src/utils/kindOf.ts",
+        "line": 53,
+        "symbol": "isDate",
+        "text": "function isDate(val: any) {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 18,
+          "text": "if (isDate(val)) return 'date'"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "redux-source-edge-3",
+      "source": {
+        "file": "src/utils/isAction.ts",
+        "line": 4,
+        "symbol": "isAction",
+        "text": "export default function isAction(action: unknown): action is Action<string> {"
+      },
+      "target": {
+        "file": "src/utils/isPlainObject.ts",
+        "line": 5,
+        "symbol": "isPlainObject",
+        "text": "export default function isPlainObject(obj: any): obj is object {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/utils/isAction.ts",
+          "line": 6,
+          "text": "isPlainObject(action) &&"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "redux-source-edge-4",
+      "source": {
+        "file": "src/utils/kindOf.ts",
+        "line": 62,
+        "symbol": "kindOf",
+        "text": "export function kindOf(val: any) {"
+      },
+      "target": {
+        "file": "src/utils/kindOf.ts",
+        "line": 44,
+        "symbol": "isError",
+        "text": "function isError(val: any) {"
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "redux-source-edge-5",
+      "source": {
+        "file": "src/utils/kindOf.ts",
+        "line": 62,
+        "symbol": "kindOf",
+        "text": "export function kindOf(val: any) {"
+      },
+      "target": {
+        "file": "src/utils/kindOf.ts",
+        "line": 2,
+        "symbol": "miniKindOf",
+        "text": "export function miniKindOf(val: any): string {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 66,
+          "text": "typeOfVal = miniKindOf(val)"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "compass.sql-regex-cache-registration/1",
+  "scope": "Development optimization prompted by an observed SQL regex-compilation profile; not held-out or broad performance qualification.",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "samples": [
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-224to225-cleanup.sql",
+      "sortedIndex": 29,
+      "bytes": 938,
+      "sha256": "e3956e631ed1569790c0e715416726ed397e0d9d2e9a60551dcc41dcd29de92f"
+    },
+    {
+      "file": "setup/db/postprocess-20to21.sql",
+      "sortedIndex": 59,
+      "bytes": 1949,
+      "sha256": "88784b0df00be6d6939ebe275c6d1aabcf8bac8636c00bf7d6ad08e2caee2aae"
+    },
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-41120to41200.sql",
+      "sortedIndex": 89,
+      "bytes": 10288,
+      "sha256": "03e7035ff015e9e3eb7f194a32d37f6e418244cee81853ec6d370b47e7589780"
+    },
+    {
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-430to440.sql",
+      "sortedIndex": 118,
+      "bytes": 411080,
+      "sha256": "99cc9ada9dae1119b8757f805211aa714702b81d2446c0f9fa58e9e7f3c62f4f"
+    }
+  ],
+  "sourceSelection": "Reuse all four complete SQL files from the prior registered diagnosis; no new selection based on cache results.",
+  "baselineProductionCommit": "1a1f6a6977d42a694df545a08aaa997b5fe05f7a",
+  "baselineBinarySha256": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+  "baselineConfirmation": "Before editing the cache, rebuild the current unchanged source with the same release command, offline parser bundle and per-worktree target; require the copied baseline hash to match. Record command, environment and source hashes. Do not run compilation alongside this task\u2019s pending whole-repository extraction.",
+  "candidatePolicy": "Only cache the fixed SQL read/write access regexes. Run native SQL/domain tests, applicable workspace/product/fixture checks, then build with matching release settings and freeze the candidate hash. Do not reuse the pending unoptimized whole-repository graph as cache-candidate output.",
+  "profile": {
+    "schema": "compass.sql-regex-profile/1",
+    "sourceSqlSha256": "d14a5ef35ae52f4bf749fdcbf6863deecd977d044a73d1b6a61241ec3a2b334d",
+    "profileSha256": "bc9e8775bb782cea3ba4a28bd53a69b598ec050fa12d2aecbac6962499b84eef",
+    "profileCaptureSha256": "bbda8ed6b4e73e9bde4572cd152d6f4575507611cbd2078c96c556ca3896a121",
+    "binarySha256": "9375271e6718e780daede034534bd6b5676e0e1385718aed2fcec16946df25df",
+    "durationSeconds": 2,
+    "intervalMilliseconds": 10,
+    "observation": "The sampled SQL extractor stack repeatedly enters State::add_access_matches and Regex::new. One branch records 60 such samples, and another records 3. This is a short snapshot, not a whole-run percentage.",
+    "sourceEvidence": "add_data_access_statement constructs the same one read and five write pattern strings per statement; add_access_matches recompiles them on each call. Patterns do not depend on source text.",
+    "proposedChange": "Cache only those fixed compiled read/write patterns, following existing local OnceLock regex caches. Preserve pattern order, captures, alias/CTE binding and emitted edge order.",
+    "limits": "Do not attribute all remaining runtime to this snapshot, change graph semantics, or replace original outcomes. The sampled whole-repository follow-up includes profiling overhead; the 24 prior per-file timings remain untouched."
+  },
+  "procedure": "Same complete input root for baseline and candidate per file, fresh outputs, three repetitions per binary, alternating old/new order by repetition. Same --code-only --no-viz --store sqlite. Record timestamps, host load, wall time and peak RSS. No overlap with this task\u2019s compilation or other extraction. Ordinary OS caches; no warmups or OS-cache flushing. Compare complete graph JSON with no exclusions, preserve array order and all failures. No ratio if either side lacks all observations or complete equality. Background host work remains a limitation.",
+  "sampleTimeoutSeconds": 180,
+  "streamLimitBytes": 16777216,
+  "graphLimitBytes": 268435456,
+  "forbiddenClaims": "Do not promote this four-file development panel as whole-product release qualification, a Graphify speed ranking, god-object classification or held-out superiority. Preserve all previous debug-build outcomes. Any full-repository cache follow-up must have its own complete source and unchanged bounds."
+}

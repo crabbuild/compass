@@ -1,0 +1,17 @@
+{
+  "schema": "compass.go-parameter-field-registration/1",
+  "declaredBeforeSourceCapture": true,
+  "status": "Development follow-up after the direct-receiver field audit; the 1908 uncredited edge count and examples were inspected. This is not a held-out sample.",
+  "sourceRepository": "benbjohnson/litestream",
+  "sourceCommit": "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa",
+  "sourceSelection": "All 146 tracked Go paths from go_full_field_registration.json, including tests and generated files, with no post-hoc file exclusions.",
+  "frozenGraphs": [
+    {"tool": "compass-before-access", "sha256": "3aed3fe0dab1fec6e1a9e197474ae3727f4c74dd6f3b68ff7cd91462cb4d29e4", "bytes": 12971447},
+    {"tool": "compass-after-access", "sha256": "d6bbc036d3cf6d294995ba734be7e70f02763fe273aa87597f40d3113f82e732", "bytes": 16902487},
+    {"tool": "graphify", "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e", "bytes": 5333935}
+  ],
+  "sourceOracle": "Parse every selected file with Go's standard go/parser and default identifier-object resolution. For each method body selector with an identifier operand, accept only a non-call selector whose operand object's declaration is one of that method's named ordinary parameters with an explicit unqualified nominal struct type (optionally pointer or generic instantiation). Require one unique top-level struct declaration in the same directory and parsed package, and one unique named direct field declaration of that struct. Record exact selector identifier byte/line, method and parameter declarations, owner and field declaration source file/line, and all exclusions. A shadowed spelling, result/receiver variable, other local, imported/qualified or unknown type, ambiguous struct or field, promoted/embedded-only field, or called selector is not credited.",
+  "graphJoin": "Require a unique source-located owner struct, method and field, direct owner-to-field containment, and a directed method-to-field references link with universal-member-access provenance at the exact selector identifier byte. Report missing and ambiguous outcomes as well as all graph edges outside the credited cohort. Compare the same exact join on each frozen graph; field-type context does not count as a declaration target.",
+  "bounds": {"maxSourcePaths": 200, "maxSourceBytesPerFile": 1048576, "maxSelectors": 100000, "maxGraphBytes": 25165824, "maxGraphNodes": 100000, "maxGraphEdges": 100000, "maxOracleSeconds": 60},
+  "outputs": "Retain raw source oracle, exact per-contact graph outcomes, negative categories, source and graph hashes, repeated deterministic runs, and a compact review. Do not claim precision for unrelated edges, broad Go completeness, god-object diagnosis or overall superiority."
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "compass.sql-regex-cache-whole-repeat-registration/1",
+  "purpose": "Investigate the longer cache-candidate observation on complete CloudStack using repeated counterbalanced release runs. This is a known development repository, not held-out confirmation or whole-product qualification.",
+  "trigger": {
+    "baselineWallMs": 193966,
+    "candidateWallMs": 280053,
+    "graphBytes": 671502979,
+    "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "interpretation": "Both initial observations succeeded and emitted identical partial-graph artifacts. Candidate took longer; cause unproven. Preserve both observations outside the new repeated panel."
+  },
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "binaries": {
+    "baseline": "96a99b19302fd3c912a07243643830f551b0e8023be619fbab51f8a7b2b86bd0",
+    "candidate": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4"
+  },
+  "repetitionsPerBinary": 3,
+  "orderByRepetition": [
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ]
+  ],
+  "commandTemplate": [
+    "/usr/bin/time",
+    "-l",
+    "<frozen-binary>",
+    "extract",
+    "<complete-pinned-source>",
+    "--code-only",
+    "--no-viz",
+    "--store",
+    "sqlite",
+    "--out",
+    "<fresh-output>"
+  ],
+  "limits": {
+    "timeoutSeconds": 1200,
+    "streamBytes": 16777216,
+    "graphBytes": 1073741824
+  },
+  "isolation": "Start only after the registered Blob query capture and its verification terminate. No own compilation, other extraction, query capture or large-graph verification alongside these timed runs. Unrelated host work remains uncontrolled and must be disclosed. Keep ordinary OS caches; no warmups or cache flushing.",
+  "observations": "Record every result, UTC timestamps, host load before/after, wall time, user/sys CPU time, peak RSS and raw process-resource output. Preserve every timeout, artifact error and omission warning. Hash whole graphs and verify equal bytes against the original preserved artifact; do not exclude metadata or array order.",
+  "decision": "Report all six observations and per-binary medians only when all three observations of that binary succeed with admitted artifacts. Report a median ratio only if all six artifacts equal the original bytes. Flag a candidate median above 1.10 times baseline for investigation; do not approve a new performance baseline from this one repository. Do not explain differences as host noise or regex contention without further evidence.",
+  "noSubstitution": "Do not replace original full-source observations, SQL-file timings, previous unoptimized timeouts, graph admission failures or Graphify results. No reduced-source fallback or selective repeat of slow outcomes.",
+  "broaderLimits": "This performance diagnosis does not evaluate god-object classification, explanation quality, source precision, communities or overall superiority."
+}

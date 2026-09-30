@@ -1,0 +1,19 @@
+{
+  "schema": "compass.rust-index-receiver-development-registration/1",
+  "scope": "Development correction of the previously reviewed WalkDir IntoIter.push -> DirList.close miss. The five repositories and all questions are reused development inputs, not held-out evidence or a broad precision score.",
+  "baselineRun": "runs/java-varargs-panel-a-02/run.json",
+  "baselineRunSha256": "c2bc04366343fbd32bbdf84ccfb1db7aaad2e2ed38b38f979065c6755432d792",
+  "baselineNavigation": "community-identity-navigation-02/capture.json",
+  "baselineNavigationSha256": "50910af023897886c683fcffc9228ef894303f56659c42030c573e9b92b7a3f9",
+  "repositories": ["chi", "click", "jsoup", "redux", "walkdir"],
+  "buildPolicy": "Rebuild all five Compass graphs from the exact baseline source commits with the same native-only extract arguments, into fresh external output directories. Retain the frozen Graphify graphs byte-for-byte; this arm does not compare extraction timing. Check every source checkout before and after. Preserve all old graphs.",
+  "graphReview": "Compare all added/removed Compass call edges by source ID, target ID, relation and source anchor, preserving multiplicity. Review every changed call edge against the pinned source, including wrong targets and deferred records. Report other node/edge changes. A recovered expected call alone is not sufficient evidence of precision.",
+  "navigationPolicy": "Reuse community_identity_navigation_panel_a.json and all 15 tasks from community_task_pairs_panel_a.json. Only graph/source-run/registration digest references change to identify new artifacts. Prepare start communities symmetrically; use only public returned source-matched IDs for requests. Capture both tools again with unchanged limits and all failures. Compare all 14 direct-call tasks; keep label presence, exact seed identity and unambiguous target labels separate.",
+  "validation": "Run focused Rust producer and universal resolver regressions, repository Rust baseline, product boundary and product tests, and code-graph fixture qualification. Preserve source-file hashes and complete command logs for the tested implementation.",
+  "limitations": [
+    "Same-agent source review is not independent evaluation.",
+    "Improving one known development miss cannot establish overall superiority to Graphify.",
+    "Graph consistency is not source precision; broad unreviewed edges remain unscored.",
+    "Natural-language discovery, god-object responsibility judgments, longer directed walks and held-out confirmation remain separate requirements."
+  ]
+}

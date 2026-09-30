@@ -42,17 +42,24 @@ pub use agent_query::{
     render_agent_query_text, render_code_query_text_page,
 };
 pub use architecture_projection::{
-    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA, ArchitectureClassCounts,
-    ArchitectureCoverage, ArchitectureDiagnosticSeverity, ArchitectureEvidenceCounts,
-    ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName, ArchitectureLens,
-    ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode, ArchitectureOmissions,
-    ArchitectureOverlay, ArchitectureOverlayGroup, ArchitectureOverlaySourceRule,
-    ArchitectureProjectionError, ArchitectureProjectionInput, ArchitectureProjectionLimits,
-    ArchitectureProjectionOptions, ArchitectureProvenance, ArchitectureQuality,
+    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY,
+    ARCHITECTURE_SUMMARY_MAX_COMMUNITIES, ARCHITECTURE_SUMMARY_MAX_KIND_BYTES,
+    ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES, ARCHITECTURE_SUMMARY_MAX_NODES_PER_COMMUNITY,
+    ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES, ARCHITECTURE_SUMMARY_MAX_SAMPLE_SCALAR_CHARS,
+    ARCHITECTURE_SUMMARY_SAMPLE_POLICY, ARCHITECTURE_SUMMARY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA,
+    ArchitectureClassCounts, ArchitectureCoverage, ArchitectureDiagnosticSeverity,
+    ArchitectureEvidenceCounts, ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName,
+    ArchitectureLens, ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode,
+    ArchitectureOmissions, ArchitectureOverlay, ArchitectureOverlayGroup,
+    ArchitectureOverlaySourceRule, ArchitectureProjectionError, ArchitectureProjectionInput,
+    ArchitectureProjectionLimitHit, ArchitectureProjectionLimits, ArchitectureProjectionOptions,
+    ArchitectureProjectionOutput, ArchitectureProvenance, ArchitectureQuality,
     ArchitectureQualityDiagnostic, ArchitectureQualityMetrics, ArchitectureQualityStatus,
     ArchitectureRelationClass, ArchitectureRelationship, ArchitectureRoute, ArchitectureRouteLevel,
     ArchitectureScope, ArchitectureScopeProjection, ArchitectureSourceCounts,
-    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureViewModel, project_architecture,
+    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureSummary,
+    ArchitectureSummaryCommunity, ArchitectureSummaryNode, ArchitectureSummaryStatistics,
+    ArchitectureViewModel, project_architecture, project_architecture_or_summary,
 };
 pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
@@ -107,10 +114,11 @@ pub use review::{
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
-    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewDocument,
-    GraphViewEdge, GraphViewModel, GraphViewNode, GraphViewSource, GraphViewStats,
-    effective_graph_view_model, graph_view_model, shared_viewer_html,
-    shared_viewer_html_with_communities, shared_viewer_html_with_hierarchy,
+    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphSearchIndex, GraphSearchNode,
+    GraphViewCommunity, GraphViewDocument, GraphViewEdge, GraphViewModel, GraphViewNode,
+    GraphViewSource, GraphViewStats, MAX_GRAPH_SEARCH_NODES, effective_graph_view_model,
+    graph_search_index, graph_view_model, shared_viewer_html, shared_viewer_html_with_communities,
+    shared_viewer_html_with_hierarchy,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{

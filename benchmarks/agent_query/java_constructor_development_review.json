@@ -1,0 +1,1184 @@
+{
+  "schema": "compass.java-constructor-development-review/1",
+  "scope": "Repeated five-language development comparison. These repositories/questions have already informed changes; neither fresh held-out evidence nor representative precision.",
+  "runId": "java-constructor-panel-a-01",
+  "suiteDigest": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "runnerDigest": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "tools": [
+    {
+      "binary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/java-constructor-provenance/compass",
+      "binarySha256": "c2de3e3ae7b0a12ac14ef24757d63bc95f199a7e1b96b639f0cfa8f18e02422f",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30"
+    },
+    {
+      "binary": "/Users/haipingfu/.local/bin/graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67"
+    }
+  ],
+  "productionSourceSha256": {
+    "crates/compass-files/src/cache.rs": "1526ae8a7d98feb92333464209cce81d5a720faee714483ffa4fbc63bde1e6ee",
+    "crates/compass-languages/src/evidence/build.rs": "70a4b9b648aa6dcedd5ebdcfc4abb4be024f2347b2f58e91f969d734dc1bbd49"
+  },
+  "regressionSourceSha256": "1fd1b3a77f5ae2d1c7bf34f6d94e0aa513811c177c4452ef1e896f7102722a08",
+  "metrics": {
+    "compass": {
+      "text": {
+        "medianAnswerTokens": 148.0,
+        "medianFirstPageTokens": 148.0,
+        "medianWallMs": 919.0,
+        "passRate": 0.8364,
+        "passed": 46,
+        "questions": 55
+      },
+      "selectedSourceRelationships": {
+        "passed": 17,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 6,
+        "total": 10
+      }
+    },
+    "graphify": {
+      "text": {
+        "medianAnswerTokens": 104.0,
+        "medianFirstPageTokens": 75.0,
+        "medianWallMs": 162.0,
+        "passRate": 0.8364,
+        "passed": 46,
+        "questions": 55
+      },
+      "selectedSourceRelationships": {
+        "passed": 20,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      }
+    }
+  },
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "d69152cc8900afc3f11756b8ce841adbed98ae6663fee4ebc64957974c8f860c",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "panelDelta": {
+    "comparisonRun": "semantic-route-parent-panel-a-01",
+    "byteIdenticalCompassGraphs": [
+      "chi",
+      "click",
+      "redux",
+      "walkdir"
+    ],
+    "jsoup": {
+      "beforeGraphSha256": "8035487618e4e96af8b7cc668d92eaea9ee3ec2a831c486d20055bc808fa23f6",
+      "afterGraphSha256": "d69152cc8900afc3f11756b8ce841adbed98ae6663fee4ebc64957974c8f860c",
+      "nodesBefore": 6116,
+      "nodesAfter": 6116,
+      "edgesBefore": 20973,
+      "edgesAfter": 21095,
+      "addedCalls": 122,
+      "removedEdges": 0,
+      "changedCommonEdges": 0,
+      "changedNodesExceptCommunity": 0,
+      "productionOccurrences": 10,
+      "testOccurrences": 112,
+      "staticSourceReview": "All 122 added occurrences reviewed against receiver expressions, package/import context, target declarations, overload argument types, exact byte anchors, and source-to-target direction. This is a complete review of this delta, not an unbiased precision sample or runtime call coverage.",
+      "sourceFileSha256": {
+        "src/main/java/org/jsoup/Jsoup.java": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7",
+        "src/main/java/org/jsoup/helper/HttpConnection.java": "9f439dc7f7aa03d18a1fbff716cfb562f9e2667b249a60dfc329f5232b3c1145",
+        "src/main/java/org/jsoup/helper/W3CDom.java": "97221e9770c46f56ad4736fccc0ec5fd690f9708ded17537e59fcd9faf137725",
+        "src/main/java/org/jsoup/nodes/NodeUtils.java": "04dffffb32b1fa4bfeb237205faa6e37433cf773ecc57a9e89de3f9d1eb67bd9",
+        "src/main/java/org/jsoup/parser/TagSet.java": "26261d2c9ee3d2e978c184f15328022488af3264ae8b1c54b6bd8fcdd02a0dff",
+        "src/main/java/org/jsoup/safety/Safelist.java": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501",
+        "src/test/java/org/jsoup/helper/HttpConnectionTest.java": "62d806a0f78b538163554bd09e4cd9cdd58f5a5dbfcaf1addf600dd73a357355",
+        "src/test/java/org/jsoup/helper/W3CDomTest.java": "3def0f732425cf7a1808e2957363a41bdd55c85f56b54708874663911302d989",
+        "src/test/java/org/jsoup/internal/NamespaceBindingsTest.java": "b23cb0e3d78202179f166e4c6c14a13dc076ce2dd278d24b64edad7757b9fd28",
+        "src/test/java/org/jsoup/nodes/AttributesTest.java": "a92b281635b30dadee55ab7f7bd0aa04977209bb3209e7084607afbd08d44391",
+        "src/test/java/org/jsoup/nodes/ElementTest.java": "f3d201c08a41ee429f5fe9fb72a12bbb6a620592d1276e66d876022fb5ef39bc",
+        "src/test/java/org/jsoup/nodes/NodeIteratorTest.java": "149503af2e01faa6ea85c170da08435790458e603aaadb4bea15c93dc37e7681",
+        "src/test/java/org/jsoup/parser/HtmlTextHandlingTest.java": "ffd7a47666c8a822d56083ce9c6516f22c6414950a5e9e586b2f52cfb72b36fa",
+        "src/test/java/org/jsoup/parser/HtmlTreeBuilderTest.java": "d7bb5ef59792baa58e3455be6e28c90e81e0469ed33fec5746815c6aef505a2a",
+        "src/test/java/org/jsoup/parser/NameNormalizationTest.java": "bb07fcb09a43a595991b79d0ec46aabae04b2a27bb3c09101b5be8382d122429",
+        "src/test/java/org/jsoup/parser/StreamParserTest.java": "83588e6ebafd1c3f390e7deefcd0c00e3b9d48366d41680778a2c2a12e512677",
+        "src/test/java/org/jsoup/parser/TagTest.java": "c9eb06ac8011a92c4ed556a7fa82e6a66463d6be233e6fe8fad819bf66055026",
+        "src/test/java/org/jsoup/safety/CleanerTest.java": "8f4e9abb7574ab5552634f21f025e2c33c3df95d4622f3f05324c32734425bfc",
+        "src/test/java/org/jsoup/safety/SafelistTest.java": "af3b581643e773f14bc71c83abfbff499adf706c3d9f89e919a997c244329c4f",
+        "src/test/java/org/jsoup/select/ElementsTest.java": "31900b1bd82389ef2ad069c3b85a79145106cdc7e52fd9a6d1d63db001e4eb08",
+        "src/test/java/org/jsoup/select/SelectorTest.java": "0560f38b89cb82e8f7e12386d468b43bd069874941be5fa85ad3227363e18d66"
+      },
+      "targetGroups": [
+        {
+          "targetId": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "target": "org.jsoup.safety.Cleaner::isValidBodyHtml",
+          "graphSignature": "isValidBodyHtml(String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 124,
+            "sha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/Jsoup.java",
+              "line": 435,
+              "edgeId": "sha256:38d6c354f2e4a136528e0f8d4261fc07f6a2c9e18886865384966819efd9e046"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:3e848e37db6f32068eecbb3958e87a0a8e273408287bd872db4c47afc8b142ff",
+          "target": "org.jsoup.helper.UrlBuilder::build",
+          "graphSignature": "build()",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/UrlBuilder.java",
+            "line": 33,
+            "sha256": "874ee79c27016735ff8a5141e1f09f76be40438e1f9bec99311b9a34a6e6f593"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/helper/HttpConnection.java",
+              "line": 451,
+              "edgeId": "sha256:c307893c6c762335b0dfe97bf7fd1bb0793e541bca05915361694c892bd3298d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 320,
+              "edgeId": "sha256:211bc74793ff58e4c3e6d57c96890cc992dd886fa3b60e63d70393b6bc652307"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 326,
+              "edgeId": "sha256:22b88548293ed5c0fc25210fe78c12f4507294dea3445d7c88dc35e20afb9e3d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 332,
+              "edgeId": "sha256:6efb0e22cac18b5a087a24a78af6284b81a99033e62ba4eaf8382256f10d0847"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 333,
+              "edgeId": "sha256:03799930f56f4189db68c10ddd5229b2d3cbdb1f61aad7c89360f920dddf90c8"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 340,
+              "edgeId": "sha256:c02290532de01e39d64548000667f53312643dd9023dddfc0ff1bbae07826538"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+              "line": 341,
+              "edgeId": "sha256:e771a487eeb791ffbbedf9d9360a51820d057fb4fba2dc2d6502ab022be71e41"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:803e6b1d2452eb819552278e067733e662e4da423240c9ccece097e43ad41c4e",
+          "target": "org.jsoup.helper.HttpConnection::KeyVal::inputStream",
+          "graphSignature": "inputStream(InputStream)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/HttpConnection.java",
+            "line": 1439,
+            "sha256": "9f439dc7f7aa03d18a1fbff716cfb562f9e2667b249a60dfc329f5232b3c1145"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/helper/HttpConnection.java",
+              "line": 1405,
+              "edgeId": "sha256:91546594788d3055205782a62af9886f1e4e41c67ac4ce4fa2e0882eb67f0742"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:eabdf2b85e2767153036daf99328b201e6da9977b01e4c7966e04e7f65958609",
+          "target": "org.jsoup.helper.W3CDom::fromJsoup",
+          "graphSignature": "fromJsoup(org.jsoup.nodes.Document)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/W3CDom.java",
+            "line": 187,
+            "sha256": "97221e9770c46f56ad4736fccc0ec5fd690f9708ded17537e59fcd9faf137725"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/helper/W3CDom.java",
+              "line": 104,
+              "edgeId": "sha256:7658b11fc681e412ec9d0b0ab53fb5cd132dea77fa84312667a9f7c3d7601c00"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 157,
+              "edgeId": "sha256:eab007225198fba0bd108747e2f17a8da32b3f02abdf076892e3b23a286c4e6e"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 179,
+              "edgeId": "sha256:0b6af4a200b1f195f88adbbfbffbb5853de7bb19b7a2597caf0c8951eb565315"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 303,
+              "edgeId": "sha256:295da2a04c113b4b9e40d70e6316a7aec91197bf81c538902ce45594dc74cc4b"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 477,
+              "edgeId": "sha256:a08c78612e65a61069016b10ee7f9effbdbebfee45724ad6eea52b62852dc42c"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 615,
+              "edgeId": "sha256:a1bb0d3d5b740a1e80cfcb29fbc9ca3537d21b27329bf73dad037f13c29f6281"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 709,
+              "edgeId": "sha256:8da9adae5a529e5683c983b0a3b43e3ba52d2052eb38aa5fc9a713f4eaa766dd"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 727,
+              "edgeId": "sha256:169ae9ed688813179fbe467dedf42d2946b78ccd15e92cfa131f3a7ba1ac7138"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 745,
+              "edgeId": "sha256:819ab6171dbebf1cf63d80cd33cdd258c793a93b27109df76c4b3ccafbfbddfd"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 760,
+              "edgeId": "sha256:818842bbffa4daa16110f6aab76f7865bec8a91fe27898f52f93f61195478f0e"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:4557280905e92abc42184d763fdd3e7a8355804c908e6cca2c861302affff47b",
+          "target": "org.jsoup.nodes.Document::outputSettings",
+          "graphSignature": "outputSettings()",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Document.java",
+            "line": 535,
+            "sha256": "cad397b7c5c767c294f27edf7971932c0d531ae8a368827e6ec34e1267a17502"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/nodes/NodeUtils.java",
+              "line": 27,
+              "edgeId": "sha256:d0e6b2e002f740de2475f737a90f907d0ed8dce13b7bfcf7881af43e74f8a66d"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:8503365ca5c06c4e01990db283d7f7a0efe276cd602c8569aeabf17dbb83e8e9",
+          "target": "org.jsoup.helper.W3CDom::namespaceAware",
+          "graphSignature": "namespaceAware(boolean)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/W3CDom.java",
+            "line": 91,
+            "sha256": "97221e9770c46f56ad4736fccc0ec5fd690f9708ded17537e59fcd9faf137725"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/nodes/NodeUtils.java",
+              "line": 49,
+              "edgeId": "sha256:c3b5fde74569579fdb5d8575f0300778ed8777fecdd6ca0c40173c35668d0df0"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 553,
+              "edgeId": "sha256:0cc78b3aa81570f43990747c6b2e727f79ed7b5b438096663ea09ebaadf1b1b8"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 566,
+              "edgeId": "sha256:a237cbca84c7e1a501d5eca4f275386f9ee30cb0503573252936a707116d5987"
+            },
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 656,
+              "edgeId": "sha256:c37803f291a28171ddcf507a9650ae53eff99417e308471eee7c5a433ccf0299"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:8a167c33bee793ed8684dae1261e55159066ea474e755ffb10273e8e93f789ee",
+          "target": "org.jsoup.parser.TagSet::setupTags",
+          "graphSignature": "setupTags(String,String[],Consumer)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/TagSet.java",
+            "line": 301,
+            "sha256": "26261d2c9ee3d2e978c184f15328022488af3264ae8b1c54b6bd8fcdd02a0dff"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/parser/TagSet.java",
+              "line": 284,
+              "edgeId": "sha256:ad84fc261ef9822f0a777f7fb1745f4885ae19384af75e2f9fa3b14ef6260d48"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:dd1ac0cfe47b9da2be7b8e1805783ac9a9ab19e1356d821cb8ca024a4a8abb07",
+          "target": "org.jsoup.safety.Safelist::addTags",
+          "graphSignature": "addTags()",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/safety/Safelist.java",
+            "line": 254,
+            "sha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/main/java/org/jsoup/safety/Safelist.java",
+              "line": 115,
+              "edgeId": "sha256:59d63e0c68a5d32af6bebc86da0302d280336bb9f1234ce60c01a3dfe26ea8e3"
+            },
+            {
+              "file": "src/main/java/org/jsoup/safety/Safelist.java",
+              "line": 136,
+              "edgeId": "sha256:9de30628de07ab75145f0cb02884eec179fe69ad5d2a31e6a26e469219bb9680"
+            },
+            {
+              "file": "src/main/java/org/jsoup/safety/Safelist.java",
+              "line": 180,
+              "edgeId": "sha256:202fcdd6300a2c37b1326f7c85148e102be607e3b9c7aeb89643244903bcddda"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 309,
+              "edgeId": "sha256:ade3f925b021192773dc6b7f466a075711488ecbafca0152683d1176e99692fc"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 319,
+              "edgeId": "sha256:f3ab4e4bcc532b6b22a1c4ce47805371ccc552c1ad56b7294332ed17ac08d442"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:e44f87b4c26d2d629d34105231dbfb7bade0144e66fb052ab7d0f4f96e61a849",
+          "target": "org.jsoup.helper.W3CDom::convert",
+          "graphSignature": "convert(org.jsoup.nodes.Element,Document)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/W3CDom.java",
+            "line": 242,
+            "sha256": "97221e9770c46f56ad4736fccc0ec5fd690f9708ded17537e59fcd9faf137725"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 642,
+              "edgeId": "sha256:f4b9b33104469a14aec9eabf7c7387701a430e7bfc25f4140bcf48385535c8dc"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:b74a4e8c8955717abc8c9572d049357040793a246cdd93434d49aa71b9d403ae",
+          "target": "org.jsoup.helper.W3CDom::asString",
+          "graphSignature": "asString(Document)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/helper/W3CDom.java",
+            "line": 335,
+            "sha256": "97221e9770c46f56ad4736fccc0ec5fd690f9708ded17537e59fcd9faf137725"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/helper/W3CDomTest.java",
+              "line": 647,
+              "edgeId": "sha256:676a951562396f7fa933de79b573bdf82b10039579a58bf850766b61bc5eea78"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:fc7e5911b18d64599b5988e0f5031218d5440d0f8389d6e1bb07d903da205d4c",
+          "target": "org.jsoup.nodes.Attributes::put",
+          "graphSignature": "put(String,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Attributes.java",
+            "line": 189,
+            "sha256": "39551b1d008f2a77b212b5b16e09e257b0ec9d8f118a0b7131a1cfe11ac32875"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/internal/NamespaceBindingsTest.java",
+              "line": 19,
+              "edgeId": "sha256:72c39e37aa7abecd130988d1a516fd1a653ca16baddec7cd58c13e78afa4ff46"
+            },
+            {
+              "file": "src/test/java/org/jsoup/internal/NamespaceBindingsTest.java",
+              "line": 23,
+              "edgeId": "sha256:342ff847a3194fc7f0018239e61eb5b23e8533ae8c489713bc956b1045b2530b"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/SafelistTest.java",
+              "line": 66,
+              "edgeId": "sha256:90dab3ce76ef9741048d7c6c71f49005b4d7482b6871e0ffabbbbb9113ff16ae"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:b6e98a981b2f46c6c2e00cfb2e6eb873e089261fce4da60b0ef8ca90d57f7da4",
+          "target": "org.jsoup.nodes.Attributes::add",
+          "graphSignature": "add(String,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Attributes.java",
+            "line": 171,
+            "sha256": "39551b1d008f2a77b212b5b16e09e257b0ec9d8f118a0b7131a1cfe11ac32875"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/nodes/AttributesTest.java",
+              "line": 350,
+              "edgeId": "sha256:9f990a1f8fd86180b909f341ac214785b58cb90b48ef9eed4c939bebe4b79a17"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/AttributesTest.java",
+              "line": 355,
+              "edgeId": "sha256:4388a9b379500e1a2060c709c152ac7f6e49b239a25b0d180e12dffc26aa73ce"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/AttributesTest.java",
+              "line": 360,
+              "edgeId": "sha256:4fa2a6c511ca9fffb4bad2ab9a1ae10d724dfa7e8e2c6320f0db09fe754c7ae8"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/AttributesTest.java",
+              "line": 365,
+              "edgeId": "sha256:d9ba883591f424748b543357baddb08fb16fb51742dc76d9c1ab4b4dcc92b36c"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/AttributesTest.java",
+              "line": 384,
+              "edgeId": "sha256:338feb82f43baf2694142b46506caa0d744355567d9e0b98a715cfb80624d96d"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:36d9c8676ae1a937613f565568e879b9b3fe720f7114d0d040fc5afd95b6f624",
+          "target": "org.jsoup.nodes.Element::text",
+          "graphSignature": "text(String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 1715,
+            "sha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 997,
+              "edgeId": "sha256:b9357c123b2b4ab1059c27b3e0dd4acde8eb885a30372a7b329b57c9445b0688"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1390,
+              "edgeId": "sha256:8ded17ed38e3f5dabfb37fe8415cf9ec8a4b0e88b384cb58d595d666ef27d325"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1391,
+              "edgeId": "sha256:a709d010ec9a4aadba966b43c869bac51a7b05cccfee3d2434d2c2f521298af9"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1860,
+              "edgeId": "sha256:5d96f25272c6c1e365c3dccb9aea4dda9cd473b1764ed1e6d297e3d72f84a0c6"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1861,
+              "edgeId": "sha256:f467d635895825d0037be9768a36f3439139ec2e2bbb332c0d152e7ec12e69ef"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2324,
+              "edgeId": "sha256:caf870e03dce95bccdbe6a3152fe3a7a9902173731333a7a3f8a0ecf5f7c4741"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2325,
+              "edgeId": "sha256:30be2c1559d683749d838858991d0f93ddb5e0537003dac291108bbb0c4758e3"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2348,
+              "edgeId": "sha256:dba349b486b4367f18d17d27077b07bec02bfd972582e99db5f2be7a568ccce9"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2349,
+              "edgeId": "sha256:ff57999c87c85b96609ad19c9a25fc875878f5d312b8e65d16ba830e5e5127fe"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2355,
+              "edgeId": "sha256:f5b6d215f0289834e0a29cd7a11700aea3e139518684dcd18af5d71672bd8248"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 3399,
+              "edgeId": "sha256:bdab0e3f92ce6b126d96adddba7a9d4ec4e766277e6a9ebeddfb427bc0ce672d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/NodeIteratorTest.java",
+              "line": 152,
+              "edgeId": "sha256:7531e7cab4f54a9fafbb7cbe490c03413376852685c9ab63d0cc25479a2f81a8"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/NodeIteratorTest.java",
+              "line": 165,
+              "edgeId": "sha256:62780a8f0bad7e4f9b0b7cf10b1a8fc4713594c5595df15a1a1f3fa83e6d6746"
+            },
+            {
+              "file": "src/test/java/org/jsoup/select/ElementsTest.java",
+              "line": 174,
+              "edgeId": "sha256:2020c8cfb97651772ef792a417e8883a00de8e99b5d519fc5d9c1c9cab8d4c6a"
+            },
+            {
+              "file": "src/test/java/org/jsoup/select/ElementsTest.java",
+              "line": 189,
+              "edgeId": "sha256:985ed65997afd6f3f68e7713e1279f5f8c13e97fcb319bf27bb9adf58fa1e78b"
+            },
+            {
+              "file": "src/test/java/org/jsoup/select/ElementsTest.java",
+              "line": 198,
+              "edgeId": "sha256:e6174edc8761d9139db3c62c15e2576b2707465009888e10bede74a450dbaab3"
+            },
+            {
+              "file": "src/test/java/org/jsoup/select/ElementsTest.java",
+              "line": 199,
+              "edgeId": "sha256:04a38567d231c68e7cc62f9e0dc0a9a5f465b6ea663ee792f54a6776f084e2b0"
+            },
+            {
+              "file": "src/test/java/org/jsoup/select/SelectorTest.java",
+              "line": 1139,
+              "edgeId": "sha256:d6558681deb2cbd0a8272ba406b811d6a299ef500529b6bd5727e4f639ad5f97"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:73af62fff71eae3c5a4f0926646fb36bf41f6c59df3fc1a93b9a4e5d8ee2433a",
+          "target": "org.jsoup.nodes.Element::id",
+          "graphSignature": "id(String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 267,
+            "sha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1124,
+              "edgeId": "sha256:f1b0e58068c5c59dd15ba9acc6601602e8d2f714fee5294328edc77dcec6a090"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:aa100e1e077020db7e859d39158a3b59b02317fdb601f1891e79e53770c9bb90",
+          "target": "org.jsoup.nodes.Element::attr",
+          "graphSignature": "attr(String,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 279,
+            "sha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1574,
+              "edgeId": "sha256:6fa6789dd67609942b8aca232fed9c80b63e3ecb5670a0e38f2b26e7b8408a37"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 1575,
+              "edgeId": "sha256:5280ff39aa117f5f1c6be1fa9b5413273222ceb205cde4a38c535bd41f2f8765"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2190,
+              "edgeId": "sha256:a6b5d61c6c4bce57131d122647c272d4dd547f38eab53b8b4a5d6b3dfb3d308c"
+            },
+            {
+              "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+              "line": 2200,
+              "edgeId": "sha256:4cbb6aa96e0d464ce7342500f7d4a356d6965446a6cb164e9006fe7e9523a546"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 686,
+              "edgeId": "sha256:be02dd1e264ab662d738702a3771fa66f3efcd30d0fb18b42de6545fa4f0a95d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 714,
+              "edgeId": "sha256:5fa77ecab31944cbe2932ca85c0b6004acf7a6c85b99bf62c5dded19af4f9787"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 757,
+              "edgeId": "sha256:7a54c9e1c1ce38d4a2cbaaa5410449606c0cbf3f1e3c9332af7de7fbf6b3eceb"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 770,
+              "edgeId": "sha256:e7ae674d916e5c439f71a8d6de8dee54edc6c99c90cc385e6501a612708d0886"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:9b3f21ab8799d0098c1a7ca7ab4c6a3c04f1026d9938125b3f2c9d36c0fff677",
+          "target": "org.jsoup.nodes.Element::appendChild",
+          "graphSignature": "appendChild(Node)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 813,
+            "sha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/HtmlTextHandlingTest.java",
+              "line": 49,
+              "edgeId": "sha256:e313255c222afafa3060662482607d965731e1f8c22f033ffd07280342ab9ed3"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:3d7ea7f7d6759755fb2ae6fff43c1865d390d23a825915ec256bf533b5fbf809",
+          "target": "org.jsoup.parser.CharacterReader::consumeToEnd",
+          "graphSignature": "consumeToEnd()",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/CharacterReader.java",
+            "line": 528,
+            "sha256": "f93452a6022d438df7ce17f00dabd9d32589815b30ee4f5e6d1bd1208e36274c"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/HtmlTextHandlingTest.java",
+              "line": 98,
+              "edgeId": "sha256:a243df929ac03cedbb5411fde9831c5e02d549d4f2c3140fcac5bb099429802f"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:bd00aad5322991cb1b3e2c4fab7c006fdbd92ee355fe93d99d4329b752cfdb8d",
+          "target": "org.jsoup.parser.Parser::setTrackErrors",
+          "graphSignature": "setTrackErrors(int)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/Parser.java",
+            "line": 168,
+            "sha256": "2b8baa95140fbf12fad9c874b42d8d31e24b186fd7c665c1708395e6d852ba98"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/HtmlTreeBuilderTest.java",
+              "line": 133,
+              "edgeId": "sha256:9825327a9e69f1927bc04e954aaad6797110bf91f08bd47333bb508836301e32"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:eece375f79deef58e8fba0f31ea7d0cdbf939b5f6de77b6b8cf4e191e4fb084f",
+          "target": "org.jsoup.parser.StreamParser::parseFragment",
+          "graphSignature": "parseFragment(String,Element,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/StreamParser.java",
+            "line": 122,
+            "sha256": "5a50cf810031c426623c68cc630218c3e6725e1519bb039143777f9f19637855"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/HtmlTreeBuilderTest.java",
+              "line": 193,
+              "edgeId": "sha256:c588d389b1aa29f9abb1bcec259a23d22c5e678daabada7f7a5bf8fe64b4afb7"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 428,
+              "edgeId": "sha256:d253790571d6a390798874265f06f1dafc91aa830c0c0d0f9f8f42c0dfdafbf1"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 688,
+              "edgeId": "sha256:2a86fb403614f22a14b40fefe5cf3dbb7eb87a7bafa366ead3fdcf314c8e2883"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 716,
+              "edgeId": "sha256:0b8c9ee0f9b12db2fe5b95fc524905d02ffb3b321ace5d338e8c0eb3639baf61"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 744,
+              "edgeId": "sha256:e2cafe46a0451a1c57ced5880658f11017c0cd8a199e7007b94229ffbe9f350c"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 759,
+              "edgeId": "sha256:75be11b70e0cc8ad21b9f946cfed7b673f43e1c935fb5fb194745ada9d37a333"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 772,
+              "edgeId": "sha256:070b8bd73264d9ea54e859af555c177174c2ae16932086adabd93d9039070c8f"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 789,
+              "edgeId": "sha256:8788de3bc00e3f231011940878ef12d299a8aa15a8cad04d16e9f4bae49a3571"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 810,
+              "edgeId": "sha256:e36f8f2ad4cb8c2e4bcb8b8e15be382ef18f5796f04308c224a8d49a84975d97"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 840,
+              "edgeId": "sha256:885eb30ae1ffc5ffe07c7a61b4de5d6763c405573d9d4f3d7a74d94787b577bd"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:aca06bc408bbbb11866b9230301285def8ea2119582345809e1037289746e512",
+          "target": "org.jsoup.parser.StreamParser::parse",
+          "graphSignature": "parse(String,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/StreamParser.java",
+            "line": 96,
+            "sha256": "5a50cf810031c426623c68cc630218c3e6725e1519bb039143777f9f19637855"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/HtmlTreeBuilderTest.java",
+              "line": 287,
+              "edgeId": "sha256:99eba178a75287ea5a5e959d55f4b8e9bd641268024d2e2fb18ddab69b420240"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 42,
+              "edgeId": "sha256:4253dfe4636cc4314e22fce8bf3c18c4436e6e84e0e32ead16dacc85f4ef169b"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 54,
+              "edgeId": "sha256:8892009eb04ec4543004c662d1d857816ed4bf5865d74bb78b97830a93c6c132"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 66,
+              "edgeId": "sha256:fd963536635cdbe5d2e243f3f265253d06936f7d8e81cfdb910276ba4ffe7746"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 101,
+              "edgeId": "sha256:38d49a4f02cf42738fa52160dbf4b506db5947157d7c7e384b43bf85e9e466d2"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 117,
+              "edgeId": "sha256:1ee8819a2e460a3943c380e45bf7c94ba08570e731f9205f420b4d8a1db297cf"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 200,
+              "edgeId": "sha256:f2933f3d5c304214cbb6188548702ae35acf0de12f8cd4633c6fcd6e94a0ef9f"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 225,
+              "edgeId": "sha256:63131841eaa69d632971ded65f0bb68aac29d0713650116af4cdb0bfba3d0879"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 256,
+              "edgeId": "sha256:92782a68438ac00a3369ff21702a9ca27e277d6addc7ad86da7ac74739a81f04"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 270,
+              "edgeId": "sha256:3f355a2cbe86aa98faf3c5ee70a3c3f97634b79c1ea186f13ac3525abd5719db"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 278,
+              "edgeId": "sha256:227d186c073bcd5c850d9a8ef086a1d99700992d7d4e62cbd219418bb9a3861a"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 288,
+              "edgeId": "sha256:58059510b4d9ffa7e7128a6407cb9e9a07e99d2ee34e3632fdaaa1da83be905c"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 299,
+              "edgeId": "sha256:aa77fe1b304f940619707cdfa17f179d3f6aea0be6e66a544622455ba76bcdb3"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 310,
+              "edgeId": "sha256:06879e092386a18e818baf4ddd24e72406aa97b283d18ef365f62a6b829c9d48"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 323,
+              "edgeId": "sha256:9ee33739a02a3401cc7081896b5fdd52a89b681111e6919c9227583f692fa3d8"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 360,
+              "edgeId": "sha256:cc919422f4e2818356cd77ea8e9448141c787a4d0bf564c920386fc6f13cf52d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 373,
+              "edgeId": "sha256:0c7f4dc9d98b131d46e7d301f3f19efe010295012a91f5d5079da2b04f6e4851"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 385,
+              "edgeId": "sha256:d632fd85a1efe5bf3e9ffbde6ba0b2fc97c60f60393f129e0ba875db3d9f43f1"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 397,
+              "edgeId": "sha256:0bf4c776a494bb0e0d0cb72f76f0198180509e91a0a32ece63fb13859133241d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 415,
+              "edgeId": "sha256:41a2fa4bf181a1f2fbf9f295888919e67fff52eecfdff111c23f0214568b8678"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 466,
+              "edgeId": "sha256:f376db8110d2a3fab3c7601fa64041a2638ab135e53ed60ccb3624bbad92e59b"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 483,
+              "edgeId": "sha256:6dc3a987e5696da59bbdabb791dda53eeeff05f75f3ece4301adbe852b29b23f"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 517,
+              "edgeId": "sha256:ba1487b8ddaa9924849e6ce95aa33757d6824256d0db00cd40430a2b34277a6d"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 534,
+              "edgeId": "sha256:b83ad0eb132e489833fb7b1f0e7b347fbb9834d1b55504365e0aabfb48fd5ab6"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 589,
+              "edgeId": "sha256:316532aa320e906cbda33c6482b592de3b207a542375bf2e8545c1dedb7f56e0"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 865,
+              "edgeId": "sha256:145082ab4f1a07855506597d5c3dd8c9aafbf49b21235ae818306742ac533316"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 877,
+              "edgeId": "sha256:138e86a72a46bff127e6e2bf41fbaef2f58f4688210ad151b782454a161d665b"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:cceba530371a95b96ccb0655acc673f295f0315c86366134b363441684be4d8c",
+          "target": "org.jsoup.parser.Tag::normalName",
+          "graphSignature": "normalName()",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/Tag.java",
+            "line": 141,
+            "sha256": "98b0a56d5963298da2176eeb555ae1e66cf43ddd0df28a25ebec1fa8ed7bee5a"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/NameNormalizationTest.java",
+              "line": 62,
+              "edgeId": "sha256:9cfa7861597d4bfff63490f1c4b070a3e2b57398afe1559b11853173756a23bb"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:94c097129a2d269e39183f18de003e7ec747b587137da88fe81f810b2a3dc92a",
+          "target": "org.jsoup.parser.Tag::set",
+          "graphSignature": "set(int)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/Tag.java",
+            "line": 173,
+            "sha256": "98b0a56d5963298da2176eeb555ae1e66cf43ddd0df28a25ebec1fa8ed7bee5a"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/NameNormalizationTest.java",
+              "line": 116,
+              "edgeId": "sha256:ef192b2fe8cbb85f42c6c4c59ee317f2bd67bc62124e151543c2dc5232c1351f"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/TagTest.java",
+              "line": 200,
+              "edgeId": "sha256:0a264e80d6c41b356cc208871c47dee6814de06a0ec7d69195cbf4aedacee860"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/TagTest.java",
+              "line": 201,
+              "edgeId": "sha256:07b1d5cac48ec1436f36ecc59ad71b34caa84c04c7a42955d124e8edee254e15"
+            },
+            {
+              "file": "src/test/java/org/jsoup/parser/TagTest.java",
+              "line": 213,
+              "edgeId": "sha256:9be8348f9788c2f426d1ecfb8e4125569ac6d66dfab924874921c65e04c93218"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:8d496c43f132d5f71e97956bbdbc252f3ef26c6615a27f0440cf9b63c1d5ccf4",
+          "target": "org.jsoup.parser.StreamParser::parse",
+          "graphSignature": "parse(Reader,String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/parser/StreamParser.java",
+            "line": 82,
+            "sha256": "5a50cf810031c426623c68cc630218c3e6725e1519bb039143777f9f19637855"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/parser/StreamParserTest.java",
+              "line": 456,
+              "edgeId": "sha256:8785e80cc707d7ab1136876fd42f625164ce09654452177adc3b3003d93a3b06"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:817144c6469132780623c859650f3dbb59eef49b75108e12e8fd2efe7763b330",
+          "target": "org.jsoup.safety.Cleaner::isValid",
+          "graphSignature": "isValid(Document)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 94,
+            "sha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 230,
+              "edgeId": "sha256:87c056c51b2d78c239f46136248cabd92a01c20a49c40de2c6b8524ce3385906"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034",
+          "target": "org.jsoup.safety.Cleaner::clean",
+          "graphSignature": "clean(Document)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 62,
+            "sha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 314,
+              "edgeId": "sha256:0fe7e24b0bb3f1209889771a740118cec26cdc2af0392852e6b4474a103729de"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 325,
+              "edgeId": "sha256:cf51e7a56e4b7a6d15e27bdfced0abe6aec269686eabf29e119835f908620d14"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 458,
+              "edgeId": "sha256:0eaa9ec56cee649aa02a7e908d111590a5a3f8843e64efcf165c36930b9793d3"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 551,
+              "edgeId": "sha256:d1fe493dfb12d292f0c85130c3dd6212bc7716e5b9b48e2a38187656a82ce810"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 567,
+              "edgeId": "sha256:f55de48143efe8d27f1357b935ee3dc2408d948ee86ed17cde3e6f57c83e1d47"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:65e150539d6718f6f78d058c646a266201b50bc1719893aa35c7926097090d94",
+          "target": "org.jsoup.safety.Safelist::addAttributes",
+          "graphSignature": "addAttributes(String)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/safety/Safelist.java",
+            "line": 303,
+            "sha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 412,
+              "edgeId": "sha256:059ef0d08b3f6b02cdf6a1f1629b1f61f83db12253a72d711917d34da201af8a"
+            },
+            {
+              "file": "src/test/java/org/jsoup/safety/CleanerTest.java",
+              "line": 423,
+              "edgeId": "sha256:db8ba0c0c548d550b90c730ff00458173536b7ffe58d1dfcda725b3935b2bd1d"
+            }
+          ]
+        },
+        {
+          "targetId": "sha256:012ffde384064b8f0d3f11ca77e7e74ddbcfe7342b24afeb79627a9b194e273f",
+          "target": "org.jsoup.nodes.Attributes::put",
+          "graphSignature": "put(Attribute)",
+          "sourceDeclaration": {
+            "file": "src/main/java/org/jsoup/nodes/Attributes.java",
+            "line": 322,
+            "sha256": "39551b1d008f2a77b212b5b16e09e257b0ec9d8f118a0b7131a1cfe11ac32875"
+          },
+          "review": "Source supports the exact constructor receiver, selected method declaration, and method-name occurrence. Compared overloads where present. Static source review; no runtime execution claim.",
+          "occurrences": [
+            {
+              "file": "src/test/java/org/jsoup/safety/SafelistTest.java",
+              "line": 79,
+              "edgeId": "sha256:d05163cf82bc8fae9df4666419def2381c1326cf4b38b10db0499fc104523677"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "diagnostic": {
+    "before": {
+      "nodes": 30,
+      "edges": 45,
+      "methodCalls": 2,
+      "inventedExternalMethodCalls": 2
+    },
+    "after": {
+      "nodes": 28,
+      "edges": 51,
+      "sourceSupportedMethodCalls": 9
+    },
+    "removedFalseRelationships": 3,
+    "removedInventedExternalNodes": 2,
+    "cacheUpgradeMatchesClean": true,
+    "compiler": "javac 17.0.8.1 compiled the fixture; javap descriptors corroborate overload and anonymous/enclosing receiver distinctions. Classes were not executed.",
+    "depthLimit": "tooDeep compiles to a real Cleaner.check call but exceeds bounded inference; unresolved is not absence credit.",
+    "enclosingInstance": "outer.new Cleaner() cannot resolve to the unrelated imported lib.Cleaner; candidate and enclosing qualifier remain available as unresolved evidence."
+  },
+  "verification": {
+    "native": {
+      "passed": 1439,
+      "failed": 0,
+      "ignored": 2,
+      "scope": "Workspace lib/bin plus selected Java, universal, contract, product, framework and frontend integration tests."
+    },
+    "clippy": "First invocation failed on redundant Ok(...?) in new test. Corrected to direct serialization function; repeated workspace lib/bin and selected integration Clippy passed. Existing unrelated react_frontend test lint violations remain outside this invocation.",
+    "finalRegression": "One test passed after the test-only Clippy correction.",
+    "fixturePreflight": "Identical expanded fixed-corpus graphs have zero node/edge changes excluding communities; no topology bounds changed.",
+    "fullFixtureQualification": "Passed with exit 0: native scale ceilings, source semantics/topology, cold/warm/forced/alternate-checkout/delete/rename/restore determinism, Markdown checks, release build and frontend precedence/positive/negative qualification. Production commit 22814e59.",
+    "formatDiffProductBoundary": "cargo fmt --all -- --check, git diff --check, and scripts/check_product_boundary.sh passed.",
+    "releaseBinarySha256": "88f98577c865a92bf6eb9cb7dc506eb5c806a2a66909d68c5fa1d1db43ccfb8d"
+  },
+  "limitations": [
+    "Text scores stay 46/55 each; selected relationships are 17/21 Compass versus 20/21 Graphify; reviewed occurrences tie at 17/21; paths remain 6/10 versus 8/10.",
+    "Single shared-machine timing run overlaps verification; latency is descriptive and gives no controlled performance comparison. Graphify digest attests its launcher only.",
+    "Anonymous dispatch, enclosing-instance owner resolution, arrays/casts, chained returns, inherited methods and deeper parentheses are not established by this change.",
+    "Source review found existing incomplete varargs display signatures: addTags() represents addTags(String...), and addAttributes(String) omits its String... parameter. Exact target source declarations, rather than those incomplete signatures, justify these edges.",
+    "No new MCP, god-object responsibility, community cohesion or directed/long-path superiority evidence. Historical pinned hierarchy scorecards remain invalidated."
+  ],
+  "artifactBase": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926",
+  "artifacts": {
+    "java-constructor-jsoup-delta.json": "f147ad06393c3f5b1600a90131b910ca6bca2c75d821ef3c4cb1a5c8907502d7",
+    "java-constructor-jsoup-source-rows.json": "7f60a3b7f42d14a4958ba0a6b7b90c6df5d116baf557b2b9a5643a944fd8e33d",
+    "java-constructor-receiver-final/policy-with-enclosing-negative.json": "17aeb86caa602f7a73ec3ea8a70e01ea17bc82547b5c5d64ad63ae3c61e62378",
+    "java-constructor-receiver-final/compiler-review.json": "8241b055f2a52a80007924342dde93d766d97aff3a6a034fcf7c54e734c83e6a",
+    "java-constructor-receiver-final/javap.txt": "327ac29b9c1ef0358bfd6ddaa3e30ff1f2b4bb63698408c8bb6e1338018aa048",
+    "java-constructor-receiver-final/delta.json": "7ec95282d16ce034ee8530e799eb751030c2fe8bf883dda8209a59465f323c9c",
+    "java-constructor-receiver-final/cache-review.json": "c57a9206395804a8085e97613beac43c9c858513099df911f62e33fa15b1d6ad",
+    "java-constructor-fixture-delta.json": "4b5ee7e5b75c5a93507fb2b92a382fadae6130b45b5600a292c05fa56d6101a8",
+    "java-constructor-native-01.log": "6d158f4b63b730028bcf940249aa626e4bf00ae5171ec9d102eaee544df9063d",
+    "java-constructor-clippy-01.log": "6904caf5e5c2ea6afbfd54469a572420b53b53e2477d1ec91236c81984f1ab4a",
+    "java-constructor-clippy-02.log": "2d48f6b34ae40fdc9a8d76136f5bffa25d233826932b0cc7aed55fd5932a63d6",
+    "java-constructor-native-after-04.log": "9122a15b8123f1d82b9558cd539da9bfb72ee8ee533753516166bc0f3ab7a68f",
+    "java-constructor-build-01.log": "cca4bf37bd1942503d72f28a0145be1717ef6747222ab3a359daf1c6d7f1761f",
+    "runs/java-constructor-panel-a-01/run.json": "c900349960adfa6b488ce98397529b5e55accb85e0dbf5dd4713a5a8b1a0bbf5",
+    "java-constructor-panel-a-path-audit-01.json": "e598f0e63e29be41883a0702ae01f828e0d63849693262afaa73ce9e25b4ef7e",
+    "java-constructor-panel-a-chi-audit-01.json": "43343bf82615be5ab0d137b233aeddf1ede61960ce6607b6d1d9197af35840a5",
+    "java-constructor-panel-a-click-audit-01.json": "9ba5d437fa949e3fc12449b2eb451caa9c0490a797d25c6e58520c813d15b0fa",
+    "java-constructor-panel-a-jsoup-audit-01.json": "2727f4c114cbbecd6dc261a5b0d9aa84fa576d90e831522ebd95f3e5e79d0b71",
+    "java-constructor-panel-a-redux-audit-01.json": "3373cda48df45a5a422f5feb8afa1cdb80c461bd8f4b10b560303ba383d0c1ed",
+    "java-constructor-panel-a-walkdir-audit-01.json": "3709a54138a721680b999acafeb0c30204b9f16b1cd05fb5fd060f238e5c01f1",
+    "java-constructor-qualification-01.log": "611c2b5b4fcb60e372598a406810e4a43343af765234f04ab2d82156cf816b5d"
+  }
+}

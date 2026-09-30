@@ -1,0 +1,49 @@
+{
+  "schema": "compass.longer-path-registration/1",
+  "registeredAt": "2026-09-27T15:06:17.015840+00:00",
+  "baselineCommit": "ce8b739417442a9d2a3ce8da0c2913d76e85f4e6",
+  "sourceWitnesses": {
+    "longer_path_witnesses.json": "33d1cdccc5cfb6f4225674c36ee7616b6dc21e0a51c2c5bbedc8fa1e44ae8718"
+  },
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "baselineBinary": "member-focus-02/compass",
+  "baselineBinarySha256": "e33934b94d1e254ba59906fddece098d8433bf7e31af746e46aac3dfc6744f97",
+  "scope": "Source-selected longer chains across Go, Python, Java, TypeScript and Rust. All repository graphs and older questions have been observed. No graph route inspected to choose these endpoint pairs.",
+  "endpointResolution": "One public resolver per endpoint/tool. Both selectors validate identical symbol, file and declaration line. Compass search_symbols exact=true with source_file/start_line and old 256/500/524288 bounds; Graphify get_node file::symbol, validate source coordinate afterward. No graph ID substitution, retries or relaxed anchors. No kind filter.",
+  "pathRequests": [
+    "compass",
+    "node",
+    "SOURCE",
+    "TARGET",
+    "--max-depth",
+    "8",
+    "--max-paths",
+    "1",
+    "--format",
+    "json",
+    "--graph",
+    "GRAPH"
+  ],
+  "graphifyPathRequests": [
+    "graphify",
+    "path",
+    "SOURCE",
+    "TARGET",
+    "--directed",
+    "--graph",
+    "GRAPH"
+  ],
+  "bounds": "Same 60 second deadline and 16 MiB per CLI stream, 1 MiB MCP response. Compass depth 8 and one path; Graphify has no matching depth flag. No equal-work or latency claim.",
+  "judgment": "A complete directed call chain must identify the source declarations and each edge orientation/occurrence in the graph and source. Endpoint echoes, candidate lists, disconnected edges, or a reversed route do not count. Registered route is a positive witness, not a requirement to choose the same shortest route; independently source-review any alternate returned route.",
+  "reverse": "Diagnostic probes only. The forward source witness does not prove global reverse unreachability. No-path/ambiguous/limit answers receive no absence credit. Review any returned reverse route for actual directed source support.",
+  "diagnostics": "Compass max_depth 1 through one below the registered primary witness hops. Any alternate returned path must be source reviewed; never score it wrong solely for differing from witness. Retain overload/label ambiguity and mixed-relation routes as unmet call-path tasks. Do not assert shortest source paths from witnesses.",
+  "confidence": "Source-supported inferred edges may be recorded as such; neither tool gets exact-evidence credit for weak/unknown confidence.",
+  "verification": "Verify source revision, clean checkouts, source anchors and file digests, all graph/binary/environment hashes before and after. Preserve every output and every failure. Commit registration before running these endpoint pairs.",
+  "limitations": [
+    "Five known development repositories; no held-out confirmation.",
+    "Endpoint assistance is part of workflow cost and differs from free-text question answering.",
+    "Source-supported static calls need not run on every invocation.",
+    "God-object design judgments, authored explanations and broader community/path quality remain unproven."
+  ]
+}

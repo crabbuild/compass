@@ -1,0 +1,200 @@
+# Registered from source before querying either tool on these repositories.
+# These check declaration identity, direct calls, callers, and one-hop paths.
+# They are selected source facts, not whole-graph precision or authored-answer scores.
+# The shared runner preserves failures, response bytes, graph coverage, and timings.
+schema = "compass.agent-query-suite/1"
+
+[[repository]]
+name = "litestream"
+language = "Go"
+url = "https://github.com/benbjohnson/litestream.git"
+commit = "6a71ccd9ad2bea0c4dc19bc274a8dc64c9b0fafa"
+
+[[repository.anchor]]
+file = "store.go"
+line = 715
+symbol = "sendHeartbeatIfNeeded"
+judgment = "Store.sendHeartbeatIfNeeded is declared at store.go:715."
+
+[[repository.anchor]]
+file = "heartbeat.go"
+line = 68
+symbol = "ShouldPing"
+judgment = "HeartbeatClient.ShouldPing is declared at heartbeat.go:68."
+
+[[repository.anchor]]
+file = "heartbeat.go"
+line = 80
+symbol = "RecordPing"
+judgment = "HeartbeatClient.RecordPing is declared at heartbeat.go:80."
+
+[[repository.question]]
+id = "litestream-explain-heartbeat"
+kind = "explain"
+subject = "Store.sendHeartbeatIfNeeded declaration"
+compass = ["explain", "sendHeartbeatIfNeeded"]
+graphify = ["explain", ".sendHeartbeatIfNeeded()"]
+expect = "answer"
+required = ["store.go", "715"]
+judgment = "The method begins at store.go:715."
+
+[[repository.question]]
+id = "litestream-callees-heartbeat"
+kind = "callees"
+subject = "direct internal calls of Store.sendHeartbeatIfNeeded"
+compass = ["callees", "sendHeartbeatIfNeeded"]
+graphify = ["explain", ".sendHeartbeatIfNeeded()"]
+expect = "answer"
+required = ["ShouldPing", "RecordPing", "Ping"]
+judgment = "The method calls HeartbeatClient.ShouldPing at 721, RecordPing at 735, and Ping at 737."
+
+[[repository.question]]
+id = "litestream-callers-should-ping"
+kind = "callers"
+subject = "direct production caller of HeartbeatClient.ShouldPing"
+compass = ["callers", "ShouldPing"]
+graphify = ["affected", ".ShouldPing()", "--depth", "1"]
+expect = "answer"
+required = ["sendHeartbeatIfNeeded"]
+judgment = "Store.sendHeartbeatIfNeeded calls ShouldPing at store.go:721."
+
+[[repository.question]]
+id = "litestream-path-heartbeat"
+kind = "path"
+subject = "Store.sendHeartbeatIfNeeded to HeartbeatClient.ShouldPing"
+compass = ["path", "sendHeartbeatIfNeeded", "ShouldPing"]
+graphify = ["path", ".sendHeartbeatIfNeeded()", ".ShouldPing()", "--undirected"]
+expect = "answer"
+required = ["sendHeartbeatIfNeeded", "ShouldPing"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct, source-supported call occurs at store.go:721; the path may be traversed undirected by both tools."
+
+[[repository]]
+name = "fastapi"
+language = "Python"
+url = "https://github.com/fastapi/fastapi.git"
+commit = "0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4"
+
+[[repository.anchor]]
+file = "fastapi/routing.py"
+line = 375
+symbol = "get_request_handler"
+judgment = "get_request_handler is declared at routing.py:375."
+
+[[repository.anchor]]
+file = "fastapi/routing.py"
+line = 1126
+symbol = "APIRoute"
+judgment = "APIRoute is declared at routing.py:1126."
+
+[[repository.anchor]]
+file = "fastapi/routing.py"
+line = 1225
+symbol = "get_route_handler"
+judgment = "APIRoute.get_route_handler is declared at routing.py:1225."
+
+[[repository.question]]
+id = "fastapi-explain-route-handler"
+kind = "explain"
+subject = "APIRoute.get_route_handler declaration"
+compass = ["explain", "get_route_handler"]
+graphify = ["explain", ".get_route_handler()"]
+expect = "answer"
+required = ["routing.py", "1225"]
+judgment = "APIRoute.get_route_handler begins at fastapi/routing.py:1225."
+
+[[repository.question]]
+id = "fastapi-callees-route-handler"
+kind = "callees"
+subject = "direct callee of APIRoute.get_route_handler"
+compass = ["callees", "get_route_handler"]
+graphify = ["explain", ".get_route_handler()"]
+expect = "answer"
+required = ["get_request_handler"]
+judgment = "get_route_handler returns get_request_handler(...) at routing.py:1232."
+
+[[repository.question]]
+id = "fastapi-callers-request-handler"
+kind = "callers"
+subject = "direct caller of get_request_handler"
+compass = ["callers", "get_request_handler"]
+graphify = ["affected", "get_request_handler()", "--depth", "1"]
+expect = "answer"
+required = ["get_route_handler"]
+judgment = "APIRoute.get_route_handler calls get_request_handler at routing.py:1232."
+
+[[repository.question]]
+id = "fastapi-path-route-request"
+kind = "path"
+subject = "APIRoute.get_route_handler to get_request_handler"
+compass = ["path", "get_route_handler", "get_request_handler"]
+graphify = ["path", ".get_route_handler()", "get_request_handler()", "--undirected"]
+expect = "answer"
+required = ["get_route_handler", "get_request_handler"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct call at routing.py:1232 supports one hop between these declarations."
+
+[[repository]]
+name = "celld"
+language = "Rust"
+url = "https://github.com/denoland/celld.git"
+commit = "10cb1303dac710dcb3b557e318e08c855261f68b"
+
+[[repository.anchor]]
+file = "crates/celld/peer_auth.rs"
+line = 137
+symbol = "signed_headers_parts"
+judgment = "PeerSigner.signed_headers_parts begins at peer_auth.rs:137."
+
+[[repository.anchor]]
+file = "crates/celld/peer_auth.rs"
+line = 341
+symbol = "now_ms"
+judgment = "The now_ms helper begins at peer_auth.rs:341."
+
+[[repository.anchor]]
+file = "crates/celld/peer_auth.rs"
+line = 352
+symbol = "sha256_hex_parts"
+judgment = "The sha256_hex_parts helper begins at peer_auth.rs:352."
+
+[[repository.question]]
+id = "celld-explain-signed-headers"
+kind = "explain"
+subject = "signed_headers_parts declaration"
+compass = ["explain", "signed_headers_parts"]
+graphify = ["explain", ".signed_headers_parts()"]
+expect = "answer"
+required = ["peer_auth.rs", "137"]
+judgment = "The method begins at crates/celld/peer_auth.rs:137."
+
+[[repository.question]]
+id = "celld-callees-signed-headers"
+kind = "callees"
+subject = "direct local callees of signed_headers_parts"
+compass = ["callees", "signed_headers_parts"]
+graphify = ["explain", ".signed_headers_parts()"]
+expect = "answer"
+required = ["now_ms", "sha256_hex_parts"]
+judgment = "signed_headers_parts calls now_ms at line 145 and sha256_hex_parts at line 149."
+
+[[repository.question]]
+id = "celld-callers-sha-parts"
+kind = "callers"
+subject = "direct caller of sha256_hex_parts"
+compass = ["callers", "sha256_hex_parts"]
+graphify = ["affected", "sha256_hex_parts()", "--depth", "1"]
+expect = "answer"
+required = ["signed_headers_parts"]
+judgment = "signed_headers_parts calls sha256_hex_parts at peer_auth.rs:149."
+
+[[repository.question]]
+id = "celld-path-signed-sha"
+kind = "path"
+subject = "signed_headers_parts to sha256_hex_parts"
+compass = ["path", "signed_headers_parts", "sha256_hex_parts"]
+graphify = ["path", ".signed_headers_parts()", "sha256_hex_parts()", "--undirected"]
+expect = "answer"
+required = ["signed_headers_parts", "sha256_hex_parts"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "A direct source-supported call occurs at peer_auth.rs:149."

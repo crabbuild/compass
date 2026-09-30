@@ -1,0 +1,241 @@
+{
+  "schema": "compass.neighbor-identity-development-review/1",
+  "scope": "Same-agent development replay on five pinned repositories and 15 reused source-defined tasks. Both receive identical public source coordinates and one optional destination resolver call. Not held-out or overall superiority.",
+  "protocolCommit": "bde19bb3687b8bcf8fb09fa0e9ef44c2bf87245c",
+  "implementationCommit": "d51698dc1cfb6fc7cf069926cb39964359859447",
+  "artifactRoot": "neighbor-identity-02",
+  "binarySha256": "59addb98d357f8ed9b09618a340df6e9dc1352357887d465eb1514c45cbd862f",
+  "version": "0.3.30",
+  "graphs": "All ten graph artifacts reused byte-for-byte from rust-index-receiver-03. No extraction timing comparison.",
+  "summary": {
+    "compass": {
+      "explicitDestinationSupported": 14,
+      "sourceMatchedDestinationFollowup": 14,
+      "fullProjectionsMatching": 15,
+      "returnedRecordAppearances": 181,
+      "calls": 59,
+      "tasks": 15,
+      "resolverIdsCorrect": 15,
+      "completedNeighborLookups": 15,
+      "directCallTasks": 14,
+      "collaboratorLabelPresent": 14,
+      "unambiguousTargetLabel": 11,
+      "callTextBytes": 193385,
+      "callResponseWireBytes": 1228383,
+      "fullSessionBytesIncludingRequestsAndStderr": 1323516
+    },
+    "graphify": {
+      "explicitDestinationSupported": 0,
+      "sourceMatchedDestinationFollowup": 14,
+      "fullProjectionsMatching": 0,
+      "returnedRecordAppearances": 0,
+      "calls": 59,
+      "tasks": 15,
+      "resolverIdsCorrect": 15,
+      "completedNeighborLookups": 15,
+      "directCallTasks": 14,
+      "collaboratorLabelPresent": 14,
+      "unambiguousTargetLabel": 11,
+      "callTextBytes": 57404,
+      "callResponseWireBytes": 63756,
+      "fullSessionBytesIncludingRequestsAndStderr": 107645
+    }
+  },
+  "responseDelta": {
+    "compass": {
+      "unchangedPriorCallPayloads": 30,
+      "changedPriorCallPayloads": 15,
+      "threeCallTextBytes": 178260,
+      "threeCallResponseWireBytes": 1017434,
+      "destinationTextBytes": 15125,
+      "destinationResponseWireBytes": 210949
+    },
+    "graphify": {
+      "unchangedPriorCallPayloads": 45,
+      "changedPriorCallPayloads": 0,
+      "threeCallTextBytes": 55402,
+      "threeCallResponseWireBytes": 60415,
+      "destinationTextBytes": 2002,
+      "destinationResponseWireBytes": 3341
+    },
+    "notes": "Payload comparisons ignore JSON-RPC request IDs, which shift after each added destination call. All 45 Graphify and 30 unchanged Compass community/seed resolver payloads match the baseline. Graphs are unchanged. Byte counts include actual new request IDs."
+  },
+  "validation": {
+    "status": "passed",
+    "sourceCommit": "d51698dc1cfb6fc7cf069926cb39964359859447",
+    "binaryMatchesFinalBuild": true,
+    "counts": {
+      "neighbor-query-tests": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "mcp-tests": {
+        "passed": 60,
+        "failed": 0,
+        "ignored": 0
+      },
+      "workspace-tests": {
+        "passed": 1106,
+        "failed": 0,
+        "ignored": 2
+      },
+      "product-tests": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 4.28
+      },
+      {
+        "name": "neighbor-query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--lib",
+          "neighbors::tests",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 0.65
+      },
+      {
+        "name": "mcp-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 18.3
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 6.44
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 67.2
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 42.36
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.08
+      },
+      {
+        "name": "qualification",
+        "argv": [
+          "bash",
+          "scripts/qualify_code_graph_v1.sh",
+          "--fixtures-only"
+        ],
+        "exitCode": 0,
+        "seconds": 633.17
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exitCode": 0,
+        "seconds": 2.22
+      }
+    ],
+    "harnessTestsPassed": 134
+  },
+  "artifacts": {
+    "policy.json": "f4afd6b400a304c3fa032b116b8dc5a7ac3c1c469224c3753de1629425310cf7",
+    "input-recheck.json": "dde3db5d4317daa0877442c13aeff17a1bfea26c0470d3a626c4e8bacd26e3dc",
+    "baseline-direct-identity.json": "1319291b5904422723dfb0628eb96a99b2217382e162e229cf7f22860abd5bd2",
+    "binary-manifest.json": "b0b4ad1c5f88e16a285f3bcd0965964286c3a719a209a08832ac2b58e463b3c8",
+    "response-delta.json": "16cb77b1ce9afce2b6ce86134c52bd09f250fc9478e30f142b595202a0a267bf",
+    "navigation/capture.json": "c1d07c47906a891c2f6451fba31f30d11fb09d51882d7282c968d8914957dafa",
+    "navigation/verified-summary.json": "14507fffe0381e5f586936b8e28a1459366d8f1ff9184c1432ba517d7a23f88a",
+    "navigation/verify_capture.py": "0cbc8ad24a1209d7d8fc559d702c2ca185c242ee1fa60dc3f7b3be776c98dc00",
+    "harness-tests.log": "9eb7ec8be37dc0d41169d0ffb240f71a0173fd9229709563beb5ce6398e2e0bb",
+    "validation.json": "a61555ab44db0fef8456ac1fffde4179d330e4038206b86b13399aa18370156f",
+    "final-validation-summary.json": "796b22e12ca5adba0eecf30919df31043c507a8b6c1bbdbc69d7f8e821e7024d",
+    "validate.py": "4ba05b9d6bd17515fb5460737c2b6300d6d80ade92e6ab3e1cbebdddb224b542",
+    "fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "neighbor-query-tests-final.log": "665afacd150175b0dfc4fb0fd94f99df9f4be09e36219277b3e3786caca3a33c",
+    "mcp-tests-final.log": "94154f9cbe14c380ae4ea21bbb9ff2fe5744b7a06483dade40eb8528e1ef6158",
+    "clippy-final.log": "c7ba7a8dd8e81a05bac04776058a3efcb131a1e59e19a80a621ebbdfcfe55873",
+    "workspace-tests-final.log": "cfa81eb3b3924767ad551ecd3203c53451c3a5b2ae76b879bf689acc40d1a5e9",
+    "product-tests-final.log": "0155aace32defe5fcc6b306984b3fdbba651c0b54ba83c0d9281ab2bdd0c7a0e",
+    "product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "qualification-final.log": "141b8e13f6062cd3447a2ca12d5976ef6edc494dd87b678b92781ef7fc8977ba",
+    "build-final.log": "2b0c38ed9b2d8b3b42ebca729444e4c5f8b4763c23bca63e77381d42bee0f513"
+  },
+  "interpretation": "Compass now exposes exact destination identities directly for all 14 reviewed calls. Graphify exposes labels and sites in neighbor output, so explicit ID projection is unavailable. With one additional source-anchored public resolver call, both resolve 14/14 destinations. Label presence remains 14/14 and global label uniqueness remains 11/14 for each. This improves direct response identity and record fidelity, not end-to-end superiority in the extended workflow.",
+  "limitations": [
+    "All 15 Compass full-record projections match their frozen graphs (181 record appearances). Graph consistency does not establish source precision for those other records.",
+    "Graphify full-record projection is unavailable, not a failed source-precision or graph-correctness score; its displayed adjacency remains consistent with its graphs.",
+    "59 public calls per tool include 14 symmetric destination follow-ups. A caller using Compass inline IDs would not require those follow-ups, but this capture executes them to compare resolver capabilities fairly.",
+    "Exact source coordinates are supplied; this is not unassisted discovery or autonomous long-walk evaluation.",
+    "Compass returns more evidence and uses more bytes. Native output richness and controls differ; byte counts are not equal-content efficiency.",
+    "God-object judgments, source-grounded responsibility explanations, broader precision, longer directed walks and held-out confirmation remain open.",
+    "The extra resolver uses supplied target coordinates; it confirms the requested declaration, not an autonomous reconstruction of an ambiguous edge from a label. All 14 reviewed pairs on both sides also have the source-required directed call in their frozen graph."
+  ],
+  "graphifyEnvironmentSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535"
+}

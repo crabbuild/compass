@@ -1636,6 +1636,32 @@ class Box {
 }
 
 #[test]
+fn typescript_repeated_nominal_call_returns_keep_the_final_member_target() {
+    let batch = universal_evidence(
+        "src/repeated_returns.ts",
+        br#"class Link {
+    next(): Link { return this; }
+    value!: string;
+}
+function read(link: Link) {
+    return link.next().next().next().next().next().next().next().next().value;
+}
+"#,
+    );
+    let value = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.qualified_name.ends_with(".Link.value"))
+        .expect("Link.value declaration");
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.relation == compass_languages::CandidateRelation::AccessesMember
+            && candidate.target_spelling == "value"
+            && candidate.constraints.exact_target_declaration_id.as_deref()
+                == Some(value.id.as_str())
+    }));
+}
+
+#[test]
 fn typescript_member_call_return_types_resolve_inherited_methods() {
     let batch = universal_evidence(
         "src/member_return_inherited.ts",

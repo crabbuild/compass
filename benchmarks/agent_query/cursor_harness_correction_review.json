@@ -1,0 +1,151 @@
+{
+  "schema": "compass.cursor-harness-correction-review/1",
+  "scope": "Benchmark workflow correction only; no product recall or extraction improvement. Query-only replay of all 110 unchanged requests on verified retained graphs and pinned source working directories.",
+  "baselineRunId": "export-binding-panel-a-01",
+  "baselineRunnerDigest": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "replayedRunnerDigest": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "finalRunnerDigest": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "suiteDigest": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "tools": [
+    {
+      "name": "compass",
+      "version": "compass 0.3.30",
+      "binarySha256": "04eab05bd5bbc94f3f0f86580bdd3de9950599bc9e548b8f8ba95791b8baa0c9"
+    },
+    {
+      "name": "graphify",
+      "version": "graphify 0.9.67",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3"
+    }
+  ],
+  "scores": {
+    "compass": {
+      "passed": 49,
+      "total": 55
+    },
+    "graphify": {
+      "passed": 46,
+      "total": 55
+    }
+  },
+  "changes": [
+    {
+      "question": "redux-holdout-broad",
+      "tool": "compass",
+      "before": {
+        "exit": 1,
+        "followUps": 1,
+        "passed": false
+      },
+      "after": {
+        "exit": 0,
+        "followUps": 0,
+        "passed": false
+      },
+      "remainingFailure": "missing 'miniKindOf'"
+    }
+  ],
+  "rawCaptureAgreement": {
+    "files": 228,
+    "byteIdenticalToBaseline": 225,
+    "note": "All retained Compass captures match byte-for-byte. Three Graphify query outputs change edge ordering/content within their output budget, without changing observed scores or token counts. Do not attribute these changes to the Compass-only cursor fix or claim whole-answer equivalence. The invalid terminal-cursor request is not issued.",
+    "changedCaptures": [
+      {
+        "path": "click/click-holdout-ask-callers.graphify.0.stdout",
+        "sha256": "35049e3d323057590a898a5e09d5576a0cd98f43cf5908eb515a0d01624d5135",
+        "baselineSha256": "1ca4304e3da5eed6d82203fd6d5e6f4e98f411e34e4110c28aa2bb2a61a1a4f3",
+        "identicalToBaseline": false
+      },
+      {
+        "path": "jsoup/jsoup-holdout-ask-callers.graphify.0.stdout",
+        "sha256": "afd7f9557d93dec2219aa29e8eb5e0e67a1c71e36c1d1b5dc41a3e0f68748626",
+        "baselineSha256": "de5fcd3ed8c6df698b140e12b68959411d1878921410102d7c7e88eb646ba371",
+        "identicalToBaseline": false
+      },
+      {
+        "path": "walkdir/walkdir-holdout-ask-callers.graphify.0.stdout",
+        "sha256": "8f75b32eed711ba8f2e1760be419d702831e21e9d178283bb03f05e869688971",
+        "baselineSha256": "8901bc64e4aaafdeda75f57dbee8a64ab823eb2bfe882d8ada259e1772c8dc95",
+        "identicalToBaseline": false
+      }
+    ]
+  },
+  "historicalRunsWithTerminalCursorCount": 5,
+  "verification": {
+    "benchmarkTests": 99,
+    "passed": true,
+    "negativeCases": [
+      "terminal none",
+      "source/prose next= text",
+      "multiple footers",
+      "repeated cursor"
+    ],
+    "positiveCases": [
+      "valid opaque cursor",
+      "legacy page footer",
+      "discovery range footer",
+      "typed page/range footer",
+      "LF and CRLF"
+    ]
+  },
+  "retainedFailedAttempts": [
+    "First test invocation targeted the wrong unittest class; the second had an incorrect argument-position assertion. The corrected tests-before-03 invocation still failed on the real parser defects.",
+    "First replay collected 110 requests but used the Compass checkout cwd, losing eight source excerpts; it is invalidated, not a comparative result. Its summary step also required recovery of omitted graphMetrics. No production cache defect is inferred.",
+    "A byte-equality assertion stopped on three Graphify output variations; all are retained and reported separately from score agreement.",
+    "The successful replay-02 uses the final CRLF-capable runner, source cwd, all binary/graph/source pre/post checks and complete aggregation."
+  ],
+  "reduxDiagnosis": {
+    "scope": "Separate post-output Compass-only diagnostic, not comparative scoring.",
+    "originalQuestion": {
+      "seeds": 0,
+      "candidateNodesRead": 431,
+      "candidateProbes": 73,
+      "diagnostic": "bounded_truncation"
+    },
+    "shortNameAndPhraseQueries": "kind of, kindOf, miniKindOf, and kindOf.kindOf produce source-located candidates. The natural-language retrieval/specificity gap remains open."
+  },
+  "artifactRoot": "cursor-harness-correction",
+  "artifactsSha256": {
+    "delta.json": "3373fd204948ed362058fdeee550b681e6736e2c2fc8950e3001334f7869865b",
+    "historical-terminal-cursor-census.json": "ac6b764e5f2d96da0ee1d727ae470d805893a1f5be0ecf2fa9dddb645e2d63de",
+    "raw-capture-manifest.json": "40a01acc3d0ce4be0bb191bccff01753e58eda98b351bb690fd1ffa3f0b98a9f",
+    "redux-recall-diagnostic/review.json": "d9b7cfb1c39d06bd847fa88fbd96a77513c6cd6a8ef073795fd4bf0b10aea1dd",
+    "replay-02/run.json": "ea64bb218186a65a775ddaefca65772b63835f98a267a8dfe7f5de29019d3c23",
+    "replay-02/runner.py": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+    "replay-02.log": "c3865fd8355295d7be0078d9712075ea111dd4e3939b2b7ae09fb7d5d2044907",
+    "replay-02.py": "84080133c52c93e6e06b00b7dc2a208e529223bb953f78b9477524f530285f75",
+    "replay.log": "35238deb04a60cf3a91ed075ac657faa382bd9fea528d5fd3c81eb4ed2833e6b",
+    "replay.py": "a09dc5cd4a579bd7951cec7966f8030f3637d79e68e31d8e30a567045e80859e",
+    "run-before-summary.json": "894143f2b5fd53101685f9fb7dbbb86c058db6cd4a266a89e7185c395c516984",
+    "run.json": "afd0dbe34e18a8a1318ab42b5eec1f1f7789326ae7059ed11eaf3185b4317a7b",
+    "runner-replayed.py": "f77a8a67d8599696b9e8bec64f3244cc0bd8e63908ac1ac6ca6f2a5d0435c016",
+    "tests-after-02.log": "fa50898beef95c419d8fdf42dc636cacd8c65c993112f4e8cefe648cbe948530",
+    "tests-after.log": "b71895754d3cfc052c763f5ae4259d3472f0106d543cb347db4139df98a8a213",
+    "tests-before-02.log": "1f8b3d1a4bcfed1631fcfff1fead6291115d0eafff7a7d310dd5d25ac8b15c98",
+    "tests-before-03.log": "d24b646a92dc635cde717d4550ecb32e816b0bf1b67d868ce8d6ae741a295340",
+    "tests-before.log": "92f6d0896422342b4d02403844c3d2ba18e0c0f1fbc78a5de12ea7882d855091",
+    "tests-after-03.log": "b06670816c08ab1d2fdf397d80071ef2c7dd29e06feecd93aaa7864062330ac9",
+    "help-before.log": "ad9efaa4a0107c256eb59648686b65d6f1f70326a18d8a00d2ae65fa6c123064",
+    "help-after-baseline.log": "4c4807e45d9aa355b504f9291d3f8cd3f16570e7bd7125be910336d506fa2139",
+    "help-after.txt": "7b796d44eea2b37d0407e340bfcd70e41a757a4a8e688e24a0cffdbd03a69fc2",
+    "help-clippy.log": "66ee6744b47d9baf2ceda592ab6af4511ed61baee1b4143796d681fb7dc5e332"
+  },
+  "testSourceSha256": "988baee76e896d97af6c306711e21beee67a97a6b56305db4591c228a3a80aaa",
+  "helpCorrection": {
+    "scope": "CLI help presentation only; runtime limits, graph/query schemas and release version are unchanged.",
+    "reproduction": "Replacing the numeric prefix default/hard maximum: 1000 also rewrote the 10000 expansion default to 128. Exact closing delimiters keep these fields separate.",
+    "sourceSha256": {
+      "crates/compass-cli/src/help.rs": "47322c5b7b5dceb0f94b2604f87dfbdca8746e4824b10418bdd5d7b39f527e68",
+      "crates/compass-cli/tests/help_cli.rs": "ebeb152bbc69daae78a256c1018ddf43bdf5d9041515c4da6e2de330379caa7e"
+    },
+    "native": {
+      "passed": 1107,
+      "failed": 0,
+      "ignored": 2,
+      "scope": "Workspace lib/bin, help_cli and compass_product; --locked."
+    },
+    "clippy": "Passed: workspace lib/bin plus help_cli, --locked, -D warnings.",
+    "binarySha256": "5e80b2f5e0624df1897fe7005677125d40fa991f4dfdf78089094dace2876ab8",
+    "graphFixtureQualification": "The complete fixture pass qualifies export-binding production 9b63873a. Not rerun for this help-only correction; no extraction/traversal code changed."
+  }
+}

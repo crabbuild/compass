@@ -1,0 +1,27 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "chi",
+  "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+  "scope": "Post-output negative discovered by reviewing a high-degree Compass route hub. Independent test-local chi.NewRouter instances do not create route containment across their files. Graphify absence of route endpoint identities is unavailable evidence, not a correct negative. This is not a representative precision sample.",
+  "witnesses": [
+    {
+      "id": "independent-chi-test-routers-do-not-contain-each-other",
+      "source": {
+        "file": "middleware/clean_path_test.go",
+        "line": 14,
+        "symbol": "GET /users/1",
+        "text": "r.Get(\"/users/1\", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))"
+      },
+      "target": {
+        "file": "middleware/throttle_test.go",
+        "line": 22,
+        "symbol": "GET /",
+        "text": "r.Get(\"/\", func(w http.ResponseWriter, r *http.Request) {"
+      },
+      "relation": "contains",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "TestCleanPath creates its local r with chi.NewRouter at clean_path_test.go:12; TestThrottleBacklog independently creates its r at throttle_test.go:18. Neither registers or mounts the other. Shared receiver spelling r and directory membership provide no parent-route evidence."
+    }
+  ]
+}

@@ -1,0 +1,693 @@
+{
+  "all55Cases": [
+    {
+      "accessMetrics": null,
+      "accessStatus": "unavailable-join",
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "repository": "apache/cloudstack",
+      "sampleId": 8491397
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:573ca6bffd3ba6ab9674f7020f46fe0e521dd0556d47eba62176ed527bcbd661",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:573ca6bffd3ba6ab9674f7020f46fe0e521dd0556d47eba62176ed527bcbd661",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8494605
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:bd754c67c67ff00c49b8a3345ce718a9942e740cbabe61a8b82e28b75d2dd65a",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:bd754c67c67ff00c49b8a3345ce718a9942e740cbabe61a8b82e28b75d2dd65a",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8497585
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "unavailable-join",
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "repository": "apache/cloudstack",
+      "sampleId": 8497687
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:c9fada4684df3357d595d7faee6b94bb5562315fea986bb64b5a0e1fbe4c0546",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:c9fada4684df3357d595d7faee6b94bb5562315fea986bb64b5a0e1fbe4c0546",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8501968
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:e03e64f9267706722b55e0379e95642fab191daa0d5c88b2e26a8acefbed35ab",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:e03e64f9267706722b55e0379e95642fab191daa0d5c88b2e26a8acefbed35ab",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8501970
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:537bff8f8df4c26e3b05bf3fe3b3d062a2fe023abaf5ca52f9256cc919e9ffc6",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:537bff8f8df4c26e3b05bf3fe3b3d062a2fe023abaf5ca52f9256cc919e9ffc6",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8502684
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:f7d514eb3a61774eaca9b30dd4a696f8185aba895d2549a6acaf3fb03a480998",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:f7d514eb3a61774eaca9b30dd4a696f8185aba895d2549a6acaf3fb03a480998",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8507718
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:75cb162c933e8f5af2fb399d12a0321c6542fddfc6221867f91241c5fea5cded",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:75cb162c933e8f5af2fb399d12a0321c6542fddfc6221867f91241c5fea5cded",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8510347
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "unavailable-join",
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "repository": "apache/cloudstack",
+      "sampleId": 8511088
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:ce5c5c31323f4bbc799721eeb6d1fa982389170f9785543ae48cee675163e15e",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:ce5c5c31323f4bbc799721eeb6d1fa982389170f9785543ae48cee675163e15e",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8514954
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:8f5e5100ee2d79560887b1d71680e14dba3d232397ff445a4ce32ca24834de9b",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:8f5e5100ee2d79560887b1d71680e14dba3d232397ff445a4ce32ca24834de9b",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8515776
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:606a6c28e5ee9445e7985f5e6206d1cc38dd6d7ec94cacf513151aff6b33bd27",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:606a6c28e5ee9445e7985f5e6206d1cc38dd6d7ec94cacf513151aff6b33bd27",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8516029
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:36b7814c82d66c65752bbc58bd537d5c9368bb439151f166c4d6ce67da7bc225",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:36b7814c82d66c65752bbc58bd537d5c9368bb439151f166c4d6ce67da7bc225",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8517396
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "unavailable-join",
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "repository": "apache/cloudstack",
+      "sampleId": 8522716
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:66538b3ff66a54fd545c41ad0c13be759817922ba4cfa3e042255e4aa1768472",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:66538b3ff66a54fd545c41ad0c13be759817922ba4cfa3e042255e4aa1768472",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8526483
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:52eababd34521216fdc02c142906b15574e8694a0a665c50bcc2fdbfb83376c8",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:52eababd34521216fdc02c142906b15574e8694a0a665c50bcc2fdbfb83376c8",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8526485
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:60b26f62e27fc38e52f1a746d0d942f8f8429abf9dbe3ec505dc3df530e8e499",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:60b26f62e27fc38e52f1a746d0d942f8f8429abf9dbe3ec505dc3df530e8e499",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533230
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:be771a36dbfcb422759048a55605d35b173fc670bc55be210b99431a408de6c1",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:be771a36dbfcb422759048a55605d35b173fc670bc55be210b99431a408de6c1",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533645
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:248c456ccd43a03c3d8d38141f3af6015fc84b7bb734ad0e215061fa36cd3cf8",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:248c456ccd43a03c3d8d38141f3af6015fc84b7bb734ad0e215061fa36cd3cf8",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533750
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:3babcd2c278f7348ac8e458c30364ae96ef6f7943f471073ddd9f52aa3793b45",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:3babcd2c278f7348ac8e458c30364ae96ef6f7943f471073ddd9f52aa3793b45",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533873
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:38284587360b3b49dbb4f5a62e61da7265017e65e4d0f3273483c38fd6f59413",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:38284587360b3b49dbb4f5a62e61da7265017e65e4d0f3273483c38fd6f59413",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8539540
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:3eae3eb896a5e0a9672beb7055286b500afc83cd6866887b6e488daf7e55d780",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:3eae3eb896a5e0a9672beb7055286b500afc83cd6866887b6e488daf7e55d780",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8541418
+    },
+    {
+      "accessMetrics": {
+        "distinctSourceMethodCounts": {},
+        "distinctTargetFieldCounts": {},
+        "id": "sha256:944a1b36f5b23ad222434d66733c9f991275aa0eab16d898496504878196a5e6",
+        "recordCounts": {}
+      },
+      "accessStatus": "available",
+      "classId": "sha256:944a1b36f5b23ad222434d66733c9f991275aa0eab16d898496504878196a5e6",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "apache/cloudstack",
+      "sampleId": 8547261
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6369779
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:2406de0a7d6d60a3285ffd6c08255cbb1ca0caea9758a152269cdb77a148add1",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6371049
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:314148a91f14e6961b357cb5e4f4aa5a81b1be65c8ca726d4baf6afae561b9c5",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6372633
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:37b79ae353d248eb203600de85dbe7573454fa88e5f8ae97e546f195609f7a42",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6375252
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:b60c2c635e95ea09774e70e6ffb28c8ebc5471b8a071c2b1a05ef74b56d697e0",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6375517
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:21e5eebc28b2d54b59d725c18a9d2adb26cb0dd025665f9d7d320e6cb8e769c2",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6379553
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:1245c6c02e5ce0dcef7062094ffc5e2e96059a0e49a4414cc079477bff4d1dc2",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6383930
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:c3a2696121c376e47b8b56df142dcff6fa5964482ec4134c70d6f19f6d8f8c50",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6385711
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6387077
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:a54c43d61dfb3df58ff9b6eb356070ef5040b5bbe3cc5c91c930c1ff37aead83",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6387249
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:8a79b8fecfc7cf66c5c6ee96ca37e92a9ca966b1de0fd7ddefc70622de492c43",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6388458
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:95081c0a06121da3dd58decd200efa14a67b6861f98ccec889aee3c97f8400eb",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6393486
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:eb1072f20cf2738fde7929fac849f050d3968f449c5fca0ba8a5076db6a66791",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6398820
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:1e001562f35ebf96d35bebfca21ec5d7e7dae156b0922bd27d95b23abf91dcc1",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6404028
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:7331c00a4419b1f8fc817a09d1b99688d726761df40bfcf00cc0f206d99ac476",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6412439
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:f2e1191484f82d8827e3b7b16753cdc9307dd2845dde8ad64ad1ada6627dbffd",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413248
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:47855833c826f9b124f009509d3ddf8d44e7b28eb237602dd130d3974195c5f8",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6414719
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:b4a4369d4e5d88bd8e5b458550726d0c510a7bf908e58870afc48af059400aa1",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6416620
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:8b309073c5c35c6b478e7e619d60e7a65a1ea7630ad30fbd09d737a14d109b94",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6424656
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6424683
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:b32f905b4ac8fb166f2d336fbbd11277610b2580af4ab5dffd204eed05f14784",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6425142
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:5df25a82acf0b628680b19b4a5f5880a41a7dde448d2a42fb10aaeb3f5b3f817",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6427227
+    },
+    {
+      "accessMetrics": null,
+      "accessStatus": "graph-not-evaluated",
+      "classId": "sha256:12bd289af06352482c17a07e499d1b592b21d7d4a31b4915bfe9dcf25938aae0",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6428158
+    }
+  ],
+  "classCount": 6373,
+  "conclusion": "All reads/writes edges in this frozen graph connect SQL nodes to database tables; no method-to-field reads/writes edges were observed. Do not combine these categories with Java field references.",
+  "endpointKindCounts": [
+    {
+      "count": 1,
+      "relation": "reads",
+      "sourceKind": "database_procedure",
+      "targetKind": "database_table"
+    },
+    {
+      "count": 863,
+      "relation": "reads",
+      "sourceKind": "database_view",
+      "targetKind": "database_table"
+    },
+    {
+      "count": 178,
+      "relation": "reads",
+      "sourceKind": "query",
+      "targetKind": "database_table"
+    },
+    {
+      "count": 1,
+      "relation": "writes",
+      "sourceKind": "database_procedure",
+      "targetKind": "database_table"
+    },
+    {
+      "count": 6160,
+      "relation": "writes",
+      "sourceKind": "query",
+      "targetKind": "database_table"
+    }
+  ],
+  "evidenceCounts": [
+    {
+      "confidence": "exact",
+      "count": 1042,
+      "relation": "reads"
+    },
+    {
+      "confidence": "exact",
+      "count": 6161,
+      "relation": "writes"
+    }
+  ],
+  "exactAnchoredCounts": [
+    {
+      "count": 1042,
+      "exactAnchored": false,
+      "relation": "reads"
+    },
+    {
+      "count": 6161,
+      "exactAnchored": false,
+      "relation": "writes"
+    }
+  ],
+  "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+  "limits": [
+    "These reads/writes are stored SQL-to-table relationships, not Java method-to-field access evidence.",
+    "Exact relation confidence here does not supply an exact AST relationship-site anchor or independent source verification.",
+    "No field-reference completeness, WMC, ATFD, TCC, god-object ranking, Graphify score, or held-out result is established.",
+    "The source graph has the previously recorded one omitted node and 45 omitted edges."
+  ],
+  "methodFieldStatusCounts": [],
+  "missingEndpointCounts": {},
+  "rawRunSha256": "73c42b565d496c322aa0adc6c9d9714edacde36ce98c48d29ceaee6d66d8704d",
+  "registrationSha256": "8f9488d637f6d6043f1bde7895e55b6b0ae06717b95c514af26a1dc73248c6c7",
+  "repeatedVerificationByteIdentical": true,
+  "schema": "compass.mlcq-access-relations-review/1",
+  "scope": "Frozen CloudStack typed graph only; known Java development cohort and older Eclipse graph not re-extracted.",
+  "verifiedRunSha256": "78b17b447a567f44b1e387edbf4c634d0f818c55cc9fab02ab60fb6738c34cfa",
+  "verifierSha256": "bc28f27a8c9b4e2cf01c90ab31f488b6bcd95e27a947dba46d49a16735582eed"
+}

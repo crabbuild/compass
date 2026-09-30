@@ -1,0 +1,1305 @@
+{
+  "schema": "compass.sql-prefix-review/1",
+  "status": "development diagnosis; no release or Graphify performance claim",
+  "source": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "trackedSqlFiles": 119
+  },
+  "productionChange": "Reject impossible dollar-delimiter syntax before scanning a SQL statement prefix. Plausible delimiters retain statement-sensitive handling.",
+  "productionChangeCommit": "1a1f6a6977d42a694df545a08aaa997b5fe05f7a",
+  "baselineProductionCommit": "89916af9",
+  "candidateBuildCommit": "bbc6a419c389829a98aa69971fafb9d29fe21aaa",
+  "registrationSha256": "f7f909424064c91844204475df74125a96a13127cfa17861fbf289553c114c39",
+  "buildContextSha256": "a0714ebf0b5e6e43a326df5a7dbe3ee79ece8ac5db32a9d931a72f102abf1697",
+  "profile": "Cargo dev, unoptimized; not release-performance qualification.",
+  "buildSettings": {
+    "TSLP_OFFLINE": "1",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2"
+  },
+  "binaries": {
+    "baseline": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+    "candidate": "9375271e6718e780daede034534bd6b5676e0e1385718aed2fcec16946df25df"
+  },
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M2 Max",
+    "memoryBytes": 34359738368,
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+  },
+  "procedure": "For each complete source sample, copy once into a dedicated external input directory preserving its repository-relative path; use that same source directory for both binaries. Three fresh-output CLI extractions per binary, alternating old/new order by repeat. No cached output reuse. Same --code-only --no-viz --store sqlite options. Timeout and stream failures stay visible; no latency ratio if either observation is unavailable. Retain commands, wall time, outputs and graph digests. Full graph JSON and published canonical graph digests are compared; any nondeterministic metadata exclusion must be reported.",
+  "commandTemplate": [
+    "/usr/bin/time",
+    "-l",
+    "<frozen-binary>",
+    "extract",
+    "<same-per-file-input-root>",
+    "--code-only",
+    "--no-viz",
+    "--store",
+    "sqlite",
+    "--out",
+    "<fresh-output>"
+  ],
+  "limits": {
+    "sampleTimeoutSeconds": 180,
+    "streamLimitBytes": 16777216,
+    "graphLimitBytes": 268435456
+  },
+  "externalRun": "sql-prefix-scan-01",
+  "artifacts": {
+    "run_samples.py": "f957611cc31d7ead80309fb9a085fda481cd7a10582816973fa96bc3e191f31c",
+    "samples.json": "e86abef9692e5391583a9f46d0662d77fdd0fc3ddf7f3d2e5b58d2148619d909",
+    "verify_samples.py": "27ea719ae2cb88b81e9eaab2c1cd7537fd455c02fbe87db91b5c9c551f5e307e",
+    "verified-samples.json": "28a7ee6b8e16ec4c4a4485559eff152318b3e2f5329ea31a3e8ddc87eca3a19b",
+    "matched-build.json": "2ac71dcc865034282312440de0061d7dca4fdb96b45a6e6ba1891d7611e11ace",
+    "build_matched.py": "af1dd9e48f6d4febc99cc0390b3b5b862de8d1a395194a230525522f63e7dcc1",
+    "checks-01/checks.json": "4316be9fe388943a68925b05d03a68f69b0fdefbde7777914624e0d850727f65",
+    "checks-before-retry.json": "095964775ca1122185077783015005982952fc79c2699ea161a3f5d5b7268870",
+    "parser-recovery.json": "e0eaff1d387664ca552eeb7baa892a4bad34cdd5a722df9603d564c8615b970c",
+    "sql-tests.log": "0db5bf9e94005de7c8c2891d3e6d12b29331eee15eb4c23e2453ba5d0b6a0bca",
+    "write_sql_report.py": "34160585c378a1611f8028c939bd80aa0209bcde5549ee43a50f2cfef0105187"
+  },
+  "checks": [
+    {
+      "name": "fmt",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 3641,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "sql-domain",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 22117,
+      "stdoutSha256": "7919a50b024e4a61fca8e291a11bd12da459ed68acb983c7f5a7c12a7a4ea487",
+      "stderrSha256": "dc5d40a4b52388cb952fb2d5e60130ce2e74d3fb7d15019eb32a5bf2096e341d"
+    },
+    {
+      "name": "workspace-clippy",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 164376,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "c04e4fe9dec188b16c240bd10d28afe552d7b0a897da2a77241b639ebba5cf2a"
+    },
+    {
+      "name": "workspace-tests",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 509231,
+      "stdoutSha256": "c6e390c0a05d59aa741e8557aed9f82cba7e1791083546c649e2c151a00be9f8",
+      "stderrSha256": "dcb9be4470d83d6247cf7d62749f5ad30953d40014b22a6f9bcc0f4a14787de9"
+    },
+    {
+      "name": "product",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 335857,
+      "stdoutSha256": "e3508b2bd54ce2ce906d89970169f62f8856596ba5dac510a8a698b7a9613168",
+      "stderrSha256": "6a324e2910ef95d328cb8d1797ea24ae84426600cb3c066b8c10f27936f1c048"
+    },
+    {
+      "name": "fixtures",
+      "exitCode": 1,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 36,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "c7d420bc8df5baecb5f9e0898d9833621c8cd80e05493221a157c39f2ea0b54b"
+    },
+    {
+      "name": "fixtures-retry",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 1448547,
+      "stdoutSha256": "7760142392afd3d4090b527940de1baf9a63d4898a93cbfe4dffcf609702a212",
+      "stderrSha256": "1498de5787005860afb41df2fd5572f7218359ea0f8ab5407d56b0334886aa63"
+    },
+    {
+      "name": "benchmark-tests",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 2072,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "d86e1d635640b2c5efebeab74c8c48f0e89698034110c9428de880ee5f24d694"
+    },
+    {
+      "name": "boundary",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 58,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "build",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "wallMs": 1314,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "6da422bbb22b76a5121c76b0eaaa70f006d102a88041cbbc8cda4d66d617bfd4"
+    }
+  ],
+  "matchingProfileChecks": [
+    {
+      "name": "build",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "7725852b81cbb4ead2d0bbe3be3eef2aae639737d890bebd5a53c7ae457e39ff"
+    },
+    {
+      "name": "sql-tests",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "stdoutSha256": "2aa1d33171ced6b02b616e84f387b6f54364b3429720038b5be717cc17dc26b8",
+      "stderrSha256": "8736f808818710a50e363548cf7f4275fd261985a54b4897dbf747e4026eae95"
+    },
+    {
+      "name": "product",
+      "exitCode": 0,
+      "timedOut": false,
+      "outputLimited": false,
+      "stdoutSha256": "e986ab762482aa98b7fee609730bac6f931e410f441720bd0d61a3e14db1b49f",
+      "stderrSha256": "6b47d0eb9a40c5982f1563f1bf312205de5b09ab70a17a6bf43a1ad9396ef4e6"
+    }
+  ],
+  "results": [
+    {
+      "bytes": 938,
+      "candidateToBaselineMedianRatio": 1.1405940594059405,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-224to225-cleanup.sql",
+      "sampleIndex": 0,
+      "sourceSha256": "e3956e631ed1569790c0e715416726ed397e0d9d2e9a60551dcc41dcd29de92f",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+          ],
+          "graphHashes": [
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298"
+          ],
+          "medianSuccessfulWallMs": 1010,
+          "peakRssBytes": [
+            50692096,
+            50757632,
+            50642944
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            2041,
+            1010,
+            815
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b",
+            "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+          ],
+          "graphHashes": [
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+            "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298"
+          ],
+          "medianSuccessfulWallMs": 1152,
+          "peakRssBytes": [
+            50855936,
+            50642944,
+            50708480
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            1928,
+            1152,
+            852
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 2041,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:29.330899+00:00",
+          "loadAverageBefore": [
+            2.45703125,
+            5.28369140625,
+            5.57861328125
+          ],
+          "loadAverageAfter": [
+            2.45703125,
+            5.28369140625,
+            5.57861328125
+          ],
+          "sampleIndex": 0,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "2da4089abcb6e30519e219229399cdeddcbb079953c2ad56dc69377f4b923a45",
+          "stderrSha256": "25d5d809c1bd6fe701a910213ffc0dd697ff3e4a9cfe38fdef4882a13d7006e7",
+          "peakRssBytes": 50692096,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1928,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:31.374626+00:00",
+          "loadAverageBefore": [
+            2.45703125,
+            5.28369140625,
+            5.57861328125
+          ],
+          "loadAverageAfter": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "sampleIndex": 0,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "dd0093774508773cd90fa9a3394856c0164f37e480dd962286fde04a7b88eb31",
+          "stderrSha256": "0b1d417bf84723be9687da9c8cdb1e04fdc0df30f80e3dbf91dadcf64610d4b1",
+          "peakRssBytes": 50855936,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1152,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:33.303979+00:00",
+          "loadAverageBefore": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "loadAverageAfter": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "sampleIndex": 0,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "bd93753fd3b38ee547aea8c3c9387b3ea35328253c1cd2f58fec44bc7b66d306",
+          "stderrSha256": "0d102c049269a1d5e17fc14a01e002271ef33e912f8eab29c30f4253caf54045",
+          "peakRssBytes": 50642944,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1010,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:34.457587+00:00",
+          "loadAverageBefore": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "loadAverageAfter": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "sampleIndex": 0,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "e31dc31eaafa5eb3da7bb64336a442ee3b8bc163bee38d9eb8f21fad7ae168f1",
+          "stderrSha256": "743c64a9ffa80e4f79a52036d59c35a93d3e00ae1af277d492292e81f7e3d197",
+          "peakRssBytes": 50757632,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 815,
+          "stdout_bytes": 481,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:35.469908+00:00",
+          "loadAverageBefore": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "loadAverageAfter": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "sampleIndex": 0,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "c0df69031543311f184124874590e27df62e520c995ab7f6d6b66c538118af85",
+          "stderrSha256": "bcd398b8fc85fbca9d104285e0bc4983537a47d0202acb7cc8f6b78c9250fe75",
+          "peakRssBytes": 50642944,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 852,
+          "stdout_bytes": 482,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:36.286022+00:00",
+          "loadAverageBefore": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "loadAverageAfter": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "sampleIndex": 0,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "c5bd3dd3544f6fc08746f3bd2e33b308740dfdea21c3ffe5915ec1f0d093334e",
+          "stderrSha256": "288af6ec691fa4730d5cf79934a29df2c39eee9e6223cac16f9008bad745c7bb",
+          "peakRssBytes": 50708480,
+          "graphSha256": "15e1869adcace69b2c2c9187482fde658158c74e1d452aabe75766e4a445e298",
+          "graphBytes": 4367,
+          "nodes": 2,
+          "edges": 1,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:bc4edc8c2745ec730fbd7bb80df1216bc17a41ec9afce5d148e9ff0cee5a6f3b",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:c94cf7fc2a4866ae6bd5eaf93ea3422dd21e1f26b6c7a3bba7035b43690ac3ec"
+          },
+          "canonicalJsonSha256": "5605edc10792b3a26d064e9d0497cb79805e98582812163e59ec231d3a266f6b"
+        }
+      ]
+    },
+    {
+      "bytes": 1949,
+      "candidateToBaselineMedianRatio": 1.0727091633466135,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "setup/db/postprocess-20to21.sql",
+      "sampleIndex": 1,
+      "sourceSha256": "88784b0df00be6d6939ebe275c6d1aabcf8bac8636c00bf7d6ad08e2caee2aae",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+          ],
+          "graphHashes": [
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a"
+          ],
+          "medianSuccessfulWallMs": 1004,
+          "peakRssBytes": [
+            55574528,
+            55705600,
+            55394304
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            1149,
+            1004,
+            860
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace",
+            "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+          ],
+          "graphHashes": [
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+            "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a"
+          ],
+          "medianSuccessfulWallMs": 1077,
+          "peakRssBytes": [
+            55459840,
+            55541760,
+            55836672
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            907,
+            1077,
+            1299
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1149,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:37.142939+00:00",
+          "loadAverageBefore": [
+            2.26025390625,
+            5.19580078125,
+            5.5458984375
+          ],
+          "loadAverageAfter": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "sampleIndex": 1,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "f95f45cfdbd0ba1a4c81f303221430634f08a499e99f7c3218350311948a7dbc",
+          "stderrSha256": "ac37cf014af3ae6bdc8d8c8d0692157c7d4fba32b5db860f00d72ef4924b17ae",
+          "peakRssBytes": 55574528,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 907,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:38.294402+00:00",
+          "loadAverageBefore": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "loadAverageAfter": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "sampleIndex": 1,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "82f94b5995fcfcca004cf81f61f8a01e3ca5700f2f7e495b5cdb227e919e5a91",
+          "stderrSha256": "9139ab3e5a3cd620dffe74b83a986b49be3cccd81b6cf28eff9f75cbe56f7e91",
+          "peakRssBytes": 55459840,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1077,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:39.203434+00:00",
+          "loadAverageBefore": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "loadAverageAfter": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "sampleIndex": 1,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "6b2f6e078881ba2b7436c9472e0c31162173d8c3c5a119edba12787388b81a27",
+          "stderrSha256": "ae84c3ef25a46e9dd5f5c921dd0727e5ab76562d227cbbde9659aaea565508d2",
+          "peakRssBytes": 55541760,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1004,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:40.282027+00:00",
+          "loadAverageBefore": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "loadAverageAfter": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "sampleIndex": 1,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "925640ba8eaf1b441ee882e195abf6690f05fc8c1d36ae8e6494486a3704f35e",
+          "stderrSha256": "8de0eba1e9b4c26362983b7ec9e6a5a8caa06802ed0bd7613eecab875e64ba89",
+          "peakRssBytes": 55705600,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 860,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:41.288360+00:00",
+          "loadAverageBefore": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "loadAverageAfter": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "sampleIndex": 1,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "2a3615135ac429f9685e8bd57224cfa93dbd20806f75b485a61673da032ad214",
+          "stderrSha256": "ed5c392ca522f2d4a1e34bc346361e29018918573fefa134c3554fa665270414",
+          "peakRssBytes": 55394304,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1299,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:42.150303+00:00",
+          "loadAverageBefore": [
+            2.1591796875,
+            5.1259765625,
+            5.51904296875
+          ],
+          "loadAverageAfter": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "sampleIndex": 1,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "5783aca4536012bd19ec1898bb8752466fb9e99811a8db5503eb33c1608c6038",
+          "stderrSha256": "c0240e33feb19d6b1d808490bdccd3782aae877860fc772fa3adaebe5033c7fc",
+          "peakRssBytes": 55836672,
+          "graphSha256": "c77e7608a0e5f205d3998e1f9af6bfddb4ae8fd2944b81f7625b8404b1f1390a",
+          "graphBytes": 24840,
+          "nodes": 13,
+          "edges": 15,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:3b82dff6cbcdcec61460eff8d56f22b8eb85e6c7265829be2415f00ce4b5c251",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:46f28e43468f804023379a7e736c76575e629c648e81c65733d7d4f36f120f42"
+          },
+          "canonicalJsonSha256": "2b4d7acf1ecf3f1f35cba2202529eba19c7d77b8b2db21025cc6bf0b9d2b6ace"
+        }
+      ]
+    },
+    {
+      "bytes": 10288,
+      "candidateToBaselineMedianRatio": 0.9277010560519903,
+      "completeOldNewEquality": true,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-41120to41200.sql",
+      "sampleIndex": 2,
+      "sourceSha256": "03e7035ff015e9e3eb7f194a32d37f6e418244cee81853ec6d370b47e7589780",
+      "successfulGraphCount": 6,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+          ],
+          "graphHashes": [
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad"
+          ],
+          "medianSuccessfulWallMs": 2462,
+          "peakRssBytes": [
+            57671680,
+            57573376,
+            57491456
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            1954,
+            4821,
+            2462
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839",
+            "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+          ],
+          "graphHashes": [
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+            "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad"
+          ],
+          "medianSuccessfulWallMs": 2284,
+          "peakRssBytes": [
+            57507840,
+            57622528,
+            57671680
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            1966,
+            2284,
+            4629
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1954,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:43.453147+00:00",
+          "loadAverageBefore": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "loadAverageAfter": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "sampleIndex": 2,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "f4a6f39afa4416f160fa23305174b143a70592bed1289fae642d85554e176fdf",
+          "stderrSha256": "aeb2e094970028fe9ad6af49c091b55af41952167b3a5403af99b3da40768100",
+          "peakRssBytes": 57671680,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 1966,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:45.409315+00:00",
+          "loadAverageBefore": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "loadAverageAfter": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "sampleIndex": 2,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "1dc5f5c4cc332643accd3f645a49d8304d568a517f802cef42a7058921d5b659",
+          "stderrSha256": "8e6cf34f1749926fb262fab36a37d89979b39554af42de70479d177ef7c4ce9c",
+          "peakRssBytes": 57507840,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 2284,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:47.377772+00:00",
+          "loadAverageBefore": [
+            2.22607421875,
+            5.09033203125,
+            5.50390625
+          ],
+          "loadAverageAfter": [
+            2.28759765625,
+            5.05517578125,
+            5.48876953125
+          ],
+          "sampleIndex": 2,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "e2f8fca28ccd3bf9957539dc2d0743a5f8fad18ef3374f577e26486851cb731e",
+          "stderrSha256": "d192958a6213b58eb23e42bd1acb510c0c0b9c7fd93438df71bd573e714b13ed",
+          "peakRssBytes": 57622528,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 4821,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:49.668968+00:00",
+          "loadAverageBefore": [
+            2.28759765625,
+            5.05517578125,
+            5.48876953125
+          ],
+          "loadAverageAfter": [
+            2.18408203125,
+            4.98779296875,
+            5.46240234375
+          ],
+          "sampleIndex": 2,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "f88b4fcdca07e1163c56bc7399beb414bab2e589ef03b3a572f8480656d54b1b",
+          "stderrSha256": "af11ad8b7090f07f73c3808be27d47695e195fd83dfca424f7b0532b3911f4bd",
+          "peakRssBytes": 57573376,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 2462,
+          "stdout_bytes": 483,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:54.494459+00:00",
+          "loadAverageBefore": [
+            2.18408203125,
+            4.98779296875,
+            5.46240234375
+          ],
+          "loadAverageAfter": [
+            2.18408203125,
+            4.98779296875,
+            5.46240234375
+          ],
+          "sampleIndex": 2,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "3b2784bb98fc5531372ebcd9807fc3bd3ee931ef83ad311d3e841b46c4e9922d",
+          "stderrSha256": "78a125064d179a4a3d8052b99156be3f565887be0782584ebf21148896adc25b",
+          "peakRssBytes": 57491456,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 4629,
+          "stdout_bytes": 484,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:24:56.960340+00:00",
+          "loadAverageBefore": [
+            2.18408203125,
+            4.98779296875,
+            5.46240234375
+          ],
+          "loadAverageAfter": [
+            2.2490234375,
+            4.95458984375,
+            5.44775390625
+          ],
+          "sampleIndex": 2,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "e3466a64b835505e649f13524e28bef299a32708fa6ab3e196bf5c39823a3b08",
+          "stderrSha256": "9d5084f97c1e4147a6c542faefac0d3349096629f21e975de7a6e61681ce0c98",
+          "peakRssBytes": 57671680,
+          "graphSha256": "5b9487fdfefccc7ab8c2790230d07edce8c6b0427b64495b6f14cc432ea1c0ad",
+          "graphBytes": 57703,
+          "nodes": 25,
+          "edges": 37,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:fdab0058ab80b6a487d0aa2e5ae1dfa565b3d31eaaa9b3d70cac6174b9c46997",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:35036ce810d331a48c3c24db7abe0f9f095716bc9101398a5651383bf7dee002"
+          },
+          "canonicalJsonSha256": "608a379f9038d59fb6f37ad7a1d1938b055702f7115b3ccf09d71ab6d5940839"
+        }
+      ]
+    },
+    {
+      "bytes": 411080,
+      "completeOldNewEquality": false,
+      "excludedGraphFields": [],
+      "file": "engine/schema/src/main/resources/META-INF/db/schema-430to440.sql",
+      "sampleIndex": 3,
+      "sourceSha256": "99cc9ada9dae1119b8757f805211aa714702b81d2446c0f9fa58e9e7f3c62f4f",
+      "successfulGraphCount": 3,
+      "successfulGraphsEqual": true,
+      "tools": {
+        "baseline": {
+          "canonicalGraphHashes": [
+            null,
+            null,
+            null
+          ],
+          "graphHashes": [
+            null,
+            null,
+            null
+          ],
+          "medianSuccessfulWallMs": null,
+          "peakRssBytes": [
+            null,
+            null,
+            null
+          ],
+          "successful": 0,
+          "timeouts": 3,
+          "wallMs": [
+            180013,
+            180005,
+            180014
+          ]
+        },
+        "candidate": {
+          "canonicalGraphHashes": [
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d",
+            "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+          ],
+          "graphHashes": [
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+            "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d"
+          ],
+          "medianSuccessfulWallMs": 174175,
+          "peakRssBytes": [
+            110297088,
+            105447424,
+            110411776
+          ],
+          "successful": 3,
+          "timeouts": 0,
+          "wallMs": [
+            173607,
+            174175,
+            176198
+          ]
+        }
+      },
+      "observations": [
+        {
+          "exit_code": -9,
+          "timed_out": true,
+          "wall_ms": 180013,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:25:01.595653+00:00",
+          "loadAverageBefore": [
+            2.2490234375,
+            4.95458984375,
+            5.44775390625
+          ],
+          "loadAverageAfter": [
+            3.3369140625,
+            4.39208984375,
+            5.12255859375
+          ],
+          "sampleIndex": 3,
+          "repeat": 0,
+          "tool": "baseline",
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "peakRssBytes": null
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 173607,
+          "stdout_bytes": 490,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:28:01.625631+00:00",
+          "loadAverageBefore": [
+            3.3369140625,
+            4.39208984375,
+            5.12255859375
+          ],
+          "loadAverageAfter": [
+            2.82958984375,
+            3.7255859375,
+            4.70703125
+          ],
+          "sampleIndex": 3,
+          "repeat": 0,
+          "tool": "candidate",
+          "stdoutSha256": "99aed09d5f1e7023d7a1003c199def3a5ba0d312cdf346b858497ae7e161ab80",
+          "stderrSha256": "79fc54d3d4658c613a42ce149b512bc6339ef6aba823a3f3d7f3c215c43a5460",
+          "peakRssBytes": 110297088,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 174175,
+          "stdout_bytes": 490,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:30:55.296331+00:00",
+          "loadAverageBefore": [
+            2.82958984375,
+            3.7255859375,
+            4.70703125
+          ],
+          "loadAverageAfter": [
+            4.2529296875,
+            3.908203125,
+            4.59033203125
+          ],
+          "sampleIndex": 3,
+          "repeat": 1,
+          "tool": "candidate",
+          "stdoutSha256": "a4a997b93919199294ca9d470613402877b01b5028d00899dc147de2bc400ecb",
+          "stderrSha256": "2a0f490b5a3a7f8de08f2043943318b9b10c5723841622746c2cffa6ac7b396e",
+          "peakRssBytes": 105447424,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        },
+        {
+          "exit_code": -9,
+          "timed_out": true,
+          "wall_ms": 180005,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:33:49.556942+00:00",
+          "loadAverageBefore": [
+            4.2529296875,
+            3.908203125,
+            4.59033203125
+          ],
+          "loadAverageAfter": [
+            4.103515625,
+            4.00048828125,
+            4.5009765625
+          ],
+          "sampleIndex": 3,
+          "repeat": 1,
+          "tool": "baseline",
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "peakRssBytes": null
+        },
+        {
+          "exit_code": -9,
+          "timed_out": true,
+          "wall_ms": 180014,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:36:49.565143+00:00",
+          "loadAverageBefore": [
+            4.103515625,
+            4.00048828125,
+            4.5009765625
+          ],
+          "loadAverageAfter": [
+            6.7880859375,
+            4.8955078125,
+            4.75
+          ],
+          "sampleIndex": 3,
+          "repeat": 2,
+          "tool": "baseline",
+          "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "peakRssBytes": null
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "wall_ms": 176198,
+          "stdout_bytes": 490,
+          "stderr_bytes": 777,
+          "output_limited": false,
+          "startedAtUtc": "2026-09-27T17:39:49.618522+00:00",
+          "loadAverageBefore": [
+            6.7880859375,
+            4.8955078125,
+            4.75
+          ],
+          "loadAverageAfter": [
+            4.9638671875,
+            5.22705078125,
+            4.94091796875
+          ],
+          "sampleIndex": 3,
+          "repeat": 2,
+          "tool": "candidate",
+          "stdoutSha256": "7bcea0c01bccf819e238aaa87d714c348a5e66a675723e326c8b84b1aa13904a",
+          "stderrSha256": "0466a9b08ddc4975c816274d33bf2fbe3e3531caa77a0d07540f3d2e29aa11a4",
+          "peakRssBytes": 110411776,
+          "graphSha256": "0d2be2b7a8c51301140b0926ba39f64afafae9970bbdfe09c2185af4067d5b3d",
+          "graphBytes": 5175612,
+          "nodes": 1949,
+          "edges": 3732,
+          "graphBuild": {
+            "builderVersion": "0.3.30",
+            "schemaFingerprint": "sha256:ef30f24aab6e9246a9b350f964ede9d154db362efd9ddfca0823e68a6959468b",
+            "sourceTreeDigest": "sha256:60ddebd65af69a29dcfee88f1a9daf7c95f806bf05c8c3c3fd66eb3591bdc112",
+            "configurationDigest": "sha256:b8f73f897c534bbfff4dacc58f21762133778afffe56892fe8fddfa57b45a91a",
+            "generationId": "sha256:2b1fd9de2802921eb656f7221b97d21a71bf811d132b752f491849cec8b5e91d"
+          },
+          "canonicalJsonSha256": "ca6603d1323d69dd59b1a5f6312296b48c8beff7d3987ee89ac41e14e43ea79d"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Unoptimized development binaries with matching explicit build settings; not release-performance qualification.",
+    "Three observations per binary and file, alternating order with fresh outputs and ordinary OS caches; no warmups or OS-cache flushing.",
+    "The same host also runs unrelated work; recorded load averages do not prove isolation. No confidence interval or tool-wide speed ranking.",
+    "Samples were selected before the candidate results but after profiling the CloudStack timeout. This is diagnosis, not held-out confirmation.",
+    "Graph equality includes all JSON fields and preserves array order. A missing baseline graph cannot establish old/new equality.",
+    "This optimization does not implement or validate god-object classification. Original full-repository timeout/admission failures remain unchanged."
+  ]
+}

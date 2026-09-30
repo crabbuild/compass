@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { BoxesIcon, BracesIcon } from "lucide-react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
+import type { GraphSearchIndex, GraphSearchNode } from "../contracts/workbench";
 import type { CommunityHierarchyView } from "../contracts/hierarchy";
 import { descendModel, hierarchyOpeningLevel, scopeModel } from "./hierarchyLevels";
 import { communityFacts, hierarchyCommunityNames, withCommunityNames } from "./communityFacts";
@@ -31,12 +32,12 @@ import { CommunityTreemap } from "./CommunityTreemap";
 import { CommunityLanes } from "./CommunityLanes";
 import type { EdgeSemanticCategory } from "./semanticAppearance";
 import {
+  BubblesIcon,
   Grid3x3Icon,
   LayoutDashboardIcon,
   MonitorIcon,
   MoonIcon,
   Rows3Icon,
-  ScatterChartIcon,
   SunIcon
 } from "lucide-react";
 
@@ -50,13 +51,13 @@ const COMMUNITY_VARIANTS: ReadonlyArray<{
   value: CommunityVariant;
   label: string;
   hint: string;
-  Icon: typeof ScatterChartIcon;
+  Icon: typeof BubblesIcon;
 }> = [
   {
     value: "bubbles",
     label: "Bubbles",
     hint: "Packed community map on the canvas",
-    Icon: ScatterChartIcon
+    Icon: BubblesIcon
   },
   {
     value: "matrix",
@@ -135,7 +136,8 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
     && (target.isContentEditable
       || target.tagName === "INPUT"
       || target.tagName === "TEXTAREA"
-      || target.tagName === "SELECT");
+      || target.tagName === "SELECT"
+      || target.closest('[role="combobox"], [role="listbox"]') !== null);
 }
 
 export type GraphHost = {
@@ -174,6 +176,8 @@ export type CompassGraphProps = {
   communityDetail?: CommunityGraphDetail | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
+  searchIndex?: GraphSearchIndex | undefined;
+  onClearSearchFilters?: (() => void) | undefined;
   onBackToOverview?: (() => void) | undefined;
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
@@ -198,6 +202,8 @@ export function CompassGraph({
   communityDetail,
   communityLoading,
   communityError,
+  searchIndex,
+  onClearSearchFilters,
   onBackToOverview,
   sourceRevisions,
   queryResult,
@@ -370,9 +376,30 @@ export function CompassGraph({
     },
     [communityDetail, derivedOverview, hierarchy, host, openGroup, scope]
   );
-  useEffect(() => {
+  const openGlobalSearchResult = useCallback((node: GraphSearchNode): boolean => {
+    if (!node.previewAvailable) return false;
+    onClearSearchFilters?.();
+    setPendingFocusId(node.id);
+    if (!namedModel.stats.aggregated) {
+      if (communityDetail !== undefined) onBackToOverview?.();
+      setDerivedCommunityId(null);
+      setTrail([]);
+      setScope("symbols");
+      return true;
+    }
+    if (derivedOverview !== undefined && communityDetail === undefined) {
+      setScope("communities");
+      setDerivedCommunityId(node.community);
+      return true;
+    }
+    if (host.openCommunity) {
+      host.openCommunity(node.community);
+      return true;
+    }
     setPendingFocusId(null);
-  }, [viewKey]);
+    return false;
+  }, [communityDetail, derivedOverview, host, namedModel.stats.aggregated,
+    onBackToOverview, onClearSearchFilters]);
   return (
     <CompassGraphView
       key={viewKey}
@@ -421,6 +448,9 @@ export function CompassGraph({
       variantData={variantData}
       onVariantChange={setVariant}
       searchModel={showCommunityOverview ? namedModel : undefined}
+      searchIndex={searchIndex}
+      onOpenGlobalSearchResult={openGlobalSearchResult}
+      onSearchFocusApplied={() => setPendingFocusId(null)}
       scopeControls={hierarchy && communityDetail === undefined
         ? (
           <div
@@ -541,6 +571,9 @@ function CompassGraphView({
   variantData,
   onVariantChange,
   searchModel,
+  searchIndex,
+  onOpenGlobalSearchResult,
+  onSearchFocusApplied,
   scopeControls,
   onOpenCommunityFromSearch,
   autoLayoutDetail,
@@ -586,6 +619,9 @@ function CompassGraphView({
   variantData?: CommunityVariantData | undefined;
   onVariantChange(variant: CommunityVariant): void;
   searchModel?: GraphViewModel | undefined;
+  searchIndex?: GraphSearchIndex | undefined;
+  onOpenGlobalSearchResult?: ((node: GraphSearchNode) => boolean) | undefined;
+  onSearchFocusApplied?: (() => void) | undefined;
   scopeControls?: ReactNode;
   onOpenCommunityFromSearch?:
     ((communityId: number, nodeId: string) => void) | undefined;
@@ -626,6 +662,7 @@ function CompassGraphView({
       };
     }
   );
+  const [externalSelected, setExternalSelected] = useState<GraphSearchNode>();
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
@@ -660,10 +697,13 @@ function CompassGraphView({
     }
     return { neighborIds, edges };
   }, [model.edges]);
-  // The community overview searches every symbol in the repository, not only
-  // the communities on screen, so search stays the fastest way to reach code.
-  const searchNodes = searchModel?.nodes ?? model.nodes;
-  const searchIndex = useMemo(() => searchNodes.map((node) => ({
+  const searchNodes = useMemo(() => {
+    const global = searchIndex?.nodes ?? searchModel?.nodes;
+    if (!global) return model.nodes;
+    const ids = new Set(global.map((node) => node.id));
+    return [...model.nodes.filter((node) => !ids.has(node.id)), ...global];
+  }, [model.nodes, searchIndex?.nodes, searchModel?.nodes]);
+  const searchEntries = useMemo(() => searchNodes.map((node) => ({
     node,
     text: [node.label, node.source?.file, node.kind]
       .filter((value) => value !== undefined)
@@ -674,19 +714,19 @@ function CompassGraphView({
     () => visibleGraphEdges(model).length,
     [model]
   );
-  const selected = state.focusedNodeId
+  const selected = externalSelected ?? (state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
-    : undefined;
+    : undefined);
   // A bubble is a community, not a symbol: the inspector answers what the
   // community holds and how it couples instead of reporting a degree of zero.
   const selectedCommunity = useMemo(
-    () => selected
+    () => selected && !externalSelected
       ? communityFacts(hierarchy, model, selected, { communityKeyed })
       : undefined,
-    [communityKeyed, hierarchy, model, selected]
+    [communityKeyed, externalSelected, hierarchy, model, selected]
   );
   const selectedNeighborhood = useMemo(
-    () => selected
+    () => selected && !externalSelected
       ? graphNeighborhood(
         model,
         selected.id,
@@ -697,6 +737,7 @@ function CompassGraphView({
     [
       model,
       selected,
+      externalSelected,
       state.edgeDirection,
       state.neighborhoodDepth
     ]
@@ -739,18 +780,24 @@ function CompassGraphView({
     const query = deferredQuery.trim().toLocaleLowerCase();
     if (!query) return [];
     const found = [];
-    for (const entry of searchIndex) {
+    for (const entry of searchEntries) {
       if (entry.text.includes(query)) found.push(entry.node);
       if (found.length === 20) break;
     }
     return found;
-  }, [deferredQuery, searchIndex]);
+  }, [deferredQuery, searchEntries]);
 
   const focus = useCallback((nodeId: string) => {
+    setExternalSelected(undefined);
     setHover(null);
     setEdgeHover(null);
     dispatch({ type: "focus", nodeId });
   }, []);
+  useEffect(() => {
+    if (!initialFocusedNodeId || !nodeById.has(initialFocusedNodeId)) return;
+    focus(initialFocusedNodeId);
+    onSearchFocusApplied?.();
+  }, [focus, initialFocusedNodeId, nodeById, onSearchFocusApplied]);
   const openCommunity = useCallback((communityId: number) => {
     hostRef.current.openCommunity?.(communityId);
   }, []);
@@ -759,16 +806,25 @@ function CompassGraphView({
       focus(nodeId);
       return;
     }
+    const global = searchIndex?.nodes.find((node) => node.id === nodeId);
+    if (global) {
+      if (onOpenGlobalSearchResult?.(global)) return;
+      dispatch({ type: "clearFocus" });
+      setExternalSelected(global);
+      return;
+    }
     const target = searchModel?.nodes.find((node) => node.id === nodeId);
-    if (!target || !onOpenCommunityFromSearch) return;
-    onOpenCommunityFromSearch(target.community, target.id);
-  }, [focus, nodeById, onOpenCommunityFromSearch, searchModel]);
+    if (target && onOpenCommunityFromSearch) {
+      onOpenCommunityFromSearch(target.community, target.id);
+    }
+  }, [focus, nodeById, onOpenCommunityFromSearch, onOpenGlobalSearchResult, searchIndex, searchModel]);
   const pauseForInteraction = useCallback(() => {
     if (state.physicsRunning) {
       dispatch({ type: "setPhysics", running: false });
     }
   }, [state.physicsRunning]);
   const clear = useCallback(() => {
+    setExternalSelected(undefined);
     setHover(null);
     setEdgeHover(null);
     dispatch({ type: "clearFocus" });
@@ -782,6 +838,8 @@ function CompassGraphView({
         event.metaKey
         || event.ctrlKey
         || event.altKey
+        || toolbarLeadingOpen
+        || (event.key === "Escape" && document.querySelector(".compass-explore-panel"))
         || isEditableKeyboardTarget(event.target)
       ) return;
       const key = event.key.toLocaleLowerCase();
@@ -845,6 +903,7 @@ function CompassGraphView({
     selectedNeighborhood,
     state.edgeDirection,
     state.forceLabels,
+    toolbarLeadingOpen,
     state.isolateSelection,
     state.neighborhoodDepth,
     state.showEdgeLabels,
@@ -904,7 +963,9 @@ function CompassGraphView({
         ? " · press Layout to arrange"
         : ""}`
     : undefined;
-  const status = selected && state.isolateSelection && selectedNeighborhood
+  const status = externalSelected
+    ? `Found ${externalSelected.label} · outside preview`
+    : selected && state.isolateSelection && selectedNeighborhood
     ? `Isolated ${selectedNeighborhood.nodeIds.size} nodes · ${state.neighborhoodDepth} hop${state.neighborhoodDepth === 1 ? "" : "s"}`
     : selected
     ? `Inspecting ${selected.label}`
@@ -971,7 +1032,7 @@ function CompassGraphView({
           <VisNetworkCanvas
             ref={canvasRef}
             model={model}
-            focusedNodeId={selected?.id ?? null}
+            focusedNodeId={externalSelected ? null : selected?.id ?? null}
             hoveredNodeId={hover?.nodeId ?? null}
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
@@ -1052,7 +1113,7 @@ function CompassGraphView({
               layoutStyle={state.layoutStyle}
               forceLabels={state.forceLabels}
               showEdgeLabels={state.showEdgeLabels}
-              hasSelection={selected !== undefined}
+              hasSelection={selected !== undefined && externalSelected === undefined}
               isolateSelection={state.isolateSelection}
               neighborhoodDepth={state.neighborhoodDepth}
               edgeDirection={state.edgeDirection}
@@ -1078,6 +1139,7 @@ function CompassGraphView({
                         : option.value === "light"
                           ? <SunIcon aria-hidden="true" />
                           : <MoonIcon aria-hidden="true" />}
+                      <span>{option.label}</span>
                     </button>
                   ))}
                 </div>
@@ -1262,6 +1324,10 @@ function CompassGraphView({
         <GraphInspector
           model={model}
           selected={selected}
+          searchOnly={externalSelected !== undefined}
+          searchCoverage={searchIndex
+            ? { indexed: searchIndex.nodes.length, total: searchIndex.totalNodes }
+            : undefined}
           communityFacts={selectedCommunity}
           neighbors={neighbors}
           connectedEdges={connectedEdges}
@@ -1270,6 +1336,10 @@ function CompassGraphView({
           communityOrder={communityOrder}
           hiddenCommunities={state.hiddenCommunities}
           communityDrilldown={detailCommunityId !== undefined}
+          subgraphAvailable={hierarchy !== undefined
+            && selected !== undefined
+            && selectedCommunity?.level !== undefined
+            && descendModel(hierarchy, selectedCommunity.level, selected.community) !== undefined}
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}
@@ -1279,7 +1349,7 @@ function CompassGraphView({
           onFocus={focusSearchResult}
           onOpenSource={host.openSource}
           onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
-          searchSpansCommunities={searchModel ? true : undefined}
+          searchSpansCommunities={searchIndex || searchModel ? true : undefined}
           onQueryNode={host.queryNode}
           onToggleCommunity={(communityId) => dispatch({
             type: "toggleCommunity",

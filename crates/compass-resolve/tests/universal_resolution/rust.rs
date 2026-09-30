@@ -3123,3 +3123,269 @@ fn rust_wildcard_bindings_resolve_local_exports_and_preserve_external_candidates
             && edge.string("resolution_rule") == "qualified-external"
     }));
 }
+
+#[test]
+fn rust_shadowed_receivers_never_capture_an_outer_parameter() {
+    for (case, body) in [
+        ("unknown let", "{ let builder = factory(); builder.finish(); }"),
+        ("known let", "{ let builder: Actual = factory(); builder.finish(); }"),
+        ("loop", "for builder in builders { builder.finish(); }"),
+        ("closure", "builders.iter().for_each(|builder| builder.finish());"),
+        ("match arm", "match builders.first() { Some(builder) => builder.finish(), None => {} }"),
+        ("match guard", "match builders.first() { Some(builder) if { builder.finish(); true } => builder.finish(), _ => {} }"),
+        ("if let", "if let Some(builder) = builders.first() { builder.finish(); }"),
+        ("while let", "while let Some(builder) = builders.first() { builder.finish(); break; }"),
+        ("let chain", "if let Some(builder) = builders.first() && { builder.finish(); true } { builder.finish(); }"),
+        ("destructured let", "struct Wrap { builder: Actual } impl Wrap { fn finish(&self) {} } { let Wrap { builder } = Wrap { builder: factory() }; builder.finish(); }"),
+    ] {
+        let source = format!(
+            "struct Actual;\nimpl Actual {{ fn finish(&self) {{}} }}\n\
+             struct Decoy;\nimpl Decoy {{ fn finish(&self) {{}} }}\n\
+             fn factory() -> Actual {{ Actual }}\n\
+             fn run(builder: &Decoy, builders: &[Actual]) {{\n    {body}\n    builder.finish();\n}}\n"
+        );
+        let extracted = extract("src/lib.rs", source.as_bytes());
+        let evidence = extracted.semantic_evidence.as_ref().expect("Rust evidence");
+        assert_eq!(evidence.occurrences.iter().filter(|occurrence| {
+            occurrence.role == compass_languages::SemanticRole::Call
+                && occurrence.spelling == "finish"
+        }).count(), source.matches(".finish()").count(), "{case}: all source occurrences must remain visible");
+        let resolved = compass_resolve::resolve(
+            &[extracted], &HashMap::from([("src/lib.rs".to_owned(), source)]),
+        );
+        let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::run")
+            .expect("run declaration");
+        let decoy = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Decoy::finish")
+            .expect("Decoy method");
+        let calls = resolved.edges.iter().filter(|edge| {
+            edge.source == run.id && edge.target == decoy.id && edge.string("relation") == "calls"
+        }).collect::<Vec<_>>();
+        assert_eq!(calls.len(), 1, "{case}: only the unshadowed outer call may target Decoy: {calls:#?}");
+        assert_eq!(calls[0].string("source_location"), "L8", "{case}");
+        assert_eq!(calls[0].string("confidence"), "EXTRACTED", "{case}");
+        let actual = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Actual::finish")
+            .expect("Actual method");
+        for edge in resolved.edges.iter().filter(|edge| edge.source == run.id
+            && edge.string("relation") == "calls" && edge.string("source_location") == "L7") {
+            let target = resolved.nodes.iter().find(|node| node.id == edge.target).expect("call target");
+            if target.string("qualified_name").ends_with("::finish")
+                && target.attributes.get("placeholder").and_then(serde_json::Value::as_bool) != Some(true) {
+                assert_eq!(target.id, actual.id, "{case}: inner call must not target the container or outer receiver");
+            }
+        }
+        if case == "known let" {
+            assert!(resolved.edges.iter().any(|edge| edge.source == run.id
+                && edge.target == actual.id && edge.string("relation") == "calls"
+                && edge.string("source_location") == "L7"), "typed inner call must still resolve");
+        }
+    }
+}
+
+#[test]
+fn rust_result_vec_match_loop_preserves_source_proven_builder_calls() {
+    let source = br#"use std::io;
+struct CommandSet { commands: Vec<()> }
+struct CommandBuilder;
+struct Decoy;
+impl Decoy { fn finish(&self) {} }
+impl CommandBuilder {
+    fn new(_: &()) -> io::Result<Self> { Ok(Self) }
+    fn push(&mut self) {}
+    fn finish(&mut self) {}
+    fn exit_code(&self) {}
+}
+impl CommandSet {
+    fn execute_batch(&self, builder: &Decoy) {
+        let builders: io::Result<Vec<_>> = self.commands.iter()
+            .map(|command| CommandBuilder::new(command)).collect();
+        match builders {
+            Ok(mut builders) => {
+                for builder in &mut builders {
+                    builder.push();
+                    builder.finish();
+                }
+                builders.iter().map(|b| b.exit_code()).count();
+            }
+            Err(_) => {}
+        }
+        builder.finish();
+    }
+}
+"#;
+    let resolved = compass_resolve::resolve(
+        &[extract("src/lib.rs", source)],
+        &HashMap::from([(
+            "src/lib.rs".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::CommandSet::execute_batch")
+        .expect("source caller");
+    for (target_name, line) in [
+        ("crate::CommandBuilder::new", "L15"),
+        ("crate::CommandBuilder::push", "L19"),
+        ("crate::CommandBuilder::finish", "L20"),
+        ("crate::CommandBuilder::exit_code", "L22"),
+        ("crate::Decoy::finish", "L26"),
+    ] {
+        let target = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == target_name)
+            .expect("source target");
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.source == caller.id
+                && edge.target == target.id
+                && edge.string("relation") == "calls"
+                && edge.string("source_location") == line
+        }), "missing {line} -> {target_name}");
+    }
+    let decoy = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::Decoy::finish")
+        .expect("Decoy method");
+    assert_eq!(resolved.edges.iter().filter(|edge| {
+        edge.source == caller.id && edge.target == decoy.id && edge.string("relation") == "calls"
+    }).count(), 1, "the loop receiver must not inherit the outer Decoy binding");
+
+    let source = String::from_utf8(source.to_vec()).expect("source");
+    for (case, altered) in [
+        (
+            "custom Result alias",
+            source.replace("use std::io;", "mod io { pub type Result<T> = std::io::Result<T>; }"),
+        ),
+        (
+            "local Vec alias",
+            source.replace("use std::io;", "use std::io;\ntype Vec<T> = std::vec::Vec<T>;"),
+        ),
+        (
+            "different constructor return",
+            source.replace("io::Result<Self> { Ok(Self) }", "io::Result<Decoy> { Ok(Decoy) }"),
+        ),
+    ] {
+        let resolved = compass_resolve::resolve(
+            &[extract("src/lib.rs", altered.as_bytes())],
+            &HashMap::from([("src/lib.rs".to_owned(), altered)]),
+        );
+        let caller = resolved.nodes.iter().find(|node| {
+            node.string("qualified_name") == "crate::CommandSet::execute_batch"
+        }).expect("caller");
+        for edge in resolved.edges.iter().filter(|edge| {
+            edge.source == caller.id && edge.string("relation") == "calls"
+        }) {
+            let target = resolved.nodes.iter().find(|node| node.id == edge.target)
+                .expect("call target");
+            assert!(
+                !matches!(target.string("qualified_name").as_str(),
+                    "crate::CommandBuilder::push" | "crate::CommandBuilder::finish" | "crate::CommandBuilder::exit_code"),
+                "{case}: unsupported type chain invented a builder call: {edge:#?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rust_let_initializer_uses_the_previous_receiver_binding() {
+    let source = b"struct Actual;
+impl Actual { fn finish(&self) {} }
+struct Decoy;
+impl Decoy { fn replace(&self) -> Actual { Actual } }
+fn run(builder: &Decoy) {
+    let builder: Actual = builder.replace();
+    builder.finish();
+}
+
+";
+    let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source)],
+        &HashMap::from([("src/lib.rs".to_owned(), String::from_utf8(source.to_vec()).expect("source"))]));
+    for (target, site) in [("crate::Decoy::replace", "L6"), ("crate::Actual::finish", "L7")] {
+        let target = resolved.nodes.iter().find(|node| node.string("qualified_name") == target).expect("target");
+        assert!(resolved.edges.iter().any(|edge| edge.target == target.id
+            && edge.string("relation") == "calls" && edge.string("source_location") == site),
+            "missing {site} -> {}", target.string("qualified_name"));
+    }
+}
+
+#[test]
+fn rust_condition_binding_is_not_visible_in_else_or_afterward() {
+    let source = b"struct Actual;
+impl Actual { fn finish(&self) {} }
+struct Decoy;
+impl Decoy { fn finish(&self) {} }
+fn run(builder: &Decoy, builders: &[Actual]) {
+    if let Some(builder) = builders.first() { builder.finish(); }
+    else { builder.finish(); }
+    builder.finish();
+}
+";
+    let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source)],
+        &HashMap::from([("src/lib.rs".to_owned(), String::from_utf8(source.to_vec()).expect("source"))]));
+    let decoy = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Decoy::finish")
+        .expect("Decoy method");
+    let sites = resolved.edges.iter().filter(|edge| edge.target == decoy.id && edge.string("relation") == "calls")
+        .map(|edge| edge.string("source_location")).collect::<BTreeSet<_>>();
+    assert_eq!(sites, BTreeSet::from(["L7".to_owned(), "L8".to_owned()]));
+}
+
+#[test]
+fn rust_indexed_receivers_publish_exact_cross_file_calls_and_occurrences() {
+    let api_source = "pub struct Entry; impl Entry { pub fn close(&self) {} }";
+    let caller_source = "use crate::api::Entry; struct Store { entries: Vec<Entry>, cursor: usize } impl Store { fn close(&self) {} fn run(&self) { self.entries[self.cursor].close(); self.entries[0].close(); } }";
+    let sources = HashMap::from([
+        ("src/api.rs".to_owned(), api_source.to_owned()),
+        ("src/lib.rs".to_owned(), caller_source.to_owned()),
+    ]);
+    let extractions = vec![extract("src/api.rs", api_source.as_bytes()), extract("src/lib.rs", caller_source.as_bytes())];
+    let resolved = compass_resolve::resolve(&extractions, &sources);
+    let reversed = compass_resolve::resolve(&extractions.into_iter().rev().collect::<Vec<_>>(), &sources);
+    assert_eq!(universal_edges(&resolved), universal_edges(&reversed));
+    let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Store::run").expect("run");
+    let close = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::api::Entry::close").expect("Entry.close");
+    let calls = resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls").collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    let mut actual_ranges = Vec::new();
+    for call in calls {
+        assert_eq!(call.target, close.id, "{call:#?}");
+        assert_eq!(call.string("confidence"), "EXTRACTED");
+        assert!(call.string("extractor").contains(".universal"));
+        assert_ne!(call.string("resolution_rule"), "deferred-receiver");
+        let start = call.attributes["start_byte"].as_u64().expect("start") as usize;
+        let end = call.attributes["end_byte"].as_u64().expect("end") as usize;
+        actual_ranges.push(&caller_source[start..end]);
+    }
+    actual_ranges.sort();
+    assert_eq!(actual_ranges, ["self.entries[0].close", "self.entries[self.cursor].close"]);
+}
+
+#[test]
+fn rust_unsupported_index_receivers_never_capture_same_named_methods() {
+    for source in [
+        "struct Entry; impl Entry { fn close(&self) {} } struct Vec<T>(T); impl<T> Vec<T> { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[0].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } struct Custom<T>(T); struct Store { entries: Custom<Entry> } impl Store { fn close(&self) {} } fn run(store: &Store) { store.entries[0].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } fn run(entries: Vec<Entry>, n: Unknown) { entries[n].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[..].close(); }",
+        "struct Entry; trait A { fn close(&self); } trait B { fn close(&self); } impl A for Entry { fn close(&self) {} } impl B for Entry { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[0].close(); }",
+    ] {
+        let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source.as_bytes())], &HashMap::from([("src/lib.rs".to_owned(), source.to_owned())]));
+        let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::run").expect("run");
+        for call in resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls") {
+            assert_eq!(call.string("resolution_rule"), "deferred-receiver", "{source}\n{call:#?}");
+        }
+    }
+}
+
+#[test]
+fn rust_indexed_parameter_fields_never_bind_the_container_method() {
+    let source = "struct Entry; impl Entry { fn close(&self) {} } struct Store { entries: Vec<Entry> } impl Store { fn close(&self) {} } fn run(store: &Store) { store.entries[0].close(); }";
+    let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source.as_bytes())], &HashMap::from([("src/lib.rs".to_owned(), source.to_owned())]));
+    let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::run").expect("run");
+    let target = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Entry::close").expect("Entry.close");
+    let calls = resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls").collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].target, target.id);
+    assert_eq!(calls[0].string("confidence"), "EXTRACTED");
+}

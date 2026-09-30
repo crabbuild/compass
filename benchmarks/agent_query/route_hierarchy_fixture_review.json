@@ -1,0 +1,555 @@
+{
+  "schema": "compass.route-hierarchy-fixture-review/1",
+  "scope": "Post-output development audit prompted by the failed topology gate. This is source-reviewed negative containment evidence, not a community-quality improvement claim.",
+  "beforeBinarySha256": "bb09a5335c80fd7dd710e008b4a2f30f9403108e4883ed74e7d7c0de1b0aaca9",
+  "afterBinarySha256": "872aff05f6c1723d27ee96230a4e315d3f0d6e1849387de09530b907f0ff3f40",
+  "graphs": {
+    "before": "c5d0e63dda3dcec46c585bfc64906f43ea04edc0a5df05877294e8297b1d772c",
+    "after": "996ae5b52508a6b8b099624c0bb52163242d10e9a440a6d3a3a7203d3d2900d3"
+  },
+  "sourceSha256": {
+    "fixtures/code-graph/frontend-react/src/routes/home.tsx": "4905d3a651b6ffb5fc16ede3834347c39d72bd599b417badce1f8e4f92145958",
+    "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx": "ea80d53e9689be9076843e4c85cfeb340361ee2e08462f67646d80b80b7c0c30",
+    "fixtures/code-graph/routes/jvm/SpringController.java": "11746a0979e1a02c71bab0621abc81167fcdd0fc08088c48f00222c47d6c5600",
+    "fixtures/code-graph/routes/jvm/SpringController.kt": "79081d811f27f6e6aa74f8130d6c781f3b0ed8ffd51c2be8d1a392c7f3b1b476",
+    "fixtures/code-graph/routes/php/drupal.module": "f4c01c09e78cc2a8e9fd1829c205a734964c30c0dedbf6193e1093cb9c98a654",
+    "fixtures/code-graph/routes/php/drupal.routing.yml": "609d4ce746dea221f0e2c0afff22be8a8d2e543e154c8afd228f3bcbdf6ca695",
+    "fixtures/code-graph/routes/python/fastapi_app.py": "56a7e6e730b3bccff2563e66cc631291988d767ec4f043fa537d266ff6d87e48",
+    "fixtures/code-graph/routes/python/fastapi_models.py": "09e845b782994eb4992cb5767e8af08d9bf6b09ee83904a2f96257017a3d804e",
+    "fixtures/code-graph/routes/python/flask_app.py": "1325c547854844ec8611d4489e0c644a6f89d452dae5691cff406a28e0740bb8",
+    "fixtures/code-graph/routes/python/flask_factory.py": "572095732ceff610d219898b919fedfb67d874134063ad410c8966cd568fc044",
+    "fixtures/code-graph/routes/typescript/express.ts": "79b18f7ac9df4a132f3e4547e6bf91ffe0e28910734a869b1e4aa07ed0c370e6",
+    "fixtures/code-graph/routes/typescript/owner-mismatch.ts": "e46dc1f0521c371f9db8d21d6673be9f56b650ea5dda4c7272de8eba8b0f5a58",
+    "fixtures/code-graph/routes/typescript/vue-router-qualified.ts": "5bd4ea29588c89bac3a8457230ce678f8f8cb2d0c9a9e3bbf888d5e1501c9a62",
+    "fixtures/code-graph/routes/typescript/vue-router.ts": "0b08f76e6b175cdb80aa999af1429b7fad096e4997903862606ce5aae7949106"
+  },
+  "policyMethod": "For every existing bound, add exactly the observed metric change. Retain its previous margin; unchanged metrics and other relation thresholds remain unchanged. Add semantic negative assertions so restored false links cannot satisfy the adjusted floor.",
+  "policyChanges": [
+    {
+      "bound": "minimums",
+      "metric": "communities",
+      "previous": 225,
+      "updated": 232,
+      "observedBefore": 225,
+      "observedAfter": 232
+    },
+    {
+      "bound": "minimums",
+      "metric": "edges",
+      "previous": 1284,
+      "updated": 1265,
+      "observedBefore": 1289,
+      "observedAfter": 1270
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactCrossCommunityEdges",
+      "previous": 5,
+      "updated": 3,
+      "observedBefore": 5,
+      "observedAfter": 3
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactCrossFileEdges",
+      "previous": 81,
+      "updated": 62,
+      "observedBefore": 81,
+      "observedAfter": 62
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactCrossFileEdgesPerThousandNodes",
+      "previous": 63,
+      "updated": 48,
+      "observedBefore": 63,
+      "observedAfter": 48
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactEdgeBearingNodePermille",
+      "previous": 711,
+      "updated": 709,
+      "observedBefore": 712,
+      "observedAfter": 710
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactEdgeBearingNodes",
+      "previous": 908,
+      "updated": 905,
+      "observedBefore": 909,
+      "observedAfter": 906
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactEdges",
+      "previous": 965,
+      "updated": 946,
+      "observedBefore": 970,
+      "observedAfter": 951
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactUniqueTypedEndpointPairs",
+      "previous": 956,
+      "updated": 938,
+      "observedBefore": 961,
+      "observedAfter": 943
+    },
+    {
+      "bound": "minimums",
+      "metric": "exactUniqueTypedEndpointPairsPerThousandNodes",
+      "previous": 749,
+      "updated": 735,
+      "observedBefore": 753,
+      "observedAfter": 739
+    },
+    {
+      "bound": "minimums",
+      "metric": "uniqueTypedEndpointPairs",
+      "previous": 1261,
+      "updated": 1243,
+      "observedBefore": 1266,
+      "observedAfter": 1248
+    },
+    {
+      "bound": "maximums",
+      "metric": "communities",
+      "previous": 226,
+      "updated": 233,
+      "observedBefore": 225,
+      "observedAfter": 232
+    },
+    {
+      "bound": "maximums",
+      "metric": "connectedComponents",
+      "previous": 222,
+      "updated": 230,
+      "observedBefore": 221,
+      "observedAfter": 229
+    },
+    {
+      "bound": "maximums",
+      "metric": "exactConnectedComponents",
+      "previous": 496,
+      "updated": 504,
+      "observedBefore": 495,
+      "observedAfter": 503
+    },
+    {
+      "bound": "maximums",
+      "metric": "exactIsolatedNodes",
+      "previous": 368,
+      "updated": 371,
+      "observedBefore": 367,
+      "observedAfter": 370
+    },
+    {
+      "bound": "maximums",
+      "metric": "isolatedNodes",
+      "previous": 96,
+      "updated": 99,
+      "observedBefore": 95,
+      "observedAfter": 98
+    },
+    {
+      "bound": "maximums",
+      "metric": "singletonCommunities",
+      "previous": 96,
+      "updated": 99,
+      "observedBefore": 95,
+      "observedAfter": 98
+    },
+    {
+      "bound": "relationshipMinimums",
+      "relation": "contains",
+      "metric": "exactCrossFileEdges",
+      "previous": 31,
+      "updated": 12,
+      "observedBefore": 31,
+      "observedAfter": 12
+    },
+    {
+      "bound": "relationshipMinimums",
+      "relation": "contains",
+      "metric": "exactUniqueEndpointPairs",
+      "previous": 624,
+      "updated": 606,
+      "observedBefore": 624,
+      "observedAfter": 606
+    }
+  ],
+  "nodeCountBefore": 1276,
+  "nodeCountAfter": 1276,
+  "removedEdges": 19,
+  "addedEdges": 0,
+  "reviewedFilePairs": [
+    {
+      "id": "route-containment-independent-1",
+      "sourceFile": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+      "targetFile": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+      "reason": "The TanStack createFileRoute /tanstack and React Router /home belong to different route libraries. A shared source directory provides no cross-framework parentage."
+    },
+    {
+      "id": "route-containment-independent-2",
+      "sourceFile": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "targetFile": "fixtures/code-graph/routes/jvm/SpringController.java",
+      "reason": "Independent annotated controllers in different packages declare /kotlin and /api mappings. The Kotlin method is not a containing route for Java endpoints."
+    },
+    {
+      "id": "route-containment-independent-3",
+      "sourceFile": "fixtures/code-graph/routes/php/drupal.module",
+      "targetFile": "fixtures/code-graph/routes/php/drupal.routing.yml",
+      "reason": "The entity-type hook has an empty body. The YAML routes independently declare controllers and forms; the hook does not contain those routes."
+    },
+    {
+      "id": "route-containment-independent-4",
+      "sourceFile": "fixtures/code-graph/routes/python/fastapi_models.py",
+      "targetFile": "fixtures/code-graph/routes/python/fastapi_app.py",
+      "reason": "The modules instantiate separate FastAPI apps. The models app does not include the other app or its router."
+    },
+    {
+      "id": "route-containment-independent-5",
+      "sourceFile": "fixtures/code-graph/routes/python/flask_factory.py",
+      "targetFile": "fixtures/code-graph/routes/python/flask_app.py",
+      "reason": "The factory registers its own root and nested blueprints. flask_app.py creates a separate app and blueprint; no cross-module registration exists."
+    },
+    {
+      "id": "route-containment-independent-6",
+      "sourceFile": "fixtures/code-graph/routes/typescript/owner-mismatch.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/express.ts",
+      "reason": "Each module creates its own Express app; neither imports or mounts the other. A route with an unresolved controller is not a parent router."
+    },
+    {
+      "id": "route-containment-independent-7",
+      "sourceFile": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/vue-router.ts",
+      "reason": "Both modules independently call createRouter. Neither route array declares the other route as a child or imports the other router."
+    },
+    {
+      "id": "route-containment-independent-8",
+      "sourceFile": "fixtures/code-graph/routes/typescript/vue-router.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "reason": "Both modules independently call createRouter. Neither route array declares the other route as a child or imports the other router."
+    }
+  ],
+  "removed": [
+    {
+      "id": "sha256:8a24a3e1586a437473ae82f930dae6ca39fd32ecf9600c2f252093a54c19e963",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:31747cec456de803d757d886692e2e268de2569768044e867991b6ee5623f9a2",
+        "name": "HOOK /__hook/hook_entity_type_build",
+        "file": "fixtures/code-graph/routes/php/drupal.module"
+      },
+      "target": {
+        "id": "sha256:ef45dc219f80b02c7241e501baff59ad91c3ea88b14f4369ace1d5eaf242fe81",
+        "name": "GET /examples/{example}",
+        "file": "fixtures/code-graph/routes/php/drupal.routing.yml"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:f4756f9a911e5e71c17d8afd492f0cf927a64958bc7aa4cadbf68d9cea1c4e6c",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:31747cec456de803d757d886692e2e268de2569768044e867991b6ee5623f9a2",
+        "name": "HOOK /__hook/hook_entity_type_build",
+        "file": "fixtures/code-graph/routes/php/drupal.module"
+      },
+      "target": {
+        "id": "sha256:983cc129463868a1905a68b07bab0e9d241d54c2ddd0b0e23937f7c219dd69ec",
+        "name": "POST /examples/{example}",
+        "file": "fixtures/code-graph/routes/php/drupal.routing.yml"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:ed771045b510289c247ca9a4014b0c5ff353852cdab247e2ccbb9d1e78bd65d8",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:0a3207a7b24df9681cb70843ee162f7f951e83aeeb560ba0e42597f8891eacc0",
+        "name": "GET /owner-mismatch",
+        "file": "fixtures/code-graph/routes/typescript/owner-mismatch.ts"
+      },
+      "target": {
+        "id": "sha256:d3678457e1f85c5c94c5a58afd5dd1c9cf9160609b234f8c535af9425370fa48",
+        "name": "GET /health",
+        "file": "fixtures/code-graph/routes/typescript/express.ts"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:f7da8b41b916fb876f33b65605294eae6cdce75f117185cf402d54756b98f572",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:03b53164cd3261fbc51bc45b4a6c6d952cea02e26225fd800aa49bd27d50fe39",
+        "name": "GET /api/v2/nested/items",
+        "file": "fixtures/code-graph/routes/python/flask_factory.py"
+      },
+      "target": {
+        "id": "sha256:2aed25182cf7d59918c8654ab2c78658ddcd329b1e03f5e52b975b51ba902bf0",
+        "name": "GET /health",
+        "file": "fixtures/code-graph/routes/python/flask_app.py"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:0b72aec3ee7a3f4bb8b19ff97729ba7fdd350c68202f68034e6fdf967c2611b2",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:f5005321e07e17e404ea9bbba7343c4e60c7517cadc1592629a9c758ec86a85e",
+        "name": "POST /items",
+        "file": "fixtures/code-graph/routes/python/fastapi_models.py"
+      },
+      "target": {
+        "id": "sha256:5f9ae35d36f7dd16a8d4d763c3f88816f77fe02acf3ff012a22ba36e5cb04d33",
+        "name": "GET /health",
+        "file": "fixtures/code-graph/routes/python/fastapi_app.py"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:d521141583f6cbc6c6543a685548d1e672915d16397dd55fd7d576af92125664",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:0a3207a7b24df9681cb70843ee162f7f951e83aeeb560ba0e42597f8891eacc0",
+        "name": "GET /owner-mismatch",
+        "file": "fixtures/code-graph/routes/typescript/owner-mismatch.ts"
+      },
+      "target": {
+        "id": "sha256:9725a055491222dc007332daecf4b701d91fd5327a179c86b14e9bc0e737a47c",
+        "name": "GET /users/{userId}",
+        "file": "fixtures/code-graph/routes/typescript/express.ts"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:0d87337f8f6e94e7b18f40974b6ce5fec3d58ca087236337eaa6c2d18fa6091b",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:ad9386df4b43dc1f7852237db9c44e9eca9b86222d1bd11d595d8b66fd09a127",
+        "name": "PAGE /qualified-users/{userId}",
+        "file": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts"
+      },
+      "target": {
+        "id": "sha256:e9ef96b35cfb02ccfdb5eea2ac4165446687a320b400e5de3e15061fb381eb8e",
+        "name": "PAGE /users/{userId}",
+        "file": "fixtures/code-graph/routes/typescript/vue-router.ts"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:4a5ee04f212621f5d0d5ff45691b3f1fe8368bbeda6da51dc34adce9e6a2bcf0",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:31747cec456de803d757d886692e2e268de2569768044e867991b6ee5623f9a2",
+        "name": "HOOK /__hook/hook_entity_type_build",
+        "file": "fixtures/code-graph/routes/php/drupal.module"
+      },
+      "target": {
+        "id": "sha256:9c9289ce2a8c82c04b345c1f452fcfd6a2ae268684f33a7fc9d4c1b13754f7bc",
+        "name": "ANY /examples/create",
+        "file": "fixtures/code-graph/routes/php/drupal.routing.yml"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:2a520b3863453c75deee6b54ab5e5aeb3ca09d49bf7b3f705e9fcfb8a5854818",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:a9e69502554bfe653b41fe1185c4f6a448712e537b7fdbda5a6cf2a81f4787dd",
+        "name": "PAGE /tanstack",
+        "file": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx"
+      },
+      "target": {
+        "id": "sha256:59be83b2ff81ea880e357d9d6ccd937e9dec254c2024007b77965f689a1f9eac",
+        "name": "PAGE /home",
+        "file": "fixtures/code-graph/frontend-react/src/routes/home.tsx"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:9917b3186cbd1dc5b45e4f44446a668e0ab89796e304898b78861dfe04d4b25f",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:03b53164cd3261fbc51bc45b4a6c6d952cea02e26225fd800aa49bd27d50fe39",
+        "name": "GET /api/v2/nested/items",
+        "file": "fixtures/code-graph/routes/python/flask_factory.py"
+      },
+      "target": {
+        "id": "sha256:a1ae0c1a00d2a542debb4c568d0900dfc453655cdff2292af9ec2468d182a481",
+        "name": "PATCH /v2/api/users/<user_id>",
+        "file": "fixtures/code-graph/routes/python/flask_app.py"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:e5a10df87a64ab2084d736ba179ed87175c41f55f2f86e1c00cd2a7a46ece604",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:03b53164cd3261fbc51bc45b4a6c6d952cea02e26225fd800aa49bd27d50fe39",
+        "name": "GET /api/v2/nested/items",
+        "file": "fixtures/code-graph/routes/python/flask_factory.py"
+      },
+      "target": {
+        "id": "sha256:571a46cfb333dba3badf206a134af6845c6da92fa1f01e81ea1d1885853959d7",
+        "name": "GET /v2/api/users/<user_id>",
+        "file": "fixtures/code-graph/routes/python/flask_app.py"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:46d7c9131d4c77f4e67b141ea7d7fa4d8a46ec0c09814c4a1075a678c8cb78f4",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:e9ef96b35cfb02ccfdb5eea2ac4165446687a320b400e5de3e15061fb381eb8e",
+        "name": "PAGE /users/{userId}",
+        "file": "fixtures/code-graph/routes/typescript/vue-router.ts"
+      },
+      "target": {
+        "id": "sha256:ad9386df4b43dc1f7852237db9c44e9eca9b86222d1bd11d595d8b66fd09a127",
+        "name": "PAGE /qualified-users/{userId}",
+        "file": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:25335c228bf1e7ae398a3185da1cb9717a3af24b10a3c53c3fc39d92e13d148b",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:f5005321e07e17e404ea9bbba7343c4e60c7517cadc1592629a9c758ec86a85e",
+        "name": "POST /items",
+        "file": "fixtures/code-graph/routes/python/fastapi_models.py"
+      },
+      "target": {
+        "id": "sha256:97e97c6afc09c04d4cbdd9e2ccfd59960853d42b5b727f2a66bb7792b766da6e",
+        "name": "POST /api/v1/users",
+        "file": "fixtures/code-graph/routes/python/fastapi_app.py"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:7291c23bc98246fd89978abd495625a22b141c6a878fa19ef55b060a5e229546",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:0a3207a7b24df9681cb70843ee162f7f951e83aeeb560ba0e42597f8891eacc0",
+        "name": "GET /owner-mismatch",
+        "file": "fixtures/code-graph/routes/typescript/owner-mismatch.ts"
+      },
+      "target": {
+        "id": "sha256:6dec9ec30252fed6272d1ec2500ce7f821bd3c882e42f0ebeef763c73dcda24c",
+        "name": "GET /inline",
+        "file": "fixtures/code-graph/routes/typescript/express.ts"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:9c0c7c7d6f16dd92e67e1b6a9b2d776d3f62632ceb9637605e70c1ad76dc08dc",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:31747cec456de803d757d886692e2e268de2569768044e867991b6ee5623f9a2",
+        "name": "HOOK /__hook/hook_entity_type_build",
+        "file": "fixtures/code-graph/routes/php/drupal.module"
+      },
+      "target": {
+        "id": "sha256:842f5ecf5ecdd18d4f5e6be3bb562b9930a541f6f1664eeabcc1eda94ac3a068",
+        "name": "ANY /examples/{example}/edit",
+        "file": "fixtures/code-graph/routes/php/drupal.routing.yml"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:c1a5582dc295b28dad519dceb9b12124e4607f5c372d3c84fa4a4f5c4d169e1c",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:5a135bd0dce2b32b9893e4e454069aad0a7d673dfd8352b5762ce60a30aa7f68",
+        "name": "GET /kotlin/users/{id}",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.kt"
+      },
+      "target": {
+        "id": "sha256:d5eb9743f89a117f10c3b05b70d04e113f49716297269172538bed063779d3ee",
+        "name": "GET /api/users/{id}",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.java"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:3bb04f97c57f0b1e72ff67e66c0fd11c1f4865c209e2fdf88ec5d85275acac29",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:5a135bd0dce2b32b9893e4e454069aad0a7d673dfd8352b5762ce60a30aa7f68",
+        "name": "GET /kotlin/users/{id}",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.kt"
+      },
+      "target": {
+        "id": "sha256:48fe0e2047b3271abf3c55299e0892712c5e60d3991ed2ce39eabda335bdbcbf",
+        "name": "POST /api/users",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.java"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:42aae14c6e91598ff3f885035583e8c91f12d0a670f90962a9b389d37e4c4e75",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:5a135bd0dce2b32b9893e4e454069aad0a7d673dfd8352b5762ce60a30aa7f68",
+        "name": "GET /kotlin/users/{id}",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.kt"
+      },
+      "target": {
+        "id": "sha256:3f9b66f884632cdbdd79e3fe407331dc72e9a0c3d412a32ae86b1004ca193bba",
+        "name": "GET /api/search",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.java"
+      },
+      "rule": "framework-route-hierarchy"
+    },
+    {
+      "id": "sha256:8b5755396dd447c253358de8f724c098c181f00b741a21118e5ac594536266d2",
+      "kind": "contains",
+      "source": {
+        "id": "sha256:5a135bd0dce2b32b9893e4e454069aad0a7d673dfd8352b5762ce60a30aa7f68",
+        "name": "GET /kotlin/users/{id}",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.kt"
+      },
+      "target": {
+        "id": "sha256:b651ac57625fe598aba29f95645bf2289ef559e6d9bd15fa79e0eda464ad1aac",
+        "name": "POST /api/search",
+        "file": "fixtures/code-graph/routes/jvm/SpringController.java"
+      },
+      "rule": "framework-route-hierarchy"
+    }
+  ],
+  "verification": {
+    "nodesUnchangedExceptCommunity": true,
+    "fixtureSourceHashesMatch": true,
+    "beforeNegativeGroupsRejected": 8,
+    "afterNegativeGroupsPassed": 7,
+    "afterNegativeGroupsFailed": 1,
+    "syntheticOracleMutationRestorationsRejected": 20,
+    "fullGate": "FAILED at the original topology floor. After recalibration, direct semantic qualification still FAILS at the new independent-route negative. No full rerun is claimed.",
+    "scriptTestsPassed": 87,
+    "benchmarkTestsPassed": 97,
+    "binaryHashesVerified": true
+  },
+  "remainingDefect": {
+    "edgeId": "sha256:be0806a621daff555e8e36c37ba605edfbf50402e8d893ab6360c06feb84182c",
+    "sourceFile": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+    "sourceQualifiedName": "react-router::PAGE::/tanstack",
+    "targetFile": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+    "targetQualifiedName": "react-router::PAGE::/home",
+    "reason": "The two flat route modules are siblings. No source declaration makes /tanstack a parent of /home. The convention route is selected by first-other-file directory order, then a ghost endpoint is remapped to the AST route.",
+    "oracleLimitation": "scripts/react_frontend_source_oracle.mjs routeParent also chooses the first other module in the directory. Agreement with that oracle cannot independently validate this hierarchy.",
+    "nextAction": "Replace first-file parent selection with source-proven framework-specific parent semantics and independently specified positive/negative fixtures. Keep this semantic gate failing until production removes the unsupported link."
+  },
+  "artifactSha256": {
+    "route-hierarchy-qualification-01.log": "fb880d5c10aca15aaff2762d35cc09a70f3c362aaf8bd428f8b27454eedea74f",
+    "route-hierarchy-fixture-delta/delta.json": "b98afa7cc1da425f212385908b70bcdc4cce1afe1a915df973081d43575915e5",
+    "route-hierarchy-fixture-delta/negative-mutation-review.json": "256513d62837ed8732c85eb616c0c1b473270eeb974c16862cfbf1130bd70f6c",
+    "route-hierarchy-scripts-tests-02.log": "b28b3dfe94e84e839b1fcb95551d01fe25e4a5e08eaa47b050d8fabad308d4c0",
+    "route-hierarchy-benchmark-tests-03.log": "5be8ffa2d27722ed8412725739af389097cb2feaad59fa212f1dc1a41f0a06ea",
+    "route-hierarchy-fixture-delta/semantic-after.capture.json": "35530c742eb9587126ea5bfb452c355294314579d6b9b67e334256bd779c8fb5",
+    "route-hierarchy-fixture-delta/topology-after.json": "c856007a49d188476c316ca8a4fab5a4a383cd0dee4290a47725b0c97c13d12c"
+  }
+}

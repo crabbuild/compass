@@ -1,0 +1,552 @@
+{
+  "all55JoinCounts": {
+    "0": 7,
+    "1": 48
+  },
+  "all55Samples": [
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "apache/cloudstack",
+      "sampleId": 8491397
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 2513,
+      "repository": "apache/cloudstack",
+      "sampleId": 8494605
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 2362,
+      "repository": "apache/cloudstack",
+      "sampleId": 8497585
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "apache/cloudstack",
+      "sampleId": 8497687
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4408,
+      "repository": "apache/cloudstack",
+      "sampleId": 8501968
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 1099,
+      "repository": "apache/cloudstack",
+      "sampleId": 8501970
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 2828,
+      "repository": "apache/cloudstack",
+      "sampleId": 8502684
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 541,
+      "repository": "apache/cloudstack",
+      "sampleId": 8507718
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 3863,
+      "repository": "apache/cloudstack",
+      "sampleId": 8510347
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "apache/cloudstack",
+      "sampleId": 8511088
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 2079,
+      "repository": "apache/cloudstack",
+      "sampleId": 8514954
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 599,
+      "repository": "apache/cloudstack",
+      "sampleId": 8515776
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 1833,
+      "repository": "apache/cloudstack",
+      "sampleId": 8516029
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 5960,
+      "repository": "apache/cloudstack",
+      "sampleId": 8517396
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "apache/cloudstack",
+      "sampleId": 8522716
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4261,
+      "repository": "apache/cloudstack",
+      "sampleId": 8526483
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 952,
+      "repository": "apache/cloudstack",
+      "sampleId": 8526485
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 131,
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4583,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533230
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 1269,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533645
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4019,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533750
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 5465,
+      "repository": "apache/cloudstack",
+      "sampleId": 8533873
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 4333,
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 411,
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 3566,
+      "repository": "apache/cloudstack",
+      "sampleId": 8539540
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 5692,
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 2973,
+      "repository": "apache/cloudstack",
+      "sampleId": 8541418
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 1055,
+      "repository": "apache/cloudstack",
+      "sampleId": 8547261
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6369779
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 1634,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6371049
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 2887,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6372633
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 426,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4119,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6375252
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 781,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6375517
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 20,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6379553
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 2719,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6383930
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 1395,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6385711
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6387077
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4437,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6387249
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 5642,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6388458
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 3903,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4558,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6393486
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 3115,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6398820
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4231,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6404028
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 3532,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 1685,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6412439
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 3644,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413248
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 714,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 3413,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6414719
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 5978,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6416620
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 4254,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6424656
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "rank": null,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6424683
+    },
+    {
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "rank": 5055,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6425142
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 6423,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6427227
+    },
+    {
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "rank": 2127,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6428158
+    }
+  ],
+  "correctedRunSha256": "53d2fa3132740f8c611a9469345515a2c64447202c91118f741c15ce9d78c71f",
+  "firstFailedRunSha256": "869ee2a6624c539b618d0e5afd9ef65ad9e74dab90fb023df2ea02d0d5aa05a5",
+  "graphs": [
+    {
+      "admissibleClassCount": 6373,
+      "classNodesWithoutAdmissibleSpan": 0,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "repository": "apache/cloudstack",
+      "sourceNodeCount": 173689
+    },
+    {
+      "admissibleClassCount": 6628,
+      "classNodesWithoutAdmissibleSpan": 0,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "repository": "eclipse/eclipse.platform.ui",
+      "sourceNodeCount": 95084
+    }
+  ],
+  "limitations": [
+    "All four consensus-positive class spans rank below the top 100; source size alone fails this known development retrieval check.",
+    "All four consensus-none classes also rank below the top 100. This does not estimate false-positive rate because most ranked classes have no consensus label.",
+    "Seven secondary classes have no exact class-node join under the preregistered file/name/span rule and remain unavailable; no nearest or alternate identity was chosen.",
+    "Known purposively selected Java ratings cannot establish independent accuracy, population prevalence or cross-language god-object detection.",
+    "Source span is not cohesion, independent responsibility, coupling or a justified defect diagnosis. Do not promote it to the product as a classifier from this result.",
+    "CloudStack and Eclipse use different preserved Compass graph producer versions. CloudStack has a recorded partial-graph warning, and the frozen Graphify CloudStack extraction omitted 119 SQL files. No fresh extraction or Graphify execution was made.",
+    "The first bounded scanner failed because the node array followed more than one MiB of graph metadata; its failure is retained. The corrected scanner changed only how the declared graph was read, not the registered ranking or labels."
+  ],
+  "primaryCases": [
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 131,
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 4333,
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 411,
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 5692,
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 426,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 3903,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534
+    },
+    {
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "rank": 3532,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "rank": 714,
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795
+    }
+  ],
+  "primaryCutoffs": {
+    "10": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "100": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    },
+    "50": {
+      "unanimous-major-critical": 0,
+      "unanimous-none": 0
+    }
+  },
+  "priorNativeReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "registrationSha256": "010bec3332f31a151ce7925d66cf8216315e20c340fd0bfb5e58ec861d029df9",
+  "repeatedVerificationByteEqual": true,
+  "schema": "compass.mlcq-class-span-probe-review/1",
+  "scope": "Preregistered, exploratory full-class source-span ranking on two frozen Compass graphs. No product change or Graphify rerun.",
+  "unchangedNativeHubControl": {
+    "compass": {
+      "10": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      },
+      "100": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      },
+      "50": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      }
+    },
+    "graphify": {
+      "10": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      },
+      "100": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      },
+      "50": {
+        "unanimous-major-critical": {
+          "not-returned": 4
+        },
+        "unanimous-none": {
+          "not-returned": 4
+        }
+      }
+    }
+  },
+  "verificationSha256": "f2309132af6199c20ac7425ea76c1f4054b4a1f180c1c8e7cd26b5bb995b6daf"
+}

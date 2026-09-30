@@ -821,7 +821,7 @@ fn build_guard_publishes_one_complete_snapshot_at_a_time() -> Result<(), Box<dyn
 fn build_guard_publishes_atomic_artifacts_without_resealing_them() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let guard = BuildGuard::begin(directory.path())?;
-    write_text_atomic(&guard.staging_directory().join("graph.json"), "graph")?;
+    write_text_atomic(guard.staging_directory().join("graph.json"), "graph")?;
     guard.commit_with_presealed_artifacts(&["graph.json"])?;
     assert_eq!(
         fs::read_to_string(BuildGuard::resolve_artifact(
@@ -985,6 +985,43 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
         cache_root.join("compass-out/cache/ast/v0.9.21/stale.json"),
         "{}",
     )?;
+    // Version 2 can contain calls attributed to a shadowed outer Rust
+    // receiver. Those facts must not survive the semantics correction.
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v2/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v3/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v5/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v7/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v8/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v9/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v10/e1"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v10/e1/stale.msgpack"),
+        "Rust facts without source-proven Result vector receiver flow",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v9/e1/stale.msgpack"),
+        "Java facts without enum contacts and constant-body ownership",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v8/e1/stale.msgpack"),
+        "Java facts without lexical field-access occurrences",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v7/e1/stale.msgpack"),
+        "Rust facts without field-access occurrences",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v5/e1/stale.msgpack"),
+        "stale Java spread parameter and array argument facts",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v3/e1/stale.msgpack"),
+        "stale Go receiver facts",
+    )?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v2/e1/stale.msgpack"),
+        "stale",
+    )?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/vold"))?;
     fs::write(
         cache_root.join("compass-out/cache/ast/vold/stale.json"),
@@ -1012,6 +1049,15 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
             ))
     );
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v2").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v3").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v5").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v7").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v8").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v9").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v10").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v11").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v12").exists());
 
     let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(

@@ -1,0 +1,8 @@
+{
+  "files": {
+    "BindingFixture.java": "3c6af5eee01529024a68fa9822cf882d60791b860eb164e180329c8e2eb1f19b"
+  },
+  "captureSha256": "be9b847db2aa9a8a298c9fe2c91453250e3c8b2d8ba89dbca87c787e6f5f7967",
+  "toolSha256": "0616d29730f77fc33a313e5c3280d6905c5435433f8e52ac4250ce2a8124e9d6",
+  "compilerRuntime": "17.0.8.1+8-LTS"
+}

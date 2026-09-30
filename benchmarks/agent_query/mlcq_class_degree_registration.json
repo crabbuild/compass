@@ -1,0 +1,203 @@
+{
+  "cases": [
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse"
+      ],
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795,
+      "tool": "compass"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-none",
+      "graphIds": [
+        "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137,
+      "tool": "graphify"
+    },
+    {
+      "classification": "unanimous-major-critical",
+      "graphIds": [
+        "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto"
+      ],
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795,
+      "tool": "graphify"
+    }
+  ],
+  "disclosure": "The eight external ratings and previous native hub misses were inspected before this registration. This is known-data exploration, not held-out testing or classifier validation.",
+  "graphByteLimit": 1073741824,
+  "graphs": [
+    {
+      "graphBytes": 671502979,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "repository": "apache/cloudstack",
+      "tool": "compass"
+    },
+    {
+      "graphBytes": 227334534,
+      "graphSha256": "8ef3ace655bb60a001851e911737b7995d7da081b04459441b02ab6b68242f72",
+      "repository": "apache/cloudstack",
+      "tool": "graphify"
+    },
+    {
+      "graphBytes": 477211091,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "compass"
+    },
+    {
+      "graphBytes": 189557807,
+      "graphSha256": "cfdc1f9f8db069df24854f5a0786d8777a9daa2e33615ed44ae39e1189b1cdef",
+      "repository": "eclipse/eclipse.platform.ui",
+      "tool": "graphify"
+    }
+  ],
+  "limitations": [
+    "The two extracted graphs have different coverage and producer versions; this isolates neither extraction nor ranking quality.",
+    "The primary panel is purposively enriched, contains a positive-rated test class, and is too small for population precision.",
+    "Degree and class type are not source-verified responsibility, cohesion, or god-object severity.",
+    "A better class-only retrieval count would not justify a classifier or broad superiority claim."
+  ],
+  "maxClassCandidates": 100000,
+  "maxEdges": 2000000,
+  "maxNodes": 1000000,
+  "maxSecondsPerGraph": 300,
+  "method": {
+    "compassPool": "Node kind exactly class, with a nonempty source.file and positive integer source.startLine.",
+    "cutoffs": [
+      10,
+      50,
+      100
+    ],
+    "degree": "Count distinct stored (source,target) endpoint pairs. Each pair contributes one to each endpoint, including two to a self-loop, matching the previously audited native directed-degree convention. Ignore parallel edge records for this ranking.",
+    "graphifyPool": "Node _callable_class exactly true, with a nonempty source_file and source_location matching L followed by a positive decimal line.",
+    "identity": "Use only exact graph IDs already verified for the eight primary source classes by the prior release follow-up; recheck each ID exists uniquely and qualifies for the pool. No label guessing.",
+    "order": "Descending degree, then ascending exact node ID. Do not exclude test or generated classes or tune a weight or threshold.",
+    "output": "Retain pool sizes, graph counts, full primary ranks/degrees, retrieved positive and none counts by cutoff, tool differences and all unavailable/error conditions. Native public god_nodes results stay separate."
+  },
+  "priorInputsSha256": "663beb33e986c695ec4a6ae8864651f9838baa4c0d183a2da021d8d3197b951e",
+  "priorReleaseReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "purpose": "Development diagnostic: apply a common class-only distinct endpoint-pair degree ranking to both frozen Java graphs, before considering any new Compass ranking option. Neither tool exposes this exact filter in the registered native god_nodes control.",
+  "schema": "compass.mlcq-class-degree-registration/1"
+}

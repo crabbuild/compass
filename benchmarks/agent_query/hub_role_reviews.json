@@ -1,0 +1,1099 @@
+{
+  "schema": "compass.hub-source-review/1",
+  "scope": "Post-output source-role census of the original fifty returned MCP hubs per tool. Manually reviewed roles describe declarations/containers, not cohesion or god-object defects; unresolved display identities stay unknown. Different returned sets prohibit a shared precision score.",
+  "roles": {
+    "type": "Production type declaration, including class, struct, alias, interface, and public testing API types.",
+    "callable": "Production function or method.",
+    "test-helper": "Callable used by repository tests.",
+    "test-type": "Test suite class.",
+    "source-module": "Whole source-file module container.",
+    "test-module": "Whole test-file module container.",
+    "example-callable": "Function in an example application.",
+    "benchmark-callable": "Benchmark support function.",
+    "generic-implementation": "Implementation block whose target is its own generic parameter.",
+    "trait-implementation": "Trait implementation block, not a new type declaration."
+  },
+  "inputRunSha256": "b92037e13a0e4300e7981e71e31cb34c109cf6318c9ca33ef74c6eeb7f046889",
+  "sources": [
+    {
+      "repository": "cobra",
+      "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "compassGraphSha256": "6f862024bd68b88b734a43421a21cc2074a94ab7d68cc8857d59609112c9c7db",
+      "graphifyGraphSha256": "218aa21e02fad4506206c34acfc6d9ff58a2a0052615d92e4377c74bf977a937"
+    },
+    {
+      "repository": "flask",
+      "commit": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+      "compassGraphSha256": "227fe2d1f74cf835caa3ec15897f05544832fbf7f394e1c02e5134101a07c3ad",
+      "graphifyGraphSha256": "ca35435af286c5c565fc66f55de569c2e3235f75c902182290ee15603ff103cc"
+    },
+    {
+      "repository": "gson",
+      "commit": "15ca7360379cf3c1502b59981569050489f2d73e",
+      "compassGraphSha256": "5856ddc99ec4025c9e36d128783e6e7393f45af76f617caa38fd6938aca23ea7",
+      "graphifyGraphSha256": "92471ab8f5bb5d34aedddd2263fa24a43ae4ed31b34d06c8d433fe0f0dada447"
+    },
+    {
+      "repository": "zod",
+      "commit": "d2b135cfb7a3582b9eb515756b9166bcb9521f4a",
+      "compassGraphSha256": "e33192de01f403cfde6c0030ba219c8e24fd26b561b984b6b710a46b3cc981e8",
+      "graphifyGraphSha256": "c0f6d021616326da6b7daf5105b3b996c0bb4ba17c0bf54a062f2e692147b01a"
+    },
+    {
+      "repository": "axum",
+      "commit": "af1345b53a259b0990be1ff853f9b56c05040ef7",
+      "compassGraphSha256": "2cc12d5060c83389c077e4eade892991fa8f7021b59d8f6f1dc98c14c2109812",
+      "graphifyGraphSha256": "6ed791a771190e98ba2905e08480a9fa6ed733f46d56212ae3a4c90018d79b52"
+    }
+  ],
+  "reviews": [
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 1,
+      "role": "type",
+      "id": "sha256:697caebc2e9b08da3f310e1054e66318c27899d93c59f22ceb9c3eafe56e6bf1",
+      "file": "command.go",
+      "line": 54,
+      "sourceText": "type Command struct {\n\t// Use is the one-line usage message.\n\t// Recommended syntax is as follows:\n\t//   [ ] identifies an optional argument. Arguments that are not enclosed in brackets are required.",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 2,
+      "role": "test-helper",
+      "id": "sha256:65d81c33651a9df51b41c907a161e2657c76cb30b22149638c54940353e420df",
+      "file": "command_test.go",
+      "line": 32,
+      "sourceText": "func executeCommand(root *Command, args ...string) (output string, err error) {\n\t_, output, err = executeCommandC(root, args...)\n\treturn output, err\n}",
+      "sourceFileSha256": "710a689a1512af3ca376a0aaaa2c0b77d10ea174f7e27db85c2f2316a087d0f3"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 3,
+      "role": "callable",
+      "id": "sha256:158d70a6b4febb5205ba5b2a13ee8f6f421942b66caa59ab479bf5b648f87819",
+      "file": "command.go",
+      "line": 1342,
+      "sourceText": "func (c *Command) AddCommand(cmds ...*Command) {\n\tfor i, x := range cmds {\n\t\tif cmds[i] == c {\n\t\t\tpanic(\"Command can't be a child of itself\")",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 4,
+      "role": "callable",
+      "id": "sha256:63fbc5cb0c7c405f776df1f05df085d1ab154255d84d03445818b33850cb2477",
+      "file": "command.go",
+      "line": 1688,
+      "sourceText": "func (c *Command) Flags() *flag.FlagSet {\n\tif c.flags == nil {\n\t\tc.flags = flag.NewFlagSet(c.DisplayName(), flag.ContinueOnError)\n\t\tif c.flagErrorBuf == nil {",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 5,
+      "role": "test-helper",
+      "id": "sha256:0dd5fd58be0e00f763db58bd16189e0f9624ced373517133c92e04876c19642b",
+      "file": "args_test.go",
+      "line": 23,
+      "sourceText": "func getCommand(args PositionalArgs, withValid bool) *Command {\n\tc := &Command{\n\t\tUse:  \"c\",\n\t\tArgs: args,",
+      "sourceFileSha256": "37058f718eb5ffc7d70f917d694c04aa11fc39ba32ad8d1db9766e9d8eb009ae"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 6,
+      "role": "test-helper",
+      "id": "sha256:acfa353e8d2a1aa41d298243a03683ef41d5b8dfb2a38ff65b0b0d3b29ea6656",
+      "file": "command_test.go",
+      "line": 74,
+      "sourceText": "func checkStringContains(t *testing.T, got, expected string) {\n\tif !strings.Contains(got, expected) {\n\t\tt.Errorf(\"Expected to contain: \\n %v\\nGot:\\n %v\\n\", expected, got)\n\t}",
+      "sourceFileSha256": "710a689a1512af3ca376a0aaaa2c0b77d10ea174f7e27db85c2f2316a087d0f3"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 7,
+      "role": "callable",
+      "id": "sha256:992b92738e6eb358b0541f388d99cae179b9ad61118a3cb07ef768e10fe82084",
+      "file": "command.go",
+      "line": 1541,
+      "sourceText": "func (c *Command) Name() string {\n\tname := c.Use\n\ti := strings.Index(name, \" \")\n\tif i >= 0 {",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 8,
+      "role": "callable",
+      "id": "sha256:3de7fbfb848d67edf0c0628b363cd3f581648e801a6fa3145fba80f7e6ee086c",
+      "file": "command.go",
+      "line": 1775,
+      "sourceText": "func (c *Command) PersistentFlags() *flag.FlagSet {\n\tif c.pflags == nil {\n\t\tc.pflags = flag.NewFlagSet(c.DisplayName(), flag.ContinueOnError)\n\t\tif c.flagErrorBuf == nil {",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 9,
+      "role": "type",
+      "id": "sha256:6432407b3f9310e3adc201a8d8f3fae8aac5b8e20100a2dc20ed7d60178aad93",
+      "file": "completions.go",
+      "line": 45,
+      "sourceText": "type ShellCompDirective int\n\ntype flagCompError struct {\n\tsubCommand string",
+      "sourceFileSha256": "b28a4f6c509acde7367323e835cfb4f4939fe656dd3214320d76f53e91743c89"
+    },
+    {
+      "repository": "cobra",
+      "tool": "compass",
+      "rank": 10,
+      "role": "test-helper",
+      "id": "sha256:e8ccb6d6f925b6b6b7d4c2e695e22c4347403a5aab92d20cc6ae14b57e8457fd",
+      "file": "cobra_test.go",
+      "line": 27,
+      "sourceText": "func assertNoErr(t *testing.T, e error) {\n\tif e != nil {\n\t\tt.Error(e)\n\t}",
+      "sourceFileSha256": "bb9a5a989701f8df0d8797ceb0365ce3076052fcaa190aa8989b3b479bff6e09"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 1,
+      "role": "test-helper",
+      "id": "command_test_executecommand",
+      "file": "command_test.go",
+      "line": 32,
+      "sourceText": "func executeCommand(root *Command, args ...string) (output string, err error) {\n\t_, output, err = executeCommandC(root, args...)\n\treturn output, err\n}",
+      "sourceFileSha256": "710a689a1512af3ca376a0aaaa2c0b77d10ea174f7e27db85c2f2316a087d0f3"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 2,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 3,
+      "role": "test-helper",
+      "id": "args_test_getcommand",
+      "file": "args_test.go",
+      "line": 23,
+      "sourceText": "func getCommand(args PositionalArgs, withValid bool) *Command {\n\tc := &Command{\n\t\tUse:  \"c\",\n\t\tArgs: args,",
+      "sourceFileSha256": "37058f718eb5ffc7d70f917d694c04aa11fc39ba32ad8d1db9766e9d8eb009ae"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 4,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 5,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 6,
+      "role": "callable",
+      "id": "cobra_writestringandcheck",
+      "file": "cobra.go",
+      "line": 243,
+      "sourceText": "func WriteStringAndCheck(b io.StringWriter, s string) {\n\t_, err := b.WriteString(s)\n\tCheckErr(err)\n}",
+      "sourceFileSha256": "aae7502e789e42469bcb2fc110af87fd02451d3b509c5b0bed782ada17338c5f"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 7,
+      "role": "callable",
+      "id": "command_defaultusagefunc",
+      "file": "command.go",
+      "line": 1974,
+      "sourceText": "func defaultUsageFunc(w io.Writer, in interface{}) error {\n\tc := in.(*Command)\n\tfmt.Fprint(w, \"Usage:\")\n\tif c.Runnable() {",
+      "sourceFileSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 8,
+      "role": "test-helper",
+      "id": "args_test_expectsuccess",
+      "file": "args_test.go",
+      "line": 35,
+      "sourceText": "func expectSuccess(output string, err error, t *testing.T) {\n\tif output != \"\" {\n\t\tt.Errorf(\"Unexpected output: %v\", output)\n\t}",
+      "sourceFileSha256": "37058f718eb5ffc7d70f917d694c04aa11fc39ba32ad8d1db9766e9d8eb009ae"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 9,
+      "role": "callable",
+      "id": "args_exactargs",
+      "file": "args.go",
+      "line": 107,
+      "sourceText": "func ExactArgs(n int) PositionalArgs {\n\treturn func(cmd *Command, args []string) error {\n\t\tif len(args) != n {\n\t\t\treturn fmt.Errorf(\"accepts %d arg(s), received %d\", n, len(args))",
+      "sourceFileSha256": "15b870d1e8a0a10341675ddee8e20bef92a21883257b6b3b11110944a573a2e7"
+    },
+    {
+      "repository": "cobra",
+      "tool": "graphify",
+      "rank": 10,
+      "role": "test-helper",
+      "id": "bash_completions_test_check",
+      "file": "bash_completions_test.go",
+      "line": 33,
+      "sourceText": "func check(t *testing.T, found, expected string) {\n\tif !strings.Contains(found, expected) {\n\t\tt.Errorf(\"Expecting to contain: \\n %q\\nGot:\\n %q\\n\", expected, found)\n\t}",
+      "sourceFileSha256": "7bb8b9de6c45ba25595ca21feadea339be1851734ad26c750d3beaf715451e20"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 1,
+      "role": "type",
+      "id": "sha256:b9fa348bcd3398661d65066e09c6d664db2f69dabf5c8bb7c9f2db7e7d91f837",
+      "file": "src/flask/app.py",
+      "line": 110,
+      "sourceText": "class Flask(App):\n    \"\"\"The flask object implements a WSGI application and acts as the central\n    object.  It is passed the name of the module or package of the\n    application.  Once it is created it will act as a central registry for",
+      "sourceFileSha256": "975de70f74626460f7afd2f16e3a513cbc2fe65cbd961f95c2f92eec4f7ecff8"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 2,
+      "role": "type",
+      "id": "sha256:de408b7ede5843f7c05d6218976c13afb68070dd25dfb892ec92a058e3f49903",
+      "file": "src/flask/sansio/app.py",
+      "line": 59,
+      "sourceText": "class App(Scaffold):\n    \"\"\"The flask object implements a WSGI application and acts as the central\n    object.  It is passed the name of the module or package of the\n    application.  Once it is created it will act as a central registry for",
+      "sourceFileSha256": "410e21f53b5da3f5b73918733160dccfc22c17b0b48fe101dea56bad001c03f3"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 3,
+      "role": "type",
+      "id": "sha256:ddea8a25218008cb45a975a1c215a0f3c3a35afa7f05e66b3b3a34cbebb68040",
+      "file": "src/flask/ctx.py",
+      "line": 260,
+      "sourceText": "class AppContext:\n    \"\"\"An app context contains information about an app, and about the request\n    when handling a request. A context is pushed at the beginning of each\n    request and CLI command, and popped at the end. The context is referred to",
+      "sourceFileSha256": "e21952d044159438765eb27848b0fe4c75f83faee8645181a09a1eccb1d5cab7"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 4,
+      "role": "callable",
+      "id": "sha256:25951e78e81c124582497db358d2bc38dccac1b4a26e9bd11d3f0202ed1b80fc",
+      "file": "src/flask/sansio/scaffold.py",
+      "line": 42,
+      "sourceText": "def setupmethod(f: F) -> F:\n    f_name = f.__name__\n\n    def wrapper_func(self: Scaffold, *args: t.Any, **kwargs: t.Any) -> t.Any:",
+      "sourceFileSha256": "d6578d2b5f06d227482e4110f8b750d04c8d94c9525c8857f9183f727ee2858b"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 5,
+      "role": "type",
+      "id": "sha256:8dab899b8b812824c068b665ff78e63daa313a7c3a7365a98cfcbd5c295aba01",
+      "file": "src/flask/wrappers.py",
+      "line": 18,
+      "sourceText": "class Request(RequestBase):\n    \"\"\"The request object used by default in Flask.  Remembers the\n    matched endpoint and view arguments.\n",
+      "sourceFileSha256": "8d492fe2655e93622ae21c3177846faab20c6faf41bf43c49438162e6779391a"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 6,
+      "role": "type",
+      "id": "sha256:b4696651e154855b4bce7a5e85d74be3985bcf1f7cf3bfd0ee8ee47eb6bb568f",
+      "file": "src/flask/sansio/scaffold.py",
+      "line": 52,
+      "sourceText": "class Scaffold:\n    \"\"\"Common behavior shared between :class:`~flask.Flask` and\n    :class:`~flask.blueprints.Blueprint`.\n",
+      "sourceFileSha256": "d6578d2b5f06d227482e4110f8b750d04c8d94c9525c8857f9183f727ee2858b"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 7,
+      "role": "type",
+      "id": "sha256:2ab354fa1c81ea0fdfcbb560699e389ab06daa6fc67ac4dfdcb7cf9cc3f230ca",
+      "file": "src/flask/sansio/blueprints.py",
+      "line": 119,
+      "sourceText": "class Blueprint(Scaffold):\n    \"\"\"Represents a blueprint, a collection of routes and other\n    app-related functions that can be registered on a real application\n    later.",
+      "sourceFileSha256": "da960c5792daf2f1cef8c14113d9c95c8ce389a9689abb395fe867f4054d0ba1"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 8,
+      "role": "type",
+      "id": "sha256:41a3a9d39eb3e0c632b3e7e75c872902d3e08e27e2162027f88668fe839ef569",
+      "file": "src/flask/wrappers.py",
+      "line": 222,
+      "sourceText": "class Response(ResponseBase):\n    \"\"\"The response object that is used by default in Flask.  Works like the\n    response object from Werkzeug but is set to have an HTML mimetype by\n    default.  Quite often you don't have to create this object yourself because",
+      "sourceFileSha256": "8d492fe2655e93622ae21c3177846faab20c6faf41bf43c49438162e6779391a"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 9,
+      "role": "example-callable",
+      "id": "sha256:4833138a290c37135cf24616ad4c7b33cbf3027d1ecb2559d63562afad079006",
+      "file": "examples/tutorial/flaskr/db.py",
+      "line": 9,
+      "sourceText": "def get_db():\n    \"\"\"Connect to the application's configured database. The connection\n    is unique for each request and will be reused if this is called\n    again.",
+      "sourceFileSha256": "700f9d0a455bf79c9bf6de4f2784f13b96256faea19c15ddee71fb7957e14c31"
+    },
+    {
+      "repository": "flask",
+      "tool": "compass",
+      "rank": 10,
+      "role": "type",
+      "id": "sha256:9eddf1514cd1c841f0010176c064ce5ab91686f8b66a0adf8946e553606c6d8d",
+      "file": "src/flask/sessions.py",
+      "line": 24,
+      "sourceText": "class SessionMixin(MutableMapping[str, t.Any]):\n    \"\"\"Expands a basic dictionary with session attributes.\"\"\"\n\n    @property",
+      "sourceFileSha256": "7b2c11aa6cad4e66275ff102efcf980462684dce570ff951a61406e4b6cdd5dd"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 1,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 2,
+      "role": "type",
+      "id": "src_flask_sansio_app_app",
+      "file": "src/flask/sansio/app.py",
+      "line": 59,
+      "sourceText": "class App(Scaffold):\n    \"\"\"The flask object implements a WSGI application and acts as the central\n    object.  It is passed the name of the module or package of the\n    application.  Once it is created it will act as a central registry for",
+      "sourceFileSha256": "410e21f53b5da3f5b73918733160dccfc22c17b0b48fe101dea56bad001c03f3"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 3,
+      "role": "callable",
+      "id": "src_flask_sansio_scaffold_setupmethod",
+      "file": "src/flask/sansio/scaffold.py",
+      "line": 42,
+      "sourceText": "def setupmethod(f: F) -> F:\n    f_name = f.__name__\n\n    def wrapper_func(self: Scaffold, *args: t.Any, **kwargs: t.Any) -> t.Any:",
+      "sourceFileSha256": "d6578d2b5f06d227482e4110f8b750d04c8d94c9525c8857f9183f727ee2858b"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 4,
+      "role": "type",
+      "id": "src_flask_ctx_appcontext",
+      "file": "src/flask/ctx.py",
+      "line": 260,
+      "sourceText": "class AppContext:\n    \"\"\"An app context contains information about an app, and about the request\n    when handling a request. A context is pushed at the beginning of each\n    request and CLI command, and popped at the end. The context is referred to",
+      "sourceFileSha256": "e21952d044159438765eb27848b0fe4c75f83faee8645181a09a1eccb1d5cab7"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 5,
+      "role": "type",
+      "id": "src_flask_sansio_scaffold_scaffold",
+      "file": "src/flask/sansio/scaffold.py",
+      "line": 52,
+      "sourceText": "class Scaffold:\n    \"\"\"Common behavior shared between :class:`~flask.Flask` and\n    :class:`~flask.blueprints.Blueprint`.\n",
+      "sourceFileSha256": "d6578d2b5f06d227482e4110f8b750d04c8d94c9525c8857f9183f727ee2858b"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 6,
+      "role": "type",
+      "id": "src_flask_wrappers_response",
+      "file": "src/flask/wrappers.py",
+      "line": 222,
+      "sourceText": "class Response(ResponseBase):\n    \"\"\"The response object that is used by default in Flask.  Works like the\n    response object from Werkzeug but is set to have an HTML mimetype by\n    default.  Quite often you don't have to create this object yourself because",
+      "sourceFileSha256": "8d492fe2655e93622ae21c3177846faab20c6faf41bf43c49438162e6779391a"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 7,
+      "role": "type",
+      "id": "src_flask_wrappers_request",
+      "file": "src/flask/wrappers.py",
+      "line": 18,
+      "sourceText": "class Request(RequestBase):\n    \"\"\"The request object used by default in Flask.  Remembers the\n    matched endpoint and view arguments.\n",
+      "sourceFileSha256": "8d492fe2655e93622ae21c3177846faab20c6faf41bf43c49438162e6779391a"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 8,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 9,
+      "role": "type",
+      "id": "src_flask_testing_flaskclient",
+      "file": "src/flask/testing.py",
+      "line": 109,
+      "sourceText": "class FlaskClient(Client):\n    \"\"\"Works like a regular Werkzeug test client, with additional behavior for\n    Flask. Can defer the cleanup of the request context until the end of a\n    ``with`` block. For general information about how to use this class refer to",
+      "sourceFileSha256": "629d481658aaec7076a55913eda38c270ec45d430b34b2f9d38b2eec2b0ad3da"
+    },
+    {
+      "repository": "flask",
+      "tool": "graphify",
+      "rank": 10,
+      "role": "example-callable",
+      "id": "examples_tutorial_flaskr_db_get_db",
+      "file": "examples/tutorial/flaskr/db.py",
+      "line": 9,
+      "sourceText": "def get_db():\n    \"\"\"Connect to the application's configured database. The connection\n    is unique for each request and will be reused if this is called\n    again.",
+      "sourceFileSha256": "700f9d0a455bf79c9bf6de4f2784f13b96256faea19c15ddee71fb7957e14c31"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 1,
+      "role": "type",
+      "id": "sha256:537e981221a007ba87ff810461ae985b77fe37f06c53093ab92814e0c635f262",
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 211,
+      "sourceText": "public class JsonReader implements Closeable {\n  private static final long MIN_INCOMPLETE_INTEGER = Long.MIN_VALUE / 10;\n\n  private static final int PEEKED_NONE = 0;",
+      "sourceFileSha256": "46321d93477d0ca372aea8d8f62431ea44b7ca8947afea2f474bdebc2ff1e589"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 2,
+      "role": "type",
+      "id": "sha256:8747e09a8e903568e8a964201f3cc56893d5a0943cb2d4d51d2692ae357c0645",
+      "file": "gson/src/main/java/com/google/gson/GsonBuilder.java",
+      "line": 93,
+      "sourceText": "public final class GsonBuilder {\n  private static final boolean DEFAULT_JSON_NON_EXECUTABLE = false;\n  // Strictness of `null` is the legacy mode where some Gson APIs are always lenient\n  private static final Strictness DEFAULT_STRICTNESS = null;",
+      "sourceFileSha256": "31a5577eee8ab35fa2fab617741d5c02067b7cab6f7db4a64c78544a05ea1d13"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 3,
+      "role": "type",
+      "id": "sha256:4fd7c5d5c89427e0b28b94c6c2de683a6533fd6ea6170d6e9c567fe4da76ac56",
+      "file": "gson/src/main/java/com/google/gson/Gson.java",
+      "line": 156,
+      "sourceText": "public final class Gson {\n\n  private static final String JSON_NON_EXECUTABLE_PREFIX = \")]}'\\n\";\n",
+      "sourceFileSha256": "1a33f3eb5ddc01f0a33bbe2b43dc26f8474fc8d5b80876ad9a2f33056224fc94"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 4,
+      "role": "callable",
+      "id": "sha256:9bdfcab0686beea84640af610c6c6889a412345b01c262629f143664459c4897",
+      "file": "gson/src/main/java/com/google/gson/Gson.java",
+      "line": 850,
+      "sourceText": "  public <T> T fromJson(String json, Class<T> classOfT) throws JsonSyntaxException {\n    return fromJson(json, TypeToken.get(classOfT));\n  }\n",
+      "sourceFileSha256": "1a33f3eb5ddc01f0a33bbe2b43dc26f8474fc8d5b80876ad9a2f33056224fc94"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 5,
+      "role": "type",
+      "id": "sha256:62389b55bcef34c86223c0c60d5f6840b5b5dc284c00baadcf2f77583be99484",
+      "file": "gson/src/main/java/com/google/gson/reflect/TypeToken.java",
+      "line": 54,
+      "sourceText": "public class TypeToken<T> {\n  private final Class<? super T> rawType;\n  private final Type type;\n  private final int hashCode;",
+      "sourceFileSha256": "f182b1fe6d242196dd846617bf594ce45741103d17bbc3f148219bfeb23db8bd"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 6,
+      "role": "type",
+      "id": "sha256:2222e85b9b69a13e38de1c9654b1ce8a86e75815310c570ee793038eab5017b8",
+      "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+      "line": 162,
+      "sourceText": "public class JsonWriter implements Closeable, Flushable {\n\n  // Syntax as defined by https://datatracker.ietf.org/doc/html/rfc8259#section-6\n  private static final Pattern VALID_JSON_NUMBER_PATTERN =",
+      "sourceFileSha256": "6b739b0ba2cc5a8e6809f1bdd31244c12e4f9a7145f6e93cd8f39ea193bf0e5b"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 7,
+      "role": "type",
+      "id": "sha256:f89ff78bd1ce026094d6afc709732ceda3547d33e541b4e12b9314a967e70894",
+      "file": "gson/src/main/java/com/google/gson/TypeAdapter.java",
+      "line": 122,
+      "sourceText": "public abstract class TypeAdapter<T> {\n\n  public TypeAdapter() {}\n",
+      "sourceFileSha256": "3b13e9c2a9337369e61fa32c493a6fbb80b011b0876c779c2f95ab1464c9e57c"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 8,
+      "role": "type",
+      "id": "sha256:03843efb2824f56acf2de39a4ad7a5467887e8c106f526a1a38837407c8dd1d2",
+      "file": "gson/src/main/java/com/google/gson/JsonPrimitive.java",
+      "line": 35,
+      "sourceText": "public final class JsonPrimitive extends JsonElement {\n\n  private final Object value;\n",
+      "sourceFileSha256": "5b466c1eee42aa86fd7106469858f121d1a062b1c6c4b48269afd96e78c051e4"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 9,
+      "role": "callable",
+      "id": "sha256:e64ab7001f5ee8b0275e8c1b857280a9c621d38902a4ae0ac9754ed0f27aa075",
+      "file": "gson/src/main/java/com/google/gson/Gson.java",
+      "line": 565,
+      "sourceText": "  public String toJson(Object src) {\n    if (src == null) {\n      return toJson(JsonNull.INSTANCE);\n    }",
+      "sourceFileSha256": "1a33f3eb5ddc01f0a33bbe2b43dc26f8474fc8d5b80876ad9a2f33056224fc94"
+    },
+    {
+      "repository": "gson",
+      "tool": "compass",
+      "rank": 10,
+      "role": "type",
+      "id": "sha256:da1b62e1a2d2be089320afcf1143b2e9e5915a28cfeda233929ca6c962c6797b",
+      "file": "gson/src/main/java/com/google/gson/JsonElement.java",
+      "line": 96,
+      "sourceText": "public abstract class JsonElement {\n  /**\n   * @deprecated Creating custom {@code JsonElement} subclasses is highly discouraged and can lead\n   *     to undefined behavior.<br>",
+      "sourceFileSha256": "3215d81cdf2b213c7250cbb7703c793595819b9bac4ffd246034d4eb9fdf5e19"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 1,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_reflect_typetoken_typetoken",
+      "file": "gson/src/main/java/com/google/gson/reflect/TypeToken.java",
+      "line": 54,
+      "sourceText": "public class TypeToken<T> {\n  private final Class<? super T> rawType;\n  private final Type type;\n  private final int hashCode;",
+      "sourceFileSha256": "f182b1fe6d242196dd846617bf594ce45741103d17bbc3f148219bfeb23db8bd"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 2,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_gson_gson",
+      "file": "gson/src/main/java/com/google/gson/Gson.java",
+      "line": 156,
+      "sourceText": "public final class Gson {\n\n  private static final String JSON_NON_EXECUTABLE_PREFIX = \")]}'\\n\";\n",
+      "sourceFileSha256": "1a33f3eb5ddc01f0a33bbe2b43dc26f8474fc8d5b80876ad9a2f33056224fc94"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 3,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_stream_jsonreader_jsonreader",
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 211,
+      "sourceText": "public class JsonReader implements Closeable {\n  private static final long MIN_INCOMPLETE_INTEGER = Long.MIN_VALUE / 10;\n\n  private static final int PEEKED_NONE = 0;",
+      "sourceFileSha256": "46321d93477d0ca372aea8d8f62431ea44b7ca8947afea2f474bdebc2ff1e589"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 4,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_jsonelement_jsonelement",
+      "file": "gson/src/main/java/com/google/gson/JsonElement.java",
+      "line": 96,
+      "sourceText": "public abstract class JsonElement {\n  /**\n   * @deprecated Creating custom {@code JsonElement} subclasses is highly discouraged and can lead\n   *     to undefined behavior.<br>",
+      "sourceFileSha256": "3215d81cdf2b213c7250cbb7703c793595819b9bac4ffd246034d4eb9fdf5e19"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 5,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_typeadapter_typeadapter",
+      "file": "gson/src/main/java/com/google/gson/TypeAdapter.java",
+      "line": 122,
+      "sourceText": "public abstract class TypeAdapter<T> {\n\n  public TypeAdapter() {}\n",
+      "sourceFileSha256": "3b13e9c2a9337369e61fa32c493a6fbb80b011b0876c779c2f95ab1464c9e57c"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 6,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_stream_jsonwriter_jsonwriter",
+      "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+      "line": 162,
+      "sourceText": "public class JsonWriter implements Closeable, Flushable {\n\n  // Syntax as defined by https://datatracker.ietf.org/doc/html/rfc8259#section-6\n  private static final Pattern VALID_JSON_NUMBER_PATTERN =",
+      "sourceFileSha256": "6b739b0ba2cc5a8e6809f1bdd31244c12e4f9a7145f6e93cd8f39ea193bf0e5b"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 7,
+      "role": "test-type",
+      "id": "gson_src_test_java_com_google_gson_stream_jsonreadertest_jsonreadertest",
+      "file": "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java",
+      "line": 40,
+      "sourceText": "@SuppressWarnings(\"resource\")\npublic final class JsonReaderTest {\n\n  @Test",
+      "sourceFileSha256": "7fb35a955e2f46fc9aed9176a3f3301dc59d198419d57e22f300d14f615f94c4"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 8,
+      "role": "type",
+      "id": "gson_src_main_java_com_google_gson_gsonbuilder_gsonbuilder",
+      "file": "gson/src/main/java/com/google/gson/GsonBuilder.java",
+      "line": 93,
+      "sourceText": "public final class GsonBuilder {\n  private static final boolean DEFAULT_JSON_NON_EXECUTABLE = false;\n  // Strictness of `null` is the legacy mode where some Gson APIs are always lenient\n  private static final Strictness DEFAULT_STRICTNESS = null;",
+      "sourceFileSha256": "31a5577eee8ab35fa2fab617741d5c02067b7cab6f7db4a64c78544a05ea1d13"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 9,
+      "role": "test-type",
+      "id": "gson_src_test_java_com_google_gson_functional_primitivetest_primitivetest",
+      "file": "gson/src/test/java/com/google/gson/functional/PrimitiveTest.java",
+      "line": 44,
+      "sourceText": "public class PrimitiveTest {\n  private Gson gson;\n\n  @Before",
+      "sourceFileSha256": "5cc2e522e5babdceef8192e6cb5cca13cae1c26eb63da0ed53a0ea80bb7bbe7b"
+    },
+    {
+      "repository": "gson",
+      "tool": "graphify",
+      "rank": 10,
+      "role": "test-type",
+      "id": "gson_src_test_java_com_google_gson_functional_defaulttypeadapterstest_defaulttypeadapterstest",
+      "file": "gson/src/test/java/com/google/gson/functional/DefaultTypeAdaptersTest.java",
+      "line": 89,
+      "sourceText": "@SuppressWarnings(\"JavaUtilDate\")\npublic class DefaultTypeAdaptersTest {\n  private Gson gson;\n  private TimeZone oldTimeZone;",
+      "sourceFileSha256": "7cd95d5cd7271ec27c264f36cc017f8980feb346efce5a6caa430b2d9a706952"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 1,
+      "role": "source-module",
+      "id": "sha256:f738b0c1f5d24863d64fab8475d14c9450aa31631743cbe083f335844f05c195",
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 1,
+      "sourceText": "import * as checks from \"./checks.js\";\nimport type { $ZodNumberFormats } from \"./checks.js\";\nimport type { $ZodBigIntFormats } from \"./checks.js\";\nimport * as core from \"./core.js\";",
+      "sourceFileSha256": "12372f51ba3e437cca064a5c743bea11bb49fc1616e3dc084dac83cc67a91f72"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 2,
+      "role": "source-module",
+      "id": "sha256:4839121225cd7b794e6b3003ae6353a387711a2ec314fae03fb27d5119abe6b0",
+      "file": "packages/zod/src/v4/classic/schemas.ts",
+      "line": 1,
+      "sourceText": "import type { $ZodBigIntFormats } from \"../core/checks.js\";\nimport * as core from \"../core/index.js\";\nimport { util, type $ZodNumberFormats } from \"../core/index.js\";\nimport * as processors from \"../core/json-schema-processors.js\";",
+      "sourceFileSha256": "c79403c4f5da6b480779d9ec65601f3fd883e99397322203f0c9b1d00ea106d4"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 3,
+      "role": "test-module",
+      "id": "sha256:f0d18b0eb1634122c407fca91d24171580b6dd9bf5b6a1be3ed08b6b57b47fa0",
+      "file": "packages/zod/src/v4/classic/tests/to-json-schema.test.ts",
+      "line": 1,
+      "sourceText": "import { Validator } from \"@seriousme/openapi-schema-validator\";\nimport { describe, expect, test, vi } from \"vitest\";\nimport * as z from \"zod\";\n// import * as zCore from \"zod/v4/core\";",
+      "sourceFileSha256": "a26ba5e1f1e8be31fdd65b1d2ca6e481832faa2f16ea58f231d616dc8eb4120a"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 4,
+      "role": "source-module",
+      "id": "sha256:c68b9b53580cb6a30f1f21ef0a236d04446328a1ef59a5242163bf6653fced15",
+      "file": "packages/zod/src/v4/mini/schemas.ts",
+      "line": 1,
+      "sourceText": "import * as core from \"../core/index.js\";\nimport type { $ZodBigIntFormats } from \"../core/index.js\";\nimport * as regexes from \"../core/regexes.js\";\nimport * as util from \"../core/util.js\";",
+      "sourceFileSha256": "0564e616637aa02917854cb0ee22bbc64172c78a111cb422ba1f577d556432ee"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 5,
+      "role": "test-module",
+      "id": "sha256:3fd0d3d2d6c99eff1c0f1d98e063e987dd6d4bab820f8b1d5fda0894bfb18eb0",
+      "file": "packages/zod/src/v4/core/tests/compile.test.ts",
+      "line": 1,
+      "sourceText": "import { expect, expectTypeOf, test } from \"vitest\";\n\nimport * as z from \"../../index.js\";\nimport {",
+      "sourceFileSha256": "82a20ec964e4a1c40514055e5113e52a29ac02aa75dbb8398cd8cf390cfdd5ea"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 6,
+      "role": "test-module",
+      "id": "sha256:9e42231af1aec41da50582f84615e89e93bc93aebbd72800c33f46cf00469f1d",
+      "file": "packages/zod/src/v4/classic/tests/from-json-schema.test.ts",
+      "line": 1,
+      "sourceText": "import { expect, test } from \"vitest\";\nimport { fromJSONSchema } from \"../from-json-schema.js\";\nimport * as z from \"../index.js\";\n",
+      "sourceFileSha256": "5ea2b7bf02920a7bb8709f1d2db0bb4d304e40bbc4927b2d6ca40f488c79ec31"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 7,
+      "role": "source-module",
+      "id": "sha256:4924f2b319a8a0fc43829d7d85e3eb5240b79b441beeaf23a23c8ff1712fa2bd",
+      "file": "packages/zod/src/v4/core/api.ts",
+      "line": 1,
+      "sourceText": "import * as checks from \"./checks.js\";\nimport type * as core from \"./core.js\";\nimport type * as errors from \"./errors.js\";\nimport * as registries from \"./registries.js\";",
+      "sourceFileSha256": "9ad4da853ced907f2e5764e5a390f087c0bc8633638a993c50699f0827a5bf5d"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 8,
+      "role": "source-module",
+      "id": "sha256:cf3531eed1cc580ec1bcff5aff8ce38c3b3442878d76b09b0e64e855870aaa79",
+      "file": "packages/zod/src/v3/types.ts",
+      "line": 1,
+      "sourceText": "import {\n  type IssueData,\n  type StringValidation,\n  type ZodCustomIssue,",
+      "sourceFileSha256": "73b9529564a34fc028a5a62c17e09148747b737039b78b124e84254cb886411a"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 9,
+      "role": "test-module",
+      "id": "sha256:e6e4c6559c1e502bcf9b32525880968d86c52d1461aee09cc3777f9620c58300",
+      "file": "packages/zod/src/v4/classic/tests/cyclic-data.test.ts",
+      "line": 1,
+      "sourceText": "import v8 from \"node:v8\";\nimport vm from \"node:vm\";\nimport { expect, test } from \"vitest\";\nimport * as z from \"zod/v4\";",
+      "sourceFileSha256": "8dc2d5bc6bb9d3a0ad40491eaffa903e837a3fe92666c067c4d428b09583786a"
+    },
+    {
+      "repository": "zod",
+      "tool": "compass",
+      "rank": 10,
+      "role": "source-module",
+      "id": "sha256:d430dadbdc4d952986b7cb934947a122a86298bf0be5a798b3117d105fede928",
+      "file": "packages/zod/src/v4/core/checks.ts",
+      "line": 1,
+      "sourceText": "// import { $ZodType } from \"./schemas.js\";\n\nimport * as core from \"./core.js\";\nimport type * as errors from \"./errors.js\";",
+      "sourceFileSha256": "d813140472a55ab36e845f4eaadbb3deae6d0597f90bef6c3f51366ac8dbfd4c"
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 1,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 2,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 3,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 4,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 5,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 6,
+      "role": "type",
+      "id": "packages_zod_src_v4_core_checks_zodstringformats",
+      "file": "packages/zod/src/v4/core/checks.ts",
+      "line": 689,
+      "sourceText": "export type $ZodStringFormats =\n  | \"email\"\n  | \"url\"\n  | \"emoji\"",
+      "sourceFileSha256": "d813140472a55ab36e845f4eaadbb3deae6d0597f90bef6c3f51366ac8dbfd4c"
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 7,
+      "role": "benchmark-callable",
+      "id": "packages_bench_metabench_metabench",
+      "file": "packages/bench/metabench.ts",
+      "line": 14,
+      "sourceText": "export function metabench<D>(name: string, benchmarks?: Benchmarks<D>): Metabench {\n  let bench: Metabench;\n  if (BENCH === \"tinybench\") {\n    bench = new Tinybench(name, benchmarks || {});",
+      "sourceFileSha256": "0db1b192313b80aa3b8502f912542a0bcf8ec919f035ca6bfc54ceb29db406af"
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 8,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 9,
+      "role": "type",
+      "id": "packages_zod_src_v4_core_schemas_zodtypeinternals",
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 181,
+      "sourceText": "export interface $ZodTypeInternals<out O = unknown, out I = unknown> extends _$ZodTypeInternals {\n  /** @internal The inferred output type */\n  output: O; //extends { $out: infer O } ? O : Out;\n  /** @internal The inferred input type */",
+      "sourceFileSha256": "12372f51ba3e437cca064a5c743bea11bb49fc1616e3dc084dac83cc67a91f72"
+    },
+    {
+      "repository": "zod",
+      "tool": "graphify",
+      "rank": 10,
+      "role": "type",
+      "id": "packages_zod_src_v3_helpers_parseutil_parseinput",
+      "file": "packages/zod/src/v3/helpers/parseUtil.ts",
+      "line": 66,
+      "sourceText": "export type ParseInput = {\n  data: any;\n  path: (string | number)[];\n  parent: ParseContext;",
+      "sourceFileSha256": "cb94690c02dce392b98ca364de0d4b24f42db715fbb1759a08bcfb7fa6674645"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 1,
+      "role": "callable",
+      "id": "sha256:60aab06ff57a8c85fab4715992128370838e5d03eed5a9e58d82bb510287ac28",
+      "file": "src/routing/mod.rs",
+      "line": 192,
+      "sourceText": "    pub fn route(self, path: &str, method_router: MethodRouter<S>) -> Self {\n        tap_inner!(self, mut this => {\n            panic_on_err!(this.path_router.route(path, method_router));\n        })",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 2,
+      "role": "test-helper",
+      "id": "sha256:68b2857794e763372a7a332a2565d51e0307a3e72c89b04f9df4a18fa960bb9a",
+      "file": "src/test_helpers/test_client.rs",
+      "line": 36,
+      "sourceText": "    pub fn new<S>(svc: S) -> Self\n    where\n        S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,\n        S::Future: Send,",
+      "sourceFileSha256": "08539b094aa868bb9be422a5dae0437a29dbf30a036df6431efed99ce2a582b6"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 3,
+      "role": "type",
+      "id": "sha256:45fdb21dd68855366f06d2399063b23ebd4754d6bd0fd99e8802b6833e18af6d",
+      "file": "src/routing/mod.rs",
+      "line": 86,
+      "sourceText": "pub struct Router<S = ()> {\n    inner: Arc<RouterInner<S>>,\n}\n",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 4,
+      "role": "type",
+      "id": "sha256:04b0b1fb883d743b22d88f96cacd55215dbcb66091ef10bff4b784aa2cbb7e1d",
+      "file": "src/routing/method_routing.rs",
+      "line": 549,
+      "sourceText": "pub struct MethodRouter<S = (), E = Infallible> {\n    get: MethodEndpoint<S, E>,\n    head: MethodEndpoint<S, E>,\n    delete: MethodEndpoint<S, E>,",
+      "sourceFileSha256": "d91b8dc73b3a584c57055a6fcf2aa88241c0ee7875663e6c103844741c4c9119"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 5,
+      "role": "callable",
+      "id": "sha256:ba87bdef07c319f041356e21239bc5984549ccefecd247c4ab6cf2ab00d1299b",
+      "file": "src/routing/mod.rs",
+      "line": 162,
+      "sourceText": "    pub fn new() -> Self {\n        Self {\n            inner: Arc::new(RouterInner {\n                path_router: Default::default(),",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 6,
+      "role": "callable",
+      "id": "sha256:a0f57e92389119330fd13358ce5f0589d5360eac2d34869176cf7a6b6813526b",
+      "file": "src/routing/mod.rs",
+      "line": 220,
+      "sourceText": "    pub fn nest(self, path: &str, router: Self) -> Self {\n        if path.is_empty() || path == \"/\" {\n            panic!(\"Nesting at the root is no longer supported. Use merge instead.\");\n        }",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 7,
+      "role": "type",
+      "id": "sha256:831ff61676cca7793933839f665e492e2451afbe00ab9ba8b0375e2fc4115d99",
+      "file": "src/routing/route.rs",
+      "line": 31,
+      "sourceText": "pub struct Route<E = Infallible>(BoxCloneSyncService<Request, Response, E>);\n\nimpl<E> Route<E> {\n    pub(crate) fn new<T>(svc: T) -> Self",
+      "sourceFileSha256": "4ce2ea4d6623d1a29e156d83f93bcb9f69aa969471f0a8083a19bb320964541d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 8,
+      "role": "test-helper",
+      "id": "sha256:90ddb5e4cc5b746f56570b98d4b7c32f333a8cc8dd9ea8c740669432186a4601",
+      "file": "src/test_helpers/test_client.rs",
+      "line": 51,
+      "sourceText": "    pub fn get(&self, url: &str) -> RequestBuilder {\n        RequestBuilder {\n            builder: self.client.get(format!(\"http://{}{url}\", self.addr)),\n        }",
+      "sourceFileSha256": "08539b094aa868bb9be422a5dae0437a29dbf30a036df6431efed99ce2a582b6"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 9,
+      "role": "callable",
+      "id": "sha256:d42797d051fe003ed59e07df110a2c316fdfe6d7be5741344cb3946dd798321f",
+      "file": "src/routing/mod.rs",
+      "line": 336,
+      "sourceText": "    pub fn fallback<H, T>(self, handler: H) -> Self\n    where\n        H: Handler<T, S>,\n        T: 'static,",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "compass",
+      "rank": 10,
+      "role": "callable",
+      "id": "sha256:dc9b52391b0c9fcd4b93234ce6294eb8f8cc7d85f3f317f2c49f2703c5fa7073",
+      "file": "src/routing/mod.rs",
+      "line": 296,
+      "sourceText": "    pub fn layer<L>(self, layer: L) -> Self\n    where\n        L: Layer<Route> + Clone + Send + Sync + 'static,\n        L::Service: Service<Request> + Clone + Send + Sync + 'static,",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 1,
+      "role": "generic-implementation",
+      "id": "src_service_ext_s",
+      "file": "src/service_ext.rs",
+      "line": 47,
+      "sourceText": "impl<S, R> ServiceExt<R> for S\nwhere\n    S: Service<R> + Sized,\n{",
+      "sourceFileSha256": "e212b899108791b586d442e9c0a294ef908cfa97652b68c8770c782d1efd07cb"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 2,
+      "role": "generic-implementation",
+      "id": "src_handler_mod_t",
+      "file": "src/handler/mod.rs",
+      "line": 272,
+      "sourceText": "impl<T, S> Handler<private::IntoResponseHandler, S> for T\nwhere\n    T: IntoResponse + Clone + Send + Sync + 'static,\n{",
+      "sourceFileSha256": "db398d9a153d8e9fbff07fc328d3805713171c7f378938edb78c426483c701ba"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 3,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 4,
+      "role": "test-helper",
+      "id": "src_routing_method_routing_call",
+      "file": "src/routing/method_routing.rs",
+      "line": 1739,
+      "sourceText": "    async fn call<S>(method: Method, svc: &mut S) -> (StatusCode, HeaderMap, String)\n    where\n        S: Service<Request, Error = Infallible>,\n        S::Response: IntoResponse,",
+      "sourceFileSha256": "d91b8dc73b3a584c57055a6fcf2aa88241c0ee7875663e6c103844741c4c9119"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 5,
+      "role": "trait-implementation",
+      "id": "src_routing_mod_router_s",
+      "file": "src/routing/mod.rs",
+      "line": 90,
+      "sourceText": "impl<S> Clone for Router<S> {\n    fn clone(&self) -> Self {\n        Self {\n            inner: Arc::clone(&self.inner),",
+      "sourceFileSha256": "7ecd918b9285812f0edfad5cc48d9ad6268c2dae9cc497089fbec6cc2eb08b7d"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 6,
+      "role": null,
+      "reason": "Returned label does not uniquely identify a stored node; no oracle ID substitution."
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 7,
+      "role": "type",
+      "id": "src_routing_route_route",
+      "file": "src/routing/route.rs",
+      "line": 31,
+      "sourceText": "pub struct Route<E = Infallible>(BoxCloneSyncService<Request, Response, E>);\n\nimpl<E> Route<E> {\n    pub(crate) fn new<T>(svc: T) -> Self",
+      "sourceFileSha256": "4ce2ea4d6623d1a29e156d83f93bcb9f69aa969471f0a8083a19bb320964541d"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 8,
+      "role": "type",
+      "id": "src_routing_method_filter_methodfilter",
+      "file": "src/routing/method_filter.rs",
+      "line": 9,
+      "sourceText": "pub struct MethodFilter(u16);\n\nimpl MethodFilter {\n    /// Match `CONNECT` requests.",
+      "sourceFileSha256": "d1c354426afb62a22f4cd518b676e2c5e0f419f7c056c59380e4aa51dd2469b1"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 9,
+      "role": "trait-implementation",
+      "id": "src_extract_ws_bytes",
+      "file": "src/extract/ws.rs",
+      "line": 769,
+      "sourceText": "impl From<Utf8Bytes> for Bytes {\n    #[inline]\n    fn from(Utf8Bytes(bytes): Utf8Bytes) -> Self {\n        bytes.into()",
+      "sourceFileSha256": "88dd9b63ef3ea7d4ed2d37bc83a0278898c48255bcd9032f386bcc7c7f376a04"
+    },
+    {
+      "repository": "axum",
+      "tool": "graphify",
+      "rank": 10,
+      "role": "type",
+      "id": "src_extract_ws_utf8bytes",
+      "file": "src/extract/ws.rs",
+      "line": 681,
+      "sourceText": "pub struct Utf8Bytes(ts::Utf8Bytes);\n\nimpl Utf8Bytes {\n    /// Creates from a static str.",
+      "sourceFileSha256": "88dd9b63ef3ea7d4ed2d37bc83a0278898c48255bcd9032f386bcc7c7f376a04"
+    }
+  ]
+}

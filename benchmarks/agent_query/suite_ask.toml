@@ -1,0 +1,227 @@
+# Natural-language routing development comparison across five real languages.
+# Reuses source-reviewed caller/callee facts from suite_v2.toml; these are not
+# independent held-out judgments. The exact same question and 2000-token budget
+# are sent to Compass ask and Graphify query. One response, no follow-ups.
+# Score selected-fact text recall first; this does not certify every returned edge.
+
+schema = "compass.agent-query-suite/1"
+
+[[repository]]
+name = "cobra"
+language = "Go"
+url = "https://github.com/spf13/cobra.git"
+commit = "adbc8813901bba65827259daa8e22ff94ec1f30e"
+
+[[repository.anchor]]
+file = "command.go"
+line = 1868
+symbol = "ParseFlags"
+judgment = "command.go:1868 declares func (c *Command) ParseFlags(args []string) error."
+
+[[repository.anchor]]
+file = "command.go"
+line = 757
+symbol = "Find"
+judgment = "command.go:757 declares func (c *Command) Find(args []string) (*Command, []string, error)."
+
+[[repository.anchor]]
+file = "doc/md_docs.go"
+line = 52
+symbol = "GenMarkdown"
+judgment = "doc/md_docs.go:52 declares GenMarkdown, which consumes the cobra package it imports at line 27."
+
+[[repository.question]]
+id = "cobra-ask-callers"
+kind = "callers"
+subject = "who calls cobra.Command::Find?"
+compass = ["ask", "who calls cobra.Command::Find?", "--text-budget", "2000"]
+graphify = ["query", "who calls cobra.Command::Find?", "--budget", "2000"]
+expect = "answer"
+required = ["ExecuteC", "command.go"]
+judgment = "Same source fact as cobra2-callers-find. Find is called by ExecuteC at command.go:1123 and by InitDefaultHelpCmd (command.go:1263) at command.go:1276 and command.go:1294. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository.question]]
+id = "cobra-ask-callees"
+kind = "callees"
+subject = "what does cobra.Command::ExecuteC call?"
+compass = ["ask", "what does cobra.Command::ExecuteC call?", "--text-budget", "2000"]
+graphify = ["query", "what does cobra.Command::ExecuteC call?", "--budget", "2000"]
+expect = "answer"
+required = ["Find", "execute", "Traverse"]
+judgment = "Same source fact as cobra2-callees-executec. ExecuteC calls Traverse (command.go:1121), Find (command.go:1123) and execute (command.go:1148). This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository]]
+name = "flask"
+language = "Python"
+url = "https://github.com/pallets/flask.git"
+commit = "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35"
+
+[[repository.anchor]]
+file = "src/flask/app.py"
+line = 969
+symbol = "dispatch_request"
+judgment = "src/flask/app.py:969 declares Flask.dispatch_request."
+
+[[repository.anchor]]
+file = "src/flask/ctx.py"
+line = 260
+symbol = "AppContext"
+judgment = "src/flask/ctx.py:260 declares AppContext."
+
+[[repository.anchor]]
+file = "src/flask/views.py"
+line = 78
+symbol = "View.dispatch_request"
+judgment = "src/flask/views.py:78 declares View.dispatch_request."
+
+[[repository.question]]
+id = "flask-ask-callers"
+kind = "callers"
+subject = "who calls src.flask.app.Flask::full_dispatch_request?"
+compass = ["ask", "who calls src.flask.app.Flask::full_dispatch_request?", "--text-budget", "2000"]
+graphify = ["query", "who calls src.flask.app.Flask::full_dispatch_request?", "--budget", "2000"]
+expect = "answer"
+required = ["wsgi_app"]
+judgment = "Same source fact as flask2-callers-fulldispatch. wsgi_app calls self.full_dispatch_request(ctx) at src/flask/app.py:1600. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository.question]]
+id = "flask-ask-callees"
+kind = "callees"
+subject = "what does src.flask.app.Flask::full_dispatch_request call?"
+compass = ["ask", "what does src.flask.app.Flask::full_dispatch_request call?", "--text-budget", "2000"]
+graphify = ["query", "what does src.flask.app.Flask::full_dispatch_request call?", "--budget", "2000"]
+expect = "answer"
+required = ["preprocess_request", "dispatch_request", "finalize_request"]
+judgment = "Same source fact as flask2-callees-fulldispatch. full_dispatch_request calls preprocess_request (app.py:1017), dispatch_request (1019) and finalize_request (1022). This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository]]
+name = "gson"
+language = "Java"
+url = "https://github.com/google/gson.git"
+commit = "15ca7360379cf3c1502b59981569050489f2d73e"
+
+[[repository.anchor]]
+file = "gson/src/main/java/com/google/gson/Gson.java"
+line = 565
+symbol = "toJson(Object)"
+judgment = "Gson.java:565 declares public String toJson(Object src)."
+
+[[repository.anchor]]
+file = "gson/src/main/java/com/google/gson/stream/JsonWriter.java"
+line = 526
+symbol = "value(String)"
+judgment = "JsonWriter.java:526 starts the @CanIgnoreReturnValue annotation on public JsonWriter value(String value), whose method header is line 527."
+
+[[repository.anchor]]
+file = "gson/src/main/java/com/google/gson/TypeAdapter.java"
+line = 143
+symbol = "toJson(Writer, T)"
+judgment = "TypeAdapter.java:143 declares final void toJson(Writer out, T value)."
+
+[[repository.question]]
+id = "gson-ask-callers"
+kind = "callers"
+subject = "who calls com.google.gson.Gson::newJsonWriter?"
+compass = ["ask", "who calls com.google.gson.Gson::newJsonWriter?", "--text-budget", "2000"]
+graphify = ["query", "who calls com.google.gson.Gson::newJsonWriter?", "--budget", "2000"]
+expect = "answer"
+required = ["toJson", "Gson.java"]
+judgment = "Same source fact as gson2-callers-newjsonwriter. newJsonWriter is called by the toJson overloads at Gson.java:642 and Gson.java:724. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository.question]]
+id = "gson-ask-callees"
+kind = "callees"
+subject = "what does com.google.gson.Gson::newJsonWriter call?"
+compass = ["ask", "what does com.google.gson.Gson::newJsonWriter call?", "--text-budget", "2000"]
+graphify = ["query", "what does com.google.gson.Gson::newJsonWriter call?", "--budget", "2000"]
+expect = "answer"
+required = ["setHtmlSafe", "setSerializeNulls"]
+judgment = "Same source fact as gson2-callees-newjsonwriter. newJsonWriter calls setFormattingStyle (Gson.java:802), setHtmlSafe (803), setStrictness (804) and setSerializeNulls (805) on the writer it returns. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository]]
+name = "zod"
+language = "TypeScript"
+url = "https://github.com/colinhacks/zod.git"
+commit = "d2b135cfb7a3582b9eb515756b9166bcb9521f4a"
+
+[[repository.anchor]]
+file = "packages/zod/src/v4/classic/schemas.ts"
+line = 303
+symbol = "ZodType.safeParse"
+judgment = "packages/zod/src/v4/classic/schemas.ts:303 implements ZodType.safeParse."
+
+[[repository.anchor]]
+file = "packages/zod/src/v4/classic/from-json-schema.ts"
+line = 105
+symbol = "detectVersion"
+judgment = "packages/zod/src/v4/classic/from-json-schema.ts:105 declares detectVersion."
+
+[[repository.anchor]]
+file = "packages/zod/src/v4/classic/parse.ts"
+line = 22
+symbol = "safeParse"
+judgment = "packages/zod/src/v4/classic/parse.ts:22 exports the classic safeParse entry point."
+
+[[repository.question]]
+id = "zod-ask-callers"
+kind = "callers"
+subject = "who calls detectVersion?"
+compass = ["ask", "who calls detectVersion?", "--text-budget", "2000"]
+graphify = ["query", "who calls detectVersion?", "--budget", "2000"]
+expect = "answer"
+required = ["fromJSONSchema", "from-json-schema.ts"]
+judgment = "Same source fact as zod2-callers-detectversion. fromJSONSchema calls detectVersion(normalized, params?.defaultTarget) at from-json-schema.ts:931. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository.question]]
+id = "zod-ask-callees"
+kind = "callees"
+subject = "what does convertSchema call?"
+compass = ["ask", "what does convertSchema call?", "--text-budget", "2000"]
+graphify = ["query", "what does convertSchema call?", "--budget", "2000"]
+expect = "answer"
+required = ["convertBaseSchema"]
+judgment = "Same source fact as zod2-callees-convertschema. convertSchema calls convertBaseSchema(schema, ctx) at from-json-schema.ts:814. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository]]
+name = "axum"
+language = "Rust"
+url = "https://github.com/tokio-rs/axum.git"
+commit = "af1345b53a259b0990be1ff853f9b56c05040ef7"
+
+[[repository.anchor]]
+file = "src/routing/mod.rs"
+line = 192
+symbol = "Router::route"
+judgment = "src/routing/mod.rs:192 declares pub fn route(self, path: &str, method_router: MethodRouter<S>) -> Self."
+
+[[repository.anchor]]
+file = "src/routing/path_router.rs"
+line = 22
+symbol = "validate_path"
+judgment = "src/routing/path_router.rs:22 declares fn validate_path."
+
+[[repository.anchor]]
+file = "src/serve/mod.rs"
+line = 106
+symbol = "serve"
+judgment = "src/serve/mod.rs:106 declares pub fn serve."
+
+[[repository.question]]
+id = "axum-ask-callers"
+kind = "callers"
+subject = "who calls validate_path?"
+compass = ["ask", "who calls validate_path?", "--text-budget", "2000"]
+graphify = ["query", "who calls validate_path?", "--budget", "2000"]
+expect = "answer"
+required = ["route"]
+judgment = "Same source fact as axum2-callers-validate-path. validate_path is called by PathRouter::route at path_router.rs:71 and PathRouter::route_endpoint at line 125. This row changes the natural-language interface, not the underlying source judgment."
+
+[[repository.question]]
+id = "axum-ask-callees"
+kind = "callees"
+subject = "what does validate_path call?"
+compass = ["ask", "what does validate_path call?", "--text-budget", "2000"]
+graphify = ["query", "what does validate_path call?", "--budget", "2000"]
+expect = "answer"
+required = ["validate_v07_paths"]
+judgment = "Same source fact as axum2-callees-validate-path. validate_path (path_router.rs:22) calls validate_v07_paths(path) at path_router.rs:30, declared at path_router.rs:36. This row changes the natural-language interface, not the underlying source judgment."

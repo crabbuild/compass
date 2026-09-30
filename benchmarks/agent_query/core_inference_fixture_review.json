@@ -1,0 +1,80 @@
+{
+  "afterFixtureSha256": "c34fa0bbaa7fc5a64d53fd142c34462c5843c0fe5e9f6fb1825248fdc3668ed9",
+  "afterSourceManifestSha256": "0c1cc9821267491f263ea22a84a92730e5b8658d96bcb05116cc978fa815c417",
+  "beforeAfterBaselineComparisonSha256": "20b9f219444095ceac3075716cf849ca8250632158cf68fd7935f213a27c3b6f",
+  "beforeFixtureSha256": "7fae4ec71c4fa1fbf06b77ee8a780f46efaf2c8d9e63c9be9ec5b34d4cd4cdcf",
+  "changedRustAndManifestInputs": [
+    "crates/compass-core/tests/loading_coverage.rs"
+  ],
+  "checks": [
+    {
+      "exitCode": 0,
+      "name": "fmt",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 4406
+    },
+    {
+      "exitCode": 0,
+      "name": "focused-clippy",
+      "stderrSha256": "223b1728b76c2132cd2612388bdf9a7487f5f2945b9b5aaa0cc3531560bbc991",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 93393
+    },
+    {
+      "exitCode": 0,
+      "name": "workspace-clippy",
+      "stderrSha256": "9564857d44c7db3de9b21adfd6f085f6306eead154431e5aab786e7e459eeb22",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 1849
+    },
+    {
+      "exitCode": 0,
+      "name": "workspace-tests",
+      "stderrSha256": "ec94f0c63096545b2c68db32e63b494b7de4134f1fa41e75cd0c7e927f4f460d",
+      "stdoutSha256": "b3063489c879d36b558f1acefb9b9654590ccb5128edfa81ff759aa9734f1ea0",
+      "wallMs": 61130
+    },
+    {
+      "exitCode": 0,
+      "name": "core-integration",
+      "stderrSha256": "a1ba9c61977fda16c3fa5e0a52d349d9d2dbab0b4cc0cefc78c0e83d146f1ad2",
+      "stdoutSha256": "30b5fe8459b07bbfe6b410549164633eef275604ec4034547f4af4ab2ab0d3aa",
+      "wallMs": 14202
+    }
+  ],
+  "fixturePatchSha256": "917897cde35b4fbae5b7a3e8400395401a4fdb02ba22c58012472a4feaa3337b",
+  "limitations": [
+    "This fixture correction does not demonstrate a product behavior improvement or change the original baseline failures.",
+    "The preserved cache query and Graphify comparison results are unaffected; actual god-object diagnosis remains unproven."
+  ],
+  "newPassedTests": [
+    "loaded_graph_learning_overlay_marks_current_missing_and_unfingerprinted_sources",
+    "export_inputs_fall_back_to_node_communities_and_tolerate_partial_sidecars",
+    "build_pipeline_reports_missing_and_empty_roots_and_accepts_file_only_sources",
+    "semantic_build_normalizes_typed_origins_paths_and_incremental_updates",
+    "incremental_mixed_origin_edges_use_fresh_ast_relationship_sites",
+    "incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_residue",
+    "incremental_update_preserves_then_replaces_owned_semantic_facts",
+    "incremental_deleted_mixed_occurrence_keeps_only_revalidated_semantic_evidence",
+    "incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites",
+    "incremental_deleted_remapped_mixed_occurrence_rebinds_trusted_semantic_residue",
+    "incremental_mixed_origin_nodes_use_fresh_ast_typed_data",
+    "refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence",
+    "incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence"
+  ],
+  "previousBaselineFailedTests": [
+    "incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence",
+    "incremental_deleted_mixed_occurrence_keeps_only_revalidated_semantic_evidence",
+    "incremental_deleted_remapped_mixed_occurrence_rebinds_trusted_semantic_residue",
+    "incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_residue",
+    "incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites",
+    "incremental_mixed_origin_edges_use_fresh_ast_relationship_sites",
+    "refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence"
+  ],
+  "priorProductionQualificationSha256": "14250b55c069e69bd107bf0a1f6aac61fe95498c0ea7ecfa761cfd0592b20d43",
+  "qualificationReportSha256": "d7fcd7ac606a27c06f3406334fe9a69a2887b45e6dad05b7fe69f1a3a0c40e2c",
+  "schema": "compass.core-inference-fixture-review/1",
+  "scope": "A test-only correction: seven semantic-preservation fixtures explicitly use Max inference and keep their assertions. The public default remains Low; production behavior and frozen cache-evaluation binary are unchanged.",
+  "unchangedProductionBinarySha256": "03403b96658900adad039db08b5814a5b5d090075fe2a31dc8bebbe7c012aa1b"
+}

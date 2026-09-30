@@ -1,0 +1,167 @@
+{
+  "bounds": {
+    "graphBytes": 1073741824,
+    "graphEdges": 2000000,
+    "graphNodes": 1000000,
+    "secondsPerGraph": 300,
+    "sourceBytesPerFile": 2097152,
+    "sourceFiles": 8
+  },
+  "cases": [
+    {
+      "classGraphIds": {
+        "compass": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+        "graphify": "bundles_org_eclipse_ui_workbench_eclipse_ui_org_eclipse_ui_internal_keys_model_bindingmodel_bindingmodel"
+      },
+      "className": "BindingModel",
+      "classification": "unanimous-major-critical",
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6374724,
+      "sourceFile": "bundles/org.eclipse.ui.workbench/Eclipse UI/org/eclipse/ui/internal/keys/model/BindingModel.java",
+      "sourceFileSha256": "c322857c126421a01dddc5b7f1d93fba2bc07de72453c19c5f30091f7048b01c",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+        "graphify": "bundles_org_eclipse_core_databinding_property_src_org_eclipse_core_databinding_property_value_simplevalueproperty_simplevalueproperty"
+      },
+      "className": "SimpleValueProperty",
+      "classification": "unanimous-none",
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6391534,
+      "sourceFile": "bundles/org.eclipse.core.databinding.property/src/org/eclipse/core/databinding/property/value/SimpleValueProperty.java",
+      "sourceFileSha256": "50407d33afc5ee8283f1022f5bf38278aa20b4cd82db4cd909eb5ee0e2e22b64",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+        "graphify": "bundles_org_eclipse_e4_ui_css_core_src_org_eclipse_e4_ui_css_core_impl_dom_cssvaluelistimpl_cssvaluelistimpl"
+      },
+      "className": "CSSValueListImpl",
+      "classification": "unanimous-none",
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6406137,
+      "sourceFile": "bundles/org.eclipse.e4.ui.css.core/src/org/eclipse/e4/ui/css/core/impl/dom/CSSValueListImpl.java",
+      "sourceFileSha256": "b45eedb84f09f0a8a258ff2eaa4327dae60fa2e7365ec4046fd3ca53dd9b4d69",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+        "graphify": "tests_org_eclipse_ui_tests_eclipse_ui_tests_org_eclipse_ui_tests_dialogs_deprecateduiwizardsauto_deprecateduiwizardsauto"
+      },
+      "className": "DeprecatedUIWizardsAuto",
+      "classification": "unanimous-major-critical",
+      "repository": "eclipse/eclipse.platform.ui",
+      "sampleId": 6413795,
+      "sourceFile": "tests/org.eclipse.ui.tests/Eclipse UI Tests/org/eclipse/ui/tests/dialogs/DeprecatedUIWizardsAuto.java",
+      "sourceFileSha256": "9a70d77d824154488332a1dcced6c6cf50af5943b1f601ef376832edc73202c7",
+      "sourceRole": "test-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+        "graphify": "server_src_main_java_com_cloud_network_externalloadbalancerdevicemanagerimpl_externalloadbalancerdevicemanagerimpl"
+      },
+      "className": "ExternalLoadBalancerDeviceManagerImpl",
+      "classification": "unanimous-major-critical",
+      "repository": "apache/cloudstack",
+      "sampleId": 8528735,
+      "sourceFile": "server/src/main/java/com/cloud/network/ExternalLoadBalancerDeviceManagerImpl.java",
+      "sourceFileSha256": "411ae1dbbd20a532d38af6c39c2fbaf0ece284d758c175be6c6f97618aba19bf",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+        "graphify": "core_src_main_java_com_cloud_agent_api_handleconfigdriveisocommand_handleconfigdriveisocommand"
+      },
+      "className": "HandleConfigDriveIsoCommand",
+      "classification": "unanimous-none",
+      "repository": "apache/cloudstack",
+      "sampleId": 8537138,
+      "sourceFile": "core/src/main/java/com/cloud/agent/api/HandleConfigDriveIsoCommand.java",
+      "sourceFileSha256": "b82d5af74a4561851bcc6b51790a037b41084db40418f12e263069973aef842b",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+        "graphify": "plugins_network_elements_brocade_vcs_src_main_java_com_cloud_network_brocade_brocadevcsapi_brocadevcsapi"
+      },
+      "className": "BrocadeVcsApi",
+      "classification": "unanimous-major-critical",
+      "repository": "apache/cloudstack",
+      "sampleId": 8538037,
+      "sourceFile": "plugins/network-elements/brocade-vcs/src/main/java/com/cloud/network/brocade/BrocadeVcsApi.java",
+      "sourceFileSha256": "c6999596499204d035357bd6862badaa4d3dcd809d064b9934254917bb6407c9",
+      "sourceRole": "production-class"
+    },
+    {
+      "classGraphIds": {
+        "compass": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+        "graphify": "api_src_main_java_org_apache_cloudstack_api_response_deploymentplannersresponse_deploymentplannersresponse"
+      },
+      "className": "DeploymentPlannersResponse",
+      "classification": "unanimous-none",
+      "repository": "apache/cloudstack",
+      "sampleId": 8539645,
+      "sourceFile": "api/src/main/java/org/apache/cloudstack/api/response/DeploymentPlannersResponse.java",
+      "sourceFileSha256": "af541c9ae7f6f630462a6aaf61239482ac485188d1837f28888637edd145bea2",
+      "sourceRole": "production-class"
+    }
+  ],
+  "disclosure": "The Compass 95/95 method and 65/65 field source matches, and one Graphify BindingModel graph, were inspected before registration. This is known development data, not held-out evaluation.",
+  "limitations": [
+    "Graphify lacks Compass typed field metadata, so field-name/line candidates are at most declaration-presence evidence and must remain type-unverified.",
+    "The source census covers only eight known Java files and does not measure all class members in either repository.",
+    "Missing dependency attribution does not affect this JDK syntax-only member census, but source responsibilities and field-access semantics remain outside this comparison.",
+    "No classifier, broad superiority, or cross-language conclusion follows from declaration coverage."
+  ],
+  "method": {
+    "candidate": "Require exact repository-relative source file, matching simple name (method display .name() normalized to name; field label exact), compatible node kind/callability and an anchored graph line within the source declaration span. Compass kind method/field; Graphify _callable=true for methods and not true for fields, excluding _callable_class=true. A missing Graphify type tag is not proof of a field, so report field matches as type-unverified.",
+    "comparison": "Apply the same source witness set to both stored graphs. Report graph direction, extraction coverage and line-anchor limits; do not equate node presence with relationship correctness or god-object severity.",
+    "cut": "No tuning or threshold. Report per-kind source coverage, source-linked ownership and unique per-declaration identities, all cases, ambiguities and unavailable outcomes. Preserve positive-rated test class.",
+    "denominator": "Every direct method and field in the frozen independent JDK sourceMembers lists, excluding constructors and nested/inherited/implicit members. Preserve overloads as separate source declarations.",
+    "identity": "Report zero, one or multiple candidate IDs per source declaration and every graph ID matched to more than one source declaration. A reused ID cannot give separate overload-identity credit. Do not choose by first label or proximity.",
+    "ownership": "Report direct class-to-candidate links separately: Compass contains; Graphify method for methods and any direct contains or field relation for fields. No containment inferred from the file or class span."
+  },
+  "priorInputsSha256": "663beb33e986c695ec4a6ae8864651f9838baa4c0d183a2da021d8d3197b951e",
+  "priorMemberReviewSha256": "edff7c60649a6d85389d94b04bfe805f0b046d0667603135e00b56b61c001756",
+  "priorReleaseReviewSha256": "0db695b5722e741d4d740707ad69888141152ae69e4af02622254293d4e4680b",
+  "purpose": "Paired source-declaration coverage on the same eight externally rated Java classes, using the prior independent JDK 17 syntax census and frozen Compass/Graphify graphs. This is a prerequisite for evidence-backed cohesion/god-object work, not a classifier.",
+  "repositories": [
+    {
+      "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+      "graphs": {
+        "compass": {
+          "graphBytes": 671502979,
+          "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69"
+        },
+        "graphify": {
+          "graphBytes": 227334534,
+          "graphSha256": "8ef3ace655bb60a001851e911737b7995d7da081b04459441b02ab6b68242f72"
+        }
+      },
+      "name": "apache/cloudstack"
+    },
+    {
+      "commit": "e3bbb556534a1fb945e1036948325d14a8dd9c7a",
+      "graphs": {
+        "compass": {
+          "graphBytes": 477211091,
+          "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+        },
+        "graphify": {
+          "graphBytes": 189557807,
+          "graphSha256": "cfdc1f9f8db069df24854f5a0786d8777a9daa2e33615ed44ae39e1189b1cdef"
+        }
+      },
+      "name": "eclipse/eclipse.platform.ui"
+    }
+  ],
+  "schema": "compass.mlcq-member-paired-registration/1",
+  "sourceWitnessesSha256": "c35e4202703599acca6f96a807c72f598345d7d764d88cfc3b13f9340e01e675"
+}

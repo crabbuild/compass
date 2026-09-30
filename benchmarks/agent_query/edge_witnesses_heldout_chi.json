@@ -1,0 +1,102 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "chi",
+  "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+  "scope": "Pre-execution source-reviewed selected direct edges and occurrences on held-out panel A; no model output used as gold, no whole-repository precision/recall claim.",
+  "witnesses": [
+    {
+      "id": "chi-source-edge-1",
+      "source": {
+        "file": "chi.go",
+        "line": 62,
+        "symbol": "NewRouter",
+        "text": "func NewRouter() *Mux {"
+      },
+      "target": {
+        "file": "mux.go",
+        "line": 52,
+        "symbol": "NewMux",
+        "text": "func NewMux() *Mux {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "chi.go",
+          "line": 63,
+          "text": "return NewMux()"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "chi-source-edge-2",
+      "source": {
+        "file": "context.go",
+        "line": 16,
+        "symbol": "URLParamFromCtx",
+        "text": "func URLParamFromCtx(ctx context.Context, key string) string {"
+      },
+      "target": {
+        "file": "context.go",
+        "line": 25,
+        "symbol": "RouteContext",
+        "text": "func RouteContext(ctx context.Context) *Context {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "context.go",
+          "line": 17,
+          "text": "if rctx := RouteContext(ctx); rctx != nil {"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "chi-source-edge-3",
+      "source": {
+        "file": "context.go",
+        "line": 16,
+        "symbol": "URLParamFromCtx",
+        "text": "func URLParamFromCtx(ctx context.Context, key string) string {"
+      },
+      "target": {
+        "file": "context.go",
+        "line": 124,
+        "symbol": "URLParam",
+        "text": "func (x *Context) URLParam(key string) string {"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "context.go",
+          "line": 18,
+          "text": "return rctx.URLParam(key)"
+        }
+      ],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    },
+    {
+      "id": "chi-source-edge-4",
+      "source": {
+        "file": "chi.go",
+        "line": 62,
+        "symbol": "NewRouter",
+        "text": "func NewRouter() *Mux {"
+      },
+      "target": {
+        "file": "context.go",
+        "line": 31,
+        "symbol": "NewRouteContext",
+        "text": "func NewRouteContext() *Context {"
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "All direct call sites for this selected declaration pair in the reviewed caller body are listed; an empty list is a direct-edge negative, not a claim of no transitive connection."
+    }
+  ]
+}

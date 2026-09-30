@@ -529,7 +529,14 @@ pub struct NodeTrailRequest {
     pub source: String,
     pub target: String,
     pub include_heuristic: bool,
+    /// Restrict both traversal and direction diagnostics to call relationships.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub calls_only: bool,
     pub limits: CodeQueryLimits,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

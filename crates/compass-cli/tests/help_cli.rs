@@ -109,6 +109,38 @@ fn command_and_nested_help_explain_options_and_examples() {
 }
 
 #[test]
+fn discovery_help_keeps_returned_edges_and_examined_relationship_limits_distinct() {
+    let limits = compass_model::query_contract::DiscoveryLimits::default();
+    for arguments in [["query", "--help"], ["help", "query"]] {
+        let outcome = invoke(&arguments);
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        let text = outcome
+            .stdout
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            text.contains(&format!(
+                "--max-nodes <N> Returned node count [default: {}; hard maximum: 500]",
+                limits.max_nodes
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "--max-edges <N> Returned edge count [default: {}; hard maximum: 1000]",
+                limits.max_edges
+            )),
+            "{text}"
+        );
+        assert!(text.contains(&format!(
+            "--max-expanded-relationships <N> Examined relationships [default/hard maximum: {}]",
+            limits.max_expanded_relationships
+        )), "{text}");
+    }
+}
+
+#[test]
 fn every_public_nested_command_has_a_dedicated_page() {
     for (parent, children) in [
         (

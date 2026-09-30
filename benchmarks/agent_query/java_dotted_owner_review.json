@@ -1,0 +1,2407 @@
+{
+  "schema": "compass.java-dotted-owner-review/1",
+  "scope": "Complete unchanged compiler-backed jsoup development census after Java nominal dotted-name resolution; paired preservation controls on all four other known cohort repositories. Not held-out or broad quality confirmation.",
+  "productionCommit": "be2fb542b0f39f752914ef83feb6913c0b4f6325",
+  "packageVersion": "0.3.30",
+  "astCacheSemantics": "10 unchanged; resolver-only correction, stored graphs require rebuild",
+  "registrationSha256": "2524bcda515c6d62bf125fe0663c564e6366152b1c108fea9cbace684b627967",
+  "registrationCommit": "c5a94aeb91e8f93a833d3a185bf307e85e823746",
+  "previousReviewSha256": "e37b6699464d57bb9f1f1a03bfd531a6c3b3c5a172a5a8648d50c41dbd8925a5",
+  "source": {
+    "repository": "jhy/jsoup",
+    "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+    "sourceRoot": "src/main/java",
+    "files": 88,
+    "sourceRegistrationSha256": "6088df9f4cf420437a71ca06324bbe80817ed73142eb61c5686d8d3da36180af"
+  },
+  "oracle": {
+    "path": "jsoup-java-field-oracle-02/capture-final/bindings.stdout",
+    "sha256": "4596b24d67fab7f728bc5dfe54e9b381fc42d411b9cb9042646cffbed420e95c",
+    "manifestSha256": "6b9532e36846aa7c2df0ac799c1c9f01dbf8c5061dd3adfa5a0fbc8e8bb64d3a",
+    "auditorSha256": "2ced23208ab1171d33ec00a6385fce34367a87c67d2cadef249650a1b8264e9b",
+    "release": "8",
+    "internalOrdinaryFieldReferences": 3785,
+    "internalEnumReferences": 529,
+    "nonSourceCategories": "Retain external fields, array lengths and class literals separately, as in the unchanged oracle."
+  },
+  "binaries": {
+    "baseline": {
+      "path": "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+      "sha256": "28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889"
+    },
+    "candidate": {
+      "path": "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+      "sha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61"
+    }
+  },
+  "qualifiedPatchSha256": "89c67244f4cf87c238b2044102d84d76ee08db6fd74b5a2d0dd8f75c742e46e9",
+  "qualifiedSourceInputs": 748,
+  "results": {
+    "baseline": {
+      "contactStatus": {
+        "verified_target_and_owner": 3461
+      },
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            10
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            10
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            8
+          ],
+          [
+            "org.jsoup.Connection.Method::GET",
+            6
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::STOP",
+            5
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            5
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            4
+          ],
+          [
+            "org.jsoup.Connection.Method::POST",
+            3
+          ],
+          [
+            "org.jsoup.Connection.Method::HEAD",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::base",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::extended",
+            3
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Document.QuirksMode::quirks",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::xhtml",
+            2
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            51
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            40
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            38
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::normalName",
+            21
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::settings",
+            16
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::key",
+            14
+          ],
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            13
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::tokeniser",
+            13
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::attributes",
+            13
+          ],
+          [
+            "org.jsoup.select.StructuralEvaluator::evaluator",
+            11
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceSvg",
+            10
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::doc",
+            10
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::value",
+            10
+          ],
+          [
+            "::i",
+            9
+          ],
+          [
+            "org.jsoup.internal.SharedConstants::DefaultBufferSize",
+            8
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceMathml",
+            8
+          ],
+          [
+            "org.jsoup.helper.DataUtil::UTF_8",
+            7
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::currentToken",
+            7
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 355,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 3106,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    },
+    "candidate": {
+      "contactStatus": {
+        "verified_target_and_owner": 3483
+      },
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            10
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            10
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            8
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            8
+          ],
+          [
+            "org.jsoup.Connection.Method::GET",
+            6
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            5
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            4
+          ],
+          [
+            "org.jsoup.Connection.Method::POST",
+            3
+          ],
+          [
+            "org.jsoup.Connection.Method::HEAD",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::base",
+            3
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::extended",
+            3
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Document.QuirksMode::quirks",
+            3
+          ],
+          [
+            "org.jsoup.nodes.Entities.EscapeMode::xhtml",
+            2
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::Initial",
+            2
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            51
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            40
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            38
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            31
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::normalName",
+            21
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::settings",
+            16
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::key",
+            14
+          ],
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            13
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::tokeniser",
+            13
+          ],
+          [
+            "org.jsoup.parser.Token.Tag::attributes",
+            13
+          ],
+          [
+            "org.jsoup.select.StructuralEvaluator::evaluator",
+            11
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceSvg",
+            10
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::doc",
+            10
+          ],
+          [
+            "org.jsoup.select.Evaluator.AttributeKeyPair::value",
+            10
+          ],
+          [
+            "::i",
+            9
+          ],
+          [
+            "org.jsoup.internal.SharedConstants::DefaultBufferSize",
+            8
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceMathml",
+            8
+          ],
+          [
+            "org.jsoup.helper.DataUtil::UTF_8",
+            7
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::currentToken",
+            7
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 368,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 3115,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    },
+    "graphify": {
+      "contactStatus": {},
+      "mostMissedTargets": {
+        "enum_constant": [
+          [
+            "org.jsoup.parser.TokeniserState::Data",
+            81
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::xml",
+            27
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InBody",
+            24
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InHead",
+            15
+          ],
+          [
+            "org.jsoup.nodes.Document.OutputSettings.Syntax::html",
+            12
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTable",
+            12
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::StartTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EndTag",
+            11
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptData",
+            10
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::Comment",
+            10
+          ],
+          [
+            "org.jsoup.select.NodeFilter.FilterResult::CONTINUE",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Comment",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Character",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::Doctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.Token.TokenType::EOF",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BeforeAttributeName",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::ScriptDataEscaped",
+            9
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::BogusDoctype",
+            9
+          ],
+          [
+            "org.jsoup.parser.HtmlTreeBuilderState::InTableBody",
+            8
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::AttributeName",
+            7
+          ]
+        ],
+        "field": [
+          [
+            "org.jsoup.nodes.Node::parentNode",
+            78
+          ],
+          [
+            "org.jsoup.parser.TreeBuilder::stack",
+            67
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::bufPos",
+            62
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::doctypePending",
+            52
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::tagPending",
+            49
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::nullChar",
+            48
+          ],
+          [
+            "org.jsoup.parser.Tokeniser::reader",
+            45
+          ],
+          [
+            "org.jsoup.helper.HttpConnection::req",
+            41
+          ],
+          [
+            "org.jsoup.nodes.Attributes::size",
+            41
+          ],
+          [
+            "org.jsoup.parser.TokeniserState::eof",
+            41
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::charBuf",
+            39
+          ],
+          [
+            "org.jsoup.nodes.Element::childNodes",
+            38
+          ],
+          [
+            "org.jsoup.nodes.Element::attributes",
+            36
+          ],
+          [
+            "org.jsoup.select.QueryParser::tq",
+            36
+          ],
+          [
+            "org.jsoup.parser.CharacterReader::bufLength",
+            33
+          ],
+          [
+            "org.jsoup.parser.Token.Doctype::forceQuirks",
+            33
+          ],
+          [
+            "org.jsoup.parser.Parser::NamespaceHtml",
+            32
+          ],
+          [
+            "org.jsoup.nodes.Attributes::keys",
+            30
+          ],
+          [
+            "org.jsoup.nodes.Attributes::vals",
+            30
+          ],
+          [
+            "org.jsoup.nodes.Element::tag",
+            30
+          ]
+        ]
+      },
+      "summary": {
+        "enum_constant": {
+          "declarations": 131,
+          "exactTargetAndOwner": 0,
+          "occurrences": 529,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "declarations": 616,
+          "exactTargetAndOwner": 0,
+          "occurrences": 3785,
+          "uniqueGraphDeclarations": 0,
+          "unsupportedAnchors": 0
+        }
+      },
+      "unsupportedContacts": []
+    }
+  },
+  "observations": [
+    {
+      "argv": [
+        "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+        "extract",
+        "<source-root>/jhy/jsoup",
+        "--code-only",
+        "--no-viz",
+        "--store",
+        "sqlite",
+        "--out",
+        "<evaluation-root>/java-dotted-owner-01/evaluation/baseline/artifact"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 6037,
+      "stdout_bytes": 494,
+      "stderr_bytes": 114,
+      "output_limited": false,
+      "name": "baseline",
+      "loadAverageBefore": [
+        13.48486328125,
+        10.31005859375,
+        9.2685546875
+      ],
+      "loadAverageAfter": [
+        12.72509765625,
+        10.205078125,
+        9.2373046875
+      ],
+      "stdoutSha256": "64be2ee2eb7b784231bfe80c59eaed5f0db987c653efbe44b8d749197929fdbb",
+      "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+      "graphPath": "<evaluation-root>/java-dotted-owner-01/evaluation/baseline/artifact/compass-out/snapshots/snapshot-1790543164384101000-80647-0/graph.json",
+      "graphBytes": 30256465,
+      "admitted": true,
+      "graphSha256": "300f9afd2bf1f3c04d11b7f4563e464fd85d4a95da6de68d940d42d9f99f6227",
+      "equalsOriginalCompassGraph": true,
+      "reviewSha256": "5c993b36e2a0a2429e2fe8f06659cc701ebd32eb922231b9e6cbd86907fec465",
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 355,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 3106,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {
+        "verified_target_and_owner": 3461
+      }
+    },
+    {
+      "argv": [
+        "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+        "extract",
+        "<source-root>/jhy/jsoup",
+        "--code-only",
+        "--no-viz",
+        "--store",
+        "sqlite",
+        "--out",
+        "<evaluation-root>/java-dotted-owner-01/evaluation/candidate/artifact"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_ms": 5125,
+      "stdout_bytes": 495,
+      "stderr_bytes": 114,
+      "output_limited": false,
+      "name": "candidate",
+      "loadAverageBefore": [
+        12.72509765625,
+        10.205078125,
+        9.2373046875
+      ],
+      "loadAverageAfter": [
+        12.9873046875,
+        10.30126953125,
+        9.27685546875
+      ],
+      "stdoutSha256": "5b1aa0b8ad7ff4ad724ad8fec9158c9513d9b39f4222da73b4d56d6f426d418b",
+      "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+      "graphPath": "<evaluation-root>/java-dotted-owner-01/evaluation/candidate/artifact/compass-out/snapshots/snapshot-1790543171203895000-80748-0/graph.json",
+      "graphBytes": 30296084,
+      "admitted": true,
+      "graphSha256": "04fc11f8d2c30f663c694451cc2c2957c94536a3658e4d0eeb5584fa38b6a2d8",
+      "equalsOriginalCompassGraph": false,
+      "reviewSha256": "9e95fb6247727b4ea01e80b0ce54805793a97b07ae38e9b4a8260e5944072c3e",
+      "summary": {
+        "enum_constant": {
+          "occurrences": 529,
+          "exactTargetAndOwner": 368,
+          "declarations": 131,
+          "uniqueGraphDeclarations": 131,
+          "unsupportedAnchors": 0
+        },
+        "field": {
+          "occurrences": 3785,
+          "exactTargetAndOwner": 3115,
+          "declarations": 616,
+          "uniqueGraphDeclarations": 614,
+          "unsupportedAnchors": 0
+        }
+      },
+      "contactStatus": {
+        "verified_target_and_owner": 3483
+      }
+    }
+  ],
+  "graphify": {
+    "graphPath": "<evaluation-root>/runs/java-varargs-panel-a-02/artifacts/jsoup/graphify/graphify-out/graph.json",
+    "graphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+    "reviewSha256": "dc5cbeea887a267d5a6f9a39860efc924e4be3a09fabb5a7c447de9e6a7ab0b2",
+    "summary": {
+      "enum_constant": {
+        "occurrences": 529,
+        "exactTargetAndOwner": 0,
+        "declarations": 131,
+        "uniqueGraphDeclarations": 131,
+        "unsupportedAnchors": 0
+      },
+      "field": {
+        "occurrences": 3785,
+        "exactTargetAndOwner": 0,
+        "declarations": 616,
+        "uniqueGraphDeclarations": 0,
+        "unsupportedAnchors": 0
+      }
+    },
+    "contactStatus": {}
+  },
+  "originalMatchedReferencesRetained": 3461,
+  "lostOriginalMatchedReferences": [],
+  "newVerifiedReferences": 22,
+  "newVerifiedContacts": [
+    {
+      "index": 84,
+      "id": "sha256:00cace29738579a28a964dc715bfe0e8c7d26e2ee4b2efcff3a75b983f2d96a7",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:8fca14f0c24e37ff24402afe64fb98b3fb3449050ad9beed2da28b70eef2d517",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 156,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6809,
+        "endByte": 6815,
+        "startLine": 156,
+        "startColumn": 39,
+        "endLine": 156,
+        "endColumn": 45
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1499:1505:enum_constant:REMOVE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4313
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 305,
+      "id": "sha256:033846b4e59ae0c7b1f116cd0f0d1718971978f8a1e0f82cb131684855f3d4a0",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:c7bf096e51b72b30d7f5e6ab4614aab468141937edd30ab01abed707afbed022",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 124,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 5299,
+        "endByte": 5307,
+        "startLine": 124,
+        "startColumn": 39,
+        "endLine": 124,
+        "endColumn": 47
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1188:1196:enum_constant:CONTINUE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4304
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 435,
+      "id": "sha256:048020294ce6b2dc53e4f92d5bfc4eeb6ec2c0af03e635521d75ae9936409032",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:3e279ab168895c5e84739f2706ef71591f5b10eda9d0f214f10628758324415d",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 51,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1713,
+        "endByte": 1726,
+        "startLine": 51,
+        "startColumn": 20,
+        "endLine": 51,
+        "endColumn": 33
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26636:26662:field:statusMessage"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        494
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 3262,
+      "id": "sha256:2062077b46b09e35fdf0c701844225ace97674e535678c286cf709759bfbf60f",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:5070d441b5070493ff795a4cfae07a38aa816eeeb9f74545f3100d9801402d27",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 134,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 5769,
+        "endByte": 5782,
+        "startLine": 134,
+        "startColumn": 78,
+        "endLine": 134,
+        "endColumn": 91
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1311:1324:enum_constant:SKIP_CHILDREN"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4306
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 3842,
+      "id": "sha256:26228dc28e40edfe6ec8e4c6ab6db2c4b2d3708f19c2a531d0832a74df54187b",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:c7bf096e51b72b30d7f5e6ab4614aab468141937edd30ab01abed707afbed022",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 144,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6247,
+        "endByte": 6255,
+        "startLine": 144,
+        "startColumn": 38,
+        "endLine": 144,
+        "endColumn": 46
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1188:1196:enum_constant:CONTINUE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4309
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 3962,
+      "id": "sha256:2747bce864ce935130d63f21c94de2f3802f9f75cf073d5b27479349873bef3a",
+      "source": "sha256:2dce7d9d277ab5893ad3f5957ee83c96e11f5371eb276ee9c448c8c647d78bc7",
+      "target": "sha256:949171853b3ec5b6a763cc9b934a706a9b767d94a37426a2e00627550f3bfb1b",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 172,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 7327,
+        "endByte": 7331,
+        "startLine": 172,
+        "startColumn": 51,
+        "endLine": 172,
+        "endColumn": 55
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1546:1550:enum_constant:STOP"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:7104:7361:method:filter"
+      ],
+      "oracleReferences": [
+        4315
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 4259,
+      "id": "sha256:29ec858c68e00ae5b693a4a8e6d737ac979cc54918bc945cfb6f40809422efe7",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:949171853b3ec5b6a763cc9b934a706a9b767d94a37426a2e00627550f3bfb1b",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 136,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 5888,
+        "endByte": 5892,
+        "startLine": 136,
+        "startColumn": 47,
+        "endLine": 136,
+        "endColumn": 51
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1546:1550:enum_constant:STOP"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4307
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 4701,
+      "id": "sha256:2e50a6f5a4ddea09ad817b2afee27f33ce56ea554cb1fc7d5fc7fab3afac90a8",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:c7bf096e51b72b30d7f5e6ab4614aab468141937edd30ab01abed707afbed022",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 134,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 5734,
+        "endByte": 5742,
+        "startLine": 134,
+        "startColumn": 43,
+        "endLine": 134,
+        "endColumn": 51
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1188:1196:enum_constant:CONTINUE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4305
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 5461,
+      "id": "sha256:35f8c99d2c547a2c5f63feb3a8c6ad5073b361aa892f34013e2f952e3720ea9a",
+      "source": "sha256:b2fb86292c7499b3accd1ce417581ca8461f7e9da79fb7c0d0a2f27c8c1e25f5",
+      "target": "sha256:e60dcd6c99e24fa328dd30c2b3bfcdaca79435bae97c7a5b9dc575edcbcd6ec5",
+      "file": "src/main/java/org/jsoup/select/QueryParser.java",
+      "line": 535,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/QueryParser.java",
+        "startByte": 22706,
+        "endByte": 22711,
+        "startLine": 535,
+        "startColumn": 45,
+        "endLine": 535,
+        "endColumn": 50
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/HasEvaluator.java:2039:2057:field:scope"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/QueryParser.java:22168:22971:method:planTraversals"
+      ],
+      "oracleReferences": [
+        4386
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 6773,
+      "id": "sha256:425413400a6c591da6ee8210e079fff0ce2bcda5bbe97d1800626e9a42b8312b",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:8fca14f0c24e37ff24402afe64fb98b3fb3449050ad9beed2da28b70eef2d517",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 142,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6134,
+        "endByte": 6140,
+        "startLine": 142,
+        "startColumn": 43,
+        "endLine": 142,
+        "endColumn": 49
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1499:1505:enum_constant:REMOVE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4308
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 7545,
+      "id": "sha256:4a502a8c1c7a791c441f465a889aac38731fa38e114488dfc5976c0f2cbc67fa",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:5070d441b5070493ff795a4cfae07a38aa816eeeb9f74545f3100d9801402d27",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 147,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6435,
+        "endByte": 6448,
+        "startLine": 147,
+        "startColumn": 74,
+        "endLine": 147,
+        "endColumn": 87
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1311:1324:enum_constant:SKIP_CHILDREN"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4311
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 7835,
+      "id": "sha256:4d45b6ff28f863206a68762ea7cd99aabecedf6b2a50fa88a1fffe1c18e33db5",
+      "source": "sha256:b2fb86292c7499b3accd1ce417581ca8461f7e9da79fb7c0d0a2f27c8c1e25f5",
+      "target": "sha256:7dfea65523e52825889964b1210bf89192f8e0cbfaea8e1005d3b756bff2169e",
+      "file": "src/main/java/org/jsoup/select/QueryParser.java",
+      "line": 536,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/QueryParser.java",
+        "startByte": 22799,
+        "endByte": 22808,
+        "startLine": 536,
+        "startColumn": 75,
+        "endLine": 536,
+        "endColumn": 84
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/HasEvaluator.java:2004:2030:field:evaluator"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/QueryParser.java:22168:22971:method:planTraversals"
+      ],
+      "oracleReferences": [
+        4387
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 9574,
+      "id": "sha256:5f22e9eee9be99aa59705c8030d2baecbd77f9fc70e12d0ab70b12e2e336bbd1",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:14a1f6d1c28c698bfce77bcabfa0f3dc811b545b2a86b9e569b34706a9a57faa",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 52,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1842,
+        "endByte": 1853,
+        "startLine": 52,
+        "startColumn": 16,
+        "endLine": 52,
+        "endColumn": 27
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26866:26895:field:contentType"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        496
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 15968,
+      "id": "sha256:9ecebf64ff2e6e42b3cf38e18e966582b64df183a7bf3775a9535ce3a31b87a3",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:c7bf096e51b72b30d7f5e6ab4614aab468141937edd30ab01abed707afbed022",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 160,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6944,
+        "endByte": 6952,
+        "startLine": 160,
+        "startColumn": 28,
+        "endLine": 160,
+        "endColumn": 36
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1188:1196:enum_constant:CONTINUE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4314
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 16693,
+      "id": "sha256:a5ee895709c8b4fbd60c5f1e0eca08d25556b5fdc5e7d981f28c8aebf0265121",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:3e279ab168895c5e84739f2706ef71591f5b10eda9d0f214f10628758324415d",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 50,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1650,
+        "endByte": 1663,
+        "startLine": 50,
+        "startColumn": 16,
+        "endLine": 50,
+        "endColumn": 29
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26636:26662:field:statusMessage"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        492
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 17452,
+      "id": "sha256:addc81574cbe384df4a6b19d8bd4f701634041db6f47c0b05f453e0353b80369",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:949171853b3ec5b6a763cc9b934a706a9b767d94a37426a2e00627550f3bfb1b",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 149,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6546,
+        "endByte": 6550,
+        "startLine": 149,
+        "startColumn": 43,
+        "endLine": 149,
+        "endColumn": 47
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1546:1550:enum_constant:STOP"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4312
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 17995,
+      "id": "sha256:b38daa2e30a47cee084b5dedba8e062a0552289d31691f3edc5f4cd97c37f32d",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:09578e29ad13c9f9a6b580d9e0e3f70b7e35e3f5f11beee5839698772e61d8de",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 46,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1450,
+        "endByte": 1458,
+        "startLine": 46,
+        "startColumn": 16,
+        "endLine": 46,
+        "endColumn": 24
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26780:26815:field:executor"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        485
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 19700,
+      "id": "sha256:c42e62ab8f9bec28794100359c97a4097c14420c384337e1107687eebf9fabb8",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:949171853b3ec5b6a763cc9b934a706a9b767d94a37426a2e00627550f3bfb1b",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 121,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 5182,
+        "endByte": 5186,
+        "startLine": 121,
+        "startColumn": 39,
+        "endLine": 121,
+        "endColumn": 43
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1546:1550:enum_constant:STOP"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4303
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 20298,
+      "id": "sha256:ca264e2dcc1e0a385c502e94236c86b42a719e512786a477e140c779411f3bdd",
+      "source": "sha256:7c26c185526bd1f5cbb09ea65e7d80bb99325922659006a26a3c33f91fbe85e4",
+      "target": "sha256:c7bf096e51b72b30d7f5e6ab4614aab468141937edd30ab01abed707afbed022",
+      "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+      "line": 147,
+      "site": {
+        "file": "src/main/java/org/jsoup/select/NodeTraversor.java",
+        "startByte": 6400,
+        "endByte": 6408,
+        "startLine": 147,
+        "startColumn": 39,
+        "endLine": 147,
+        "endColumn": 47
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/select/NodeFilter.java:1188:1196:enum_constant:CONTINUE"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/select/NodeTraversor.java:4936:6959:method:filter"
+      ],
+      "oracleReferences": [
+        4310
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 22565,
+      "id": "sha256:e0d1255df023b1b1d52b9c717eafe2ca63f63283e22bf097e3522fe4ce28483f",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:3e279ab168895c5e84739f2706ef71591f5b10eda9d0f214f10628758324415d",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 51,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1740,
+        "endByte": 1753,
+        "startLine": 51,
+        "startColumn": 47,
+        "endLine": 51,
+        "endColumn": 60
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26636:26662:field:statusMessage"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        495
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 25005,
+      "id": "sha256:f8aae85e8c816f866488766038d4ae8d29f1fba55b3067663d40bbc9f69c741c",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:568569ab1f68d27a4827997b315287fb5163829769a23cbc83522f45f0d61975",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 53,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1895,
+        "endByte": 1908,
+        "startLine": 53,
+        "startColumn": 16,
+        "endLine": 53,
+        "endColumn": 29
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26904:26922:field:contentLength"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        498
+      ],
+      "status": "verified_target_and_owner"
+    },
+    {
+      "index": 25499,
+      "id": "sha256:fdbd29f148a547fa4585c2aab58751957106e08014bb111afcea152a8813654d",
+      "source": "sha256:57ec730ceb5e52e360a9b8dbe0fb4b4253eb103d92321784c4624ec1f5a1d463",
+      "target": "sha256:fefa7c3d245cd15f4f7f2b5445da817ddc4598013c56736376056f0fd750e79e",
+      "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+      "line": 49,
+      "site": {
+        "file": "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java",
+        "startByte": 1597,
+        "endByte": 1607,
+        "startLine": 49,
+        "startColumn": 16,
+        "endLine": 49,
+        "endColumn": 26
+      },
+      "graphDirected": true,
+      "targetDeclarations": [
+        "src/main/java/org/jsoup/helper/HttpConnection.java:26612:26627:field:statusCode"
+      ],
+      "ownerDeclarations": [
+        "src/main/java/org/jsoup/helper/UrlConnectionExecutor.java:887:2184:method:execute"
+      ],
+      "oracleReferences": [
+        490
+      ],
+      "status": "verified_target_and_owner"
+    }
+  ],
+  "remainingMisses": {
+    "field": 670,
+    "enum_constant": 161
+  },
+  "wholeGraphDelta": {
+    "links": {
+      "added": 49,
+      "addedKinds": {
+        "references": 49
+      },
+      "addedOccurrenceScopes": {
+        "outside-registered-source-or-unanchored": 27,
+        "registered-source": 22
+      },
+      "baseline": 25676,
+      "candidate": 25725,
+      "changed": 0,
+      "changedFieldCounts": {},
+      "removed": 0,
+      "removedKinds": {}
+    },
+    "nodes": {
+      "added": 0,
+      "baseline": 6116,
+      "candidate": 6116,
+      "changed": 4097,
+      "changedFieldCounts": {
+        "community": 4097
+      },
+      "removed": 0
+    }
+  },
+  "otherTopLevelGraphFieldsEqual": true,
+  "sourceAnchorChecks": {
+    "schema": "compass.java-dotted-owner-added-anchors/1",
+    "graphSha256": "04fc11f8d2c30f663c694451cc2c2957c94536a3658e4d0eeb5584fa38b6a2d8",
+    "verificationSha256": "30e15a450eca8230e591161ca0b3e34f8cbb47215737d8bf000019dfbaec218c",
+    "scriptSha256": "cc6002bc024d722025ac17efe1dda7ebfa24acf9a36346961f20d6885e49d74d",
+    "allChecksPassed": true,
+    "outsideCompilerCohortFiles": {
+      "src/main/java11/org/jsoup/helper/HttpClientExecutor.java": 6,
+      "src/test/java/org/jsoup/integration/ConnectTest.java": 10,
+      "src/test/java/org/jsoup/nodes/DocumentTest.java": 4,
+      "src/test/java/org/jsoup/parser/XmlTreeBuilderTest.java": 7
+    },
+    "scope": "Checks graph/source byte anchors, provenance and callable containment only. Same-spelled wrong bindings can pass these checks; additions outside the Java 8 compiler cohort remain semantically unscored."
+  },
+  "partialGraphWarnings": [
+    {
+      "admitted": true,
+      "diagnostics": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+      "name": "baseline",
+      "successful": true
+    },
+    {
+      "admitted": true,
+      "diagnostics": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+      "name": "candidate",
+      "successful": true
+    }
+  ],
+  "controls": {
+    "verification": {
+      "allEightAdmitted": true,
+      "allFourPairsEqual": true,
+      "allFourPairsEqualOriginal": true,
+      "limits": [
+        "This is one known Java configuration; general cross-language superiority remains unproven.",
+        "The change was motivated by observed missed enum constants. All scores are development results, even though this follow-up protocol precedes candidate extraction.",
+        "No authored explanation, runtime feasibility, functional community or god-object classification claim follows.",
+        "The preceding compiler fixture captures remain separate development diagnostics; neither changes the fixed real-source denominator.",
+        "This correction canonicalizes already established nominal receivers. Missing type/value expression-chain, static-import, hierarchy and selector typing evidence remains explicit."
+      ],
+      "observations": [
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "chi",
+          "stderr": "",
+          "successful": true,
+          "tool": "baseline"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "chi",
+          "stderr": "",
+          "successful": true,
+          "tool": "candidate"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "click",
+          "stderr": "",
+          "successful": true,
+          "tool": "baseline"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "click",
+          "stderr": "",
+          "successful": true,
+          "tool": "candidate"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "redux",
+          "stderr": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+          "successful": true,
+          "tool": "baseline"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "redux",
+          "stderr": "warning: Compass published a partial graph after omitting 0 nodes and 2 edges; 0 identity collisions quarantined.\n",
+          "successful": true,
+          "tool": "candidate"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "walkdir",
+          "stderr": "",
+          "successful": true,
+          "tool": "baseline"
+        },
+        {
+          "admitted": true,
+          "equalsOriginalGraph": true,
+          "repository": "walkdir",
+          "stderr": "",
+          "successful": true,
+          "tool": "candidate"
+        }
+      ],
+      "panels": [
+        {
+          "admitted": 2,
+          "allThreeEqual": true,
+          "completePair": true,
+          "fullPairByteEquality": true,
+          "repository": "chi"
+        },
+        {
+          "admitted": 2,
+          "allThreeEqual": true,
+          "completePair": true,
+          "fullPairByteEquality": true,
+          "repository": "click"
+        },
+        {
+          "admitted": 2,
+          "allThreeEqual": true,
+          "completePair": true,
+          "fullPairByteEquality": true,
+          "repository": "redux"
+        },
+        {
+          "admitted": 2,
+          "allThreeEqual": true,
+          "completePair": true,
+          "fullPairByteEquality": true,
+          "repository": "walkdir"
+        }
+      ],
+      "registrationSha256": "2524bcda515c6d62bf125fe0663c564e6366152b1c108fea9cbace684b627967",
+      "runSha256": "02cc70888ef7dc532fcbe5ba6501b1dd1d1a67d3edffd0e70f4570b7ea0d3582",
+      "schema": "compass.java-dotted-owner-controls-verification/1",
+      "scope": "Complete unchanged compiler-backed jsoup development census after Java nominal dotted-name resolution; paired preservation controls on all four other known cohort repositories. Not held-out or broad quality confirmation.",
+      "verifierSha256": "b2ca7976d4271ae39061f8453ea2c53090ec3d3c5ca721ea5855f00eb3f3a810"
+    },
+    "observations": [
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<source-root>/go-chi/chi",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/chi/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 1586,
+        "stdout_bytes": 493,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "chi",
+        "tool": "baseline",
+        "stdoutSha256": "ab149a5c14d7c1b3a0fe93ca02aca630322536af20225214abc8a7b1573910cd",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/chi/baseline/artifact/compass-out/snapshots/snapshot-1790543163882142000-80622-0/graph.json",
+        "graphBytes": 2488750,
+        "admitted": true,
+        "graphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<source-root>/go-chi/chi",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/chi/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 1564,
+        "stdout_bytes": 494,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "chi",
+        "tool": "candidate",
+        "stdoutSha256": "6021b54197ec67ec946d9bfad2788c5eae1b0345b7123eeed3daa96291764a99",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/chi/candidate/artifact/compass-out/snapshots/snapshot-1790543165935883000-80658-0/graph.json",
+        "graphBytes": 2488750,
+        "admitted": true,
+        "graphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<source-root>/pallets/click",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/click/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 2528,
+        "stdout_bytes": 498,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "click",
+        "tool": "baseline",
+        "stdoutSha256": "513df87e5ceabc04a9346c29affd7cdb27403416a3d1f35596a40bb3ae4b5427",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/click/baseline/artifact/compass-out/snapshots/snapshot-1790543168173090000-80686-0/graph.json",
+        "graphBytes": 9607995,
+        "admitted": true,
+        "graphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<source-root>/pallets/click",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/click/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 2242,
+        "stdout_bytes": 499,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "click",
+        "tool": "candidate",
+        "stdoutSha256": "e15948c13e5a88891e97586ef16b1c4e72443d907b936f68c775047f8f17e1fb",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/click/candidate/artifact/compass-out/snapshots/snapshot-1790543171176890000-80747-0/graph.json",
+        "graphBytes": 9607995,
+        "admitted": true,
+        "graphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<source-root>/reduxjs/redux",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/redux/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 3166,
+        "stdout_bytes": 498,
+        "stderr_bytes": 114,
+        "output_limited": false,
+        "repository": "redux",
+        "tool": "baseline",
+        "stdoutSha256": "6d31fcc44b95e7c2ae142af7e64f14c7c483df93ba50b7714888da6934177b53",
+        "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/redux/baseline/artifact/compass-out/snapshots/snapshot-1790543174881936000-80761-0/graph.json",
+        "graphBytes": 8047006,
+        "admitted": true,
+        "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<source-root>/reduxjs/redux",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/redux/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 2024,
+        "stdout_bytes": 499,
+        "stderr_bytes": 114,
+        "output_limited": false,
+        "repository": "redux",
+        "tool": "candidate",
+        "stdoutSha256": "a018792ab2edd4823d67c99d8e65622bcd752432da7a61ac387d01ca5d5f21e4",
+        "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/redux/candidate/artifact/compass-out/snapshots/snapshot-1790543178528549000-80777-0/graph.json",
+        "graphBytes": 8047006,
+        "admitted": true,
+        "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<source-root>/BurntSushi/walkdir",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/walkdir/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 867,
+        "stdout_bytes": 496,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "walkdir",
+        "tool": "baseline",
+        "stdoutSha256": "39c1484ddc57733f5c22e2bf89096f20ef571d6de2f048b2c2e7fc480eb6ea1b",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/walkdir/baseline/artifact/compass-out/snapshots/snapshot-1790543181039404000-80785-0/graph.json",
+        "graphBytes": 1463032,
+        "admitted": true,
+        "graphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+        "equalsOriginalGraph": true
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<source-root>/BurntSushi/walkdir",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/controls/walkdir/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 863,
+        "stdout_bytes": 497,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "repository": "walkdir",
+        "tool": "candidate",
+        "stdoutSha256": "afa7fca8ab34fa2dfa11ae545b17c0e2edc9592a81cff52580d47748a88cd8dc",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphPath": "<evaluation-root>/java-dotted-owner-01/controls/walkdir/candidate/artifact/compass-out/snapshots/snapshot-1790543182470054000-81022-0/graph.json",
+        "graphBytes": 1463032,
+        "admitted": true,
+        "graphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+        "equalsOriginalGraph": true
+      }
+    ],
+    "repositories": [
+      {
+        "name": "chi",
+        "repository": "go-chi/chi",
+        "language": "Go",
+        "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+        "originalCompassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+        "frozenGraphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+      },
+      {
+        "name": "click",
+        "repository": "pallets/click",
+        "language": "Python",
+        "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+        "originalCompassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+        "frozenGraphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+      },
+      {
+        "name": "redux",
+        "repository": "reduxjs/redux",
+        "language": "TypeScript",
+        "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+        "originalCompassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+        "frozenGraphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+      },
+      {
+        "name": "walkdir",
+        "repository": "BurntSushi/walkdir",
+        "language": "Rust",
+        "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+        "originalCompassGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+        "frozenGraphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+      }
+    ]
+  },
+  "communityReplay": {
+    "scope": "Post-change diagnostic after observing changed community labels. Replay every unchanged source task pair from the existing known development cohort; no new selection, tuning, preregistered quality outcome, functional-cohesion or superiority claim.",
+    "unchangedPairs": 75,
+    "repositories": [
+      {
+        "repository": "chi",
+        "pairOutcomesUnchanged": true,
+        "baselineCommunities": 154,
+        "candidateCommunities": 154
+      },
+      {
+        "repository": "click",
+        "pairOutcomesUnchanged": true,
+        "baselineCommunities": 173,
+        "candidateCommunities": 173
+      },
+      {
+        "repository": "jsoup",
+        "pairOutcomesUnchanged": true,
+        "baselineCommunities": 40,
+        "candidateCommunities": 43
+      },
+      {
+        "repository": "redux",
+        "pairOutcomesUnchanged": true,
+        "baselineCommunities": 845,
+        "candidateCommunities": 845
+      },
+      {
+        "repository": "walkdir",
+        "pairOutcomesUnchanged": true,
+        "baselineCommunities": 10,
+        "candidateCommunities": 10
+      }
+    ]
+  },
+  "warmCache": {
+    "argv": [
+      "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+      "extract",
+      "<source-root>/jhy/jsoup",
+      "--code-only",
+      "--no-viz",
+      "--store",
+      "sqlite",
+      "--out",
+      "<evaluation-root>/java-dotted-owner-01/warm-cache/artifact"
+    ],
+    "exit_code": 0,
+    "timed_out": false,
+    "wall_ms": 7575,
+    "stdout_bytes": 485,
+    "stderr_bytes": 114,
+    "output_limited": false,
+    "scope": "Post-census compatibility diagnostic using copies of preserved baseline AST facts, not a new quality or timing score.",
+    "binarySha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61",
+    "checksSha256": "e5b130b37763dc4041e14f0206383539a1f37c6e32621c2898a6d003f3fe549c",
+    "sourceCacheFiles": 206,
+    "sourceCacheBytes": 10436161,
+    "stdoutSha256": "32830fcb8debc92eeae9236104af1326d7163893e72f6ae222e6475b7e7dd31b",
+    "stderrSha256": "45059c9ec54273c94fdab76dffa2e08eee926f56b533e2e277d2a1a2bee38743",
+    "scriptSha256": "5ef25031fcc09a62b22137bbd2fd25a4f9ee8e70044499936ae8b1616ebcbeb2",
+    "graphSha256": "04fc11f8d2c30f663c694451cc2c2957c94536a3658e4d0eeb5584fa38b6a2d8",
+    "freshCandidateSha256": "04fc11f8d2c30f663c694451cc2c2957c94536a3658e4d0eeb5584fa38b6a2d8",
+    "fullGraphEqualsFreshCandidate": true
+  },
+  "fixtures": {
+    "complete": true,
+    "scope": "Known compiler-backed development fixtures, distinct from the registered real-source denominator. No Graphify or broad quality comparison.",
+    "checksSha256": "e5b130b37763dc4041e14f0206383539a1f37c6e32621c2898a6d003f3fe549c",
+    "scriptSha256": "a267cc65f51bd055d2f115c0ca7013a3d793d089ed9f9361f116e49e72178f1c",
+    "results": [
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<evaluation-root>/java-dotted-owner-01/source-oracle",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/fixture-evaluation/imported-nominal/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 988,
+        "stdout_bytes": 509,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "fixture": "imported-nominal",
+        "tool": "baseline",
+        "binarySha256": "28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889",
+        "sourceSha256": {
+          "model/Outer.java": "8bf2317e813b7ecaec5deac2535104c6b2ec111533c5b26144a888502ae4896d",
+          "app/Box.java": "c12de4815a9e41182ef443b33799d16699b823d121c8cfbdf4b508b0bf4f897e"
+        },
+        "oracleSha256": "3fe82fe73483d6e23cd972808c4c7d8e12108abbb13aa865969a0ac018c9f2ec",
+        "stdoutSha256": "2cca084eb91dba6d5519e2664a4c888529c926133bfc07fc5d62e8c3f960c2ef",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphSha256": "c69f358899f6436595ac6bf481bd5e8e22e5e01d588e3576dad6ebceb036fc2a",
+        "summary": {
+          "enum_constant": {
+            "occurrences": 3,
+            "exactTargetAndOwner": 0,
+            "declarations": 2,
+            "uniqueGraphDeclarations": 2,
+            "unsupportedAnchors": 0
+          },
+          "field": {
+            "occurrences": 1,
+            "exactTargetAndOwner": 0,
+            "declarations": 1,
+            "uniqueGraphDeclarations": 1,
+            "unsupportedAnchors": 0
+          }
+        },
+        "contactStatus": {},
+        "reviewSha256": "366a39fdabb67982d19d07a7b08644c6ab68e5a73a8896715faeb07695fee543"
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<evaluation-root>/java-dotted-owner-01/source-oracle",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/fixture-evaluation/imported-nominal/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 983,
+        "stdout_bytes": 510,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "fixture": "imported-nominal",
+        "tool": "candidate",
+        "binarySha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61",
+        "sourceSha256": {
+          "model/Outer.java": "8bf2317e813b7ecaec5deac2535104c6b2ec111533c5b26144a888502ae4896d",
+          "app/Box.java": "c12de4815a9e41182ef443b33799d16699b823d121c8cfbdf4b508b0bf4f897e"
+        },
+        "oracleSha256": "3fe82fe73483d6e23cd972808c4c7d8e12108abbb13aa865969a0ac018c9f2ec",
+        "stdoutSha256": "3f900a9cec159374e69d298a1a1f100cfeedf20e7a28d8575ebeaeab57c8b1ba",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphSha256": "8e7e38d5924b95d1d98accc585bd4d7baba6f1632bb502e7b5c7ae3d1b9efba9",
+        "summary": {
+          "enum_constant": {
+            "occurrences": 3,
+            "exactTargetAndOwner": 3,
+            "declarations": 2,
+            "uniqueGraphDeclarations": 2,
+            "unsupportedAnchors": 0
+          },
+          "field": {
+            "occurrences": 1,
+            "exactTargetAndOwner": 1,
+            "declarations": 1,
+            "uniqueGraphDeclarations": 1,
+            "unsupportedAnchors": 0
+          }
+        },
+        "contactStatus": {
+          "verified_target_and_owner": 4
+        },
+        "reviewSha256": "52bc7f40db02465d3d4101a1a90491d6f99033be71f3a559784602045e345042"
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-enum-access-01/compass-candidate-release",
+          "extract",
+          "<evaluation-root>/java-enum-access-01/nested-enum-oracle",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/fixture-evaluation/nested-expressions/baseline/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 993,
+        "stdout_bytes": 511,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "fixture": "nested-expressions",
+        "tool": "baseline",
+        "binarySha256": "28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889",
+        "sourceSha256": {
+          "NestedEnums.java": "34d2542585f54e50b5430bacb1d5ab6e67ddde93c1ac524c535682004af93174"
+        },
+        "oracleSha256": "0a9c5d681a66efea0f1d0972cf15626713c6f5ba0d31146c544de30888cbea90",
+        "stdoutSha256": "dff4159e1d7d847bcdab53efd735643011edccaadfa5c31051aaad42c4a3d76c",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphSha256": "359c762dbdc1d4b10a41ed9427014cd61e977f07f8aa5711f66f37c693cbec52",
+        "summary": {
+          "enum_constant": {
+            "occurrences": 8,
+            "exactTargetAndOwner": 5,
+            "declarations": 6,
+            "uniqueGraphDeclarations": 6,
+            "unsupportedAnchors": 0
+          },
+          "field": {
+            "occurrences": 5,
+            "exactTargetAndOwner": 5,
+            "declarations": 3,
+            "uniqueGraphDeclarations": 3,
+            "unsupportedAnchors": 0
+          }
+        },
+        "contactStatus": {
+          "verified_target_and_owner": 10
+        },
+        "reviewSha256": "24ab7b2bd8ab594f720cb270d3d900fe7ee4ecad3f71f64e944b8c1f9f1f5074"
+      },
+      {
+        "argv": [
+          "<evaluation-root>/java-dotted-owner-01/compass-candidate-release",
+          "extract",
+          "<evaluation-root>/java-enum-access-01/nested-enum-oracle",
+          "--code-only",
+          "--no-viz",
+          "--store",
+          "sqlite",
+          "--out",
+          "<evaluation-root>/java-dotted-owner-01/fixture-evaluation/nested-expressions/candidate/artifact"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 949,
+        "stdout_bytes": 512,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "fixture": "nested-expressions",
+        "tool": "candidate",
+        "binarySha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61",
+        "sourceSha256": {
+          "NestedEnums.java": "34d2542585f54e50b5430bacb1d5ab6e67ddde93c1ac524c535682004af93174"
+        },
+        "oracleSha256": "0a9c5d681a66efea0f1d0972cf15626713c6f5ba0d31146c544de30888cbea90",
+        "stdoutSha256": "0c11ab327ec7c1fedc32e0d2c0e989937f7492dc2d22170e4b454e9a0f0468a1",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "graphSha256": "359c762dbdc1d4b10a41ed9427014cd61e977f07f8aa5711f66f37c693cbec52",
+        "summary": {
+          "enum_constant": {
+            "occurrences": 8,
+            "exactTargetAndOwner": 5,
+            "declarations": 6,
+            "uniqueGraphDeclarations": 6,
+            "unsupportedAnchors": 0
+          },
+          "field": {
+            "occurrences": 5,
+            "exactTargetAndOwner": 5,
+            "declarations": 3,
+            "uniqueGraphDeclarations": 3,
+            "unsupportedAnchors": 0
+          }
+        },
+        "contactStatus": {
+          "verified_target_and_owner": 10
+        },
+        "reviewSha256": "24ab7b2bd8ab594f720cb270d3d900fe7ee4ecad3f71f64e944b8c1f9f1f5074"
+      }
+    ]
+  },
+  "graphifyEnvironmentVerification": {
+    "manifestSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535",
+    "checkedGraphifyPackageFiles": 227,
+    "changedFiles": [],
+    "checkedFrozenPackageVersions": 58,
+    "versionMismatches": {},
+    "additionalDistributions": [],
+    "scriptSha256": "dae2f89912a6a56690339e012b96eaaff99f6f3d94764b7765a5915bf13309fa"
+  },
+  "verification": {
+    "nativeSteps": [
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 4033,
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "name": "fmt",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "test",
+          "-p",
+          "compass-resolve",
+          "--tests",
+          "--locked"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 156906,
+        "stdout_bytes": 46456,
+        "stderr_bytes": 4871,
+        "output_limited": false,
+        "name": "resolver-tests",
+        "stdoutSha256": "89f985ef90d11382f95a94c5335704cc70c55bdeacb18487778788ac94faca88",
+        "stderrSha256": "d1522de6b75e9254eaaa362b585ae3016c46bc8cc519463f19616cbc312104f3"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "clippy",
+          "-p",
+          "compass-resolve",
+          "--test",
+          "java_enum_access",
+          "--test",
+          "java_field_access",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 10119,
+        "stdout_bytes": 0,
+        "stderr_bytes": 213,
+        "output_limited": false,
+        "name": "focused-clippy",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "dee6f5021abdae938d336c3e41f5519dfbb39fb7164aaf5962c6e26546f2ef03"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 53164,
+        "stdout_bytes": 0,
+        "stderr_bytes": 615,
+        "output_limited": false,
+        "name": "workspace-clippy",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "5909b0c529577e4145f7a184462541e3dad0d4c75dd731d85b23ee3a77f7db1d"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 124764,
+        "stdout_bytes": 95610,
+        "stderr_bytes": 6183,
+        "output_limited": false,
+        "name": "workspace-tests",
+        "stdoutSha256": "1799df0601f60995757e8619c4d3cfa46e934640a71eeaec89242ed4d9398376",
+        "stderrSha256": "e9b0dbe44505b707d453a781e4f90a16d9fcdc394dad64dc2aacf8abc6789273"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 58203,
+        "stdout_bytes": 673,
+        "stderr_bytes": 1044,
+        "output_limited": false,
+        "name": "product",
+        "stdoutSha256": "24bb3b5a630eab967028f400d3d40602908bb4d769d8934839dd7bf9a5f9ceef",
+        "stderrSha256": "02baf2ee06c9bbfae778d7abe7698889fbd0a252b71a27dc29fb97edd7768392"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "./scripts/qualify_code_graph_v1.sh",
+          "--fixtures-only"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 826304,
+        "stdout_bytes": 16700,
+        "stderr_bytes": 5794,
+        "output_limited": false,
+        "name": "fixtures",
+        "stdoutSha256": "d6183870264b87bd8f21887d9a5abc8679e2bd965dd06e4aeb9332c29f83085d",
+        "stderrSha256": "67275acc70bd67a37b39ba6f23447e43beab6472e9b3670a47d32a3f9ca1619a"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "benchmarks/agent_query/tests"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 2011,
+        "stdout_bytes": 0,
+        "stderr_bytes": 338,
+        "output_limited": false,
+        "name": "benchmark-tests",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "b26939e4e063a705ee8908a2782954820d872e4fb85340ebafa64a4d500b7249"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 50,
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "output_limited": false,
+        "name": "boundary",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "argv": [
+          "env",
+          "CARGO_TARGET_DIR=<cargo-target>",
+          "PROJECT_ROOT=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_PARSER_SOURCE_DIR=<cargo-target>/debug/build/compass-tree-sitter-language-pack-3a9794dcf61d9a4c/out/_parsers",
+          "TSLP_OFFLINE=1",
+          "TMPDIR=<evaluation-root>/sql-prefix-scan-01/tmp",
+          "cargo",
+          "build",
+          "--release",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_ms": 1164,
+        "stdout_bytes": 0,
+        "stderr_bytes": 62,
+        "output_limited": false,
+        "name": "release-build",
+        "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderrSha256": "537405d5f285a378fc72a211cd213874ce69eeba5e997c45363867ec94d31f17"
+      }
+    ],
+    "testCounts": {
+      "resolver-tests": {
+        "passed": 536,
+        "failed": 0,
+        "ignored": 0,
+        "suites": 32
+      },
+      "workspace-tests": {
+        "passed": 1109,
+        "failed": 0,
+        "ignored": 2,
+        "suites": 36
+      },
+      "product": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "suites": 1
+      }
+    },
+    "benchmarkTests": 238,
+    "suitesOverlap": true,
+    "repeatReportsByteEqual": true,
+    "notRun": [
+      "Standalone browser/platform/packaging matrices were not rerun for this resolver-only correction."
+    ],
+    "fixtureComparisonsReconstructed": true
+  },
+  "retainedFailures": [
+    "Initial imported-nested regression failed with zero rather than three enum contacts; baseline log and source hash retained. The fixture later added an ordinary field and cumulative lookup-budget cases.",
+    "Three nested type-expression-chain enum references remain missed in the separate 13-reference compiler fixture."
+  ],
+  "limitations": [
+    "This is one known Java configuration; general cross-language superiority remains unproven.",
+    "The change was motivated by observed missed enum constants. All scores are development results, even though this follow-up protocol precedes candidate extraction.",
+    "No authored explanation, runtime feasibility, functional community or god-object classification claim follows.",
+    "The preceding compiler fixture captures remain separate development diagnostics; neither changes the fixed real-source denominator.",
+    "This correction canonicalizes already established nominal receivers. Missing type/value expression-chain, static-import, hierarchy and selector typing evidence remains explicit.",
+    "All 3483 returned compiler-cohort contacts have exact source owner and target support; 831 internal compiler references remain missing.",
+    "27 additional references lie outside the compiler cohort: 21 test occurrences and 6 Java 11 overlay occurrences. Token/provenance/containment checks do not prove their bindings.",
+    "jsoup retains two omitted edges; Redux controls retain two omitted edges. These are published partial graphs.",
+    "Repeated verification is consistency evidence, not a second independent oracle. Community replay was selected after observing partition changes.",
+    "All extraction durations are operational; no performance inference. Frozen Graphify graphs were rescored; Graphify extraction was not rerun."
+  ],
+  "artifactDirectory": "java-dotted-owner-01",
+  "artifactSha256": {
+    "checks.json": "e5b130b37763dc4041e14f0206383539a1f37c6e32621c2898a6d003f3fe549c",
+    "qualified.patch": "89c67244f4cf87c238b2044102d84d76ee08db6fd74b5a2d0dd8f75c742e46e9",
+    "checks.py": "e6a23fa4ab1ddbd325c129ca5354c27dde6990562d7bd96760bf407dc192e113",
+    "evaluate.py": "5912ab4f2ed704998454f110dc75c3ec53ed3a46cc12f8a635dcd37c7d35f6d1",
+    "evaluation/run.json": "1b4b5a8e33471cf8da754384751a69c8683198e2a3719cb9da67967d1c29ca56",
+    "verify_evaluation.py": "1efd8e87a83db27fd555e95716aa735bd2b3bd2fc11f302611664022971a483d",
+    "verified-evaluation.json": "30e15a450eca8230e591161ca0b3e34f8cbb47215737d8bf000019dfbaec218c",
+    "verified-evaluation-repeat.json": "30e15a450eca8230e591161ca0b3e34f8cbb47215737d8bf000019dfbaec218c",
+    "control_runs.py": "278afdce258669c4a8c575218013a1434f45002ff3d2b4850c0fe0e0cd8b091a",
+    "controls/run.json": "02cc70888ef7dc532fcbe5ba6501b1dd1d1a67d3edffd0e70f4570b7ea0d3582",
+    "verify_controls.py": "b2ca7976d4271ae39061f8453ea2c53090ec3d3c5ca721ea5855f00eb3f3a810",
+    "verified-controls.json": "8569254764c8067fd77b8618755c9a346a8eb564209fa344d23801b5b706d488",
+    "verified-controls-repeat.json": "8569254764c8067fd77b8618755c9a346a8eb564209fa344d23801b5b706d488",
+    "fixture_runs.py": "a267cc65f51bd055d2f115c0ca7013a3d793d089ed9f9361f116e49e72178f1c",
+    "fixture-evaluation/run.json": "a9736835253226e1a1ddbc4a0a744e2105af2c73c91e5cdcf1b038473d237365",
+    "warm_cache.py": "5ef25031fcc09a62b22137bbd2fd25a4f9ee8e70044499936ae8b1616ebcbeb2",
+    "warm-cache/report.json": "bf3f3fb248aef62700e57eb97227a9ebc6c73f00138ee01ed98bcbd73ba257d3",
+    "check_added_anchors.py": "cc6002bc024d722025ac17efe1dda7ebfa24acf9a36346961f20d6885e49d74d",
+    "added-anchor-review.json": "47feacc329577009bae8ed7d652286d21eccf6a23a59e2fe759bfdb1552fb1ec",
+    "replay_communities.py": "03d356da551e499337b06367d0544ef3966a2c296a2fe1b770fc4db794365b39",
+    "community-replay.json": "19d48a53766753b898d3f4116b7f6ad5fb701109b49481400a282633fea30726",
+    "community-replay-repeat.json": "19d48a53766753b898d3f4116b7f6ad5fb701109b49481400a282633fea30726",
+    "graphify-environment-verification.json": "f234306696faef338c37c6941eded9537f70be5d9339fcdd87fd0b25bc80e4a7",
+    "publish_review.py": "2b311da21dc6554bae1e47847cad0c088939b3ed4d71aa4125ae1cbdd0ee7170",
+    "baseline.json": "a5f502f3391e42ed9c44cc2b68542014292b69ebf15d5818056a10ea456d9bf2",
+    "focused.json": "65d74172f21ffbdaf4a8525b49175ba4ac864f05308be0d93807e78a6010362f",
+    "source-oracle/captures.json": "a6b00f3dfc79ef56bfbee972543c3a14e17a639e5b2c8ecd41e5aedc1cbd843e"
+  }
+}

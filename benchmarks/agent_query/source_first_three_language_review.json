@@ -1,0 +1,389 @@
+{
+  "caveat": "A source-backed edge does not validate every other returned relationship or explanation claim. Short-name ambiguity remains a valid refusal; structural paths do not answer direct-call requests.",
+  "graphPins": [
+    {
+      "repository": "litestream",
+      "sha256": "8dd89c5a60e004c098104ee644b02ddb2d6a64698956ac7f25cdce7c1871a2db",
+      "tool": "compass"
+    },
+    {
+      "repository": "litestream",
+      "sha256": "9cb6df8dcc053cea5b395292a7f460eaaeb2afc566acddb021ae003e51862b0e",
+      "tool": "graphify"
+    },
+    {
+      "repository": "fastapi",
+      "sha256": "1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a",
+      "tool": "compass"
+    },
+    {
+      "repository": "fastapi",
+      "sha256": "5ffe3ae56c206c0031fdda3d4f1d8ddaa6d270b9be54b5f3e5c086689829c8ab",
+      "tool": "graphify"
+    },
+    {
+      "repository": "celld",
+      "sha256": "6db996ad031824f7b476c16145cc94287738eaba1e63f1802011f70559cfd1d6",
+      "tool": "compass"
+    },
+    {
+      "repository": "celld",
+      "sha256": "950caea25518bc7e44baa215d2cfcb8dd14c457ef283276b01b6eacf5ba0d750",
+      "tool": "graphify"
+    }
+  ],
+  "questions": [
+    {
+      "question": "litestream-explain-heartbeat",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "c3e84f8890f1789aae9e0f8339d576ee4356a4cdcf29523e262fb11e31792c4f",
+      "tool": "compass"
+    },
+    {
+      "question": "litestream-explain-heartbeat",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "4da52cc0ef1e36ea8260a7134b25603118bd5e4e3f8435e90a3c452319cc686b",
+      "tool": "graphify"
+    },
+    {
+      "question": "litestream-callees-heartbeat",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "94d7cd78879e63fdfb63d587e83f4db88cef61bda5fcd1c7436dbd121210489a",
+      "tool": "compass"
+    },
+    {
+      "question": "litestream-callees-heartbeat",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": false,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "4da52cc0ef1e36ea8260a7134b25603118bd5e4e3f8435e90a3c452319cc686b",
+      "tool": "graphify"
+    },
+    {
+      "question": "litestream-callers-should-ping",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "b6c315a510dace2b262880e1d521746a79ccd00213d63fe87174c6b81e4d5222",
+      "tool": "compass"
+    },
+    {
+      "question": "litestream-callers-should-ping",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": false,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "63d7fce01a6734855ed3869c1bf582722ed044214ad434bb756bfb25bb4d10ae",
+      "tool": "graphify"
+    },
+    {
+      "question": "litestream-path-heartbeat",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": true,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "66379164fd4c7bf1cabba8b4f2ee2b14259767327abd5625ee7bda1d1c36132d",
+      "tool": "compass"
+    },
+    {
+      "question": "litestream-path-heartbeat",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": false,
+      "repository": "litestream",
+      "requiredCallEdgesPresent": false,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "a6da1476f329d4f7d9d4bf184653214fc61a71255b0afa7d6e498e63e2f26119",
+      "tool": "graphify"
+    },
+    {
+      "question": "fastapi-explain-route-handler",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "63c4df38191450a06ca85c6a3b57be4e78623b031feaa1d70dc7236eea35a178",
+      "tool": "compass"
+    },
+    {
+      "question": "fastapi-explain-route-handler",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "e7dc941fdc6abce461dea492b304fa87f6a444f6b21c5c102085cc2542e72c0d",
+      "tool": "graphify"
+    },
+    {
+      "question": "fastapi-callees-route-handler",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "db8e7fe2d3c5822a4b76fe56f9e0b77ad698acf9c5fa1e7cffb09a9cae8f697c",
+      "tool": "compass"
+    },
+    {
+      "question": "fastapi-callees-route-handler",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "e7dc941fdc6abce461dea492b304fa87f6a444f6b21c5c102085cc2542e72c0d",
+      "tool": "graphify"
+    },
+    {
+      "question": "fastapi-callers-request-handler",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "9e2bfc33402f542aa3d7ced36a91707d45f84a3514f073cf4fce987073ca1007",
+      "tool": "compass"
+    },
+    {
+      "question": "fastapi-callers-request-handler",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "ab6e357a46466ba007fa00febecf090022577e482ffc06f51b9dccb8ccb5bfc8",
+      "tool": "graphify"
+    },
+    {
+      "question": "fastapi-path-route-request",
+      "registeredTextPass": false,
+      "renderedDirectCallPath": false,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tool": "compass"
+    },
+    {
+      "question": "fastapi-path-route-request",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": false,
+      "repository": "fastapi",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": false,
+      "stdoutSha256": "95638cab09a5b6050fcc9fe3cac387f0105844d34dd9d702e96a82985c013e09",
+      "tool": "graphify"
+    },
+    {
+      "question": "celld-explain-signed-headers",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "eb2ef8dac2e1f6fe7e1844a29edec7325a4b89ee279450765b6e19e744dde119",
+      "tool": "compass"
+    },
+    {
+      "question": "celld-explain-signed-headers",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "bccba1e3ed85a11063ccff4b78b1b8f72baeb279dd9773b530bf0429cee81da8",
+      "tool": "graphify"
+    },
+    {
+      "question": "celld-callees-signed-headers",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "ee9457fcc25a34b078de6043eeb0f196360c816effa31c0bbf2c962a6e60b51a",
+      "tool": "compass"
+    },
+    {
+      "question": "celld-callees-signed-headers",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "bccba1e3ed85a11063ccff4b78b1b8f72baeb279dd9773b530bf0429cee81da8",
+      "tool": "graphify"
+    },
+    {
+      "question": "celld-callers-sha-parts",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "3a02f33d944cb40d482eca4f5f4e02831d638232bcea42c979070f673c04c502",
+      "tool": "compass"
+    },
+    {
+      "question": "celld-callers-sha-parts",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": null,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "47f5729b836802a99e7b1cdee486ed8acff15db239d9c7f91041dc087978a89a",
+      "tool": "graphify"
+    },
+    {
+      "question": "celld-path-signed-sha",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": true,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "d3e0520147b67bbbcb501a3aa54639505196dbf5e22b944f9cc605776fffb8e2",
+      "tool": "compass"
+    },
+    {
+      "question": "celld-path-signed-sha",
+      "registeredTextPass": true,
+      "renderedDirectCallPath": true,
+      "repository": "celld",
+      "requiredCallEdgesPresent": true,
+      "sourceSupportedPass": true,
+      "stdoutSha256": "fb1ea7b1dbef051ae9508643d40775f82a1978ab1589802e92bb6af8a5a4935f",
+      "tool": "graphify"
+    }
+  ],
+  "registrationCommit": "ab93cd34",
+  "relationshipFacts": [
+    {
+      "callLine": 721,
+      "callee": "ShouldPing",
+      "caller": "sendHeartbeatIfNeeded",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 0
+      },
+      "factIndex": 0,
+      "repository": "litestream",
+      "sourceFile": "store.go"
+    },
+    {
+      "callLine": 735,
+      "callee": "RecordPing",
+      "caller": "sendHeartbeatIfNeeded",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 0
+      },
+      "factIndex": 1,
+      "repository": "litestream",
+      "sourceFile": "store.go"
+    },
+    {
+      "callLine": 737,
+      "callee": "Ping",
+      "caller": "sendHeartbeatIfNeeded",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 0
+      },
+      "factIndex": 2,
+      "repository": "litestream",
+      "sourceFile": "store.go"
+    },
+    {
+      "callLine": 1232,
+      "callee": "get_request_handler",
+      "caller": "get_route_handler",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 1
+      },
+      "factIndex": 0,
+      "repository": "fastapi",
+      "sourceFile": "fastapi/routing.py"
+    },
+    {
+      "callLine": 145,
+      "callee": "now_ms",
+      "caller": "signed_headers_parts",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 1
+      },
+      "factIndex": 0,
+      "repository": "celld",
+      "sourceFile": "crates/celld/peer_auth.rs"
+    },
+    {
+      "callLine": 149,
+      "callee": "sha256_hex_parts",
+      "caller": "signed_headers_parts",
+      "edgeCounts": {
+        "compass": 1,
+        "graphify": 1
+      },
+      "factIndex": 1,
+      "repository": "celld",
+      "sourceFile": "crates/celld/peer_auth.rs"
+    }
+  ],
+  "runJsonSha256": "f28a92dd08363607f534632471e15f61e7f3d6cd3ce34e479ab04ff09ebdba4c",
+  "runnerSha256": "173242988699eb6fabd175c293634d3cf37c1394f76429540fd7af2a48ef7026",
+  "schema": "compass.source-first-three-language-review/1",
+  "scope": "Selected source-first Go/Python/Rust development questions; source-grounded static calls, not runtime reachability, authored explanations, or whole-graph accuracy",
+  "sourcePins": [
+    {
+      "file": "heartbeat.go",
+      "repository": "litestream",
+      "sha256": "ef90f2e79f1a8f89bd34a9cada9e3c399a410cf774b5c2b3233863dc7cbf2581"
+    },
+    {
+      "file": "store.go",
+      "repository": "litestream",
+      "sha256": "56b3da1cdd69e7a3e30b4982f93fcfc4377f7572497c60ac3371cf4b867f7a17"
+    },
+    {
+      "file": "fastapi/routing.py",
+      "repository": "fastapi",
+      "sha256": "7b1ef65fb6b209445dc43be070a23324b7879aef9c6b9f63e6968234b7723b55"
+    },
+    {
+      "file": "crates/celld/peer_auth.rs",
+      "repository": "celld",
+      "sha256": "916bff6785a787db68f6dd62e4ac39c983280b3a4a6850e2010653c63dee54f9"
+    }
+  ],
+  "suiteSha256": "13338a37b219b82d6b0a99f5a8b884cc27efa8043b1a38d5a32dcfa88a53da0e",
+  "totals": {
+    "registeredText": {
+      "compass": 9,
+      "graphify": 8
+    },
+    "sourceSupported": {
+      "compass": 9,
+      "graphify": 6
+    }
+  }
+}

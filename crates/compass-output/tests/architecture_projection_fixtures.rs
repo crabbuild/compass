@@ -3,9 +3,12 @@ use std::error::Error;
 
 use compass_model::GraphDocument;
 use compass_output::{
-    ARCHITECTURE_VIEWER_SCHEMA, ArchitectureLens, ArchitectureProjectionInput,
-    ArchitectureProjectionOptions, ArchitectureQualityStatus, ArchitectureRelationClass,
-    ArchitectureScope, ArchitectureSourceScope, project_architecture,
+    ARCHITECTURE_SUMMARY_MAX_COMMUNITIES, ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES,
+    ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES, ARCHITECTURE_SUMMARY_SCHEMA,
+    ARCHITECTURE_VIEWER_SCHEMA, ArchitectureLens, ArchitectureProjectionError,
+    ArchitectureProjectionInput, ArchitectureProjectionOptions, ArchitectureProjectionOutput,
+    ArchitectureQualityStatus, ArchitectureRelationClass, ArchitectureScope,
+    ArchitectureSourceScope, project_architecture, project_architecture_or_summary,
 };
 use serde_json::json;
 
@@ -104,6 +107,226 @@ fn generated_vendor_test_and_documentation_nodes_cannot_shape_production()
         .find(|projection| projection.scope == ArchitectureScope::AllCode)
         .ok_or("missing All-code")?;
     assert_eq!(all_code.memberships.len(), model.nodes.len());
+    Ok(())
+}
+
+#[test]
+fn architecture_projection_returns_typed_summary_when_input_bound_is_exceeded()
+-> Result<(), Box<dyn Error>> {
+    let document: GraphDocument = serde_json::from_value(json!({
+        "graph": {},
+        "nodes": [{"id":"a"}, {"id":"b"}],
+        "links": [{"source":"a","target":"b","relation":"calls"}]
+    }))?;
+    let communities = BTreeMap::from([(0, vec!["a".to_owned(), "b".to_owned()])]);
+    let defaults = ArchitectureProjectionOptions::default();
+    let options = ArchitectureProjectionOptions {
+        limits: compass_output::ArchitectureProjectionLimits {
+            max_nodes: 1,
+            ..defaults.limits
+        },
+        ..defaults.clone()
+    };
+    let output = project_architecture_or_summary(
+        ArchitectureProjectionInput {
+            document: &document,
+            communities: &communities,
+            community_labels: None,
+            overlay: None,
+            project_name: "Large fixture",
+            built_at_commit: None,
+            generated_at: None,
+        },
+        &options,
+    )?;
+
+    let summary = match output {
+        ArchitectureProjectionOutput::Summary(summary) => summary,
+        ArchitectureProjectionOutput::Detailed(_) => {
+            return Err(std::io::Error::other("expected a totals-only summary").into());
+        }
+    };
+    assert_eq!(summary.schema, ARCHITECTURE_SUMMARY_SCHEMA);
+    assert_eq!(summary.statistics.nodes, 2);
+    assert_eq!(summary.statistics.relationships, 1);
+    assert_eq!(summary.statistics.communities, 1);
+    assert_eq!(summary.statistics.node_kinds.values().sum::<usize>(), 2);
+    assert_eq!(summary.statistics.other_nodes, 0);
+    assert_eq!(summary.statistics.relationship_kinds["calls"], 1);
+    assert_eq!(summary.statistics.other_relationships, 0);
+    assert_eq!(summary.limit_hit.name, "max_nodes");
+    assert_eq!(summary.limit_hit.required, 2);
+    assert_eq!(summary.limit_hit.limit, 1);
+    assert_eq!(summary.sampled_communities.len(), 1);
+    assert_eq!(summary.sampled_communities[0].member_count, 2);
+    assert_eq!(summary.sampled_communities[0].omitted_sample_nodes, 0);
+    assert_eq!(
+        summary.sampled_communities[0]
+            .sampled_nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    assert_eq!(
+        summary.kind_count_policy,
+        compass_output::ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY
+    );
+    assert!(summary.details_omitted);
+
+    let conflicting_communities = BTreeMap::from([
+        (0, vec!["a".to_owned(), "b".to_owned()]),
+        (1, vec!["a".to_owned()]),
+    ]);
+    let invalid_community_summary = project_architecture_or_summary(
+        ArchitectureProjectionInput {
+            document: &document,
+            communities: &conflicting_communities,
+            community_labels: None,
+            overlay: None,
+            project_name: "Large fixture",
+            built_at_commit: None,
+            generated_at: None,
+        },
+        &options,
+    );
+    assert!(matches!(
+        invalid_community_summary,
+        Err(ArchitectureProjectionError::DuplicateCommunity { .. })
+    ));
+
+    let invalid_options = ArchitectureProjectionOptions {
+        limits: compass_output::ArchitectureProjectionLimits {
+            max_nodes: 0,
+            ..defaults.limits
+        },
+        ..defaults
+    };
+    let invalid_limit_summary = project_architecture_or_summary(
+        ArchitectureProjectionInput {
+            document: &document,
+            communities: &communities,
+            community_labels: None,
+            overlay: None,
+            project_name: "Large fixture",
+            built_at_commit: None,
+            generated_at: None,
+        },
+        &invalid_options,
+    );
+    assert!(matches!(
+        invalid_limit_summary,
+        Err(ArchitectureProjectionError::LimitExceeded {
+            name: "max_nodes",
+            limit: 0,
+            ..
+        })
+    ));
+    Ok(())
+}
+
+#[test]
+fn architecture_summary_caps_kind_and_sample_payloads_deterministically()
+-> Result<(), Box<dyn Error>> {
+    let oversized_id = "a".repeat(ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES + 1);
+    let mut nodes = vec![json!({
+        "id":oversized_id,
+        "kind":"kind-oversized-id",
+        "label":"Oversized identifier"
+    })];
+    let first_label = format!("{}\u{202e}{}", "L".repeat(510), "tail");
+    for index in 0..70 {
+        nodes.push(json!({
+            "id":format!("n-{index:02}"),
+            "kind":format!("kind-{index:02}"),
+            "label":if index == 0 { first_label.clone() } else { format!("Node {index}") }
+        }));
+    }
+    let links = (0..70)
+        .map(|index| {
+            json!({
+                "source":"n-00",
+                "target":"n-01",
+                "relation":format!("relation-{index:02}")
+            })
+        })
+        .collect::<Vec<_>>();
+    let document: GraphDocument = serde_json::from_value(json!({"nodes":nodes,"links":links}))?;
+    let mut largest_community = vec![oversized_id];
+    largest_community.extend((0..3).map(|index| format!("n-{index:02}")));
+    let mut communities = BTreeMap::from([(90, largest_community)]);
+    communities.insert(70, (3..6).map(|index| format!("n-{index:02}")).collect());
+    for index in 0..64 {
+        communities.insert(usize::try_from(index)?, vec![format!("n-{:02}", index + 6)]);
+    }
+    let mut labels = BTreeMap::from([(90, "C".repeat(600))]);
+    labels.insert(70, "Shared runtime".to_owned());
+
+    let defaults = ArchitectureProjectionOptions::default();
+    let options = ArchitectureProjectionOptions {
+        limits: compass_output::ArchitectureProjectionLimits {
+            max_nodes: 1,
+            ..defaults.limits
+        },
+        ..defaults
+    };
+    let output = project_architecture_or_summary(
+        ArchitectureProjectionInput {
+            document: &document,
+            communities: &communities,
+            community_labels: Some(&labels),
+            overlay: None,
+            project_name: "Large fixture",
+            built_at_commit: None,
+            generated_at: None,
+        },
+        &options,
+    )?;
+    let summary = match output {
+        ArchitectureProjectionOutput::Summary(summary) => summary,
+        ArchitectureProjectionOutput::Detailed(_) => {
+            return Err(std::io::Error::other("expected bounded summary").into());
+        }
+    };
+
+    assert_eq!(
+        summary.sampled_communities.len(),
+        ARCHITECTURE_SUMMARY_MAX_COMMUNITIES
+    );
+    assert_eq!(summary.sampled_communities[0].id, 90);
+    assert_eq!(summary.sampled_communities[1].id, 70);
+    assert_eq!(summary.sampled_communities[2].id, 0);
+    assert_eq!(summary.sampled_communities[0].member_count, 4);
+    assert_eq!(summary.sampled_communities[0].sampled_nodes.len(), 2);
+    assert_eq!(summary.sampled_communities[0].omitted_sample_nodes, 1);
+    assert_eq!(summary.sampled_communities[0].label.chars().count(), 513);
+    assert_eq!(summary.sampled_communities[0].bounded_fields, ["label"]);
+    assert!(summary.statistics.node_kinds.len() <= ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES);
+    assert_eq!(summary.statistics.other_nodes, 7);
+    assert!(summary.statistics.relationship_kinds.len() <= ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES);
+    assert_eq!(summary.statistics.other_relationships, 6);
+    assert_eq!(
+        summary.statistics.node_kinds.values().sum::<usize>() + summary.statistics.other_nodes,
+        summary.statistics.nodes
+    );
+    assert_eq!(
+        summary
+            .statistics
+            .relationship_kinds
+            .values()
+            .sum::<usize>()
+            + summary.statistics.other_relationships,
+        summary.statistics.relationships
+    );
+    let bounded_node = summary.sampled_communities[0]
+        .sampled_nodes
+        .iter()
+        .find(|node| node.id == "n-00")
+        .ok_or("missing selected sample node")?;
+    assert!(bounded_node.bounded_fields.contains(&"label"));
+    assert!(bounded_node.label.contains("\\u{202e}"));
+    assert!(bounded_node.label.ends_with('…'));
+    assert!(serde_json::to_vec(&summary)?.len() < 100_000);
     Ok(())
 }
 

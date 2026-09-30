@@ -41,9 +41,15 @@ pub struct NaturalQueryPlan {
     intent: NaturalQueryIntent,
     confidence: u8,
     operands: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    calls_only: bool,
 }
 
 impl NaturalQueryPlan {
+    #[must_use]
+    pub fn calls_only(&self) -> bool {
+        self.calls_only
+    }
     #[must_use]
     pub fn profile(&self) -> &str {
         &self.profile
@@ -190,6 +196,7 @@ impl CodeQueryEngine {
                 })?;
                 self.node_trail_instrumented(
                     NodeTrailRequest {
+                        calls_only: plan.calls_only,
                         source: primary,
                         target,
                         include_heuristic: request.include_heuristic,
@@ -230,6 +237,14 @@ fn plan_validated_natural_query(question: &str) -> NaturalQueryPlan {
         return plan(NaturalQueryIntent::Fallback, 0, [String::new()]);
     }
     let lower = original.to_ascii_lowercase();
+
+    for prefix in ["call path from ", "call chain from "] {
+        if let Some((source, target)) = split_operands(original, &lower, prefix, " to ") {
+            let mut result = plan(NaturalQueryIntent::NodeTrail, 100, [source, target]);
+            result.calls_only = true;
+            return result;
+        }
+    }
 
     for prefix in [
         "shortest path from ",
@@ -396,7 +411,12 @@ fn plan(
         intent,
         confidence,
         operands: operands.into_iter().collect(),
+        calls_only: false,
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 fn fallback_plan(query: &str) -> NaturalQueryPlan {

@@ -1,0 +1,118 @@
+{
+  "askReview": "Compass uniquely targets the requested callee and prints incoming relationship direction on Chi, Click, jsoup, and Redux; WalkDir remains ambiguous. Incoming usages include references/imports where shown. Graphify prints broader neighborhoods containing the requested incoming call on these tasks; WalkDir combines test and library seeds. This is selected-fact recall, not whole-answer precision.",
+  "auditDigests": {
+    "heldout-a-chi-edge-audit-01.json": "fc4bac5f24224eb2f8308f3fcd1ad3ab0d5f3bfd5503916a73681d2a4c5eaadc",
+    "heldout-a-click-edge-audit-01.json": "4c81cb59f7a0d51caa7acc4bd692a0ae92dd976405fa9465924259767caace0c",
+    "heldout-a-click-edge-audit-corrected-01.json": "2cf35f85a402d5cdcbb88820409d0f3dee1ae41d2dc05951ded74d59d7fc6865",
+    "heldout-a-jsoup-edge-audit-01.json": "f6c1fff6a8763e01651cf600674f3a2abbc5172d460d58eff6ca4bc7683e1838",
+    "heldout-a-path-audit-01.json": "4b4e19d5ac3a977cbb2ce4f27ef4e72ec4c6e9f3f8c890de5ada7998d69f25a0",
+    "heldout-a-redux-edge-audit-01.json": "504f66e12c798cde7bc1010f1476678dc7e447f42da20b13a7d0d20fdb4382af",
+    "heldout-a-walkdir-edge-audit-01.json": "f611d41d07752835ecac23080974c5d4b0ef3ddcf8b73ffe6a9335777b8bce9b"
+  },
+  "buildsSucceeded": 10,
+  "edgeSummary": {
+    "corrected": {
+      "compass": {
+        "fullOccurrenceMatches": 15,
+        "pairs": 21,
+        "positiveOccurrencesExpected": 19,
+        "positiveOccurrencesMatched": 14,
+        "relationshipMatches": 15,
+        "uniqueEndpointPairs": 17
+      },
+      "graphify": {
+        "fullOccurrenceMatches": 17,
+        "pairs": 21,
+        "positiveOccurrencesExpected": 19,
+        "positiveOccurrencesMatched": 15,
+        "relationshipMatches": 20,
+        "uniqueEndpointPairs": 21
+      }
+    },
+    "registered": {
+      "compass": {
+        "fullOccurrenceMatches": 14,
+        "pairs": 21,
+        "positiveOccurrencesExpected": 18,
+        "positiveOccurrencesMatched": 13,
+        "relationshipMatches": 15,
+        "uniqueEndpointPairs": 17
+      },
+      "graphify": {
+        "fullOccurrenceMatches": 18,
+        "pairs": 21,
+        "positiveOccurrencesExpected": 18,
+        "positiveOccurrencesMatched": 15,
+        "relationshipMatches": 20,
+        "uniqueEndpointPairs": 21
+      }
+    }
+  },
+  "inputDigests": {
+    "edge_witnesses_heldout_chi.json": "198b3982981429b4f96366685c1a32c5fdff295441da8a452cd351b620e779b4",
+    "edge_witnesses_heldout_click.json": "84657bfad12322347e0c7af4642897acbf572fe20d16f20fbcba489e958a22f6",
+    "edge_witnesses_heldout_jsoup.json": "e8bf60d682228a7115603049177349b399eed055b41743c35c6a638aaf24fc38",
+    "edge_witnesses_heldout_redux.json": "f0a361aa2a3492b8c816bd6351a4160ecd197348b474498683932e800ac7a7d2",
+    "edge_witnesses_heldout_walkdir.json": "1e203696db152499f7b08bfea40aa089d4b235ee744e76c2421f8c617f23b58a",
+    "heldout_panel_a.json": "e6d341f45f93a47ea297cd0f732d8a527e1d8de2f2ca1a0149760024d5c06c5c",
+    "path_witnesses_heldout_a.json": "fb7fcc2cfa698a0d64b1a0929a1a9a0f5c97e973deb05e303d798f0d0c033f6e",
+    "suite_heldout_a.toml": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237"
+  },
+  "observations": 110,
+  "oracleCorrection": "Registered Click open_stream -> _wrap_io_open omitted the call at _compat.py:450. Corrected diagnostic adds it without replacing original witness or results.",
+  "pending": [
+    "Whole-answer/source-edge precision",
+    "MCP hubs and community workflows on this panel",
+    "Functional cohesion and god-object judgments",
+    "Directed and long paths",
+    "Representative independent confirmation after further tuning"
+  ],
+  "provenanceLimit": "CLI run records executable hashes and reported versions; the Graphify launcher hash does not pin all Python package/dependency bytes during execution. The separate MCP package manifest must not be presented as a CLI pre/post package check.",
+  "registrationCommit": "7c70fbeaf78818f1b5055b3a852c0f6350728e2f",
+  "responseReviews": [
+    {
+      "judgment": "Text pass is an ambiguity list for export and function nodes at the same declaration, not an explanation of one resolved node.",
+      "response": "raw/redux/redux-holdout-explain-primary.compass.0.stdout",
+      "sha256": "57be3b5fa8c5e038bdcabed6e39e1ae177223fc2801df76d902b86a086771e74"
+    },
+    {
+      "judgment": "Text pass is an ambiguity list for library and test declarations, not a resolved explanation.",
+      "response": "raw/walkdir/walkdir-holdout-explain-primary.compass.0.stdout",
+      "sha256": "fa3577f28fdb9303d10f80f1e1107369975646a4315220857241acb002ade4e3"
+    },
+    {
+      "judgment": "Text pass is an ambiguity list for library and test declarations, not a resolved explanation.",
+      "response": "raw/walkdir/walkdir-holdout-explain-target.compass.0.stdout",
+      "sha256": "06e2c99993e809ce65a0292c9f3c03f30ae19efd2a37da466deacea4bdf5534e"
+    },
+    {
+      "judgment": "Text pass comes from candidate names. Response is needs_resolution and contains no direct callee answer.",
+      "response": "raw/walkdir/walkdir-holdout-callees.compass.0.stdout",
+      "sha256": "2187b9b854e9ccd9851bbc469e127dddfe79d0641340552d070871e69fd7522c"
+    },
+    {
+      "judgment": "Text pass is a containment route between same-named test functions, not the registered library declarations or call.",
+      "response": "raw/walkdir/walkdir-holdout-path-forward.graphify.0.stdout",
+      "sha256": "2ffc33bac6667a18b7979e75b064ca2730fd19a7e93e977b28bc31382cea35f6"
+    },
+    {
+      "judgment": "Text pass is a reversed containment route between same-named test functions, not the registered library declarations or call.",
+      "response": "raw/walkdir/walkdir-holdout-path-reverse.graphify.0.stdout",
+      "sha256": "736636244cca57cf06ce86a293a15b530c3c610b889eb1b14ff694458ae47ac7"
+    }
+  ],
+  "runDigest": "6412df38bbde56a1ec89974ac8d0a11162592bae90c403ed7b7f745acb6384bd",
+  "runId": "heldout-a-01",
+  "schema": "compass.heldout-panel-review/1",
+  "scope": "Post-output audit of the frozen, purposively selected confirmation panel A. Text matches do not establish source precision or successful resolution. No population-wide superiority claim. Later tuning is development.",
+  "sourcePathMatches": {
+    "compass": 6,
+    "graphify": 8
+  },
+  "sourcePathQuestionsPerTool": 10,
+  "textPasses": {
+    "compass": 46,
+    "graphify": 46
+  },
+  "textQuestionsPerTool": 55
+}

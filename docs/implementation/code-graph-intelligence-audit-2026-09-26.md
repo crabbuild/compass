@@ -1,0 +1,4908 @@
+# Code graph intelligence audit: 2026-09-26
+
+## Status and acceptance criteria
+
+Broad superiority over Graphify is **unproven**. The objective covers hub
+analysis, code graph correctness, queries, explanations, navigation/path
+finding, clusters and communities. A focused text-recall score cannot establish all of those properties.
+
+| Requirement | Evidence needed | Current evidence |
+| --- | --- | --- |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. The selected Go/Python/Rust source-first panel checks retrieval and stored degree, including a Graphify-only `PeerAuth` top-100 hit. Class-only degree still retrieves 0/4 Java positives for either tool. Typed member evidence exposes stored methods, fields and own-field contacts; the later Go field correction changes ranks in rebuilt graphs but does not supply a classifier. God-object quality remains unproven. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. Eight rated Java classes have 95/95 direct methods and 65/65 direct fields as unique Compass nodes versus 90/95 methods and 0/65 field nodes in Graphify's frozen graphs. In one pinned Go repository, independent parser censuses find 993/993 named struct fields and 2,742/2,742 exact direct receiver-field contacts in the candidate Compass graph versus zero under each matching frozen-graph join. The 1,908 other new field-reference edges remain uncredited. These selected results do not establish cross-language or whole-graph precision. |
+| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. A new source-first Go/Python/Rust selected panel records 9/12 versus 8/12 text passes and 9/12 versus 6/12 source-supported passes; it is too small and selected to confirm representative superiority. |
+| Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
+| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
+| Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
+| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The largest of four SQL files improves in repeated release timings, but the first complete-source candidate observation is longer (280.053 s versus 193.966 s). The separate registered repeat completes all six runs with identical partial graphs and medians of 204.082 s candidate versus 215.288 s baseline (ratio 0.948). Timing variation remains unexplained; no general efficiency win is established. |
+| Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Three previously unused Go/Python/Rust checkouts were pinned and 12 selected source-first questions registered before both tools ran. Their narrow direct-call review is recorded below. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
+
+Current evidence summaries are in the
+[original Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
+[larger-artifact follow-up](../../benchmarks/agent_query/mlcq_admission_followup_review.json),
+[release-server Blob follow-up](../../benchmarks/agent_query/mlcq_release_followup_review.json),
+[original Java field census](../../benchmarks/agent_query/java_real_field_review.json),
+[Java enum follow-up](../../benchmarks/agent_query/java_enum_access_review.json),
+[Java dotted-owner follow-up](../../benchmarks/agent_query/java_dotted_owner_review.json),
+[paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
+[shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json),
+[SQL prefix diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json)
+and [release SQL cache diagnosis](../../benchmarks/agent_query/sql_regex_cache_review.json).
+The chronological sections below retain earlier checkpoints; their counts and
+claims apply to the stated binary, graph and protocol rather than the latest
+branch automatically.
+
+“God mode” is interpreted here as the existing `god_nodes` hub analysis.
+It orders connected candidates by degree; it does not measure responsibility,
+cohesion, or whether a high-degree declaration needs refactoring.
+
+## Reproduced production defects
+
+`crates/compass-graph/src/analyze.rs` previously discarded names such as
+`Path` and `Counter` even when they were project declarations with source
+locations. It also used graph input order to break degree ties, and returned
+isolated declarations when enough results were requested.
+
+The fix retains those source-located declarations, breaks ties by stable node
+ID, and omits degree-zero candidates. Two regression tests failed before the
+fix; all ten tests in `analyze_coverage` passed afterward. An MCP regression
+checks the rendered ordering and top-N behavior. Public fields and degree
+semantics are unchanged; candidate lists can change.
+
+A fourth defect treated every `.method()` label as a file even when the node
+had canonical kind `method`, and allowed explicitly typed files with descriptive
+labels into the hub list. The regression returned `[caller, file]` where the
+source-located candidates were `[method, caller, function]`. Recognized canonical
+kinds now take precedence; the label heuristic remains for legacy unknown kinds.
+The updated graph-analysis integration suite passes all eleven tests.
+
+A fifth defect excluded typed functions whose source filename has no extension.
+An MCP diagnostic using the release binary omitted `prepare()` in `bin/launch`,
+but included the identical node when its source was `bin/launch.sh`. A native
+regression reproduced the failure. Canonical structural kinds now take
+precedence over the concept filename heuristic when the source path is nonempty.
+Nodes without a source remain excluded, and unknown legacy kinds retain the
+existing fallback. The graph-analysis integration suite passes all twelve tests.
+
+Remaining limitation: legacy file/concept/JSON-noise eligibility still uses heuristics.
+Degree combines relationship kinds and counts directed endpoint pairs, not
+responsibilities or call-site occurrences. A popular infrastructure type may
+be a legitimate hub. A separate design diagnosis requires reviewed evidence
+and an explicit metric contract before it can be claimed.
+
+## Reproduced navigation defects
+
+Two adversarial native regressions exposed problems in the typed `node` search:
+
+1. Keeping only the cheapest arrival at each node loses feasible paths under a
+   hop limit. For `s -> a -> b -> t` (cheap calls) and `s -> b` (costlier
+   reference), a two-hop request incorrectly returned no path. The search now
+   retains nondominated cost/depth states and reconstructs the exact state path.
+2. A node rejected by the node budget was inserted into the admitted set before
+   the budget check. A second visit could admit it without paying, leaking that
+   rejected node into a truncated response. Admission now happens only after
+   successful budget consumption.
+
+Both tests failed before the changes and passed afterward. The full traversal
+integration suite passes 11/11, including JSON and SQLite checks, record-order
+permutations, two/three-hop expectations and a cycle under a five-edge work
+budget. Positive-cost cycles are dominated rather than repeatedly expanded.
+All search labels and predecessor records remain bounded by examined edges.
+The CLI contract regression also passed, within the 34-test CLI query suite.
+
+A third navigation defect was then reproduced in the separate undirected
+`path` implementation: it retained only one arrival per node and made the same
+incorrect no-path claim under a two-hop bound. The release CLI and a native
+regression both reproduced it. That implementation now also keeps cost/depth
+states and reconstructs their exact predecessors. Its two ranking passes each
+cap adjacency work at 1,000,000 entries and cumulative path keys at 16 MiB;
+exhaustion is a command error, not a no-path claim.
+
+An independent oracle enumerates all simple paths through 729 four-node graphs,
+where each of six pairs is absent, a cost-1 call, or a cost-4 reference. Both
+engines are checked at depths one through three (4,374 queries). The directed
+engine sees DAGs; the undirected engine also sees cycles. The oracle compares
+reachability, minimum cost and hop count, and validates rendered/native edge
+chains and directions. It reproduced the legacy defect at graph 113, depth 2.
+This is exhaustive coverage of that small family, not a general graph proof or
+independent real-source extraction evaluation.
+
+## Evaluation corrections
+
+The v1 graph-anchor scorer ignored the requested symbol. For Compass, any
+node span covering a reviewed line could earn credit, including a whole
+module. For Graphify, any name at that line could earn credit. Fourteen
+negative subcases reproduced false positives in the old scorer.
+
+Run schema v2 records `exact-file-start-terminal-symbol/1`: exact file,
+exact declaration start, and case-sensitive terminal name on both tools.
+Qualification/signature text is stripped symmetrically; this does not verify
+owner identity or parameter types. Missing anchors are listed for review.
+Source-located ratios are metadata counts, not verified source correctness.
+
+The runner also previously reused graph files by directory existence and
+reported the current executable identity. A changed tool could be credited
+with an old graph. Runs now build fresh artifacts beneath their own run
+directory and refuse existing run IDs/artifact directories. They check clean
+pinned Git state before extraction and after querying, retain graph digests
+and build logs, and compare executable identities before/after the run.
+Executable-file hashes do not cover Python imports or the full environment.
+
+A response containing the requested strings could pass even if its process
+failed or timed out. Such executions now fail independently of text matching.
+Capture now enforces a 16 MiB per-stream disk cap during execution; limit
+failures cannot pass. An invalid snapshot pointer cannot silently select an
+unpublished graph. Unpaired token medians no longer produce a cost-winner claim.
+The existing text oracle remains a recall proxy: mentioning both endpoints
+does not prove a valid path, and mentioning a caller does not prove its edge.
+
+The historical report is annotated and its unsupported graph-quality conclusion
+withdrawn. Its original raw artifact directories are unavailable on this host,
+so the historical graph scores have not been recalculated. Do not substitute
+newer tool outputs for that missing historical evidence.
+
+## Available comparison inputs
+
+Cobra, Flask, Gson and Zod have clean working checkouts at the suite commits.
+The old `doctor` accepted Axum's bare Git repository merely because HEAD matched;
+that directory has no source tree to extract. The runner and doctor now reject
+bare repositories. A separate Axum working checkout was created and verified at the suite commit.
+Existing checkouts remain read-only.
+The installed Compass reports 0.3.29 and cannot represent this working branch.
+Installed Graphify reports 0.9.67; the old report used 0.9.36. The separately
+available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c48`
+(version 0.9.63), so its implementation is not assumed identical to 0.9.67.
+
+## Verification ledger
+
+- Graph analysis integration suite: 12/12 passed after all five hub fixes.
+- Benchmark Python unit suite: 38/38 passed, including ten path-auditor tests.
+- CLI query contract suite: 35/35 passed; product suite: 9/9 passed.
+- After the separate legacy `path` fix: query library 178/178, exhaustive oracle
+  1/1 (4,374 queries), traversal integration 11/11, legacy query coverage 6/6,
+  CLI query suite 35/35 and product suite 9/9 passed. This includes an actual
+  work-limit CLI failure with empty stdout. These graph/path regressions and
+  the competitor-free Python scorer tests are now explicitly wired into CI.
+- Query relevance qualification: 5/5 passed, including the 500 synthetic cases.
+- Workspace Clippy (`--workspace --lib --bins --locked -- -D warnings`): passed
+  after all eight production corrections. The new query integration tests also
+  pass a dedicated Clippy run with warnings denied.
+- Rust formatting check: passed.
+- Product boundary script: passed; competitor tooling stays outside production.
+- Workspace native tests (`--workspace --lib --bins --locked`): 1,083 passed,
+  zero failed, two ignored after all eight production corrections, including
+  the three new MCP regressions.
+- Code-graph fixture qualification: initial native stages passed; the React
+  oracle then failed because locked TypeScript dependencies were absent.
+  After `npm ci --ignore-scripts`, the complete final gate passed (exit 0),
+  including deterministic production updates, semantic/topology assertions,
+  Markdown quality, and independent React source-anchor checks at the six-defect
+  checkpoint. The complete gate also passed at the seven-defect checkpoint
+  after the extensionless-source fix. The built release binary still reproduces
+  the separate legacy `path` defect; that run is not evidence for the eighth fix.
+- First v2 replay: complete but invalidated for comparative scoring (see below).
+- Corrected v2 replay `v2-corrected-02`: complete, after all three evaluation
+  corrections. It uses the debug binary and recorded source patch from before
+  the explicit-kind hub and typed-trail fixes, with Graphify 0.9.67.
+- Release replay `v2-release-03`: complete at source commit `8a13928e`, including
+  the six original production fixes, before the extensionless-source correction.
+  Scores and paired token estimates match the corrected debug replay. Its
+  source-grounded path audit passes 5/5 per tool. All 92 previously recorded
+  Graphify source/data file hashes remain unchanged after the run; this does not
+  pin every transitive dependency.
+- Explicit fixed-graph regression replay `query-only-04`: the current debug
+  query binary passes all 50 text oracles on the retained `v2-release-03`
+  Compass graphs and all five source-grounded path witnesses. Source state and
+  graph hashes were verified before/after querying. This checks query
+  compatibility; it is not a new extraction or comparative performance run.
+
+## Findings from the first fresh replay
+
+The raw evidence is retained under the `code-graph-audit-20260926` evaluation
+workspace, run `v2-fresh-01`, with a separate invalidation record. Before scoring
+it as a comparison, three issues required correction (now implemented):
+
+- Graphify 0.9.67 deliberately exits 1 when `explain` returns an ambiguity list.
+  Its installed `cli.py` and the captured Cobra, Flask and Gson responses confirm
+  this. The new blanket nonzero-exit rejection wrongly penalizes a correct
+  pick-list outcome. The scorer now permits this explicit contract only when the
+  candidate oracle passes; actual command failures and timeouts still fail.
+- Gson's `JsonWriter.value(String)` annotation starts at line 526; its method
+  header is line 527. Both tools correctly locate the declaration at 526.
+  The reviewed anchor now uses the annotation start. These were not extraction
+  failures; the matching policy remains exact.
+- Axum's suite uses paths relative to the `axum/` package, while the separate
+  checkout is the monorepo root. The corrected replay uses that package as the
+  source root, and preflight now rejects roots missing reviewed files.
+
+The source patch and Graphify distribution file hashes were retained alongside
+this run. Timings from the debug Compass executable are not release-performance
+evidence. Preliminary score totals must not be presented as accuracy results.
+
+## Corrected focused comparison
+
+The corrected replay uses the exact source roots and reviewed declaration starts
+and accepts Graphify's documented ambiguity exit status. Both executable
+identities remained unchanged and all five source roots remained clean/pinned.
+Its suite and runner copies, tool hashes, graphs, logs and raw responses are
+retained under `runs/v2-corrected-02` in the evaluation workspace.
+
+| Measured item | Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Text-oracle passes, all rows | 50/50 | 44/50 |
+| Non-excerpt rows | 45/45 | 44/45 |
+| Source-excerpt rows | 5/5 | 0/5 |
+| Exact reviewed declaration anchors | 15/15 | 14/15 |
+| Median estimated tokens on 44 shared passes | 308 | 111.5 |
+
+The largest difference is a source-excerpt feature gap: Graphify's `explain`
+returns metadata rather than the requested declaration text. Those five rows
+are separated above instead of treating them as five independent relationship
+accuracy wins. Among the other 45 rows, the difference is one Axum file-path
+lookup. Both path inputs resolve to the same unrelated test module. A follow-up
+using the full `src/routing/...` paths produced the same failure; the raw retry
+is retained as `axum-exact-path.stdout`/`.stderr`. This is evidence of that file
+lookup failure, not proof that Graphify cannot traverse an explicit-ID path.
+Its missing Zod anchor is the implementation at `classic/schemas.ts:303`; its
+graph retains the interface declaration at line 72 instead.
+
+Graphify has the lower paired token estimate. These are bytes/4 estimates, not
+measured model tokens. No speed comparison is claimed: Compass used a debug
+binary, other native checks ran concurrently, and timings were single samples.
+The later release checkpoint reproduced every score and paired token median
+in the table. Its single-run paired median latency was 259.5 ms for Compass and
+216 ms for Graphify; this also does not establish a repeatable speed advantage.
+The release executable and build log were retained with a source-commit record
+and SHA-256, and both tool identities were unchanged across the replay.
+All 50 questions are an existing development suite. The six extra passes do
+not establish held-out precision, execution-path accuracy or overall superiority.
+The subsequent native trail defects demonstrate gaps this text suite misses.
+The separate 500-query relevance qualification runs AI-reviewed synthetic
+phrasing-equivalence cases over the shared fixture graph, as its test and
+corpus notes explicitly state. It is useful regression coverage, not 500
+independent real-repository judgments or production telemetry.
+
+## Source-grounded path review
+
+The five positive path responses from `v2-corrected-02` were audited separately
+against the printed ordered hops, unique graph node identities, semantic edge
+direction, relation, declaration anchors, and reviewed source occurrences.
+Both tools pass all five navigation witnesses in `path-audit-02.json`.
+This is post-output development review, not held-out precision or recall.
+
+The first diagnostic incorrectly required Gson's construction line 801 even
+when allowing the coarse `references` relation. Graphify's actual edge is a
+valid return-type reference at line 797. The corrected witness accepts that
+site for `references` and line 801 for `instantiates`; Compass returns the
+latter. The report preserves this specificity difference. The earlier
+`path-audit-01.json` remains as an oracle-error diagnostic, not a competitor
+failure. Zod's route uses reverse/forward file containment in both tools;
+it supports navigation but proves no runtime call chain.
+
+The checked-in auditor rejects missing/reversed edges, wrong occurrences,
+wrong declarations, ambiguous labels, invalid identities, endpoint-only text,
+and inconsistent hop counts. It checks recorded graph/suite digests and pinned
+source state, bounds inputs, and records hashes for its own code, witnesses,
+and captured responses. It currently audits successful positive path rows;
+unreachable, ambiguous, truncated and limit outcomes still need a broader
+source-reviewed corpus.
+
+## Synthetic boundary diagnostics
+
+Separate shared-graph cases were recorded before executing either tool, with
+raw outputs and exact arguments retained under `path-boundary-diagnostic` in
+the evaluation workspace. These isolate query behavior from extraction quality.
+
+| Case | Compass release checkpoint | Graphify 0.9.67 |
+| --- | --- | --- |
+| Two disconnected components | Explicit no path | Explicit no path |
+| Absent endpoint | Nonzero no-match error | Nonzero no-match error |
+| Two `Worker` nodes in different components | Lists both IDs and refuses a path | Warns on stderr, selects one, returns its path |
+| Exact ID in the disconnected component | Explicit no path | Explicit no path |
+| Reverse traversal of a stored call | Preserves reverse arrow | Preserves reverse arrow |
+| Both endpoints resolve to the same node | Explicit refusal | Explicit refusal |
+
+The ambiguity row records a policy difference: Graphify does disclose the
+ambiguity, but still picks an endpoint. It must not be described as hiding the
+warning. The two hop-limit cases are Compass-only contract checks because
+Graphify exposes no documented hop-bound option. A one-hop request correctly
+returns a bounded no-path result; the two-hop request reproduced the third
+navigation defect above. These are not extra head-to-head accuracy wins.
+
+## Separate source-first fd sample
+
+The inputs in `benchmarks/agent_query/suite_fd.toml` and
+`edge_witnesses_fd.json` were committed at `fe1a1fb5` before either tool was
+run on this checkout. Source selection used `sharkdp/fd` at
+`b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5`, with a separate clean working
+checkout because the existing repository was bare. The sources stayed pinned
+and clean before/after extraction. This is a source-first selected sample,
+not a representative held-out corpus. It becomes development evidence once
+used to guide fixes.
+
+The fresh run `fd-source-first-01` uses the frozen debug Compass executable
+with all eight preceding fixes. It records both graph digests, executable
+identities, build logs and every query response. It is not performance evidence.
+
+| Measured item | Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Predeclared text-oracle passes | 11/12 | 9/12 |
+| Non-excerpt passes | 10/11 | 9/11 |
+| Exact reviewed declaration anchors | 5/5 | 5/5 |
+| Predeclared positive direct-call pairs present | 10/10 | 10/10 |
+| Reviewed line-level call occurrences preserved | 16/16 | 10/16 |
+| Predeclared wrong-target pairs correctly absent | 2/2 | 2/2 |
+| Post-output positive path witnesses | 2/2 | 2/2 |
+| Median estimated tokens on eight shared passes | 227 | 88 |
+
+Relationship presence and occurrence preservation are different measurements.
+Graphify retains one occurrence for each reviewed pair, losing six repeated
+sites across four pairs. These are selected-pair results, not whole-graph
+precision or recall. The positive path review confirms an adjacent directed
+call and a compatible source occurrence in each graph; neither rendered path
+names a particular parallel edge or proves runtime execution.
+
+The Compass failure is real: the `execute_batch` callees answer omits
+`CommandBuilder::finish` at `src/exec/mod.rs:111`. The graph also lacks that
+method's calls to `CommandBuilder::push` at line 104 and `exit_code` at line
+116. The enclosing function maps constructors into a collected result,
+destructures its success case, then iterates the builders. Graphify finds all
+three method targets. Compass's Rust value-type collector handles function
+parameters and local lets, but does not establish the loop/match/iterator
+binding chain needed here. This is an extraction/resolution gap, not an
+answer-rendering error.
+
+The same answer exposes a Graphify precision error: its call at line 97 targets
+`CommandTemplate::new` (declaration line 220), although the source explicitly
+calls `CommandBuilder::new` (declaration line 136). Compass targets the correct
+constructor. The post-output manifest `edge_witnesses_fd_diagnostic.json`
+records those five checks separately. Graphify's text-oracle pass is retained;
+it does not prove every returned edge correct.
+
+Graphify's other text failures are the source-excerpt feature gap, a file
+lookup resolving `src/exec/mod.rs` to the `Exec` declaration in
+`src/cli.rs:858`, and a broad question that never returns `handle_cmd_error`
+within its three budget increases. Compass needs two follow-up pages for
+that broad question (1,769 estimated total tokens), so its pass also identifies
+room to improve ranking and answer size. The lower paired token median remains
+a Graphify advantage.
+
+The first generated report incorrectly describes every suite as containing
+five repositories. Its original report is retained. The renderer now uses the
+recorded repository count, with singular/plural regression coverage; this
+wording correction changes no scores or raw observations.
+
+### Rust receiver correctness defect and correction
+
+Reducing the loop miss uncovered false-positive calls in Compass. The frozen
+eight-fix executable emits `Decoy::finish` for both calls below, although the
+loop call is on `Actual`:
+
+```rust
+struct Actual;
+impl Actual { fn finish(&self) {} }
+struct Decoy;
+impl Decoy { fn finish(&self) {} }
+fn run(builder: &Decoy, builders: &[Actual]) {
+    for builder in builders { builder.finish(); }
+    builder.finish();
+}
+```
+
+A nested `let builder = factory();` also inherits the outer parameter's
+type when the local initializer does not yield a producer-known type.
+Unknown local types currently fall through the value-type lookup, while the
+parameter's alias remains available to call resolution. These are
+precision defects, not acceptable substitutes for unresolved evidence.
+Retained reductions are under `rust-loop-diagnostic-01` and
+`rust-shadow-diagnostic-02`; the latter uses a source-defined factory returning
+a different declared type.
+
+The new edge auditor and report/input regression coverage pass 48 Python
+tests. No production Rust change is included in this evaluation checkpoint;
+the prior native verification ledger still describes the eight-fix executable.
+
+The subsequent correction is in the Rust evidence producer. Value lookup now
+distinguishes an absent binding from an existing binding of unknown type.
+Local bindings suppress stale parameter aliases, including loop and closure
+patterns, match arms/guards, conditional lets, and let-chain guards. Binding
+visibility is bounded by lexical scope and source range; initializers and else
+branches keep their proper outer bindings. Destructuring records the bound
+names without assigning the whole container's type to each field. If an inner
+receiver's type remains unknown, its source occurrence and unresolved candidate
+remain visible; no target is invented.
+
+A native regression failed before the fix by returning two calls to `Decoy`
+where only the unshadowed outer call is valid. The expanded regression covers
+ten scope/pattern forms, initializer timing, preserved typed inner calls, and
+else-branch visibility. The current targeted checks pass 27 Rust language
+tests, all 206 universal resolver integration tests, and 33 filesystem
+contracts. Workspace and changed integration-test Clippy pass with warnings
+denied. An existing needless borrow in the touched filesystem test was also
+removed to allow that test target's Clippy check.
+
+AST cache semantics advance from 2 to 3 so warm builds cannot keep previously
+incorrect relationships. A cache regression checks that version-2 facts are
+discarded. This is a correction to the existing producer contract, not a new
+advertised capability or a new universal-pipeline promotion. Evidence/graph
+schema majors and the Rust producer capability identity remain unchanged;
+historical graphs are not rewritten.
+
+The full workspace native baseline passes 1,083 tests with zero failures and
+two ignored tests. The qualifying debug executable was copied and hashed after
+its successful native build; its source snapshot, patch, and committed Rust
+file hashes are retained under `shadow-fix-provenance`. The replay in
+`rust-shadow-corrected-03` removes the wrong `Decoy` edge in both source
+reductions while preserving exactly one valid outer call in each. The still
+unproven inner receiver remains unresolved.
+
+Fresh extraction/query run `fd-shadow-02` preserves all 12 query outcomes,
+all 16 reviewed Compass call occurrences, and both source-grounded path
+witnesses. The paired token medians remain 227 versus 88 on eight shared
+passes. The separate diagnostic still records the three missing Compass
+loop/callback calls and Graphify's wrong constructor target. All 92 recorded
+Graphify distribution-file hashes remained unchanged; this does not pin every
+transitive dependency. The Compass executable is a debug build and native
+qualification ran concurrently, so these timings are not performance evidence.
+
+Fixture qualification initially stopped at preflight because the default
+parser-source bundle directory was absent. It was restarted using the complete
+bundle already present in this checkout's build directory, whose language
+definition hash matches the vendored manifest. The full fixture gate completed
+successfully, including independent Markdown and React frontend qualification.
+The release executable is frozen under `shadow-fix-provenance/compass-release`
+with SHA256 `6baa1cabccdea6357ad5e9653a008efa1b384250557c1ce27278402e85399719`.
+
+## Natural-language interface comparison
+
+The preregistered `suite_ask.toml` sends identical caller/callee questions and
+2,000-token budgets through Compass `ask` and Graphify `query`, with no
+continuations. The ten questions reuse reviewed facts from the five-language
+panel; they are interface checks, not ten independent source judgments.
+Captured run `ask-paired-01` passes 9/10 selected-fact text checks for Compass
+and 10/10 for Graphify. Compass's Cobra callees page omits `Find` before its
+12-primary-result projection bound, even though the requested token budget
+has room. Graphify wins that preregistered row. Do not change its oracle or
+silently add a follow-up to erase this failure.
+
+Review beyond the text oracle finds seven Compass relationship headlines
+attributing the answer to the wrong subject: Cobra callers, both Flask rows,
+both Gson rows, Zod callees, and Axum callees. Their correct fact anchors do
+not make these answers fully correct. The CLI executes parsed operands but
+supplies the whole natural-language question as a query operand to the
+renderer; the first node by ID then substitutes for the requested subject.
+This also affects answer basis, primary ordering, and suggested next actions.
+The native CLI regression reproduced the wrong subject before correction.
+The CLI now passes the planner operands with their symbol/source/target roles
+and retains the original question separately. The first correction passes
+36 CLI query and 9 product tests, workspace Clippy, and the 1,083-test native
+baseline. The expanded regression also checks a missing subject and follow-up
+actions. Python benchmark tests pass 49 cases.
+
+Graphify exceeds the requested 2,000-token budget on four answers (Cobra
+callers: 2,854; Gson callers and callees: 2,773 each; Axum callees: 3,160),
+using the recorded stdout bytes/4 estimate. Each explicitly discloses the
+overrun. The original selected-fact scores remain recorded; they are not
+hard-budget success scores or complete precision judgments. On the nine
+shared text passes, median output is 291 versus 1,210 estimated tokens.
+This does not establish equal-budget correctness or performance superiority.
+
+The diagnostic query-only replay `ask-operands-replay-02` uses retained,
+digest-checked graphs from `ask-paired-01`. Both tools now pass 10/10 text
+checks, including Cobra: correct subject ordering puts its missing fact on
+page one without changing the budget or oracle. Median text output is 279.5
+versus 1,439.5 estimated tokens on the ten shared passes. Additional JSON
+requests compare all ten Compass ask projections with their direct commands;
+those diagnostic requests are excluded from paired workflow costs.
+
+All ten agree with direct commands, but source review still finds two wrong
+headlines in both interfaces (Zod callees and Axum callees): function labels
+such as `convertSchema()` and `validate_path()` carry trailing parentheses,
+and the renderer's exact-string lookup does not share the query engine's
+symbol normalization. Consequently Zod still names `convertBaseSchema` and Axum still names
+`validate_v07_paths` as their subjects. The first correction resolves five of
+seven observed headline failures; direct-command equivalence alone cannot prove source correctness.
+A separate renderer regression failed before correction. The renderer now
+shares the query engine's existing normalization for case, leading dots, and
+trailing empty parentheses, while exact IDs and uniqueness remain explicit.
+The original run, intermediate replay, and their scores remain retained
+independently.
+
+Final query-only replay `ask-operands-replay-03` passes 10/10 text checks for
+both tools. A separate post-output subject diagnostic verifies all ten Compass
+headlines and node bases against exact reviewed declaration labels, files,
+and start lines (including Zod and Axum). Those witnesses are retained as
+`ask-subject-witnesses.json`; they do not replace the original text oracle.
+The frozen final debug executable has SHA256
+`a748d0fa8eb08fec09a43647e29be0b056a706eb986d70c47049463c9dbb123c`.
+The source patch and file hashes are retained under
+`ask-normalization-provenance`. Output medians remain 279.5 versus 1,439.5
+estimated tokens on the same ten passing text questions.
+
+The complete native run passes 1,145 tests: 1,083 workspace lib/bin tests,
+36 CLI query tests, 9 CLI product tests, and 17 output integration tests;
+two existing tests remain ignored. Workspace and changed integration-target
+Clippy pass with warnings denied. The first expanded Clippy run found an
+existing `expect_err` in the touched output test; it now returns the failed
+assertion as an error. The 17-test output suite was rerun after that test-only
+cleanup. Formatting, diff checks, product boundary, and 49 Python benchmark
+tests pass. The full extraction fixture gate passed at the preceding receiver
+checkpoint; these presentation corrections use native query/CLI tests and
+retained real graphs rather than claiming a new extraction qualification.
+
+The fresh `v2-shadow-05` run remains 50/50 versus 44/50, with five source
+excerpt availability differences and one Axum file-resolution difference.
+Its five source-grounded path witnesses pass for both tools in
+`path-audit-v2-shadow-05.json`. Graphify uses less output on its 44 shared
+passes (112 versus 308 estimated tokens). All of these runs use a frozen
+debug executable during concurrent qualification; timings are not speed
+comparisons. The new ask failures demonstrate why that earlier suite is
+insufficient to establish the requested superiority.
+
+## Shared MCP comparison across five languages
+
+Commit `152efdd7` records `suite_mcp.json` and the bounded stdio collector before
+execution. There are 29 questions per tool on the retained five-repository
+panel: graph counts, top-ten hubs, largest-community enumeration, missing
+communities, calls adjacent to reviewed declarations, and four ambiguous
+neighbor names. Both products expose the same MCP operations. Input node IDs
+and community IDs are prepared symmetrically from the graphs and are not
+counted as successful node retrieval. Sources and graph hashes are checked
+before and after use.
+
+Graphify runs in the isolated 0.9.67 MCP environment described in the coverage
+plan. Its optional SDK dependencies are separately recorded, and all 227
+compared Graphify package files match the original installation. This avoids
+counting an absent optional SDK as a product failure. Full-enumeration requests
+use its explicit 262,144-token allowance; Compass exposes whole-result output.
+The external limits are 60 seconds per RPC, 16 MiB per response/stderr, and
+64 MiB per session. These are complete-enumeration tasks, not an equal
+2,000-token arm. Text bytes and actual response-wire bytes are reported
+separately. Concurrent debug timings are not performance comparisons.
+
+All 58 RPCs completed in `mcp-paired-01`. The original run exposed two production
+defects: the compact traversal projection retained community names but dropped
+labeled community IDs, and `get_neighbors` selected the first ambiguous match.
+The independent auditor checks source-run/graph/input/collector hashes and
+captured responses against raw JSON-RPC transcripts. Its checks implement the
+preregistered graph-consistency policies; these are not complete source-precision
+or functional-clustering oracles.
+
+| Graph-consistency check | Initial Compass | Corrected Compass | Graphify in both runs |
+| --- | ---: | ---: | ---: |
+| Node/edge/community totals | 0/5 | 5/5 | 5/5 |
+| Largest-community member multiset and count | 0/5 | 5/5 | 5/5 |
+| Absent community is reported absent | 5/5 | 5/5 | 5/5 |
+| Filtered neighbor direction/label/relation triples | 5/5 | 5/5 | 5/5 |
+| Ambiguous neighbor lookup preserves ambiguity | 0/4 | 4/4 | 4/4 |
+
+The first two failures share one cache defect; they are not ten independent
+implementation bugs. Native regressions failed before both corrections.
+The model now retains the community ID and display name in its compact cache,
+and advances cache magic to `TRAILT05` so previously deficient `TRAILT04`
+projections rebuild. Cold, warm, and stale-cache regression cases pass.
+MCP now returns a stable candidate list (at most 20 plus an omission count)
+with source paths and exact IDs. Exact IDs preserve case. Graph schemas and
+historical artifacts remain unchanged.
+
+Replay `mcp-paired-02` uses the same questions, source graphs, and Graphify
+environment. It rebuilds the old Compass traversal caches automatically and
+passes the graph-consistency checks above. The corrected debug binary SHA256
+is `4b3b755fd8a3e8d74c4eac8c336f719506dcfee9f8ac89cea2eafbe181042efb`;
+source/file hashes are under `mcp-corrections-provenance`. No oracle was retuned
+to replace the initial failures. Reports and transcripts for both runs remain.
+
+The hub outputs expose another unresolved limitation. Only 29/50 Compass and
+37/50 Graphify entries have labels that uniquely identify a graph node.
+All of those identifiable entries have matching independently computed degree;
+the remaining entries are unverified because their labels collide. Matching a
+label plus its expected degree to choose a convenient identity would conceal
+this limitation. Both MCP outputs need stronger identity presentation for
+reliable navigation. These counts do not verify ranking eligibility or source
+correctness, and high degree does not establish excessive responsibility or
+poor cohesion. Zod's highly connected module nodes also need explicit role
+interpretation before any design conclusion.
+
+Verification after the two corrections: 1,148 native tests passed (1,086
+workspace lib/bin tests plus 36 CLI query, 9 product, and 17 output tests),
+zero failed, two ignored. Workspace Clippy passes with warnings denied.
+The benchmark/transport/auditor suite passes 65 Python tests, including
+membership mismatches, ambiguous labels, direction errors, parallel edges,
+self-loops, transport timeouts/byte limits, and unsupported-platform handling.
+Formatting, diff checks, and the native product boundary pass. Full extraction
+fixture qualification remains the preceding receiver checkpoint; this change
+is verified through native cache/MCP regressions and the retained-graph replay.
+
+### Neighbor filtering diagnostic
+
+The five selected neighbor questions missed another defect: MCP grouped each
+neighbor before applying the relation filter. A preceding containment or
+reference edge could therefore hide a later call between the same endpoints.
+Both incoming and outgoing lookups were affected. A post-output source review
+of Flask `tests/test_helpers.py:275–281` establishes the nested `index` to
+`generate` call. The retained graph contains both containment and call edges,
+but both filtered MCP lookups returned empty adjacency before correction.
+This diagnostic is separate from the preregistered comparison scores.
+
+The filter now precedes grouping. Native regression coverage exercises both
+directions, both edge orders, and duplicate calls. The tool continues to return
+distinct neighbors; it does not promise call-site multiplicity. The unchanged
+Flask source and graph now produce the correct outgoing and incoming call in
+`mcp-filter-diagnostic-02`, with original failures retained in
+`mcp-filter-diagnostic-01`. Similar edge-order candidates exist elsewhere in
+the panel, but their presence alone is not source-accuracy evidence.
+
+The final filter executable is retained under `mcp-filter-provenance`, SHA256
+`367dfd78301d9c3914049b8c134933dce91934003eafbc2c144d9abd760a7e1a`.
+Native verification passes 1,149 tests, zero failed, two ignored; workspace
+Clippy passes with warnings denied. Formatting, diff checks, and the product
+boundary also pass. This is a query correction on retained graphs; no new
+extraction or performance claim follows. Replay `mcp-paired-03` completes all
+58 RPCs; `mcp-audit-03.json` confirms the same graph-consistency results as
+`mcp-paired-02` for both tools. The separate Flask diagnostic is the evidence
+for the additional filter correction.
+
+### Hub identity and direct navigation
+
+The first hub responses omitted the exact IDs already retained by Compass's
+analysis layer. MCP now adds ID/source/location text and the versioned
+`compass.mcp.hubs/1` structured result inside its existing transport envelope.
+It preserves ranking and degree semantics. Labels are sanitized for display;
+exact IDs are JSON-escaped in text and retained unchanged in structured data.
+Missing source fields remain null. The public description now describes
+topology candidates rather than asserting that connectivity proves a core
+abstraction or design defect.
+
+A failed-before native regression covers duplicate labels, legacy source
+locations, typed anchors, and an ID containing quotes, a backslash, and a
+newline. Its follow-up also exposed lookup trimming an ID before checking exact
+identity. Exact lookup now precedes the existing trimmed fallback; a separate
+query-layer test verifies IDs distinguished by surrounding whitespace.
+The transport regression checks that clients receive structured hub results.
+
+`mcp-paired-04` repeats all 58 original RPCs. All previous graph-consistency
+checks remain passing for both tools. All 50 Compass hub IDs now resolve to
+unique graph nodes, with independently matching degrees and source anchors.
+Graphify's MCP result still provides label-only identity: 37/50 entries can be
+identified uniquely from their display labels. Its CLI JSON interface supplies
+IDs, so this is specifically a finding about these MCP responses. Neither
+count proves complete top-N eligibility, source precision, or design quality.
+
+Commit `7c554c2f` adds a separate development diagnostic before its follow-up
+requests: use each returned hub ID when available, otherwise the returned
+label, for exactly one `get_neighbors` request. The graph may be read by the
+oracle but never to substitute a request ID. Explicit ambiguity is safe and
+is not counted as completed direct navigation. The same full-enumeration
+bounds apply to both tools. Additional disambiguation steps and the alternative
+Graphify CLI workflow are outside this diagnostic.
+
+| Repository | Compass before IDs | Compass with IDs | Graphify in both runs |
+| --- | ---: | ---: | ---: |
+| Cobra | 2/10 | 10/10 | 7/10 |
+| Flask | 2/10 | 10/10 | 5/10 |
+| Gson | 0/10 | 10/10 | 7/10 |
+| Zod | 0/10 | 10/10 | 4/10 |
+| Axum | 0/10 | 10/10 | 5/10 |
+| Total | 4/50 | 50/50 | 28/50 |
+
+Runs `hub-navigation-02` and `hub-navigation-03` each capture all 100 follow-up
+RPCs without execution failures. The oracle checks seed identity, response
+headline, and the multiset of displayed direction/neighbor-label pairs after
+grouping by distinct neighbor. It does not validate individual neighbor IDs,
+all parallel relations, source occurrences, or source accuracy. Both products'
+broader name matching can be ambiguous even when a case-sensitive display
+label is unique. The initial `hub-navigation-01` attempt stopped before
+follow-up RPCs because the collector resolved Python's virtual-environment
+symlink, losing its package environment. Commit `e3652ae3` fixes that harness
+error; it is not counted as a product failure.
+
+The five hub responses plus 50 follow-ups total 593,962 text bytes / 626,338
+wire-response bytes for corrected Compass, versus 265,393 / 272,996 for
+Graphify. These totals include different completion counts and different
+returned hub sets, and are not an efficiency win. Initialization/setup
+transcripts are retained separately. A separate transcript integrity pass
+checks all 200 follow-up requests and responses against their recorded
+arguments, text, and byte counts. Timings remain unsuitable for speed claims.
+
+The frozen executable in `mcp-hubs-provenance` has SHA256
+`0c54260eb380c08c18a14c7044a1abce932ede56114d6a515223ab19e1b7be93`.
+Verification passes 1,198 native tests, zero failed, two ignored, including
+the broader `coverage_paths` suites and the new identity regressions.
+Workspace and `coverage_paths` Clippy pass with warnings denied. All 72 Python
+benchmark tests, formatting, diff checks, and product boundary pass. Full
+extraction fixture qualification remains the receiver checkpoint; this change
+adds query/MCP presentation and exact-ID lookup verification on retained graphs.
+
+### Source-role diagnostics from the returned hubs
+
+Two post-output reductions in `hub-source-diagnostics-01.json` retain pinned
+source excerpts, file and graph hashes, node records, and selected edges:
+
+- Compass's Zod `to-json-schema.test` module spans the test suite, not a
+  production object. Its distinct-pair degree is 789. Its 1,156 incident edge
+  records include 789 containment, 321 reference, and 46 call records, with
+  overlap between endpoint pairs. Containment-driven degree does not establish
+  excessive responsibility.
+- Graphify's Axum hubs `S` at `src/service_ext.rs:47` and `T` at
+  `src/handler/mod.rs:272` are generic implementation subjects. Their degrees
+  are 153 and 87, predominantly reference edges. Two reviewed edges target
+  the ServiceExt implementation's `S` from `Router<S>` and the separate
+  `Handler<..., S> for T` implementation. Each source declaration binds its
+  own `S`; those references do not identify the independently bound `S` in
+  `service_ext.rs`. This establishes two wrong reference targets, not that all
+  150 references to that hub are wrong or a representative precision rate.
+
+These diagnostics motivate role-aware explanations and independent edge
+review. They are not folded into the original graph-consistency scores, and
+do not establish that Compass already diagnoses god objects reliably.
+
+## MCP path identity, bounds, and source-route diagnostics
+
+The next development arm uses the same retained Cobra (Go), Flask (Python),
+Gson (Java), Zod (TypeScript), and Axum (Rust) graphs. There are 28 questions per
+tool: five forward paths, five reverse paths, five one-hop-too-small bounds,
+five nonexistent source IDs, four ambiguous source names, and four disconnected
+pairs. Exact IDs are prepared symmetrically from source anchors and are not
+scored as retrieval. Each side has the same external 60-second/16-MiB RPC and
+64-MiB session bounds. Graphify receives `undirected=true`; Compass's public
+MCP operation is undirected navigation. These results do not establish directed
+call-flow accuracy.
+
+Disconnected pairs are selected from common source-anchored nodes in different
+components in each graph. They include files/modules/configuration as well as
+function declarations. Preparation examined at most 2,048 common anchors;
+no Cobra pair was selected, which does not prove none exists. Positive source
+witnesses reuse development witnesses reviewed after earlier path outputs.
+
+**Registration correction:** inputs were written before the first requests,
+but a transient Python runner cleanup `PermissionError` prevented the intended
+pre-execution commit. The initial capture was launched before that command
+failure was noticed. Its retained manifest's preregistration claim is wrong;
+this report and the current input scope supersede it. This is a development
+diagnostic. The original log is `mcp-path-python-01.log`; the child process was
+subsequently absent and the full 81-test rerun passed. The runner was not changed
+for an unreproduced failure.
+
+### Baseline findings and the separate label arm
+
+All 56 requests execute in `mcp-path-paired-01`. The independent auditor checks
+transcript/input/graph hashes, actual path bodies, exact endpoint identity,
+minimum distance, each ordered edge's relation and direction, and source-route
+witnesses separately. It never resolves an ambiguous displayed intermediate
+node using the expected answer.
+
+| ID-input diagnostic | Baseline Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Verifiable minimum-hop path | 8/10 | 0/10 |
+| Explicit hop-bound outcome | 5/5 | 3/5 |
+| Missing source stays unresolved | 5/5 | 0/5 |
+| Ambiguous source is not selected | 0/4 | 0/4 |
+| Correct global disconnection | 4/4 | 1/4 |
+
+Compass's two positive misses use a Zod intermediate label shared by several
+nodes; the text does not identify the selected node. This does not prove the
+route itself wrong. Graphify's exact-ID inputs frequently select other nodes:
+Cobra `.Find()` becomes `Command`, Axum `validate_path` becomes `routing()`,
+and some pairs resolve to the same node. Its missing-ID sentinel also resolves
+to fuzzy candidates. These are strict identity diagnostics, not a general
+claim about Graphify's advertised label/keyword interface.
+
+A separate label-input arm was committed before its requests, after the ID
+failures were observed. It uses the same positive source endpoints and bounds,
+with each tool's actual display labels: 15 questions per tool, all 30 executed.
+**Graphify wins this baseline comparison:** 10/10 verifiable paths versus
+Compass's 8/10; both give 5/5 explicit hop-limit outcomes. Graphify matches all
+five reviewed source routes; Compass verifies four of five, with Zod's identity
+unverified. This arm is development evidence, not held-out confirmation.
+Artifacts are `mcp-path-labels-01` and `mcp-path-labels-audit-01.json`.
+
+### Production corrections and the intermediate failure
+
+MCP path endpoints now require an exact ID or uniquely matching normalized
+symbol/qualified name. Ambiguity returns stable candidates and exact IDs;
+missing names remain unresolved. The public hop bound is validated from zero
+to 64. Search uses the query crate's shared bounded engine, minimizing hops,
+then structural relation cost, then a stable tie key. Its one-million-adjacency
+and 16-MiB cumulative path-key budgets fail explicitly. Reaching a depth
+frontier is distinguished from proving disconnection; conservative depth
+reports may remain incomplete even when the full stored graph is disconnected.
+
+The versioned `compass.mcp.path/1` structured result preserves ordered node IDs,
+source anchors, and selected edges with their stored and traversal directions.
+Legacy text remains available. Equal-hop routes can change under the structural
+tie rule, and callers relying on fuzzy endpoint selection must migrate; the
+compatibility reference and migration guide document both changes.
+
+The first corrected binary (`3fc64bc00f1f47e36fb2158c9dfbfb360cf81915c6b81f588c84f5f29b023ed1`)
+failed every positive structured-anchor check: compact traversal nodes omit
+numeric source lines, so projection emitted null. Both `*-02` captures and
+audits preserve this failure. Projection now reads the full stored node
+records, as hub projection does, and a native regression requires line 9 to
+survive actual structured invocation. The oracle was not relaxed.
+
+The intermediate ID run already refused all four ambiguous endpoints. It
+reported global disconnection for only two of four disconnected pairs; Gson
+and Axum reached the depth bound. Those two remain incomplete answers rather
+than being credited as proven disconnections.
+
+The next frozen binary (`78e2a3528ef864937b7160fb523826b621218e05e14ccad51faba6dc8caf1082`)
+restored all node source anchors, but `*-03` audits exposed null edge IDs:
+the compact cache omits these too. All positive results therefore still failed
+the structured-edge checks. The implementation now selects and renders paths
+from one full bounded document snapshot, retaining parallel-edge IDs during
+the search itself. It does not attach an arbitrary full-record edge after
+traversing a lossy projection. The native regression uses two parallel calls
+and requires the stable selected ID (`edge-a`), as well as the source line.
+This full-snapshot load can cost more than compact traversal; no timing or
+memory improvement is claimed.
+
+### Final path replay at this checkpoint
+
+The frozen executable in `mcp-path-identities-provenance` has SHA256
+`b16d7f755a81bf68110737a445701158ee541a4cc0f070b9e4e800cff693c988`.
+Its base commit, full source patch, and changed-file hashes are retained.
+`mcp-path-paired-04` completes all 56 RPCs and `mcp-path-labels-04` completes
+all 30. Corresponding `mcp-path-audit-04.json` and
+`mcp-path-labels-audit-04.json` validate raw transcripts and stored graph
+identities. The current auditor also rechecks both baseline captures in
+`mcp-path-baseline-current-audit.json` and
+`mcp-path-labels-baseline-current-audit.json`; all 86 original outcomes remain
+unchanged. Errors cannot pass from error text, and structured negative statuses
+must agree with the required outcome.
+
+| ID-input diagnostic | Baseline Compass | Corrected Compass | Graphify |
+| --- | ---: | ---: | ---: |
+| Verifiable minimum-hop path | 8/10 | 10/10 | 0/10 |
+| Explicit hop-bound outcome | 5/5 | 5/5 | 3/5 |
+| Missing source stays unresolved | 5/5 | 5/5 | 0/5 |
+| Ambiguous source is not selected | 0/4 | 4/4 | 0/4 |
+| Correct global disconnection | 4/4 | 2/4 | 1/4 |
+
+The corrected label arm **ties Graphify**: each returns 10/10 verifiable
+minimum-hop paths and 5/5 hop-bound outcomes. Each matches all five reviewed
+source routes. Compass also matches those five routes in the ID arm; Graphify
+matches none of the five with ID inputs. Failure to establish identity remains
+unverified source-route evidence, not evidence that every underlying edge is
+wrong. These short selected navigation routes do not establish representative
+path precision, source occurrence recall, execution feasibility, or broad
+superiority.
+
+Compass's two lost global-disconnection completions are explicit depth-limit
+outcomes for Gson and Axum at eight hops. The original implementation searched
+the whole component before applying the requested hop limit. The corrected
+one stops at the bound; neither this report nor the auditor credits those
+incomplete answers as disconnections. Retain that completion tradeoff alongside
+the identity and ambiguity improvements.
+
+Verification: 1,212 native tests pass, zero fail, two are ignored. This includes
+workspace library/binary tests, CLI query/product contracts, output agent-query
+contracts, MCP coverage, typed traversal, and the three-engine independent
+path oracle (729 four-node graphs × three depth bounds × three engines =
+6,561 queries). The small oracle covers hop/cost optimality and actual edge
+chains; it does not establish large-graph performance or source extraction
+accuracy. Workspace and changed integration-target Clippy pass with warnings
+denied. All 86 Python benchmark tests, formatting, diff checks, and the product
+boundary gate pass. Logs are `mcp-path-corrections-tests-04.log`,
+`mcp-path-corrections-clippy-04.log`, and `mcp-path-python-07.log`.
+The test build emits existing core `unused_mut` and macOS linker unwind
+warnings. Full extraction fixture qualification remains the earlier receiver
+checkpoint: this correction changes query/MCP behavior on retained graphs,
+not extraction. Concurrent debug replays are not timing evidence.
+
+## Hub explanations and source-role census
+
+The next development diagnostic inspects the original 100 MCP hub entries,
+50 per tool. `benchmarks/agent_query/hub_role_reviews.json` records manual
+source-role judgments, exact graph IDs when recoverable from the response,
+pinned source-file hashes, anchors, and excerpts. It deliberately follows
+output inspection. It is neither preregistered design-quality evaluation nor a
+representative precision sample. Different returned sets prevent a shared
+accuracy score.
+
+The independent `hub_evidence_audit.py` verifies the original capture and source
+provenance. It checks 87 reviewed identities against the pinned source; the 13
+ambiguous Graphify labels remain unknown. This verifies where the judgments
+came from, not that a source hash can prove a semantic role or design judgment.
+The original report is `hub-source-role-audit-01.json`.
+
+| Reviewed role among returned hubs | Compass | Graphify |
+| --- | ---: | ---: |
+| Production type declaration | 21 | 19 |
+| Production callable | 12 | 4 |
+| Test helper callable | 6 | 5 |
+| Test suite type | 0 | 3 |
+| Whole production source module | 6 | 0 |
+| Whole test module | 4 | 0 |
+| Example callable | 1 | 1 |
+| Benchmark callable | 0 | 1 |
+| Generic implementation target | 0 | 2 |
+| Trait implementation block | 0 | 2 |
+| Unidentified from returned label | 0 | 13 |
+
+Types include classes, structs, aliases, interfaces, and public testing API
+types. “Production” distinguishes the source declaration from repository test
+helpers, not its release stability or architectural importance. All ten
+Compass Zod results are whole-file module nodes, four spanning test files.
+These can be useful file navigation hubs, but do not identify ten god objects.
+Graphify's Axum `S` and `T` entries are generic implementation subjects, and
+`Router<S>` and `Bytes` refer to trait implementation blocks rather than new
+type declarations. Earlier source diagnostics establish two wrong references
+to `S`; this census does not extrapolate their frequency.
+
+### Exposing why a hub is connected
+
+Both original MCP hub responses primarily state degree. Compass now adds
+stored node kind and a bounded relation/direction breakdown, in text and
+`connectivity` with schema `compass.hub-connectivity/1`. Analysis lives in
+`compass-graph`; MCP projects it. Eligibility, degree, and ranking stay the
+same. Undirected ranking metadata is corrected to name its existing policy.
+The summary counts all valid incident records, including parallel records,
+separately from distinct-pair degree. Directed self-loops count once in the
+incident total and once per direction. Undirected records receive no invented
+arrow. Sixteen relation categories are shown by descending record count then
+name, with omitted category and record totals.
+
+Concrete observations from the retained Compass graphs illustrate why this
+matters:
+
+- Cobra `Command`: 525 incident records, including 346 incoming references and
+  154 outgoing containment records. Its degree is 443, a different quantity.
+- Flask `Flask`: 110 records include 38 outgoing containment and 34 incoming
+  references; several other relation kinds contribute too.
+- Gson `JsonReader`: 530 records include 240 incoming instantiations and 97
+  outgoing containment records.
+- Zod `to-json-schema.test`: 1,156 records include 789 containment, 321
+  references, and 46 calls, all outgoing. It is a whole test module.
+- Axum `.route()`: 584 records include 306 incoming calls, one outgoing call,
+  and 272 incoming `tests` records. A high degree does not mean this method
+  makes hundreds of outgoing calls.
+
+These counts are observations about the stored graph, not independently
+verified counts of source occurrences or evidence of excessive responsibility.
+The previous neighbor interface groups by neighbor and can omit parallel
+relations; a summary should not be reconstructed from that grouped view.
+The native implementation uses complete stored records. No automatic
+production/test role classifier or god-object judgment is introduced.
+
+The summary auditor separately checks numeric types, direction, self-loops,
+parallel records, ordering, omission accounting, and each hub's text block.
+Original Compass and Graphify responses have no such summary. That absence is
+reported as unavailable, not as a wrong answer or lack of another workflow.
+Graphify's neighbor and CLI interfaces remain available; this diagnostic does
+not measure their multi-step explanation cost or quality.
+
+### Hub explanation replay and verification
+
+`mcp-hub-evidence-01` completes all 58 original shared MCP questions on the
+same graphs. All original graph-consistency judgments and all returned hub
+identity/degree/rank records remain unchanged. The independently verified
+`hub-evidence-audit-01.json` checks **50/50 Compass connectivity summaries and
+50/50 matching text blocks**. Graphify's direct hub responses offer no such
+summary; this is recorded as unavailable, not 50 incorrect explanations.
+The latest source-role check (`hub-source-role-audit-02.json`) also verifies
+each hub RPC's raw request and response. Graphify's stored graphs are
+undirected, so their oracle record counts remain undirected; the summary does
+not infer semantic directions from their serialized endpoints.
+
+For the same five Compass top-ten hub responses, text grows from 9,136 to
+26,620 bytes and captured response-wire bytes grow from 24,146 to 75,299.
+Graphify remains at 1,489 text / 1,989 wire bytes. This is additional evidence
+with a payload cost, not an efficiency win or a controlled multi-step workflow
+comparison. Initialization traffic is retained separately. Ranking sets differ
+between products, and these runs do not establish comparative design quality.
+
+The frozen executable in `hub-evidence-provenance` has SHA256
+`5382b51b86ab76032173a17e638a3ad525600ec1726364d3244edddb7abd2c19`;
+the collector records the same executable digest. Base commit, source patch,
+and changed-source hashes are retained. Native verification passes **1,162
+tests, zero failed, two ignored**, covering the full workspace library/binary
+baseline plus `analyze_coverage`, `coverage_paths`, and `compass_product`.
+This is a different integration selection from the prior path checkpoint,
+whose larger count also included CLI/output path suites. New regressions
+cover parallel edges, self-loops, missing endpoints, directed/undirected
+records, permutation stability, top-zero, relation omission totals, text
+projection, and actual MCP transport. Workspace and selected integration
+Clippy pass with warnings denied. All **93 Python tests**, formatting, diff
+checks, and product boundary pass. Logs: `hub-evidence-native-04.log`,
+`hub-evidence-clippy-03.log`, and `hub-evidence-python-03.log`.
+
+Earlier development logs preserve a test fixture type mismatch and an expected
+legacy-kind mismatch (`symbol`, not `unknown`); both were corrected before the
+final checks. Existing core `unused_mut` and macOS linker unwind warnings remain
+in test builds. The full extraction fixture gate remains the prior receiver
+checkpoint: no extractor, publication, or viewer format changes are made here.
+God-object detection, community cohesion, source-edge precision, and explanation
+usefulness on held-out tasks remain open.
+
+## Frozen confirmation panel A: competitor advantages remain
+
+Inputs were committed as `7c70fbea` before extraction or queries: 55 questions,
+21 selected relationship pairs, and ten forward/reverse path witnesses.
+Chi (Go), Click (Python), jsoup (Java), Redux (TypeScript), and WalkDir (Rust)
+are new repositories for this checkpoint. Both tools use the same five clean,
+pinned checkouts. Selection is purposive, not representative. The Compass
+executable is the frozen `5382b51b…` hub-evidence build above; Graphify reports
+0.9.67. `heldout-a-01` completed all ten builds and 110 question workflows.
+Source commits, registered input bytes, captured graph digests, runner digest,
+and capture byte totals were rechecked. The CLI records executable hashes;
+Graphify's launcher hash does **not** attest to all Python package/dependency
+bytes during execution. Do not conflate the separate MCP environment check
+with a pre/post CLI package check.
+
+### Original text-recall scores
+
+| Surface | Compass | Graphify |
+| --- | ---: | ---: |
+| Explain | 10/10 | 8/10 |
+| Direct callers plus incoming-call ask | 8/10 | 9/10 |
+| Callees | 4/5 | 4/5 |
+| Symbol paths, both directions | 6/10 | 10/10 |
+| File paths | 5/5 | 1/5 |
+| Ambiguity | 5/5 | 4/5 |
+| Missing symbols | 5/5 | 5/5 |
+| Broad natural query | 3/5 | 5/5 |
+| Total text matches | 46/55 | 46/55 |
+
+There are 38 shared passes, eight exclusive passes per tool, and one shared
+failure. On shared text passes, median estimated answer tokens are 158 Compass
+versus 104 Graphify. The single-run overall wall-time medians are 738 versus
+236 ms; these are observations, not a controlled performance benchmark.
+Graphify sometimes exceeds the requested text budget (for example the Chi ask
+response is 2,744 estimated tokens against a requested 2,000). All consumed
+responses and documented follow-ups remain in the cost totals.
+
+These are **not correctness scores**. Manual response inspection catches four
+Compass text passes that do not resolve the requested operation: Redux's
+primary explanation, both WalkDir explanations, and WalkDir callees merely
+list ambiguity candidates. The registered text criteria find names/lines in
+those lists. Graphify's two WalkDir symbol paths also pass by printing the
+requested words while selecting same-named **test** functions and walking
+through their containing test file. Its stderr warns of ambiguity; the body
+still provides a different route. The frozen run is preserved, with these
+judgments recorded separately in `heldout_panel_a_review.json`.
+
+For incoming-call ask, Compass prints the requested callee and incoming
+relationships on Chi, Click, jsoup, and Redux; WalkDir remains unresolved.
+Compass's usage results include references/imports where explicitly labeled,
+not just calls. Graphify's query answers return broader neighborhoods that
+contain the selected incoming call; WalkDir combines library and test seeds.
+These inspected facts do not establish the precision of every returned edge.
+
+### Source and identity checks
+
+The path auditor now retains failed commands as failed rows rather than
+aborting and dropping the remaining denominator. Nonzero exit, timeout, and
+unsupported multi-response execution cannot pass even if stdout prints a valid
+path. Source drift and mismatched graph provenance still abort the audit.
+All ten witnesses remain in each tool's denominator. Source-verified paths
+are **6/10 Compass versus 8/10 Graphify**: both pass Chi, Click, and jsoup;
+Graphify also passes Redux; neither establishes the requested WalkDir route.
+Compass refuses WalkDir's genuinely ambiguous unqualified names and Redux's
+export/function name collision. An ambiguity refusal is safer than selecting
+a wrong declaration, but it is still not a completed path task.
+
+The initial edge audit also exposed an **oracle mistake**. The registered
+Click witness omitted `open_stream`'s second call to `_wrap_io_open` at
+`src/click/_compat.py:450`. Compass preserved both calls, while Graphify kept
+only line 397. The original witness and audit remain unchanged. A separately
+named `edge_witnesses_heldout_click_corrected.json` adds line 450 after reviewing
+the entire function; it is an explicitly post-output diagnostic correction.
+
+| Selected-pair evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Unique endpoint identity, original or corrected | 17/21 | 21/21 |
+| Relationship/absence matches, original or corrected | 15/21 | 20/21 |
+| Full occurrence agreement, registered witness | 14/21 | 18/21 |
+| Reviewed positive occurrences, registered witness | 13/18 | 15/18 |
+| Full occurrence agreement, corrected diagnostic | 15/21 | 17/21 |
+| Reviewed positive occurrences, corrected diagnostic | 14/19 | 15/19 |
+
+The 21 pairs comprise 16 positive pairs and five direct-edge negatives.
+Negatives pass only with both endpoints uniquely identified. Four Compass
+Redux pairs fail identity checks because separate export and function nodes
+share the exact file/start-line/terminal name; they must not be described as
+four missing call edges. The plain-symbol ambiguity is a real workflow issue,
+while the source audit cannot choose between those nodes using its registered
+identity rule. Compass also misses Chi's source-proven `rctx.URLParam` call.
+Both tools miss jsoup's chained `new Cleaner(...).isValidBodyHtml(...)` call.
+Graphify loses repeated occurrences in jsoup and WalkDir as well as corrected
+Click. This checks selected pairs, not complete callee sets or graph precision.
+
+Artifacts are `heldout-a-path-audit-01.json`, five
+`heldout-a-*-edge-audit-01.json` files, and
+`heldout-a-click-edge-audit-corrected-01.json` under the evaluation root.
+The checked-in review records their digests, input digests, response-review
+digests, and limits. Auditor regressions pass all 95 Python tests, including
+unsuccessful execution and source-drift cases (`heldout-a-auditor-tests-01.log`).
+This panel contradicts a broad superiority claim. Its first run remains a
+confirmation checkpoint; subsequent product tuning on it is development and
+requires another independent confirmation panel. MCP/community workflows,
+directed or long walks, source-level cohesion, and god-object judgments remain
+unproven here.
+
+### Post-output path selection diagnostics
+
+Two additional arms use the **original frozen binaries and graphs**, with
+source-reviewed callable endpoints prepared symmetrically from the graphs.
+They are post-output diagnostics, not node retrieval or workflow-cost scores:
+preparing an endpoint from the oracle does not prove that a user found it.
+The four questions cover forward/reverse Redux and WalkDir paths only.
+
+| Prepared endpoint form | Compass source-path matches | Graphify source-path matches |
+| --- | ---: | ---: |
+| Full stored IDs | 4/4 | 2/4 |
+| Exact stored display labels | 0/4 | 2/4 |
+
+Both graphs contain the selected WalkDir call edges. Full IDs let Compass
+navigate those edges and Redux's function declarations. Graphify's CLI path
+help describes source/target strings without promising exact-ID semantics;
+its stored-ID and display-label attempts still choose different WalkDir
+endpoints. For example the full-ID forward request returns a test function,
+its containing test file, and an import to `WalkDir`. Compass normalizes display
+labels and still detects the export/function or library/test collisions.
+Neither arm replaces the original 6/10 versus 8/10 source-path result, and the
+ID diagnostic is not a claim that Graphify lacks other disambiguation workflows.
+Artifacts: `heldout-a-explicit-path-diagnostic-01` and
+`heldout-a-label-path-diagnostic-01`, each retaining prepared inputs, executable
+hashes, script, captured streams, and source-witness audit results.
+
+### Development correction: actionable ambiguity answers
+
+The frozen panel exposed an unrelated presentation defect: a typed ambiguous
+relationship request said “No exact match” and named the first candidate as a
+fallback. A typed ambiguous node-trail response could instead claim no directed
+path. `compass-output` now handles `needs_resolution` before those answer
+branches, asks for exact IDs, and uses the operation as the answer basis.
+Every retained ambiguity candidate has its exact ID in paged and full text,
+even if qualified labels differ. Candidate selection, raw query results,
+relationship resolution, schema majors, and path algorithms are unchanged.
+Changed text pages use the existing cursor-prefix rejection rules; restart a
+rejected continuation from page one.
+
+This is **development after observing panel A**, not an improved held-out
+score. `heldout-a-ambiguity-replay-01` repeats all 55 Compass questions against
+the original hash-verified graphs. Text passes remain **46/55**, with no changed
+pass/fail rows. All four inspected Redux/WalkDir ambiguous callers/callees/ask
+responses now show exact IDs and the corrected headline. The text-oracle false
+positives documented above remain false positives; better ambiguity wording
+does not turn an unresolved task into a successful answer. The replay does not
+re-extract either graph or rerun Graphify.
+
+The new frozen binary has SHA256
+`d561d7c762410899cb6039f409d17401239ee26ee525f8bbfd2e95cebcb82857`.
+`ambiguity-headline-provenance` records its base commit, patch, and source hashes.
+Verification passes **1,155 native tests, zero failed, two ignored**, comprising
+workspace library/binary tests plus `agent_query`, `code_query_cli`, and
+`compass_product`. The new regressions cover callers, callees, impact, node
+trails, candidate permutation, full/paged text, agent JSON, and the actual CLI
+callers/callees/ask boundary. Workspace and the same selected integration Clippy
+pass with warnings denied. All **95 Python tests**, formatting, diff checks,
+and product-boundary checks pass. Logs are `ambiguity-headline-native-02.log`,
+`ambiguity-headline-clippy-01.log`, and `ambiguity-headline-python-01.log`.
+The first targeted test compile used a nonexistent test-options default; the
+retained `ambiguity-headline-targeted-01.log` records that development error.
+Explicit options corrected it before the full pass. Existing core unused-mut
+and macOS linker warnings remain in build/test logs. Extraction qualification
+and JavaScript gates were not rerun: this change only projects query ambiguity
+and does not change extraction, publication, or viewer assets.
+
+### Development correction: Go control initializers and receiver shadowing
+
+The registered Chi miss at `context.go:18` came from a supported factory return
+that was lost in an `if` initializer. The universal Go producer now searches
+control initializers and nearer lexical bindings before outer parameter aliases.
+Unknown locals, callback factories, closure parameters, and type-switch aliases
+must not borrow a same-named outer type or package function. Case-specific
+type-switch narrowing remains unsupported. Existing parameter/import evidence
+still supports project-wide field and return resolution. Disposable AST cache
+semantics advance from 3 to 4; users must rebuild old Go graphs to get these
+edges. Published history is unchanged.
+
+The first frozen development binary is retained under
+`go-initializer-provenance`, SHA256
+`bd0168b9d1258199a23820c1888aba577a41869fec820baeb5d9a54db2a4087d`.
+Fresh paired runs `go-initializer-chi-01` and `go-initializer-cobra-01` use
+unchanged question suites and pinned sources. Text scores remain **Chi 11/11
+versus 10/11**, and **Cobra 10/10 versus 9/10** (Compass versus Graphify).
+These scores did not improve. Concurrent builds make these runs unsuitable
+for latency claims. The Graphify launcher/package provenance limitation above
+still applies.
+
+Every graph relationship delta was inspected, using source/target declaration
+identity, relationship kind, exact site, and multiplicity. Chi adds two calls
+and removes no relationships:
+
+- `URLParamFromCtx` to `Context.URLParam` at `context.go:18`, supported by
+  `RouteContext`'s declared `*Context` return and the `if` initializer.
+- `compressResponseWriter.Flush` to the `compressFlusher.Flush` interface method
+  at `middleware/compress.go:364`, supported by the type assertion at line 363.
+  This proves an interface-method target, not the runtime implementation.
+
+The four original Chi pair/occurrence witnesses now all match both tools;
+Compass previously matched three. A separately recorded **post-output** fifth
+witness checks the compression interface call: Compass matches it; Graphify
+has both unique endpoints but lacks the call. This diagnostic selection is
+not an independent precision or recall sample, and does not replace panel A.
+
+The same complete-delta review caught a regression on Cobra: four new type
+references to `Command` at `command.go:479,521,921,1153` came from invoking
+callbacks returned by `UsageFunc`, `HelpFunc`, and `FlagErrorFunc`. The outer
+invocation has no proven named target. A native regression reproduced the
+extra edge (two site edges instead of one). The producer now omits that
+unsupported outer call candidate while retaining the separately visited inner
+factory call. The intermediate binary and its faulty output remain recorded;
+the four references are not counted as gains.
+
+The checked-in `go_receiver_development_review.json` records intermediate run
+digests, every delta, source anchors, and judgments.
+`edge_witnesses_go_receiver_chi_diagnostic.json` preserves the expanded diagnostic
+separately from the original registered witness file.
+
+The corrected frozen binary has SHA256
+`bb09a5335c80fd7dd710e008b4a2f30f9403108e4883ed74e7d7c0de1b0aaca9`
+under `go-initializer-final-provenance`. Fresh paired repeats
+`go-initializer-chi-02` and `go-initializer-cobra-02` complete all 42 requests.
+Chi retains exactly the two reviewed additions; Cobra removes exactly the four
+intermediate false references and has no relationship delta from its baseline.
+Text scores and the five-pair diagnostic result are unchanged. The delta script,
+graph/run digests, source excerpts, and both failed/passing callback regression
+logs are retained. These are development results after panel A.
+
+Final-source native checks pass **1,410 tests, zero failed, two ignored**:
+workspace library/binary tests plus `universal_evidence`, `universal_resolution`,
+`contracts`, and `compass_product`. Workspace and the same integration Clippy
+selection pass with warnings denied. All **95 Python tests**, formatting,
+product boundary, and diff checks pass. Both full fixture qualification runs
+completed with exit zero, including semantic, topology, Markdown, and React
+fixture checks. The second run started after the final Go production edit.
+These gates do not cover the subsequently discovered Chi route-parent defect
+below. Logs use `go-initializer-qualification-02`, `go-initializer-native-03`,
+`go-initializer-clippy-02`, and `go-initializer-python-02` prefixes. Existing
+core unused-mut and macOS linker warnings remain in build/test logs.
+
+### Panel A MCP extension: communities, neighbors, and hubs
+
+Commit `3ec3732a` registered 60 MCP requests before executing them on the original
+panel-A graphs and frozen hub-evidence Compass binary. This is a **development
+extension after observing CLI output**, not a new independent confirmation panel.
+It uses the separate Graphify MCP environment, checking its recorded package
+files before and after execution. This does not retroactively attest the CLI
+extraction environment. All 60 expected requests completed; raw transcripts,
+input digests, and the exact question multiset were checked.
+
+| Stored-graph diagnostic | Compass | Graphify |
+| --- | ---: | ---: |
+| Counts match | 5/5 | 5/5 |
+| Complete largest-community membership | 5/5 | 5/5 |
+| Missing community handled | 5/5 | 5/5 |
+| Selected call-neighbor label/direction triples match | 5/5 | 5/5 |
+| Ambiguous name remains ambiguous | 5/5 | 4/5 |
+| Returned hub identity established | 50/50 | 41/50 |
+| Direct hub connectivity summary matches | 50/50 | unavailable |
+
+Graphify silently selects the Chi `Context.URLParam` method for `URLParam`,
+despite the separate top-level declaration. It preserves the other four
+ambiguities. Compass preserves all five, but substring matching produces broad
+candidate lists, including documentation nodes; this is not a candidate-precision
+win. Neighbor consistency also does not establish source-edge correctness:
+Compass text omits call-site occurrences, while Graphify prints retained sites.
+The frozen Chi graph still has the already-documented receiver miss.
+
+Largest-community sizes are Chi **96/108**, Click **389/84**, jsoup **752/295**,
+Redux **271/71**, and WalkDir **116/47** (Compass/Graphify). These are different
+partitions on different extracted graphs, not shared correctness denominators.
+The reviewed file distributions include many tests: Compass Redux's largest
+community includes 156 nodes from `test/createStore.spec.ts`; Graphify WalkDir's
+includes 45 from `src/tests/recursive.rs`. Neither fact alone establishes good
+or bad functional cohesion.
+
+The complete post-output hub-role census verifies 50 Compass and 41 Graphify
+source identities; nine Graphify display identities remain unresolved. Compass
+uses explicit MCP IDs here; Graphify's CLI JSON can supply IDs, so the nine
+unknowns are specific to this MCP display, not missing graph identities. Compass
+returns 22 production types, seven production callables, eight test helpers,
+two test types, five test modules, two source modules, two documentation-tooling
+callables, and two route records from a test/example. The different returned
+sets cannot establish a shared design-quality score. The roles, source excerpts,
+file hashes, and all unknowns are preserved in `hub_role_reviews_panel_a.json`.
+
+Full answer text totals **125,033/42,550 bytes**, with **174,128/45,989 actual
+response-wire bytes**. Hub responses alone total **24,401/1,473 text bytes** and
+**69,504/1,973 wire bytes**. Compass supplies more metadata and different members;
+these costs do not prove greater efficiency. Concurrent compilation excludes
+latency claims. `mcp_panel_a_review.json` records all denominators and artifact
+digests. The collector now accepts safely named repositories from the captured
+run instead of a hard-coded five-name list; all **97 benchmark tests** pass,
+including duplicate-record and path-escape regressions.
+
+### Source defect exposed by a consistent hub summary
+
+Compass's second Chi hub is the route `GET /users/1` inside `TestCleanPath`,
+with degree **59** from **68 outgoing containment records** and no other
+incident relationship kinds. Its graph-consistent summary faithfully exposes
+unsupported hierarchy. For example, it claims to contain `GET /` inside
+`TestThrottleBacklog`, although both tests independently construct a local
+`r := chi.NewRouter()` and neither mounts the other's route.
+
+The separately recorded negative witness fails on both the original panel
+graph and the newer Go-corrected graph. Graphify has no matching route endpoint
+identities, so it cannot receive credit for the negative. The source review
+traced the defect to shared publication applying filesystem parent selection
+to programmatic receivers named `r`. This can inflate hubs and connect unrelated
+tests; passing self-graph consistency and existing fixture gates did not detect
+it. The recorded real-source negative is not a population precision estimate.
+
+A native regression reproduced the defect. Publication now admits only
+recognized filesystem-convention facts to that parent-selection step;
+programmatic mounts/groups remain owned by framework composition rules. Tests
+cover six programmatic frameworks, input-order reversal, a positive filesystem
+case, and mismatched origin/rule/framework negatives. All **17 framework-route
+tests** pass. Framework-pack semantics advance from 6 to 7 and build-state seals
+include that identity. Existing filesystem conventions still
+need broader independent semantic review; this correction is not proof of their
+complete correctness.
+
+#### Fresh development comparison after the hierarchy correction
+
+The frozen `route-hierarchy-provenance` binary has SHA256
+`872aff05f6c1723d27ee96230a4e315d3f0d6e1849387de09530b907f0ff3f40`.
+`route-hierarchy-panel-a-01` builds both tools afresh on all five pinned sources
+and repeats every original question. All **110 requests ran**, with zero
+timeouts; nonzero exits remain in the denominator. Text scores remain **46/55
+for both**, with no changed pass/fail rows. Source-path matches remain **6/10
+versus 8/10**. Corrected selected-pair relationship matches are **16/21 versus
+20/21**, and full occurrence agreement is **16/21 versus 17/21**. Compass's
+one-pair improvement over the original panel comes from the earlier Go receiver
+fix, not the hierarchy correction. Original and corrected Click witnesses are
+still separate.
+
+A complete relationship delta against the Go-corrected Chi graph removes
+**88 `contains` records**, adds none, and retains all 729 nodes. The other four
+repositories have no relationship changes from the original panel. The recorded
+independent-router negative now passes with both Compass endpoints present;
+Graphify's endpoints remain unavailable. This is source-backed defect recovery,
+not a new broad recall score.
+
+`mcp-panel-a-02` repeats all **60 MCP requests**, each successfully, against the
+fresh graphs. All earlier consistency and ambiguity outcomes are retained.
+Compass's two Chi route hubs disappear from the top ten, replaced by the
+production type `compressResponseWriter` and test helper `bigMux`; both new
+source roles were inspected. The other four hub rankings are unchanged.
+`hub_role_reviews_panel_a_after_routes.json` retains all 100 rows and only reuses
+earlier judgments after exact identity, anchor, excerpt, and file-hash equality.
+Chi's selected largest Compass community changes from 96 to 90 nodes; complete
+enumeration still does not prove functional cohesion. Compass/Graphify answer
+text totals are **125,192/42,550 bytes**, with **174,698/45,989 wire bytes**.
+No latency or efficiency win is claimed.
+
+Verification passes **1,431 native tests, zero failed, two ignored**, covering
+workspace libraries/binaries and the selected universal-evidence, resolver,
+cache/contracts, product, framework-route, and framework-qualification tests.
+The first expanded Clippy invocation exposed an existing `expect_err` in a
+qualification test. An explicit `Err(MissingRoute)` assertion replaced it;
+all four qualification tests were rerun and the full selected Clippy invocation
+then passed. All **97 benchmark tests**, formatting, diff, and product-boundary
+checks pass. The subsequent full fixture qualification **failed** at its topology
+floor: 1,270 edges versus a required 1,284. The previous Go fixture pass does not
+verify this production change. The follow-up below retains that failure and
+finds an additional semantic defect.
+
+#### Fixture topology review and a remaining false filesystem parent
+
+The full run passed its native scale checks, source-integrity and repeated-build
+comparisons, and existing semantic assertions before stopping at the count
+floor. It did not reach the subsequent Markdown and React qualification stages.
+Fresh clustered production builds of the identical fixture corpus with the
+frozen Go-receiver and route-hierarchy binaries isolate exactly **19 removed
+`contains` records, zero added records**, and the same **1,276 nodes**. Node
+contents are unchanged except for community assignments. The removed records
+represent 18 unique typed endpoint pairs.
+
+Source inspection covers every removed relationship:
+
+| Independent fixture groups | Removed records |
+| --- | ---: |
+| Drupal entity-type hook and YAML routes | 4 |
+| Express apps in separate modules | 3 |
+| Flask factory and separately instantiated app | 3 |
+| Independently instantiated FastAPI apps | 2 |
+| Vue Router route arrays in separate modules, both directions | 2 |
+| Kotlin and Java Spring controllers in separate packages | 4 |
+| TanStack and React Router route modules | 1 |
+
+The [complete review](../../benchmarks/agent_query/route_hierarchy_fixture_review.json)
+records every removed identity, both binary and graph hashes, source hashes,
+and every policy adjustment. Each count bound changes by exactly its measured
+before/after delta, retaining its previous margin. Community count changes
+from 225 to 232 and component count from 221 to 229; neither change establishes
+better functional cohesion.
+
+Count recalibration alone is insufficient. Qualification manifest version 3
+adds eight source-reviewed independent-route assertions. Both endpoint files
+must retain route nodes; the specified directed containment must be absent at
+every confidence level. The old graph fails all eight groups. The corrected
+production graph passes **seven and fails one**: a convention-derived
+`react-router::PAGE::/tanstack` still contains `/home`, with the child endpoint
+remapped to the AST route. These flat source modules do not declare that
+parent-child relationship.
+
+The remaining resolver helper selects the first other route module found in a
+nearby directory. The frontend source oracle's `routeParent` helper uses the
+same rule. Their agreement therefore cannot independently validate framework
+parentage. **The semantic gate remains failing**; no successful full rerun is
+claimed. Fixing this requires framework-specific, source-proven parent rules
+and independently specified positive and negative fixtures.
+
+All **87 Python script tests** pass, including 23 code-graph oracle tests. On a
+synthetic graph with the remaining false edge removed solely for oracle
+validation, restoring each of the 20 known false records individually fails
+the new assertion. This mutation exercise validates the checker; it is not a
+production correction. Existing native results describe the unchanged Rust
+production code, not a fix for this newly exposed defect.
+
+#### Framework-specific filesystem parents and independent source review
+
+The next correction replaces directory-order selection with an indexed lookup
+of framework parent roles: Next layouts, the supported Svelte layout facts,
+Nuxt parent pages, and default React Router/Remix/TanStack flat-route names.
+Pages, standalone HTTP endpoints, and Astro routes no longer establish parents
+by proximity. Ambiguous nearest parents remain unresolved. Custom configuration
+and extraction gaps are documented in the framework reference; this change does
+not claim complete routing support. Framework semantics advance to version 8;
+the product version remains 0.3.30 and historical graphs remain immutable.
+
+The frozen binary SHA256 is
+`9efe548537b106c69d1da7a5ac7955e764e43103e0d1e4a754a3c1880c292bea`.
+On the **identical original fixture corpus**, it removes exactly **12 more
+unsupported containment records**, adds none, and retains all **1,276 nodes**
+unchanged except for community assignments. All common edges are unchanged.
+The removed records are two React Router sibling links, two Next page-parent
+links, five Astro links, one Nuxt endpoint link, and two Svelte page/server
+links. The source-reviewed negative manifest now covers **18 file pairs** and
+passes on the production graph. Restoring each of these 12 false records
+individually makes the checker fail.
+
+Adding two explicit Next layout fixtures is measured separately: the sources
+add 16 nodes and 24 edges to the corrected original graph, including four
+expected layout relationships. On identical expanded sources, old versus new
+production removes 12 false links and adds the missing root-to-nested-layout
+link. No other common edge or node content changes. The frontend fixture gate
+requires exactly the four source-specified layout pairs; omitting any one fails
+its mutation check. The topology bounds move by the measured original-before to
+expanded-after deltas, preserving every previous margin. The
+[complete fixture review](../../benchmarks/agent_query/semantic_route_parent_fixture_review.json)
+separates the production delta, fixture addition, mutation checks, and each
+policy adjustment. Increased fragmentation is not evidence of better cohesion.
+
+The JavaScript source oracle now uses a separate pairwise convention predicate,
+with 15 manually specified cases in both input orders. The native route matrix
+contains 23 cases, also in both orders. Agreement is still insufficient by
+itself: the historical Next, React Router, and TanStack hierarchy scorecards
+are explicitly **invalidated**, retaining their old counts and digests until
+their sources are independently reviewed. Pinned hierarchy qualification
+cannot use those records as passing evidence.
+
+A real Next diagnostic uses 273 files (1,398,028 bytes) projected read-only from
+shadcn/ui commit `a87a63b2ca25143d26c8bd0903e4e9bc77b3f824`. Four positive and
+three negative pairs were recorded before inspecting either graph for this
+projection. Old production passes **6/7** and corrected production **7/7**.
+The complete graph delta contains **13 removed** links (nine to HTTP handlers,
+two page-to-layout reversals, and two loading-to-layout reversals) and **four
+added** AppLayout-to-nested-layout links. Every changed pair was source-reviewed;
+the 14,762 nodes are unchanged except for communities and all common edges are
+unchanged. This is a source-selected development diagnostic over a partial
+repository, not held-out evidence or a graph-wide precision estimate.
+
+Fresh paired builds on the unchanged five-language panel produce byte-identical
+Compass graphs to the preceding route correction. The same 110 requests yield:
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 46/55 | 46/55 |
+| Source-checked paths | 6/10 | 8/10 |
+| Selected source relationships | 16/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 16/21 | 17/21 |
+
+The [development review](../../benchmarks/agent_query/semantic_route_parent_development_review.json)
+records pins, binary and graph hashes, source witnesses, and raw-artifact hashes.
+This correction does not improve the panel scores or prove superiority. The
+shared-machine timing run overlaps other verification and supports no speed
+claim. MCP scores from the earlier run are not presented as a fresh rerun.
+
+Verification: **1,436 native tests passed, zero failed, two ignored** before a
+trivial Clippy needless-borrow correction; the final production binary built
+successfully. Workspace library/binary and selected-integration Clippy passes.
+A broader invocation including the untouched `react_frontend` test failed on
+39 existing `unwrap`/`expect` lint violations; its failure log is retained.
+All **88 script tests**, **15 JavaScript oracle cases**, and **97 benchmark
+tests** pass, as do formatting and the product-boundary check. The first full
+fixture invocation stopped because its default parser-source path was absent.
+A second invocation uses the existing parser bundle in this worktree's target
+directory and completed with exit 0. It passed the scale, semantic, topology,
+Markdown, lifecycle determinism, and release frontend qualification stages.
+This full pass qualifies production commit `c20db15b`; the pinned hierarchy
+scorecards remain invalidated and require separate source review.
+
+#### Java constructor receiver correction
+
+The earlier frozen-binary diagnostic and failed native regression reproduced
+the jsoup constructor receiver gap. They remain retained, including the initial
+graph-review mistake (`relation` versus graph-v1 `kind`). The producer now reads
+the constructor's AST type for direct calls and up to seven parenthesis wrappers,
+then uses existing qualified-type and overload resolution. It rejects anonymous
+and enclosing-instance receiver assumptions. A separate correction retains
+`outer.new Cleaner()` as unresolved instead of binding an unrelated imported
+`Cleaner`. AST cache semantics advance from 4 to 5; product version, graph and
+evidence schemas, and advertised capabilities are unchanged.
+
+On identical three-file Java diagnostic sources, the old binary produces two
+invented external method targets. The correction removes those two nodes and
+three false relationships, and adds nine source-supported calls. The native
+regression checks exact name spans, repeated occurrences, argument overloads,
+type/value namespace distinction, provenance, direction, and reverse-input
+determinism. `javac`/`javap` independently corroborate the fixture's target
+distinctions; compiled classes were not executed. The deliberately deep receiver
+is a real call beyond bounded inference, **not a true absence negative**. A copy
+of the old cache rebuilds to a graph byte-identical to a clean extraction.
+
+Fresh paired builds at the same five repository pins and all 110 unchanged CLI
+requests are recorded in `java-constructor-panel-a-01`. The other four Compass
+graphs are byte-identical to the preceding checkpoint. jsoup retains all 6,116
+nodes and common edges, except community assignments, and adds **122 call
+occurrences** (10 production, 112 test). Complete delta review checks each
+receiver, package/import context, target declaration, overload argument types,
+source span, and direction. This is static review of a development delta, not a
+representative precision sample or proof of runtime calls. It also exposes
+existing incomplete varargs display signatures; the exact source declarations
+support those edges, while signature completeness remains follow-up work.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 46/55 | 46/55 |
+| Source-checked paths | 6/10 | 8/10 |
+| Selected source relationships | 17/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 17/21 | 17/21 |
+
+The one newly matched selected pair is `Jsoup.isValid` to
+`Cleaner.isValidBodyHtml`; both tools previously missed it. The
+[development review](../../benchmarks/agent_query/java_constructor_development_review.json)
+records executable, graph, source and artifact hashes, all added occurrences,
+target declarations, and remaining limitations. Reusing these repositories after
+they informed the fix is development evidence, even though the suite filename
+contains `heldout`. No new MCP or god-object/community quality claim follows.
+Timings overlap native verification and support no speed claim.
+
+Verification: **1,439 native tests passed, zero failed, two ignored**. Clippy first
+found redundant error wrapping in the new test; after that test-only correction,
+workspace library/binary plus selected integration Clippy and the focused
+regression pass. The fixed qualification corpus has zero node/edge changes
+excluding communities, so no topology thresholds changed. Full Java fixture
+qualification completed with exit 0, including native scale ceilings, semantic
+and topology checks, lifecycle determinism, Markdown checks, the release build,
+and frontend precedence/positive/negative checks. This pass qualifies Java
+production commit `22814e59`; it does not establish comparative superiority.
+
+#### Export binding query resolution and traversal cache fidelity
+
+Redux's `miniKindOf` has separate export and function records. The graph already
+contains its three reviewed local calls, but ordinary name lookup previously
+refused the export/function pair as ambiguous. Lookup now removes a redundant
+export candidate only when complete exact, nondeferred `contains` and `exports`
+evidence proves one declaration at the binding occurrence. The declaration must
+already be a candidate with the same normalized name, nonempty qualified name,
+and source file. Genuine competing declarations remain ambiguous; exact export
+IDs retain their original meaning. Proof is bounded to 256 candidates and 1,024
+examined edges plus one truncation probe. Exhaustion retains the original
+candidates and reports incomplete typed resolution.
+
+A failed-before regression also exposed the compact traversal reader retaining
+only the first evidence confidence and dropping `deferred`. It now retains the
+weakest confidence across evidence and the compatibility field, plus deferred
+state. Disposable traversal cache magic advances from `TRAILT05` to `TRAILT06`;
+published graphs, identities, schemas, and AST cache semantics remain unchanged.
+
+Fresh paired extraction and all 110 unchanged requests on the same Go, Python,
+Java, TypeScript, and Rust pins produce **byte-identical graphs for both tools**
+relative to the Java checkpoint. The three newly passing text questions are
+Redux callees and the two directions of the undirected `miniKindOf`/`ctorName`
+path. Source review confirms the three local callees and the call occurrence;
+the reverse traversal does not claim a reversed call.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 49/55 | 46/55 |
+| Source-checked paths | 8/10 | 8/10 |
+| Selected source relationships | 17/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 17/21 | 17/21 |
+
+The unchanged relationship oracle still cannot identify four Redux pairs
+uniquely because export and function records remain distinct. These failures
+are retained; they are neither four missing calls nor recovered extraction
+relationships. Both WalkDir ordinary-name path witnesses still fail both tools:
+Compass preserves genuine ambiguity, while Graphify returns an unreviewed
+route. A separate post-output source census reviews 126 coincident Redux
+bindings; this establishes static correspondence, not 126 successful public
+queries or representative precision. The
+[development review](../../benchmarks/agent_query/export_binding_development_review.json)
+records source, executable, graph, oracle, and raw-artifact hashes.
+
+Verification: **1,180 native tests passed, zero failed, two ignored** across
+workspace libraries/binaries and the selected export, cache, traversal, store,
+CLI query, and product integration targets. The four export regressions include
+direct SQLite, JSON, generic materialized store, cold/warm projection, preserved
+ID/ambiguity behavior, and proof exhaustion. The cache regression includes
+mixed-confidence order, deferred state, and stale cache rebuilding. Workspace
+and selected-integration Clippy pass with warnings denied. Full fixture
+qualification for production commit `9b63873a` completed with exit zero,
+including native scale ceilings, semantic/topology checks, lifecycle
+determinism, Markdown, release compilation, and frontend precedence,
+positive/negative, and independent source-anchor checks. The release binary
+and qualification log hashes are recorded in the development review.
+No MCP rerun, full-answer precision, community cohesion, god-object quality,
+directed/long-path, latency, or general superiority claim follows. This reused
+panel remains development evidence.
+
+#### Directed call-path development comparison
+
+[Five source-reviewed chains](../../benchmarks/agent_query/directed_path_development_registration.json)
+were committed as `bc4374a7` before their first execution: Chi registration to
+radix-prefix matching (four calls), Click file opening to binary-reader testing
+(four), jsoup validation to safe-node copying (two), Redux kind detection to
+constructor-name inspection (two), and WalkDir entry handling to loop-error
+creation (three). Both tools receive identical short endpoint names and the
+same verified stored graphs. Compass uses `node` with depth eight and one path;
+Graphify uses `path --directed`. Each command has the same external 60-second
+deadline and 16 MiB capture ceiling. Their internal work limits differ.
+
+All 20 requests completed: five positive requests and five reverse-direction
+probes per tool. Positive **source-supported directed call chains score 2/5
+for each tool**, with different failures:
+
+| Repository | Compass | Graphify |
+| --- | --- | --- |
+| Chi | Refuses interface/implementation name ambiguity | Returns a five-hop mixed-reference/method route, not a call chain |
+| Click | Returns the four-call source chain | Returns the four-call source chain |
+| jsoup | Refuses two genuine `isValid` declarations | Reports no directed route |
+| Redux | Refuses function/import/module name ambiguity | Returns the two-call source chain |
+| WalkDir | Returns the three-call source chain | Returns a seven-hop mixed-reference/method route, not a call chain |
+
+The Compass Click path selects the second `_is_binary_reader` occurrence at
+line 188, while the frozen witness names line 181. Both occurrences were visible
+in the source window reviewed before execution. The alternate is explicitly
+adjudicated after output; the original witness is unchanged. Literal frozen
+occurrence-site agreement is **Compass 1/5, Graphify 2/5**. The separate 2/5
+source-supported figure accepts this valid occurrence under the registered
+policy and does not claim complete occurrence recall.
+
+Compass's ambiguity refusals are safe but do not complete the requested positive
+paths. Graphify's mixed routes do not satisfy a call-chain request; this alone
+does not establish that every structural relationship in those routes is false.
+Neither tool returns a reverse path. Compass reports three ambiguities and two
+bounded direction mismatches; Graphify reports five missing directed paths.
+These receive **no global unreachability credit**. Forward source witnesses
+cannot prove global reverse absence.
+
+The [review](../../benchmarks/agent_query/directed_path_development_review.json)
+retains the executable/graph/registration hashes, raw outputs, identities,
+source spans, alternate-occurrence adjudication, and all failures. Its first
+audit attempt stopped because it assumed Rust occurrences covered only the
+terminal method name; the corrected check requires the exact qualified source
+expressions. No graph, request, or witness changed. This is selected development
+evidence on reused graphs, with concurrent fixture qualification and no speed
+claim. It establishes no directed-navigation lead.
+
+#### Terminal-cursor harness correction and remaining broad-query gap
+
+The benchmark previously treated any `next=` token as a continuation, including
+the published terminal marker `next=none`. Redux's broad question therefore
+received an unnecessary second request and an invalid-cursor error. The harness
+now accepts one pagination footer, stops at `none` or a repeated token, and
+ignores source/prose occurrences. Regressions cover real cursors, multiple
+footers, legacy/discovery/typed footer forms, and LF/CRLF. All **99 benchmark
+tests pass**. Graphify's documented budget continuation is unchanged.
+
+A query-only replay runs all 110 unchanged requests with the same binaries,
+graph digests, source pins, and source working directories. Scores remain
+**Compass 49/55, Graphify 46/55**. The sole outcome change removes the invalid
+Redux follow-up: the question still fails its `miniKindOf` recall requirement,
+now with exit zero and zero follow-ups. Every retained Compass capture is
+byte-identical to its baseline page. Three Graphify query outputs vary in edge
+order/content within their output budgets while scores and byte counts remain
+unchanged; no whole-answer equivalence or causal claim follows.
+
+The first replay used the Compass checkout as its working directory, making
+eight source excerpts unavailable. That attempt is explicitly invalidated and
+retained, along with its later summary-generation error. No cache defect or
+token improvement is inferred from it. The successful second replay preserves
+both tools' original working-directory setup. A failed byte-equality assertion
+also remains documented; it exposed the three Graphify variations rather than
+a scoring change. The
+[correction review](../../benchmarks/agent_query/cursor_harness_correction_review.json)
+records exact runner, executable, graph, source, and raw-capture provenance.
+
+A separate post-output diagnostic leaves the product gap open: the original
+Redux question reads 431 candidates in 73 probes but admits zero seeds and
+reports bounded truncation. Shorter `kind of`, `kindOf`, `miniKindOf`, and
+qualified-name questions recover source-located candidates. These are diagnosis
+inputs, not replacements for the original failed question or extra comparative
+passes. The specificity filter and phrase recall need a native reduction and
+broader positive/negative evaluation before changing their behavior.
+
+During this investigation, help output incorrectly displayed an examined-edge
+default of 128 even though runtime JSON and `DiscoveryLimits` use 10,000. A
+numeric-prefix replacement intended for the 1,000 returned-edge ceiling also
+matched 10,000. The help correction requires the closing delimiter. A native
+regression failed before the change and checks both help entry points against
+the runtime defaults. Verification passes **1,107 native tests, zero failed,
+two ignored** across workspace libraries/binaries and help/product integration
+targets. Workspace and help-integration Clippy pass with warnings denied, as do
+formatting, diff, and the product boundary. Runtime query limits and graph/query
+schemas do not change. Full fixture qualification was not repeated for this
+help-only correction; the recorded pass qualifies query/cache commit `9b63873a`.
+
+#### Java varargs reduction: signature and call recall failures
+
+A [compiler-valid reduction](../../benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java)
+now isolates the varargs issue found during jsoup review. Expected declarations
+and call targets were written before extracting this diagnostic. `javac
+17.0.8.1` compiles it, and `javap` descriptors/instructions independently confirm
+the target overloads; compiled classes were not executed.
+
+The frozen export-binding binary preserves only **two of five** reviewed
+declaration signatures: the boolean overload and ordinary arrays. Both
+varargs-only `join` declarations render `join()`, and the prefixed overload
+omits its trailing varargs parameter. More seriously, it preserves only **two
+of five** reviewed calls: the boolean call and the uniquely named prefixed call.
+Calls with string arguments, integer arguments, and an explicit string array
+are missing. This reduction emits no wrong target for those three calls.
+
+The [diagnostic review](../../benchmarks/agent_query/java_varargs_diagnostic_review.json)
+retains exact identities, source and graph hashes, compiler evidence, and the
+unfixed failures. Initial inspection looked for a top-level signature; corrected
+inspection reads `details.data.signature`. At that checkpoint, code inspection
+suggested the producer assumed every spread parameter had a named `type` field;
+AST inspection and a failed-before native regression were still required. This
+was a post-jsoup-output development reduction. The correction below preserves
+that original failure record.
+
+## Java varargs correction and repeated development comparison
+
+The native failed-before regressions confirmed the earlier diagnostic: the
+pinned Java grammar represents a spread type as an unnamed child and its name
+inside a variable declarator. The producer now preserves that type, its array
+rank, the spread signature, and parameter references. Explicit array creation
+arguments retain their dimensions. The resolver checks strict fixed-arity,
+loose fixed-arity, then variable-arity applicability and requires sufficient
+evidence for a unique overload. Receiver parameters do not add call arguments;
+array parameters do not borrow their element class as a method receiver.
+AST cache semantics advance from 5 to 6; the product remains 0.3.30.
+
+The original five-call reduction now resolves all five calls. A larger,
+compiler-checked reduction exposes both missing and wrong targets:
+
+| Selected source occurrences | Before | After |
+| --- | ---: | ---: |
+| Correct target | 6/25 | 24/25 |
+| Wrong target | 5/25 | 0/25 |
+| Missing | 14/25 | 1/25 |
+
+Four wrong targets treated array arguments as scalar strings; another selected
+boxing before primitive widening. `javac`/`javap` confirm the expected targets;
+the classes were not executed. The remaining missing call passes a method
+result with no proven type in Compass. Its preserved ambiguity is a known
+recall gap, not a negative success. These deliberately constructed development
+cases do not estimate population precision.
+
+The fresh paired five-language run `java-varargs-panel-a-02` completed all 110
+requests with the original questions and witnesses. Text checks remain
+**49/55 Compass, 46/55 Graphify**; reviewed source paths remain **8/10 each**.
+Selected relationship identity checks remain **17/21 versus 20/21**;
+all-occurrence checks remain **17/21 each** with the disclosed corrected Click
+witness. This repair produced **no score gain on those existing questions**.
+All four non-Java Compass graphs and all five Graphify graphs are byte-identical
+to the export-binding checkpoint.
+
+The pinned jsoup graph keeps 6,116 nodes and grows from 21,095 to 21,110 edges:
+43 signature corrections, nine added calls (five production, four test), and
+six added production type references, with no removed relationships. Every
+changed signature and added relationship was reviewed against the pinned
+source, including overload sets, receiver declarations, inheritance, and
+occurrence spans. This reviews the entire observed delta, not the remaining
+graph or community responsibilities.
+
+An upgrade from copied AST-v5 artifacts extracts both files again; a subsequent
+run reuses both AST-v6 entries. Links, node fields excluding community labels,
+and community member partitions match a clean build. The initial byte-equality
+assertion failed because community numeric IDs are remapped against prior
+state. The two upgraded graphs are byte-identical to each other; whole-graph
+equality with the clean build is not claimed.
+
+Verification so far: 1,092 workspace library/binary tests passed with two
+ignored; 250 product/cache/resolution contract tests and nine focused tests
+passed; workspace and focused-test Clippy passed with `-D warnings`; format,
+diff, product-boundary, and all 99 benchmark harness tests passed. The full
+fixture qualification passed against final production sources, including release
+frontend precedence, activation, determinism, and source-anchor checks. The first
+final-source attempt was interrupted during release compilation; its missing
+handle and absent process were confirmed before retrying. Its partial log is
+retained and is not counted as a full pass. Review found
+that a missing optional type vector could incorrectly prove a zero-parameter
+declaration; that regression failed before an added exact-match guard and passed
+afterward. The earlier fixture run passed but is superseded by that source
+change. The second frozen comparison reproduces all ten first-run graph hashes
+and the same scores. An additional array-receiver regression passed for spread,
+ordinary-array, and trailing-dimension parameters without changing production
+code. The first
+harness discovery command pointed at the wrong directory and ran zero tests;
+the corrected command ran all 99. The
+[development review](../../benchmarks/agent_query/java_varargs_development_review.json)
+records binaries, sources, graph hashes, all source judgments, cache differences,
+and retained failures. No speed, fresh held-out, new MCP/directed-path, community
+quality, or god-object diagnosis claim follows from this checkpoint.
+
+## Responsibility explanation evidence on the five-language panel
+
+Commit `232608ee` froze five natural-language questions and 20 source-backed
+implementation facts before either tool answered those questions. This is a new
+development arm on previously evaluated repositories, with the final Java
+comparison graphs reused. It is not held-out or representative evidence.
+Both tools received the same question, a requested 2,000-token budget, the
+source checkout as their working directory, and no follow-up allowance.
+All ten requests completed successfully.
+
+| Complete fact coverage in the returned response | Compass | Graphify |
+| --- | ---: | ---: |
+| Explicit correct implementation facts | 0/20 | 0/20 |
+| Sufficient returned evidence for the full fact | 0/20 | 0/20 |
+| Total stdout bytes across five requests | 39,740 | 53,306 |
+
+These native queries primarily return graph context. Names, navigation anchors,
+and partial relationships remain useful, but they do not establish such facts
+as shared router state, a file wrapper's exception behavior, listener snapshots,
+or symlink-loop conditions. The result does not show fabricated prose answers;
+there were no task-level mechanism assertions to score for prose precision.
+Four Compass responses request resolution; the Click response returns
+candidates. A source-reading/disambiguation workflow remains to be compared.
+Compass `explain` advertises verified source; Graphify's other public operations
+and a symmetric agent source-reading workflow are not excluded by this arm.
+
+Graphify's WalkDir response explicitly reports that its complete answer exceeds
+the requested budget. All 26,609 bytes were retained, including 244 edge rows;
+equal requested budgets did not produce equal answer sizes. No latency claim
+is made while compilation shares the machine.
+
+Post-output inspection identifies one wrong Graphify call target:
+`IntoIter::get_deferred_dir` is linked to `IntoIter::pop`, but the receiver at
+that source occurrence is the `Vec<DirEntry>` field `deferred_dirs`. Compass
+keeps the valid call to `skippable` and has no corresponding wrong internal
+`pop` edge. That does not recover the external vector call or establish overall
+precision. The remaining additional node/edge assertions have not all been
+source-reviewed; full response precision remains incomplete.
+
+The [frozen questions](../../benchmarks/agent_query/responsibility_questions_panel_a.json)
+and [fact review](../../benchmarks/agent_query/responsibility_review_panel_a.json)
+preserve exact source witnesses, raw-response hashes, all omissions, the budget
+discrepancy, and the diagnosed edge. God-object responsibility judgments,
+functional community quality and overall superiority remain unproven.
+
+### Bounded source follow-up for responsibility questions
+
+The [follow-up protocol](../../benchmarks/agent_query/responsibility_source_followup_panel_a.json)
+was frozen in `62f60b29` before the source windows were read. Both sides get
+one contiguous window of at most 8,000 bytes, beginning at the earliest exact
+subject anchor returned by their initial query. A read requires one unique
+file. All matching declaration anchors remain visible; choosing the window
+origin does not resolve declaration identity. Oracle witness ranges do not
+select the window.
+
+| Sufficient evidence after query plus source read | Compass | Graphify |
+| --- | ---: | ---: |
+| Chi | 2/4 | 2/4 |
+| Click | 4/4 | 4/4 |
+| jsoup | 3/4 | 3/4 |
+| Redux | 1/4 | 3/4 |
+| WalkDir | 1/4 | 1/4 |
+| Total | 11/20 | 13/20 |
+| Source payload bytes | 35,692 | 35,692 |
+| Initial query plus source payload bytes | 75,432 | 88,998 |
+
+Graphify's two additional Redux facts concern reducer state updates and the
+listener snapshot. Its returned anchor starts at implementation line 86;
+Compass also returns overload declarations at lines 41 and 75, so its window
+starts earlier and ends before those mechanisms. This is a workflow advantage
+under the specified policy. It does not establish that omitting overloads is
+universally correct. Compass likewise retains WalkDir's associated type alias
+at line 538 and struct at line 566; neither ambiguity is silently resolved.
+
+The [review](../../benchmarks/agent_query/responsibility_source_followup_review_panel_a.json)
+records all 40 evidence judgments and source/response hashes. Strict containment
+of every complete frozen witness yields 10/20 and 12/20. Semantic review credits
+one additional Chi fact per tool: the complete middleware construction and
+shared pool/tree assignments appear before the partial last line, although the
+window omits the later return in the witness. jsoup attribute filtering remains
+incomplete because the window ends before the destination write and rejection
+branch. These distinctions are preserved rather than treating partial ranges
+uniformly as successes or failures.
+
+All ten reads succeeded. Click's window reaches EOF at 3,692 bytes; every other
+window returns 8,000 bytes. The collector reads bounded whole files to validate
+and hash them before slicing; payload bytes do not measure disk IO. No model
+generated an explanation. This development arm measures evidence available to
+an agent under one reading policy, with unequal initial query response sizes.
+It does not measure best-possible workflows, source-reading latency, native
+explanation quality, community quality, or god-object detection.
+
+### Literal identifiers in natural questions
+
+The responsibility responses exposed a retrieval gap: Click's question names
+`_AtomicFile`, but generic `close` methods occupy all three seed slots. Commits
+`090140f5` and `6711e3a3` add bounded declared-name lookup for underscore and
+mixed-case compound identifiers embedded in prose. Ordinary words retain their
+lexical rank; a missing compound does not turn partial names into exact hits.
+All lookups share the existing work bounds, and incomplete name postings or
+candidate admission cannot establish uniqueness.
+
+The first implementation exposed a second problem in the real Redux response:
+the top `createStore` seed lacked an ambiguity flag while the other same-name
+declarations had one. A regression with same-name declarations of different
+kinds failed before correction. Exact source-name collisions now stay ambiguous
+across ranking evidence; heuristic ranking orders them without resolving their
+identity. Matched identifier components are retained even when later recall
+channels cannot admit more candidates.
+
+The final fixed-graph rerun executes all 110 existing suite requests and the ten
+responsibility queries against the same graph files and source pins. The
+existing recall proxy remains **49/55 for Compass and 46/55 for Graphify**, with
+no verdict changes or timeouts. The responsibility diagnostics show:
+
+- Click's first seed is now `_AtomicFile`, with exact-name provenance and a
+  matched identifier component. Generic secondary candidates and partial
+  coverage remain.
+- All three Redux `createStore` declarations are exact-name seeds and all
+  three carry ambiguity warnings.
+- WalkDir's associated alias and `IntoIter` struct are both exact-name seeds
+  with ambiguity warnings.
+- Chi `Mux` and jsoup `Cleaner` outputs remain byte-identical. Single-word
+  capitalized subjects still use the earlier ranking.
+
+These are anchor-selection diagnostics on a development panel, not a new
+explanation score. The earlier source-follow-up score belongs to its frozen
+pre-change workflow. The
+[development review](../../benchmarks/agent_query/literal_identifier_development_review.json)
+records both candidate runs, failed-before regressions, final verification,
+source and binary hashes, and actual response sizes. The first workspace
+verification batch was intentionally stopped for the ambiguity correction and
+is not counted as a completed baseline. Extraction was not rerun for these
+query-only changes. Full response precision, new source-follow-up coverage,
+held-out confirmation, god-object diagnosis and community quality remain open.
+
+### Source-defined community task pairs
+
+Commit `234753eb` freezes
+[30 exact declarations](../../benchmarks/agent_query/community_task_pairs_panel_a.json)
+and their source mechanisms before this task-pair membership audit. Earlier
+comparisons had already exposed parts of these graphs, so this is a development
+diagnostic. The three task pairs per repository yield 15 within-task pairs and
+60 cross-task pairs. Both tools use the unchanged captured native graphs.
+
+All 30 declarations resolve uniquely on both sides. The
+[review](../../benchmarks/agent_query/community_task_pairs_review_panel_a.json)
+records identities, memberships, source witnesses and whole-community sizes.
+
+| Repository | Compass collaborator pairs co-located | Graphify collaborator pairs co-located | Compass cross-task pairs co-located | Graphify cross-task pairs co-located |
+| --- | ---: | ---: | ---: | ---: |
+| Chi | 3/3 | 3/3 | 0/12 | 0/12 |
+| Click | 2/3 | 3/3 | 2/12 | 0/12 |
+| jsoup | 2/3 | 0/3 | 0/12 | 0/12 |
+| Redux | 3/3 | 3/3 | 4/12 | 0/12 |
+| WalkDir | 3/3 | 3/3 | 12/12 | 12/12 |
+| Total | 13/15 | 12/15 | 18/60 | 12/60 |
+
+These columns describe different tradeoffs. They are not a combined accuracy
+score, and cross-task co-location is not a false-positive count. Only two of
+the 15 collaborator pairs cross source files; both tools co-locate those two.
+The purposefully small task labels do not partition all source responsibilities.
+
+Source review of all five split collaborator pairs finds the expected direct
+call edge in the corresponding graph:
+
+- Compass splits Click `term_len` from `strip_ansi`, while placing `term_len`
+  with help-table layout. The source shows `measure_table` using `term_len`,
+  so there is a concrete reason for that cross-task grouping.
+- Both tools split jsoup `isBlank` from `isWhitespace`.
+- Graphify also splits jsoup `clean` from `copySafeNodes`, and
+  `parseBodyFragment` from the selected three-argument `parseFragment`.
+
+The five boundaries are not missing-call findings. They motivate testing
+navigation to collaborators outside a community. Likewise, both tools place
+WalkDir's handle budgeting, deferred-directory output and symlink-loop methods
+in one community. Those mechanisms share iterator state; this does not prove
+excessive responsibility. Whole-community size comparisons also reflect
+different extraction granularity, including fields, parameters and containers.
+
+The bounded auditor reproduces all 150 tool/pair outcomes after hardening input
+validation. All **109 developer-harness tests** pass, including ten new tests
+for exact identity, ambiguity, missing assignments, integer-zero communities,
+bounds and deterministic pair outcomes. A separate direct recomputation checks
+the captured IDs and pairs, but it is not an independent semantic reviewer.
+No Rust code or clustering algorithm changed in this iteration. Public
+community/navigation workflow costs, broader membership precision, positive
+god-object evidence, independent review and fresh confirmation remain open.
+
+### Public community-to-neighbor workflow
+
+Commit `7a6d6c97` freezes the
+[one-follow-up protocol](../../benchmarks/agent_query/community_navigation_panel_a.json)
+before capture. Every task starts at the community containing its first
+source-defined declaration, prepared symmetrically from each tool's graph.
+Starting-community discovery is not scored. The neighbor selector comes only
+from returned member text matching the public seed file and terminal symbol.
+Distinct matching labels remain unresolved; no expected ID is substituted.
+
+The [complete review](../../benchmarks/agent_query/community_navigation_review_panel_a.json)
+records all 30 tool/task outcomes and the source-backed failure distinctions.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Community lists matching stored membership | 15/15 | 15/15 |
+| Unambiguous follow-up label selected | 13/15 | 15/15 |
+| Seed identity supported after one lookup | 5/15 | 9/15 |
+| Direct collaborator identity supported | 4/14 | 8/14 |
+| Neighbor calls reporting ambiguity | 8 | 6 |
+| Required direct-call pairs present in graph | 13/14 | 14/14 |
+
+All 58 executed tool calls succeeded at the protocol/tool level. Two Compass
+lookups were skipped because multiple distinct member labels matched. Successful
+seed responses matched their stored displayed adjacency. That consistency does
+not establish the precision of every returned edge. Chi's request-ID pair shares
+context state and is excluded from the direct-call denominator.
+
+The failures expose separate improvement opportunities:
+
+- Compass's `get_neighbors` consumes the full exact/prefix/substring candidate
+  list from `find_node`. Unique displayed names `RequestID()`, `term_len()` and
+  `.follow()` still produce ambiguity with broader matches such as
+  `NextRequestID()`, `test_term_len()` and `.follow_links()`.
+- Compass's Redux communities contain several member labels for the same seed
+  file and terminal symbol. Without declaration lines or IDs in the member
+  text, this policy cannot select the intended declaration.
+- Click's `__exit__` and the selected jsoup names collide in both tools. Their
+  ambiguity responses often expose candidate IDs, and Graphify suggests
+  `path::symbol`. A longer disambiguation workflow remains a valid unmeasured
+  alternative; these failures do not prove navigation is impossible.
+- Compass's successful WalkDir `push` response omits the reviewed call to
+  `DirList.close` at `src/lib.rs:906`. Both declarations are uniquely present,
+  but the captured Compass graph lacks that edge. Graphify stores and displays
+  it. This graph gap is separate from community grouping or selector ambiguity.
+
+Neither tool reaches its split collaborator pairs under this policy: Compass
+has two such pairs, Graphify three. The earlier source review found the required
+edges in all five cases. These different subsets are not equal denominators.
+
+The 60-second/1-MiB external response bounds are common, but native controls
+are unequal: Graphify receives a generous explicit token budget and Compass
+exposes whole results. Actual call text totals are 145,715 versus 51,605 bytes;
+call response wire totals are 150,769 versus 55,173. Including initialization,
+listing, requests and stderr, the session totals are 238,216 versus 94,443 bytes.
+Different community sizes and success counts prevent a matched-success output
+or latency efficiency claim. No cap or timeout occurred.
+
+All **119 developer-harness tests** pass, including ten new tests for selector
+ambiguity, duplicate identities, direction and distinct-neighbor multiplicity.
+A separate same-agent script checks all saved requests/responses, graph and
+support-file hashes and identity/count summaries; it is not an independent
+semantic reviewer. No Rust code changed or Rust tests ran in this iteration.
+The workflow is development evidence on reused repositories, not a held-out
+result, god-object diagnosis or overall superiority claim.
+
+### Exact-first neighbor lookup correction
+
+Commit `8f5eb5e5` fixes the broad-match ambiguity demonstrated above.
+`get_neighbors` delegates first to the existing `find_exact_nodes` query helper;
+only an empty exact candidate set uses the broader lookup. Exact IDs retain
+case and precedence. Genuine normalized-name collisions remain ambiguous and
+keep the same bounded, stable candidate list. The implementation reuses the
+shared evidence-gated export-binding behavior rather than adding a second
+resolver. Graphs and clustering do not change.
+
+The [complete rerun review](../../benchmarks/agent_query/neighbor_exact_match_review_panel_a.json)
+uses the same frozen 15 tasks and one-follow-up policy. All ten graph hashes,
+source declarations, selected labels and community texts are unchanged. Every
+Graphify neighbor response is byte-identical to the baseline.
+
+| Measure | Compass before | Compass after | Graphify both runs |
+| --- | ---: | ---: | ---: |
+| Seed identity supported | 5/15 | 8/15 | 9/15 |
+| Reviewed direct collaborator supported | 4/14 | 6/14 | 8/14 |
+| Neighbor responses reporting ambiguity | 8 | 5 | 6 |
+
+Chi `RequestID`, Click `term_len` and WalkDir `follow` now resolve their exact
+seed. The latter two expose their reviewed direct collaborators; the request-ID
+pair has no direct-call requirement. No task loses a previously supported seed
+or collaborator. Graphify remains ahead in this specific arm.
+
+Two Compass Redux member selectors still have multiple distinct labels. Click's
+`__exit__`, the three jsoup seeds and Redux's `bindActionCreators` still produce
+genuine neighbor ambiguity. WalkDir's `push -> DirList.close` edge remains
+missing in the frozen Compass graph. The next navigation arm should use each
+tool's documented source-qualified or exact-ID handles and examine whether
+neighbor results identify the selected declarations. This label-only arm does
+not measure the best possible longer agent workflow.
+
+All 58 executed tool calls succeed. Call text totals are 139,718 bytes for
+Compass and 51,605 for Graphify; complete captured session bytes are 232,183
+and 94,443. Unequal community sizes and success counts still preclude a
+matched-success efficiency claim. The public inputs, outputs and product
+version remain compatible at 0.3.30.
+
+Verification:
+
+- Both failing exact-priority/collision-count regressions are preserved in the
+  initial log; the four focused neighbor tests then pass.
+- All 58 MCP tests pass, including 38 library tests and 20 integration tests.
+- Workspace library/binary tests: **1,101 pass, two ignored**. The MCP library
+  tests are included in this count, not additive.
+- Product contract tests: **nine pass**. Workspace formatting, Clippy with
+  warnings denied, product boundary and the CLI build pass.
+- Developer harness: **120 tests pass**. A comparison verifier exposed unstable
+  ordering in older missing-neighbor diagnostic lists. The auditor now sorts
+  missing/extra lists; the failing regression and initial capture remain.
+  Final recapture preserves all public responses and verdicts. Older diagnostic
+  list ordering is canonicalized only for comparison, not source interpretation.
+- The first full MCP run also exposed a stale transport assertion from before
+  the shared renderer's compact `RESULT` header. Commit `500a4565` updates it
+  and verifies text equality with the rendered structured Agent View. The
+  failed run remains recorded; the complete rerun passes.
+
+Validation logs retain the existing core-test `unused_mut` warning and a macOS
+linker unwind-table warning. No extraction, language or viewer code changes, so
+those full qualification/JavaScript gates were not rerun. Source assertion
+precision, god-object judgments, broader community usefulness, longer walks
+and held-out confirmation remain incomplete.
+
+### Source-coordinate-assisted public navigation
+
+Commit `f660408b` freezes a stronger
+[public resolver workflow](../../benchmarks/agent_query/community_identity_navigation_panel_a.json)
+before capture. Both tools receive the exact task seed file, declaration start
+line and terminal symbol. Starting communities are still prepared symmetrically.
+After finding matching member rows, Compass uses structured `search_symbols`
+results and Graphify uses `get_node` with its documented `path::symbol` form.
+Only a uniquely source-matched returned ID becomes the next `get_neighbors`
+input. The expected collaborator is scoring-only and cannot gate requests.
+Each task permits one resolver and one neighbor lookup after the community.
+
+The [complete review](../../benchmarks/agent_query/community_identity_navigation_review_panel_a.json)
+records every task and the provenance of its selected ID.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Correct returned seed ID | 15/15 | 15/15 |
+| Completed neighbor lookup with that ID | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label present | 13/14 | 14/14 |
+| Unambiguous target label after validated seed lookup | 10/14 | 11/14 |
+
+This is meaningful counterevidence to treating the earlier label-only failures
+as inability to navigate. Existing public APIs can resolve all selected seeds
+with the additional source-assisted step. No product code changed in this arm,
+so the stronger results are not attributed to an extraction improvement.
+
+A completed lookup here means the returned ID matches the frozen declaration,
+the request uses that ID, and the response has the expected successful heading.
+It does not mean the legacy neighbor body explicitly reports its seed ID.
+Likewise, Click's `close`, jsoup's `parseFragment`, and jsoup's `isWhitespace`
+labels each map to multiple target declarations in both graphs. Their displayed
+labels are not counted as unique destination identities. The earlier name-only
+identity audit remains separately recorded; these different metrics must not
+be silently substituted for one another.
+
+The only reviewed direct pair absent from the frozen Compass graph is still
+WalkDir `push -> DirList.close` at `src/lib.rs:906`. Graphify stores and displays
+it. All five earlier split-community pairs now expose the collaborator label
+(two Compass, three Graphify); these unequal subsets remain descriptive.
+All community memberships and displayed neighbor multiplicities agree with
+their stored graphs. That does not establish precision for every extra edge.
+
+All **90 public tool calls succeed** with no timeout or cap failure. Compass
+call text totals 156,976 bytes and response-wire totals 694,354; Graphify totals
+55,402 and 60,410. Including initialization, listing, requests and stderr, the
+session totals are **785,989 versus 102,213 bytes**. These are real costs of this
+fixed workflow. Compass search supplies multiple candidates, source anchors and
+richer structured evidence, while Graphify's lookup returns one node. Native
+limits and semantic payloads differ; these totals are not a universal efficiency
+ranking or an equal-token result.
+
+All **129 developer-harness tests** pass. Eight new resolver tests cover exact
+anchors, collisions, truncation, schema errors and returned-ID provenance. A
+missing-target-oracle regression ensures seed navigation can still be scored
+when no expected destination ID is available. Final recapture after removing
+target-oracle availability from workflow control flow retains all 90 response
+packets and 30 task audits identically. A separate same-agent verifier checks
+raw requests/responses, graph hashes, source-coordinate identity and adjacency;
+it is not an independent semantic reviewer. Rust tests were not rerun because
+this iteration changes only evaluation code/docs and reuses the validated binary.
+
+Next work should address the missing Rust indexed-receiver call, exact
+destination identities in public call/navigation output, and bounded resolver
+cost. Natural-language seed discovery, broader source precision, god-object
+responsibility evidence, longer directed walks and held-out confirmation remain
+open; the supplied declaration coordinates make this a different task from
+unassisted discovery.
+
+## Rust indexed-receiver recovery
+
+The development protocol is frozen in
+`benchmarks/agent_query/rust_index_receiver_development_registration.json`
+(commit `6c70df5e`). Implementation `18bb37ea` follows bounded Rust receiver
+syntax through source-proven scalar indexes into standard vectors, arrays and
+slices. Field types retain their declaration context; nested qualified names
+retain every module segment. Ambiguous imports/layouts, custom containers,
+ranges, unknown index types, raw pointers and root-container method fallbacks
+cannot establish an element-method target. AST cache semantics advance to 7;
+the package stays at 0.3.30 and published graph schemas/history remain unchanged.
+
+All five Compass graphs were rebuilt from the same pinned source commits with
+the original native-only arguments into fresh outputs. The frozen Graphify
+graphs were retained byte-for-byte; both public MCP workflows were recaptured.
+This arm does not compare extraction timing. The review and artifact hashes are
+in `benchmarks/agent_query/rust_index_receiver_development_review.json`;
+complete logs, graphs and transcripts are under `rust-index-receiver-03`.
+
+The complete graph comparison finds **one added call and no removed or changed
+existing records**: WalkDir `IntoIter::push` calls `DirList::close` at
+`src/lib.rs:906`. Source establishes `stack_list: Vec<DirList>` and
+`oldest_opened: usize`; the target method begins at line 1008. A separate
+same-agent verifier checks the full graph-record delta, source bytes, caller
+range and target identity. All five node arrays and community assignments are
+unchanged; the other four Compass graphs are byte-identical. This is evidence
+for the changed call, not precision for every existing graph assertion.
+
+The original 15 tasks, source witnesses, selectors and limits remain unchanged:
+
+| Source-assisted navigation measure | Compass before | Compass after | Graphify |
+| --- | ---: | ---: | ---: |
+| Correct seed ID and completed lookup | 15/15 | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label | 13/14 | 14/14 | 14/14 |
+| Globally unambiguous target label | 10/14 | 11/14 | 11/14 |
+
+All 90 public calls succeed. All 45 Graphify response packets are identical to
+the prior capture. Compass changes one neighbor text to include `close`; three
+WalkDir resolver packets change only graph identity/view digests. The other
+41 packets are identical. Compass totals 157,011 call-text bytes, 694,390 wire
+response bytes and 786,025 full-session bytes; Graphify remains at 55,402,
+60,410 and 102,213. Native payloads and controls differ, so these are actual
+workflow costs rather than an equal-token efficiency ranking.
+
+Three target labels remain ambiguous for both tools: Click `close`, jsoup
+`parseFragment`, and jsoup `isWhitespace`. The fix closes a known extraction
+gap and produces a tie on this development panel. It does not establish overall
+superiority, god-object diagnosis, broad source precision or held-out quality.
+Explicit destination identities, source-grounded explanations and longer
+source-verified directed walks remain next work.
+
+Final validation against unchanged implementation `18bb37ea` passed: formatting,
+38 Rust language tests, 211 universal resolver tests, workspace Clippy, 1,101
+workspace tests (2 ignored), 9 product tests, the product-boundary check and the
+complete production fixture qualification. The Python benchmark harness passed
+129 tests. Source hashes remained unchanged before and after each native gate;
+the frozen evaluated binary is byte-identical to the final build. Commands,
+counts and log hashes are recorded in the review artifact. Broader real-repository
+qualification and fresh held-out evaluation were not run in this development arm.
+
+## Explicit neighbor identities and relationship evidence
+
+Protocol `bde19bb3` freezes this development arm before implementation
+`d51698dc`. It reuses all ten graph artifacts and the same five pinned source
+repositories from the Rust recovery arm. All 15 tasks retain their original
+community, seed resolver and neighbor calls. A new symmetric arm permits one
+additional destination resolver call on each of the 14 direct-call tasks,
+gated on an actually returned outgoing collaborator label. Both tools receive
+the same target file, declaration start and terminal symbol for that follow-up.
+This is source-assisted navigation on reused tasks, not held-out discovery.
+
+Compass neighbor results now carry `compass.query.neighbors/1`: exact seed and
+destination node records and all matching relationship records. The query layer
+preserves parallel records, self loops, endpoint direction, source anchors and
+provenance under explicit adjacency/record/byte bounds. Text retains compact
+neighbor lines and adds escaped identity/source details. The graph artifacts,
+extraction, source trees, package version and historical realizations do not
+change in this arm.
+
+A separate same-agent verifier recomputes every request, response, source-anchor
+selection and full incident-record multiset. All 15 Compass projections match
+their graphs, totaling 181 record appearances across the requests. That includes
+records beyond the 14 reviewed source collaborators and is **graph consistency,
+not broader source precision**. All 45 prior Graphify payloads and all 30 Compass
+community/seed resolver payloads match the baseline, ignoring request IDs that
+shift after the extra calls. All 15 Compass neighbor payloads change.
+
+| Development measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Correct seed ID and completed neighbor lookup | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label | 14/14 | 14/14 |
+| Globally unambiguous target label | 11/14 | 11/14 |
+| Explicit target ID in direct neighbor response | 14/14 | Unavailable (0/14) |
+| Correct target ID after one extra source-anchored resolver | 14/14 | 14/14 |
+
+Before this change neither tool emitted explicit neighbor IDs. Graphify's
+neighbor response still emits labels, relations and source sites; the lack of a
+full record projection is not a wrong-edge judgment. Its additional public
+`get_node` call resolves all 14 source-matched targets, including the three
+ambiguous labels. Compass's richer direct response avoids that extra identity
+lookup for these tasks, but the extended workflow remains a tie. The extra
+resolver uses supplied target coordinates; it does not autonomously reconstruct
+an ambiguous edge from its label. All 14 reviewed pairs on both sides also have
+the required directed call in their frozen graph.
+
+All 118 public calls succeed. With all four steps executed symmetrically,
+Compass uses 193,385 text bytes, 1,228,383 response-wire bytes and 1,323,516
+full-session bytes. Graphify uses 57,404, 63,756 and 107,645 respectively. For
+just the original three steps, response-wire totals are 1,017,434 versus 60,415
+bytes. These are observed costs with different native payloads and controls;
+there is no equal-content efficiency or latency claim.
+
+Artifact hashes, commands and limitations are recorded in
+`benchmarks/agent_query/neighbor_identity_development_review.json`; raw captures
+and logs are under `neighbor-identity-02`. Final validation passed: formatting,
+3 focused query tests, all 60 MCP tests, workspace Clippy, 1,106 workspace tests
+(2 ignored), 9 product tests, the product-boundary check, complete production
+fixture qualification and the final CLI build. The Python harness passed all
+134 tests. Runtime/test hashes stayed unchanged during validation and match
+`d51698dc`; the evaluated binary is byte-identical to the final build. The gate
+retains its existing fixture-omission and compiler warnings in the logs.
+God-object responsibility judgments, richer source explanations, broader
+assertion precision, longer directed walks and fresh held-out confirmation
+remain outstanding.
+
+## Directed endpoint identity and depth-limit correctness
+
+The registered development replay reuses the five source-reviewed two-to-four
+call chains in Chi (Go), Click (Python), jsoup (Java), Redux (TypeScript), and
+WalkDir (Rust), with all ten graphs frozen from `rust-index-receiver-03`.
+Both tools receive the same endpoint file, start line and symbol. One public
+MCP resolver call per endpoint returns candidates; only a unique exact source
+match may supply an ID to the directed CLI path request. No graph ID is used to
+construct requests. The protocol was committed as `98759ae8`, before capture.
+This is source-assisted navigation on known development tasks, not autonomous
+endpoint discovery, fresh extraction or held-out evidence.
+
+A separate native-label control was registered at `2cc02501` after observing
+ID-input failures, before executing the control with the final binary. It uses
+only the original five short-name pairs, with no retries or candidate changes.
+Its results are kept separate: taking the best answer from either arm would
+misrepresent both protocols. External deadlines and stream bounds match, but
+native internal work limits differ; Graphify exposes no matching CLI depth
+control. There is no timing or efficiency ranking.
+
+| Source-supported directed call chains | Compass | Graphify |
+| --- | ---: | ---: |
+| Public resolver IDs supplied to CLI | 4/5 | 1/5 |
+| Original native short labels | 2/5 | 2/5 |
+
+The ID workflow resolves four Compass endpoint pairs and all five Graphify
+pairs. Compass returns the reviewed chains for Chi, Click, jsoup and WalkDir;
+Redux remains unresolved because `search_symbols` returns a function and an
+export with the same source line and name. The frozen selector refuses to pick
+one. Graphify succeeds for Redux; its Chi route starts at `Mux` rather than the
+resolved `MethodFunc` and mixes references/membership with calls. It reports
+no path for Click, jsoup and WalkDir with these ID inputs. Inspection of the
+pinned Graphify CLI confirms it passes IDs through label scoring without an
+exact-ID check. This arm measures endpoint handling across public interfaces
+as well as path availability; it is not a pure path-search comparison.
+
+The native-label control preserves Graphify's Click and Redux successes.
+Compass succeeds for Click and WalkDir and refuses three ambiguous requests.
+Graphify's Chi and WalkDir routes mix structural relationships with calls;
+jsoup reports no directed route. Those structural routes are not credited as
+call chains, but this does not establish that the structural edges themselves
+are wrong. Every successful chain was checked against exact declarations,
+edge orientation, occurrence sites and pinned source. Compass selects a second
+valid Click call at line 188 rather than the frozen line 181; literal frozen-site
+agreement is therefore 3/5 and 1/5 for its ID and label arms, versus Graphify's
+1/5 and 2/5. Conditional static call chains do not imply guaranteed runtime
+execution sequences.
+
+The replay also exposed a correctness defect independent of the paired score:
+a failed depth-limited directed search could claim a direction mismatch using
+a shorter undirected route, even while a longer forward route existed. A native
+regression reproduced that claim before the fix. A second regression reproduced
+`explore` dropping incomplete status when no connecting path was returned.
+The query layer now checks whether the depth frontier remains open after a
+failed bounded search and preserves that status through exploration. Frontier
+checks share the work budget and occur after the positive search, so they cannot
+consume the budget of a still-viable shorter route. Closed dead ends and cycles
+can still prove a complete negative result within the graph.
+
+All nine registered low-depth requests changed from `truncated: false` to
+`truncated: true` with `bounded_truncation`; none now claims `direction_mismatch`
+or `no_match`. All four positive Compass ID-path payloads and all ten Graphify
+forward/reverse payloads are byte-identical to baseline. The path scores above
+were already present before this fix: the improvement is truthful bound reporting.
+Reverse probes receive no source-global absence credit. In particular, Chi's
+reverse diagnostic combines a closed directed search with an incomplete
+undirected search that nevertheless finds a connection; its bounded flag
+remains visible.
+
+A separate same-agent verifier checks saved public request/response transcripts,
+source-coordinate selections, CLI arguments, graph/source/binary hashes, full
+paths and typed provenance projections. Its first attempt incorrectly required
+raw graph and typed query evidence to have identical JSON structure; the retained
+failure led to checking their explicit field/anchor projection instead. It is
+not independent human adjudication. Raw captures, both native reproductions,
+the failed verification attempt and the final verifier are retained under
+`directed-identity-01` and `directed-identity-02`; artifact hashes and detailed
+outcomes are in `benchmarks/agent_query/directed_identity_development_review.json`.
+
+Final validation passed: formatting, 24 focused query tests (including the
+2,187-request four-node oracle), 38 CLI query tests, 60 MCP tests, workspace
+Clippy, 1,106 workspace tests (2 ignored), 9 product tests, product boundary,
+complete production fixture qualification and the final CLI build. The Python
+harness passed 137 tests. Validated source hashes match implementation
+`1ec835bf`; the evaluated binary is byte-identical to the final build. Existing
+fixture-omission and compiler warnings remain in the retained logs. No version
+or machine-schema bump was made.
+
+God-object responsibility judgments, richer explanations, broader source
+precision, longer walks and fresh held-out confirmation remain unproven.
+
+## Native responsibility explanations and source verification
+
+Registration `4e6ccb25` froze a native `explain` comparison for the existing five
+responsibility subjects and 20 implementation facts. It reuses the ten graphs
+from `rust-index-receiver-03`. Both tools receive the same short subject name
+and run in the pinned source checkout. A separate arm supplies the same subject
+file, start line and symbol to one public MCP resolver, then passes a unique
+source-matched returned ID to `explain`. No graph lookup chooses requests and
+there are no retries or external source follow-ups. These are known development
+questions, not held-out evaluation or automatic god-object judgments.
+
+Compass receives a 2,000-token connection budget and an 8,000-byte source cap;
+Graphify's native `explain` has no equivalent flags. Both have the same external
+120-second timeout and 16 MiB stream caps. Source availability is an observed
+capability of these commands, not an equal-I/O or efficiency comparison.
+
+| Complete responsibility facts in returned evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Native short-label `explain` | 7/20 | 0/20 |
+| Source-coordinate-assisted `explain` | 7/20 | 0/20 |
+| Earlier query plus symmetric bounded source read (separate workflow) | 11/20 | 13/20 |
+
+Neither native command authors a mechanism explanation: explicit native
+responsibility assertions remain **0/20 for both**. Compass's excerpts contain
+all four Click `_AtomicFile` facts and three jsoup `Cleaner` facts. Their full
+frozen source witnesses are returned, including the otherwise easy-to-misread
+Click exception behavior: the `delete` argument is not inspected by `close`.
+The Java excerpt ends at a partial line 206, before the attribute write needed
+for the remaining cleaning fact; it receives no partial-fact credit.
+Graphify returns useful relationships and source anchors, but no source excerpts
+sufficient for these complete implementation facts. It can still support an
+agent source-reading workflow, as the separate 13/20 result demonstrates.
+
+Graphify resolves all five subject identities in both arms. Compass resolves
+three native subjects and four assisted subjects. Native `createStore` is
+ambiguous across 27 source-backed candidates; its assisted search exceeds the
+frozen 256-candidate bound and is refused. Native `IntoIter` is ambiguous between
+an associated type alias and a struct; the supplied line resolves the struct in
+the assisted arm. Go `Mux` and Rust `IntoIter` declaration excerpts include their
+fields, but their separately defined methods remain outside those source spans.
+Names and method relationships do not establish the missing responsibility
+facts. This identifies a concrete next explanation gap: gathering the relevant
+implementation evidence beyond the subject's declaration span.
+
+Native stdout totals are 24,476 bytes for Compass and 6,286 for Graphify;
+Compass includes 9,620 raw source bytes. In the assisted arm, the totals are
+24,308 and 6,286, with 11,448 Compass source bytes. These totals exclude resolver
+traffic, whose raw transcripts are retained. A source excerpt is evidence rather
+than an authored answer. Other printed graph relationships have not all received
+source review; these fact scores are not full response-precision scores.
+
+Inspection exposed a separate provenance defect: `explain` labeled every source
+excerpt `digest-verified`, including nodes without a stored digest. A native
+regression reproduced that label, and checks cover same-length source changes,
+matching and mismatching full-span digests, truncated returned prefixes, absent
+files, malformed digests and all three CLI output formats. The query layer now
+returns an explicit verification flag. A missing digest produces an unverified
+current excerpt; malformed or mismatching digests prevent source output. The
+existing containment and bounded-read primitives are retained. Verification
+matches recorded bytes; it does not authenticate the graph or its semantics.
+
+A separate post-output Redux diagnostic selects the `kindOf` function from an
+already captured public resolver response by its explicit kind and source site.
+That diagnostic does **not** change the frozen ambiguous selection policy or any
+paired score. The published function has no source digest. Its old explanation
+claims verification; the new explanation says `unverified: no recorded source
+digest`. All remaining output, graph bytes and source bytes are unchanged.
+
+All 19 paired explanation payloads and all ten resolver response payloads are
+unchanged after the provenance fix: the selected excerpts in the comparison
+already had matching digests. Thus the 7/20 evidence result is an observation
+about existing native capabilities, not an improvement attributable to this fix.
+A separate same-agent verifier checks saved requests/responses, commands,
+source/graph/binary hashes, every rendered source line and the full-span digest.
+It reuses the frozen resolver helper and separately verifies selected source
+anchors; it is not independent human adjudication.
+
+Implementation `3a58309f` passed formatting, 4 query source tests, 39 CLI query
+tests, all 60 MCP tests, workspace Clippy, 1,106 workspace tests (2 ignored),
+9 product tests, the product-boundary check and a final CLI build. Validated
+source hashes match the commit, and the evaluated binary matches the final
+build. Extraction/viewer qualification and JavaScript gates were not rerun:
+extraction, resolution, publication and viewer assets are unchanged. No benchmark
+library changed, so the Python harness was not rerun; the new external collectors
+and evidence verifier completed successfully. The nonfatal macOS linker warning
+is retained in the reproduction log. Version remains 0.3.30.
+
+Detailed judgments and artifact hashes are in
+`benchmarks/agent_query/native_explanation_development_review.json`; captures are
+under `native-explanation-01` and `native-explanation-02`. God-object diagnosis,
+responsibility synthesis, broader source precision, longer walks and fresh
+held-out confirmation remain outstanding.
+
+## Recorded member source and a shared neighbor/source-window control
+
+Registration `bac936f9` freezes the existing five subjects, 20 responsibility
+facts, graph snapshots and ten public endpoint-resolver responses. This is
+known development evidence. No selector substitutions rescue Compass's Redux
+candidate-limit failure. The opt-in `explain --source-members` implementation
+(`6d4df994`) follows recorded outgoing containment through nested types and
+returns callable spans in source order under one 8,000-byte source budget.
+Default declaration excerpts are unchanged. This new Compass capability has
+no claimed equivalent Graphify flag; its feature delta is not a paired win.
+
+A separate control gives each tool one public `get_neighbors` call with the
+previously selected ID. It groups outgoing `contains` / `method` rows by their
+returned file/start-line anchors, sorts them, and reads up to the next returned
+anchor in that file (at most 4,096 bytes for its final anchor). All windows share
+8,000 source bytes per subject. There are no extra pages, retries, fact-guided
+selection or end-line advantages. Graphify's displayed relation sites are
+checked against source declarations after capture. Windows do not establish
+unique target identity. This is one reproducible agent policy, not an optimal
+retrieval strategy or an equal-I/O experiment.
+
+| Subject | Compass member mode | Compass shared control | Graphify shared control |
+| --- | ---: | ---: | ---: |
+| Chi / Go | 3/4 | 3/4 | 3/4 |
+| Click / Python | 3/4 | 4/4 | 4/4 |
+| jsoup / Java | 4/4 | 3/4 | 4/4 |
+| Redux / TypeScript | 0/4 | 0/4 | 2/4 |
+| WalkDir / Rust | 3/4 | 1/4 | 2/4 |
+| **Complete facts supported by source** | **13/20** | **11/20** | **15/20** |
+
+The earlier declaration-only native result remains Compass 7/20, Graphify
+0/20; the earlier query-plus-source-read result remains Compass 11/20,
+Graphify 13/20. Keep these workflows separate. None of these tools' native
+renderings authors the requested mechanism explanations: explicit native
+responsibility assertions remain zero. Source evidence is not a synthesized
+answer or a god-object defect judgment.
+
+Member mode gains seven facts and loses one against declaration excerpts.
+Separately defined Go and Rust methods become available, and the Java attribute
+write now fits. However, Click's recorded getter span excludes `@property`.
+The initializer and getter body alone cannot establish property semantics, so
+that entire fact is denied. The shared windows retain the decorator and earn
+that fact for both tools. Chi's route handler remains outside the native budget;
+WalkDir's loop-check body is partial. Redux remains unresolved for Compass.
+
+Graphify leads the shared control by four facts: one Java, two TypeScript and
+one Rust. Compass's returned Java field and Rust field/type anchors consume
+window budget before later methods; Graphify exposes fewer such anchors. The
+same policy therefore produces different coverage. No missing or partial code
+is credited to close the gap.
+
+Exact literal witness coverage is 4/20 for member mode, 10/20 for Compass's
+control and 14/20 for Graphify's control. The semantic scores above separately
+allow leading indentation differences at callable-span starts and missing blank
+separators between complete bodies. Both controls also omit the Click class
+header, whose identity is already supplied by the verified selected owner;
+all initialization, decorator and getter code is present. Every exception and
+rejected fact is recorded individually. This is same-agent adjudication with a
+separate verifier, not independent human review.
+
+All 54 native member spans match stored full-span digests and pinned source
+bytes, including the returned prefixes of truncated members. Seven members are
+omitted by the byte budget across Chi and WalkDir; no member source read fails
+in this sample. All 130 returned membership anchors (69 Compass, 61 Graphify)
+were checked against declaration lines. Nine saved neighbor request/response
+pairs and every source window were verified. Compass reports no neighbor or
+transport truncation; no Graphify truncation marker was observed. Neither fact
+proves complete graph membership or general relationship precision.
+
+Native member mode returns 23,082 source bytes in 48,177 stdout bytes. The
+shared control returns 27,673 source bytes for Compass and 35,673 for Graphify;
+Compass's unresolved Redux subject contributes zero. Neighbor text totals are
+26,497 versus 6,980 bytes; full MCP responses total 281,242 versus 7,534 bytes.
+These figures exclude previously captured resolver traffic and do not measure
+latency or equal computational work.
+
+Validation passed: formatting, 13 focused query tests, 40 CLI query tests,
+60 MCP tests, workspace Clippy, 1,106 workspace tests (2 ignored), 9 product
+tests, the product boundary and a final CLI build. Recorded Rust source hashes
+match `6d4df994`; the final build matches the evaluated binary. JavaScript/viewer
+and extraction/resolution publication gates were not rerun because those
+surfaces are unchanged. Version remains 0.3.30. Discovery, metadata, source and
+verification-work bounds have native regressions; stale or missing source
+status remains explicit.
+
+The first external collector failed before any public request because of an
+invalid hash-helper read bound. Its log and script are retained; the corrected
+capture uses a fresh directory. A verifier parser initially included the summary
+heading as a member; its failed attempt is also retained. The corrected verifier
+passes, including byte-to-line consistency checks. Detailed judgments and hashes
+are in `benchmarks/agent_query/member_source_development_review.json`; external
+artifacts are under `member-source-02`. The next explanation work needs better
+source context and selection, actual responsibility synthesis, and fresh
+confirmation. This result does not establish overall superiority.
+
+## Exact source-constrained lookup and the remaining retrieval gap
+
+Registration `2ef40e95` keeps the same five repositories, graph/source pins and
+20 facts, and adds explicit identity constraints: symbol, source file, declaration
+start line and stored kind. These are supplied task inputs in a new development
+arm; they do not retroactively rescue the old unscoped Redux result. Prior
+sources and outputs were known when this arm was designed.
+
+Implementation `9cc6ba9e` adds `search --exact` and MCP `search_symbols` with
+`exact: true`, plus optional file, start-line and kind filters. Exact IDs take
+precedence; otherwise the existing normalized name index is read within the
+unchanged candidate cap. All matching records survive unless an explicit filter
+excludes them. No lexical fallback, inferred ownership, export-binding collapse,
+or arbitrary winner is introduced. Filtering happens after the bounded index
+read: a truncated singleton or empty result proves neither uniqueness nor
+absence. Exact text requests keep the supplied bounds without automatic widening.
+
+The paired identity control uses the same supplied constraints. Compass receives
+its supported fields directly; Graphify receives its existing `file::symbol`
+lookup, and its returned source identity and declaration kind are checked against
+the constraints afterward. Graphify is not claimed to accept a native kind
+filter. Each tool receives one scored lookup, followed by one neighbor request
+and the unchanged registered 8,000-byte source-window policy. Diagnostic replays
+and negative controls are kept separate from those scored calls.
+
+Both tools resolve **5/5 subjects**. Compass now reaches the `createStore`
+function at `src/createStore.ts:86`. Omitting the explicit `function` kind returns
+both its declaration and its coincident export record; neither is silently
+removed. Asking for declaration line 87 returns no match with complete lookup.
+The original ten unscoped resolver response payloads are unchanged, including
+Compass's old candidate-limit failure. All nine previously available neighbor
+responses and source-window payloads are also unchanged.
+
+| Subject | Compass constrained lookup + windows | Graphify constrained lookup + windows |
+| --- | ---: | ---: |
+| Chi / Go | 3/4 | 3/4 |
+| Click / Python | 4/4 | 4/4 |
+| jsoup / Java | 3/4 | 4/4 |
+| Redux / TypeScript | 3/4 | 2/4 |
+| WalkDir / Rust | 1/4 | 2/4 |
+| **Complete facts supported by source** | **14/20** | **15/20** |
+
+The three newly supported Compass facts concern Redux enhancer behavior,
+dispatch state/reentrancy, and listener snapshots/unsubscription. Its returned
+parameter anchors start early enough to include the enhancer body; Graphify's
+first returned member anchor is later. Compass's final window reaches part of
+line 312, and the observable/store-API fact remains unavailable. Graphify still
+supplies one additional Java fact and one additional Rust fact. Thus the overall
+lead in this workflow remains Graphify's, despite Compass's Redux advantage.
+
+Strict literal witness counts are 13/20 and 14/20. Both semantic scores retain
+the prior Click allowance: the missing class-header line is supplied by the
+independently verified owner identity, and the initialization, decorator and
+getter code are all present. Every other credited fact has complete literal
+witnesses. Neither tool authors the mechanism answers; these are source-evidence
+scores, not synthesized explanations or god-object judgments. The earlier
+11/20 versus 15/20 unscoped-window result and 13/20 native member-mode result
+remain separate.
+
+Both tools now return 35,673 source bytes across the five subjects. Compass's
+neighbor responses contain 33,061 text bytes and 372,829 full MCP response bytes;
+Graphify's contain 6,980 and 7,534. Scored resolver responses add 3,039 text /
+21,983 wire bytes for Compass and 619 / 1,094 for Graphify. This is not equal
+compute, latency or response-size superiority. The verifier checks all 32 saved
+public calls, pinned inputs, source windows and unchanged earlier payloads.
+The additional 23 Redux membership anchors were source-reviewed, bringing the
+reviewed membership-site total to 153; other relationship precision is unproven.
+
+Native checks exposed and corrected two response defects during development:
+new exact-mode node limits initially retained excess search hits, and an empty
+truncated search failed Agent View validation by claiming `no_match` without a
+no-match diagnostic. Exact mode now bounds nodes and hits together; the view
+preserves unknown match with partial execution. Search display also uses the
+query engine's existing name normalization. Failed fixture construction and
+overly strict test assertions are retained separately from these product defects.
+
+Final validation passed formatting, 37 targeted query/backend/binding tests,
+20 output-contract tests, 41 CLI tests, 61 MCP tests, workspace Clippy,
+1,106 workspace tests (2 ignored), 9 product tests, the product boundary and
+CLI build. Validated source hashes match `9cc6ba9e`; evaluated and final binaries
+match. JavaScript/viewer and extraction/publication gates were not rerun because
+those surfaces are unchanged. Version stays 0.3.30. The separate same-agent
+artifact verifier passes; this is not independent human adjudication.
+
+Per-fact judgments, command logs, failed attempts and artifact hashes are recorded
+in `benchmarks/agent_query/exact_symbol_development_review.json`, with external
+artifacts under `exact-symbol-01` through `exact-symbol-08`. Source selection,
+responsibility synthesis, actual god-object defect evidence, broader edge
+precision, longer walks and fresh confirmation remain unfinished.
+
+## Shared-state evidence prerequisite for cohesion analysis
+
+Registration `1c6f2a43` freezes 20 source-selected access sites: two state slots,
+each used by two methods, in each of the existing five development repositories.
+The subjects and earlier graph inventories were already known; this is not a
+blind or held-out evaluation. Java includes `Cleaner.CleaningVisitor`, and Redux
+uses closure variables rather than class fields. These are prerequisites for
+state-sharing analysis, not equivalent whole-class cohesion samples.
+
+The diagnostic scans the same complete, hash-pinned frozen graphs for both
+tools, with a 512 MiB bound per graph. It identifies endpoints by exact source
+file, declaration line and symbol, retaining ambiguity. It separately checks
+method-to-state contact records and occurrence provenance at the selected access
+line. Calls on a field's type, containment, owner-type references and excerpts do
+not count as state-access edges. It does not measure public query retrieval.
+
+| Subject | Compass state slots represented | Graphify state slots represented | Compass access sites | Graphify access sites |
+| --- | ---: | ---: | ---: | ---: |
+| Chi / Go | 0/2 | 0/2 | 0/4 | 0/4 |
+| Click / Python | 0/2 | 0/2 | 0/4 | 0/4 |
+| jsoup / Java | 2/2 | 0/2 | 0/4 | 0/4 |
+| Redux / TypeScript | 2/2 | 0/2 | 0/4 | 0/4 |
+| WalkDir / Rust | 2/2 | 0/2 | 0/4 | 0/4 |
+| **Total** | **6/10** | **0/10** | **0/20** | **0/20** |
+
+All 20 accessing callable coordinates identify one node in both tools. Compass
+has missing state endpoints at eight access sites and represented endpoints
+with no connecting records at the other twelve. Graphify has no state endpoint
+at any of the ten pinned declaration/introduction coordinates. There are no
+connecting records of any kind or direction between any candidate endpoints;
+the zero result is not caused by the diagnostic's relation whitelist. The
+Graphify containers declare `directed: false`; saved endpoint order must not be
+interpreted as native directed path support. The report preserves that flag.
+
+These results contradict using absent method/state links as evidence of low
+cohesion in these subjects. They do not show independent responsibilities,
+a god-object defect, poor whole-class cohesion, or overall tool superiority.
+The extra six Compass declarations do not supply the missing access evidence.
+Python's state coordinates are first assignments to instance attributes, so
+those rows specifically test whether the graph represents those introductions.
+
+Code inspection locates concrete producer gaps at baseline `7aef6a0c`:
+
+- `walk_rust_evidence` in `compass-languages/src/evidence/build.rs` emits calls,
+  macro invocations and declaration references, but has no field-expression
+  access emission arm. The selected Rust field declarations already exist.
+- `walk_java_evidence` in that module emits calls, construction, annotations and
+  type relationships, but has no ordinary field-access emission arm. Both
+  selected Java field declarations already exist.
+- TypeScript identifier traversal calls `emit_callable_reference`; that function
+  explicitly skips local declarations without proven callable status. The two
+  Redux closure variables are declared but their ordinary value uses are lost.
+  Broadening that code requires a truthful value-reference contract, not
+  relabeling arbitrary state as callable.
+
+The existing member-access candidate projects to a `references` edge with
+member-access provenance, so qualified field-access evidence can use an existing
+relationship representation. The next production work belongs in language
+fact emission and qualified resolution, with shadowing/ambiguity negatives,
+precise occurrence anchors, bounded lookup, cache invalidation and affected
+language qualification. Hub ranking cannot reconstruct these missing facts.
+No producer, capability, runtime behavior or release version changes in this
+checkpoint; the gaps remain open.
+
+`state_access_audit.py` replays source pins, clean checkout state, exact source
+witnesses, graph hashes, candidate sets, all connecting records and its own
+script hash. The committed registration and review live under
+`benchmarks/agent_query/`; raw development artifacts and logs are under
+`state-access-01`. The first collector attempt incorrectly required a directed
+container and stopped on Graphify's undirected container; retaining that flag
+instead permitted the registered stored-endpoint diagnostic. No partial result
+was scored. Before registration, source-coordinate assertions also caught and
+corrected off-by-one Redux/Rust anchors.
+
+The eleven focused auditor tests pass, including positive contact evidence,
+shadowed targets, duplicate candidates, wrong relations/directions, occurrence
+mismatch, constructor spelling, parallel records and bounded reads. The complete benchmark suite passes 148 tests. The saved
+real-repository review replays byte-for-byte. No Rust/JavaScript tests or
+extraction gates were rerun for this benchmark/documentation-only checkpoint;
+previous production validation remains tied to its earlier commit.
+
+## Rust field-access correction and paired navigation control
+
+Registrations `4a1be265` and `56d7d559` fix the production contract, unchanged
+20-site comparison and four known-ID-assisted public neighbor requests before
+rebuilt graphs or follow-up outputs were inspected. Production commit
+`390406c1` emits Rust `MemberAccess` occurrences and qualified `AccessesMember`
+candidates for explicit field expressions. It reuses bounded source-type
+inference and existing universal resolution, restricts targets to fields,
+retains unknown/shadowed receivers as unresolved, and excludes method selectors.
+Parallel occurrences keep exact field-identifier anchors. It does not infer
+read/write effects, aliasing, independent responsibilities or god-object defects.
+
+AST cache semantics advance from 7 to 8 so older facts rebuild. Evidence/graph
+schemas, advertised producer capabilities and package version stay unchanged;
+published historical realizations are immutable. Graphs must be rebuilt to
+receive the new evidence. The CI workflow now runs both new integration suites
+explicitly because its library/binary test invocations would otherwise skip them.
+
+All five Compass graphs were rebuilt from the same pinned, read-only sources.
+Graphify's frozen native graphs remain unchanged. The original 0/20 versus
+0/20 report is preserved; it is not rewritten with the improved graph.
+
+| Evidence | Compass before | Compass after | Graphify |
+| --- | ---: | ---: | ---: |
+| Registered state-contact access sites, all five repositories | 0/20 | **4/20** | 0/20 |
+| Registered Rust access sites | 0/4 | **4/4** | 0/4 |
+| State slots represented, all five repositories | 6/10 | 6/10 | 0/10 |
+
+The four recovered sites link `IntoIter::handle_entry` and `get_deferred_dir`
+to `deferred_dirs`, and `push` and `pop` to `oldest_opened`, at the registered
+lines. Java and TypeScript still miss their eight selected contact edges;
+Go and Python still lack the four selected state-slot declarations. Both tools
+continue to identify all twenty accessing callable coordinates.
+
+Chi, Click, jsoup and Redux graphs are byte-for-byte identical to their frozen
+controls, including all communities. jsoup and Redux still report two omitted
+edges each; this checkpoint does not repair those partial publications. WalkDir
+keeps all 288 nodes and all 1,206 earlier edge records unchanged, adds 174
+member-access references, and changes 122 node community assignments. It now
+has 1,380 edge records. Recomputed clustering is an observable consequence, not
+proof of improved communities. The verifier checks every added record's field
+target kind, exact identifier bytes, enclosing source extent and provenance;
+this is occurrence consistency rather than a compiler/type-resolution oracle
+or full semantic precision review of all 174 records.
+
+The separate public MCP arm provides each tool its own exact callable IDs as
+explicit task inputs, then makes one unfiltered `get_neighbors` request per
+method. All eight requests succeed. Compass exposes the field identity and the
+selected source-line occurrence in **4/4** replies; Graphify exposes neither
+in **0/4**. Compass's complete neighbor nodes and records match its new graph.
+This is a known-ID retrieval control with native defaults, not natural-language
+identity discovery or authored responsibility explanation. It is not held-out.
+
+Compass returns 10,308 text / 139,303 full response bytes; Graphify returns
+1,519 / 1,904. The larger Compass responses retain full records and repeated
+occurrences; no token-efficiency or latency advantage is claimed. The scoped
+four-site gain must not be substituted for the earlier five-language source
+explanation comparison, where Graphify retained a 15/20 versus 14/20 lead.
+
+All six initial extraction regressions failed before the change. The final
+seven extraction tests and three resolver/publication tests cover direct and
+nested fields, indexed receivers, lexical shadowing, unknown/raw-pointer
+receivers, duplicate fields, ambiguous imports, depth exhaustion, trait impls,
+callable fields versus method selectors, cross-file targets, parallel anchors
+and input-order determinism. An integration fixture initially lacked physical
+source inventory and checked the wrong raw kind key; both were corrected.
+Another assertion exposed an audit wording error: `member-access` is retained
+in provenance, not necessarily in the optional `context` field. The earlier
+wording is corrected. Focused Clippy also caught and corrected a test-helper
+type-complexity warning. Failed attempts remain in the external logs.
+
+Final validation passed formatting, 45 Rust language integration tests,
+237 resolver integration tests, 33 cache contracts, workspace and focused-test
+Clippy, 1,106 workspace tests (2 ignored), 9 product tests, the product boundary,
+full code-graph fixture qualification (including Markdown and the independent
+React release-binary fixture gate), and 148 benchmark tests. The new CI command
+also passes all ten new integration tests. The evaluated debug binary matches
+the qualifying debug binary, and validated source hashes match `390406c1`.
+Warnings retained in the logs include fixture publication omissions, a linker
+warning and an existing unused-mut test warning; passing does not mean the logs
+are warning-free. Hosted platform/packaging/browser matrices are not claimed.
+
+Verification and artifact hashes are recorded in
+`benchmarks/agent_query/rust_state_access_development_review.json`; the complete
+capture, fresh graph manifests, graph deltas, raw MCP transcripts, source checks,
+verifier and validation logs are under `rust-state-access-01`. Remaining Java,
+TypeScript, Go and Python state evidence, actual cohesion/god-object judgments,
+authored explanations and fresh held-out confirmation remain unfinished.
+
+## Java field-scope compiler oracle and baseline
+
+Before changing Java extraction, commit `d1b701b5` registered a 44-case source
+fixture. The prior five-repository registration remains unchanged. This is a
+synthetic development challenge motivated by the four missing jsoup accesses,
+not a fresh repository sample or a held-out score.
+
+The existing Java `java_value_types` map is keyed by declaration scope and name;
+local declarations are inserted without block lifetimes. Reusing it for field
+access would lose distinctions required by Java name scope. Local variables,
+loop bindings, resources and catch parameters have different scope boundaries;
+pattern scope depends on flow. Field selection also follows the receiver's
+compile-time type. These rules are specified in
+[JLS scope](https://docs.oracle.com/javase/specs/jls/se21/html/jls-6.html#jls-6.3)
+and [field access](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.11).
+
+The installed Amazon Corretto 17.0.8 compiler was invoked with `--release 17`,
+`-proc:none`, `-implicit:none` and source/line/local-variable debug tables.
+Fixture code was never executed. A bounded class-file reader records declared
+fields, descriptors, synthetic flags and superclass/interface links. Captured
+`javap -p -c -l -s` output supplies field instructions and source-line tables,
+including compiler-generated lambda bodies. Registered expectations agree with
+all **44 cases: 36 positive cases, eight negative cases, 45 field occurrences**.
+Repeated fields on one line retain multiplicity. Inherited bytecode owners are
+resolved to the actual declaring field; enclosing `this$0` instructions remain
+visible but their compiler-marked synthetic targets are not source fields.
+
+Fresh native Compass and Graphify captures use the identical registered source:
+
+| Evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Graph nodes / edges | 53 / 78 | 43 / 62 |
+| Registered source field declarations | 12/14 | 0/14 |
+| Contacts to any registered field | 0 | 0 |
+| Registered occurrence targets recovered | 0/45 | 0/45 |
+| Negative lines with a registered field contact | 0/8 | 0/8 |
+
+Compass's absent declarations are the anonymous-class and local-class fields.
+The compiler challenge also proves targets for resource-scope exit, flow-scoped
+patterns, inherited fields hiding enclosing fields, typed/cast/array receivers,
+and distinct lambda versus anonymous-class `this`. These must be explicit
+coverage requirements or documented unsupported cases in the correction;
+name-only fallback is not acceptable.
+
+This inventory does not score source-caller ownership, read/write classification,
+positive edge precision, complete Java coverage, cohesion or god-object defects.
+With no positive contacts, the empty negative controls provide no positive
+precision evidence. Constant folding and arbitrary compiler desugarings make
+bytecode unsuitable as an unrestricted source-occurrence oracle; this fixture
+uses nonconstant fields and fails when its source inventory, source-line
+coverage or expected multiplicity disagrees. No existing real-repository score
+is increased by these synthetic results.
+
+The Compass executable is the same hashed binary as the previous qualified
+Rust-field run. Graphify 0.9.67 uses its unmodified installed native extractor;
+its existing stale skill-installation warning is retained, and no skill was
+installed or used. Graphify's undirected container flag is preserved. This is
+an extraction/representation diagnostic, not a build-speed or public-query
+comparison.
+
+`java_state_scope_audit.py` supplies bounded capture and deterministic offline
+replay. The 14 new tests exercise bytecode offsets and line boundaries,
+multiplicity, lambdas, hiding, hierarchy ambiguity/cycles, synthetic flags,
+source drift, missing/duplicate graph endpoints, wrong targets and absent edge
+anchors. All **162 benchmark tests pass**. The saved compiler and graph reviews
+replay byte-for-byte, and package/binary/source/capture hashes are checked.
+No production Rust or JavaScript implementation changed in this checkpoint;
+native Rust, browser and packaging gates were not rerun. Java production
+field-access extraction and the unchanged five-repository rerun remain next.
+
+Committed artifacts are `java_state_scope_registration.json`,
+`java_state_scope_oracle.json` and `java_state_scope_baseline.json` under
+`benchmarks/agent_query`; complete compiler/graph captures, exploratory reports
+and verification logs are under external `java-state-scope-01`. The registration
+precedes compiler and graph observations. The graph inventory explicitly reports
+unscored caller ownership rather than treating a matching target/line as a full
+semantic-edge judgment.
+
+## Java field contacts: correction and unchanged development comparisons
+
+Registration `5c10c9d4` fixes the same 20 real-repository access sites and all
+44 compiler scope cases before production work. Public registration `5548a864`
+fixes four known-ID neighbor requests after implementation but before rebuilt
+real graphs or responses were inspected. These are development controls, not
+held-out questions. Production commits `09ca58e6` and `f2cacfeb` add bounded Java
+field evidence and correct two reproduced type-selection defects.
+
+The extractor now distinguishes lexical values from source-declared fields,
+retains block/loop/lambda/catch/resource lifetimes, and records exact field-token
+occurrences. Declared nominal receivers, arrays, casts, direct constructors,
+source-local field chains and single generic bounds can establish an owner.
+Simple flow patterns are supported; unsupported flow masks possibly shadowed
+bindings. Unknown receivers, inherited fields, unregistered local/anonymous
+owners and exhausted inference do not acquire convenient same-named targets.
+The generic graph projection remains `references`, with member-access provenance;
+it does not classify reads/writes or establish runtime alias identity.
+
+Two counterexamples invalidated the initial production capture. An imported
+`remote.Cell` incorrectly beat a visible member `Box.Cell`; compiler bytecode
+confirms the member type's field. Two files declaring the same receiver type
+also allowed field availability to choose one declaration. Failing regressions
+are retained. The correction gives visible source types precedence over imports
+and package prefixes, and checks nominal receiver ambiguity before field lookup.
+Parser-free decisions cover absent/unique/duplicate types, lookup limits and
+exact-source precedence. The compiler counterexample now publishes the correct
+`p.Box::Cell::value` target. `java-state-access-01` remains superseded evidence;
+its interrupted fixture qualification is not counted as passed.
+
+### Fixed real-source and compiler results
+
+| Registered evidence | Compass before Java correction | Compass corrected | Graphify |
+| --- | ---: | ---: | ---: |
+| Five-repository field contacts with selected-line anchors | 4/20 | 8/20 | 0/20 |
+| Compiler fixture occurrence targets | 0/45 | 39/45 | 0/45 |
+| Compiler fixture field declarations | 12/14 | 12/14 | 0/14 |
+| Negative compiler cases with field contacts | 0/8 | 0/8 | 0/8 |
+
+All four selected jsoup sites now connect the exact callable to `safelist` or
+`destination` with selected-line anchors. The four Rust successes remain.
+Go/Python lack eight registered state-site declarations; TypeScript has four
+state sites without contacts. The original denominator and source hashes are
+unchanged. Synthetic misses remain explicit: `super` and inherited fields,
+one qualified static-field use, anonymous-class accesses and a local-class
+access (six occurrences across five cases). No unexpected registered target was
+observed. A separate post-capture check matches all 39 supported contacts to
+compiler field/enclosing-method pairs and source ranges; compiler lambda names
+map to enclosing source methods. This check assumes the fixture's unambiguous
+method names and is not a general overload adapter or blinded precision score.
+
+Fresh Compass builds use all five pinned read-only repositories; unchanged
+Graphify 0.9.67 native graphs are reused. No build-speed comparison is made.
+The Chi, Click, Redux and WalkDir graphs are byte-identical to the qualified
+Rust-field baseline. jsoup retains all 6,116 nodes and 21,110 previous edges,
+adding 3,896 field references for 25,006 edges total. Every added record passes
+field-target, exact-identifier, provenance and source-owner checks; 26 initializer
+owners require an independent source AST range because the graph's field source
+range anchors its declaration token. These are consistency checks, not
+compiler-grade target precision across jsoup. The final type correction adds
+28 contacts beyond the superseded capture; their receiver declarations and
+source expressions were inspected. Existing jsoup/Redux warnings each report
+two omitted edges and remain visible.
+
+### Public retrieval and community impact
+
+Each tool receives its own exact callable ID and one unfiltered native-default
+`get_neighbors` request per Java case, with no retries or source follow-ups.
+All eight requests succeed. Compass returns field identity and selected-line
+anchors in **4/4**; Graphify returns neither in **0/4**, consistent with its
+missing field nodes. Compass's complete nodes and parallel edge records match
+the stored graph with no truncation. Aggregate response text is 9,883 versus
+3,313 bytes; wire payload is 108,999 versus 3,708 bytes. This is a known-ID
+retrieval control, not identity discovery, authored-answer accuracy or an
+efficiency win. All 227 Graphify package files verify unchanged.
+
+jsoup communities change from 41 to 42. Co-member pairs change from 1,110,372
+to 1,077,153: 796,307 retained, 314,065 separated and 280,846 joined. This ignores
+numeric community renaming but measures only partition change. Replaying the
+unchanged 75 source-selected task pairs gives identical outcomes: within-task
+co-location remains Compass 13/15 versus Graphify 12/15; cross-task co-location
+remains 18/60 versus 12/60. Cross-task co-location is not automatically wrong.
+There is no new community-quality or god-object classification result.
+
+### Verification and retained evidence
+
+The final `f2cacfeb` source passes formatting; 27 Java language integration tests;
+244 resolver integration tests; 33 cache contracts; workspace and focused-test
+Clippy; 1,106 workspace library/binary tests (two ignored); nine CLI product
+tests; the product boundary; full production fixture qualification, including
+Markdown and the independent React release-binary checks; and all 162 benchmark
+tests. The evaluated and qualifying debug binaries match exactly. All validated
+production source hashes match the commit. The full fixture gate took 666
+seconds, including a seven-minute release build. Existing fixture omission,
+linker and unused-mut warnings remain visible. Hosted CI, full platform,
+packaging and browser suites are not claimed.
+
+AST cache semantics advance from 8 to 9; users rebuild graphs to obtain the
+facts. Package version remains 0.3.30; graph/evidence schemas and producer
+capabilities are unchanged. Published history is immutable. The committed
+`java_state_access_development_review.json` contains result summaries, source
+and capture hashes, missing cases and verification commands. External
+`java-state-access-02` retains complete graphs, raw public responses, compiler
+consistency proofs, failed attempts, deltas and replay scripts. The original
+registrations and baseline reports are preserved. Broader target precision,
+authored explanations, longer walks, actual god-object judgments and held-out
+confirmation remain open.
+
+## Real Java source-binding census: independent field precision
+
+The earlier 3,896-record jsoup check established occurrence/endpoint consistency,
+not semantic target precision. Registration `2499e927` now fixes all **88 Java 8
+base-source files** (1,150,637 bytes, including examples) before compiler binding
+capture. It uses the existing pinned jsoup source and both frozen native graphs.
+This is a complete census of that registered source set on a previously observed
+development repository, not held-out or cross-language generalization. Java 11
+overlays, separately compiled package metadata and tests remain outside this
+build configuration.
+
+A standalone auditor uses the public JDK
+[JavacTask parse/analyze API](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.compiler/com/sun/source/util/JavacTask.html)
+and source-tree bindings. Its
+[source positions](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.compiler/com/sun/source/util/SourcePositions.html)
+are converted from Java UTF-16 positions to exact UTF-8 offsets. Corretto
+17.0.8.1 runs with `--release 8`, disabled processors, no implicit compilation,
+matched cached dependency hashes and no project code generation/execution.
+Compiler errors or incomplete/unbounded captures cannot produce a scored oracle.
+No dependency is added to Compass execution or native tests.
+
+The compiler resolves 4,314 internal source references, plus 44 external fields,
+55 array-length operations and 31 class literals. javac exposes the latter two
+as field-kind elements; round 01 grouped them with non-source targets. Round 02
+retains them as separate intrinsic categories. That correction does not change
+the internal denominator or either tool's results. Both rounds are preserved.
+
+| Source-declared evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Ordinary field declarations represented uniquely | 614/616 | 0/616 |
+| Ordinary field references with exact target, owner and occurrence | 3,047/3,785 | 0/3,785 |
+| Enum-constant declarations represented uniquely | 131/131 | 131/131 |
+| Enum-constant references with exact target, owner and occurrence | 0/529 | 0/529 |
+| Returned in-scope field contacts agreeing with the compiler | 3,047/3,047 | No contacts; precision unavailable |
+
+Every in-scope graph `references`/`reads`/`writes` contact to a field or enum
+member is inventoried; the scorer retains wrong, unmapped, ambiguous and
+unanchored records. All 3,047 Compass contacts match the compiler's source field
+declaration, enclosing source owner and exact token span. No missing/ambiguous
+identity or anchor failure occurs among these contacts. Graphify has no such
+contacts, so an empty result cannot establish its positive precision. The
+adapter preserves Graphify's undirected flag and never upgrades a line-only
+record into an exact occurrence or directed use. Source-region identity is
+checked; this is not a separate audit of every rendered qualified-name string.
+
+Compass still misses **738 ordinary field references and all 529 enum-constant
+references**. Frequent missed targets include `TreeBuilder.stack` (51 uses),
+`TokeniserState.nullChar` (47), `TokeniserState.eof` (41), and
+`Parser.NamespaceHtml` (32). Source inspection confirms examples of inherited
+state (`HtmlTreeBuilder` reading `TreeBuilder.stack`), statically imported
+constants (`Jsoup.clean` reading `SharedConstants.DummyUri`), and unrepresented
+anonymous-class fields (`expectedSize` and `i` in `Attributes.iterator`). These
+examples do not classify every missing case. Missing contacts cannot establish
+independent responsibilities or justify a god-object diagnosis.
+
+Qualification checks the source oracle against all 44 previously registered
+scope cases and 45 independently bytecode-checked occurrences. An additional
+20-record fixture covers two overloads, field/class initializers, lambdas,
+anonymous/local classes, hidden fields, compound uses, folded constants,
+external fields, array/class intrinsics, comments and Unicode. Unicode-escaped
+identifier anchors remain explicit unsupported cases instead of guessed spans.
+Fourteen new tests reject corruption, source drift, wrong targets/owners,
+ambiguous identities, missing anchors and inappropriate Graphify span/direction
+credit. All **176 benchmark tests and the product boundary pass**. Final whole-source compiler captures
+are byte-identical, and both saved reviews replay exactly.
+
+`java_real_field_review.json` contains summaries, missing-field identities,
+frequent missed targets and provenance hashes. Full raw bindings, every returned
+contact judgment and all missing occurrences are retained under external
+`jsoup-java-field-oracle-02`; `java_field_capture.py` and
+`java_source_fields.py` provide reproducible capture and replay. The product
+remains at `f2cacfeb`, version 0.3.30; this checkpoint changes only the auditor,
+fixtures and documentation. Native Rust, JavaScript, platform and packaging
+checks were not rerun. This strengthens semantic precision evidence for one
+Java source configuration; authored explanations, longer walks, functional
+communities, actual god-object judgments and held-out confirmation remain open.
+
+## Explanation retrieval: paired source-budget sensitivity
+
+Registration `35cb4aee` freezes five per-subject source quotas before capture:
+2,000, 4,000, 8,000, 16,000 and 32,000 bytes. All 20 existing responsibility
+facts, five pinned repositories, exact identity constraints and source-window
+rules remain fixed. Both tools receive one public resolver request and one
+public neighbor request per subject. Only returned outgoing `contains`/`method`
+anchors determine source selection. Sorted windows end at the next returned
+anchor; the last window is limited to 4,096 bytes. No witness, source-content
+ranking or extra query selects the source. The latest `f2cacfeb` binary and
+`java-state-access-02` graphs are used; Graphify's frozen native graphs and
+installed package hashes are unchanged.
+
+This is a known development panel. Earlier questions and failures informed the
+choice to examine budget sensitivity. The results are **source-evidence
+coverage**, with no authored answers, held-out claim or production change.
+
+| Source quota per subject | Compass facts | Graphify facts | Compass actual source bytes, five subjects | Graphify actual source bytes, five subjects |
+| --- | ---: | ---: | ---: | ---: |
+| 2,000 | 8/20 | 8/20 | 10,000 | 10,000 |
+| 4,000 | 8/20 | 8/20 | 19,673 | 19,673 |
+| 8,000 | 14/20 | 15/20 | 35,673 | 35,673 |
+| 16,000 | 19/20 | 18/20 | 59,542 | 53,417 |
+| 32,000 | 20/20 | 18/20 | 64,644 | 53,747 |
+
+Literal-witness counts are one lower for each tool at every quota. The prior
+Click allowance remains explicit: the class header alone is absent, while the
+source-validated owner and every other required line are present. It cannot be
+applied when identity is unverified or another required line is missing.
+
+At 8,000 bytes, every membership row and retained source interval is unchanged
+from the earlier 14/20 versus 15/20 control. Added Java/Rust field contacts do not
+help this membership-only policy. Changed jsoup/WalkDir resolver responses carry
+new graph/view digests; jsoup neighbor differences are community metadata and
+the corresponding serialized-byte requirement.
+Full payload differences are retained, not silently discarded.
+
+The remaining Compass fact at 16,000 bytes is WalkDir's symlink-loop handling.
+Earlier fields, methods and intervening comments consume the quota before its
+implementation is reached. At 32,000 bytes, all four WalkDir witnesses fit.
+Graphify's two remaining facts are Redux enhancer delegation and the complete
+observable/store API. Its earliest returned member begins after the enhancer
+implementation, and its last-member window reaches only part of the observable
+implementation before the fixed 4,096-byte cap. Raising the global quota cannot
+repair those intervals. This does not establish that Graphify cannot retrieve
+that code with a different workflow.
+
+Payload costs remain unequal. Across the five subjects, Compass resolver
+responses contain 3,039 text / 21,983 wire bytes and neighbor responses contain
+33,061 / 372,871 bytes. Graphify returns 619 / 1,094 resolver bytes and
+6,980 / 7,534 neighbor bytes. Larger-quota Compass coverage also consumes more
+actual source bytes. Equal retained-source ceilings therefore do not imply
+equal context, compute or total information cost.
+
+The reusable `source_windows.py` evaluator bounds files, aggregate source reads,
+anchors and quotas; validates every anchor, including omitted ones; preserves
+raw byte cuts through UTF-8; and checks source hashes before scoring. Eleven
+new tests cover budget exhaustion, deduplication, order, final-window caps,
+invalid anchors, path/symlink escapes, corruption, Unicode and the constrained
+Click allowance. All **187 benchmark tests and the product boundary pass**.
+The separate artifact verifier checks all 20 public calls, 153 membership
+anchors and 50 window/scoring arms from raw transcripts and pinned source.
+Independent repeated verification is byte-identical. The unchanged historical
+8,000-byte policy is also replayed directly against each newly captured response.
+
+Committed `explanation_budget_registration.json` and
+`explanation_budget_review.json` retain the protocol, every budget result,
+actual costs, misses and artifact hashes. External `explanation-budget-01`
+contains capture/replay scripts, raw calls, literal source windows, payload
+deltas and verification logs. No native Rust, JavaScript, platform or packaging
+checks were rerun because the product is unchanged; version remains 0.3.30.
+
+A 20/20 witness score does not establish complete answers to the original
+natural-language questions or behavior of unseen callees. The next production
+work should improve bounded explanation evidence selection and context costs,
+then evaluate authored answers under a separately registered common workflow.
+God-object defect judgments, longer-walk quality, functional community quality
+and held-out confirmation remain open.
+
+## Optional member-name focus: bounded native explanation improvement
+
+Registration `1c80747a` fixes the existing five questions, source pins, exact
+root identities, graphs and 8,000-byte source quota before this experiment.
+Production commit `293582c3` adds `explain --source-members --member-focus TEXT`.
+It uses normalized query terms to count distinct matches in recorded callable
+names, prioritizes higher counts, and uses the existing source order for ties.
+Snake-case names retain their whole token and components, following the existing
+lexical index. No source text is read to rank. Unmatched members remain eligible;
+focus neither selects an ambiguous owner nor changes membership or source bounds.
+The output discloses normalized terms and the matches behind each retained member.
+
+The query library owns ranking and validation; the CLI parses and presents it.
+Focus accepts at most 4,096 bytes and 32 distinct searchable terms. Empty or
+unsearchable input, repeated options and focus without member mode fail explicitly.
+All existing discovery, metadata, nesting, source-verification and retained-byte
+limits remain in force. Missing digests and failed source reads keep their
+individual statuses. Without focus, all five captured stdout and stderr streams
+are byte-identical to the frozen baseline executable.
+
+The experiment passes each **full original question** as focus, without manually
+choosing helpful method names or tuning individual questions after capture.
+
+| Native member evidence, 8,000-byte quota | Without focus | Full-question focus |
+| --- | ---: | ---: |
+| Chi | 3/4 | 4/4 |
+| Click | 3/4 | 3/4 |
+| jsoup | 4/4 | 4/4 |
+| Redux | 2/4 | 2/4 |
+| WalkDir | 2/4 | 2/4 |
+| Total | 14/20 | 15/20 |
+
+There is one gain, `chi-4`, and no lost facts on this panel. Name matches bring
+`routeHTTP` and related routing methods ahead of earlier methods without matching names,
+so the routing witness fits. Literal coverage, before indentation normalization,
+is 5/20 versus 6/20. Recorded callable spans can start at a declaration token
+rather than its leading indentation; the independent verifier checks each
+returned span against pinned source before normalized evidence scoring.
+No missing-class-header allowance is applied to this native arm.
+
+Both arms retain 28,129 total source bytes. Focus increases stdout from 58,506
+to 60,942 bytes and charged full-span verification work from 28,636 to 29,287
+bytes. Name matches are a heuristic, not behavioral evidence or a general quality
+guarantee. Broad or held-out questions may regress even though this panel did not.
+
+Remaining misses are substantive. Click's class header and `@property` decorator
+lie outside callable spans. Redux's enhancer and complete store/observable API
+are not fully represented by member excerpts. Six returned Redux callables lack
+recorded source digests in both arms; native output correctly marks those
+excerpts unverified. The external audit checks current pinned source without
+upgrading the native provenance claim. WalkDir still lacks complete symlink-loop
+and contents-first witnesses. Moving `check_loop` earlier does not also retrieve
+all surrounding evidence required by the loop fact.
+
+**This is a Compass before/after experiment.** Graphify has no equivalent native
+member-source/focus flag in the recorded interface. The separately registered
+paired public-neighbor control remains Compass 14/20 versus Graphify 15/20 at
+8,000 bytes. Its numbers must not be equated with or replaced by this native arm.
+A common focused workflow must be evaluated on both tools before claiming a new
+paired improvement. These are source-evidence results, not authored answers.
+
+Validation passes formatting, workspace Clippy, 19 focused/source integration
+tests, all 42 CLI code-query tests, 1,106 workspace library/binary tests (two
+existing ignores), nine CLI product tests, the product boundary, the CLI build,
+and all 187 benchmark tests. Native tests cover late-member retrieval with the
+same quota, duplicate terms, camel/snake case, Unicode, ties and shuffled input,
+zero-match/default behavior, stale sources, ambiguous roots, invalid bounds and
+CLI output formats. The initial compile failure from a wrong runtime-node
+accessor is retained in round 01. The final source hashes match the production
+commit and frozen evaluated binary. Existing unused-mut test warnings remain
+visible. No JavaScript, browser, platform, packaging or extraction-fixture gate
+was rerun because those production surfaces are unchanged.
+
+External `member-focus-02` retains all 15 CLI calls, source/binary hashes,
+independent ordering/span/digest-status verification and identical repeated
+replay. Its first verifier incorrectly assumed every source had a digest; that
+failure is preserved, and the corrected verifier explicitly validates the six
+unverified Redux excerpts. `explanation_focus_review.json` retains every fact,
+member order, limit/provenance status, cost and artifact hash. Package version
+remains 0.3.30; no graph schema, extraction, cache or history changes occur.
+Authored answers, fair common-workflow focus comparison, longer walks, god-object
+judgments, functional communities and held-out confirmation remain open.
+
+## Common member-name focus: paired negative result
+
+Registration `67e5550b` fixes a symmetric public-interface experiment after the
+native-only improvement above. Policy and tests were committed as `6c9876ee`
+before fresh captures. Both tools receive the same exact identity constraints,
+full questions and five source quotas. Each subject uses one resolver call and
+one neighbor call. The same helper ranks returned outgoing `contains`/`method`
+labels by distinct normalized question-term matches. A shared file/line group's
+score is the maximum score of one of its labels; duplicates and alternative
+labels cannot accumulate weight. Source order breaks ties and unmatched groups
+remain eligible. Fields, bindings and nested types are retained when returned by
+either tool; no Compass-only kind filter or private graph metadata ranks them.
+
+The source intervals are fixed **before** ranking: next greater returned anchor
+in the same file, or the existing 4,096-byte final-window cap. Reranking changes
+visit order, never interval ends. The same raw-byte quota applies to both tools.
+The original source-order controls are captured alongside the focused arm.
+
+| Source quota per subject | Source order: Compass | Source order: Graphify | Common focus: Compass | Common focus: Graphify |
+| --- | ---: | ---: | ---: | ---: |
+| 2,000 | 8/20 | 8/20 | 6/20 | 8/20 |
+| 4,000 | 8/20 | 8/20 | 9/20 | 10/20 |
+| 8,000 (primary) | 14/20 | 15/20 | 12/20 | 14/20 |
+| 16,000 | 19/20 | 18/20 | 19/20 | 18/20 |
+| 32,000 | 20/20 | 18/20 | 20/20 | 18/20 |
+
+**Reject this common name-first window policy as the default explanation
+retrieval policy.** Its primary result regresses for both tools, and Compass
+still trails Graphify. The favorable 4,000-byte result cannot replace the
+registered primary result. This does not invalidate the separate native
+callable-span 14/20 to 15/20 experiment; it shows that the improvement does not
+transfer reliably to a different evidence layout. Native focus remains optional.
+
+At 8,000 bytes:
+
+- Both tools gain Chi routing fact `chi-4` but lose the `With` shared-state fact
+  `chi-1`. Seven matching routing/middleware anchors move first. The existing
+  query normalization removes `With` as a stopword in the full question, and its
+  unmatched window no longer fits. The unchanged total conceals this tradeoff.
+- Compass loses Redux enhancer delegation (`redux-1`) and listener snapshot
+  semantics (`redux-3`). A matching `getState` binding at line 390 promotes a
+  3,886-byte final window ending at line 489. Post-capture inspection of the
+  owner span shows that **3,759 bytes follow the end of `createStore` at line
+  395**. That owner metadata was not used to select, clip or score the window.
+  A name hit can therefore spend most of the quota on subsequent source.
+- Graphify loses WalkDir contents-first evidence (`walkdir-4`). Promoting the
+  606-byte `check_loop` window leaves the `get_deferred_dir` window partial.
+  Neither tool gains the complete multi-method loop-handling fact at this quota.
+- Click and jsoup have no fact changes at this quota. The existing Click
+  class-header allowance is preserved; literal totals remain one lower per tool.
+
+All actual retained-source totals equal the corresponding source-order totals;
+no extra source quota explains these changes. At the primary quota each tool
+retains 35,673 bytes across five subjects. Public response costs remain unchanged
+and unequal: Compass resolver 3,039 text / 21,983 wire bytes and neighbors
+33,061 / 372,871; Graphify resolver 619 / 1,094 and neighbors 6,980 / 7,534.
+These are source-evidence scores, not authored answers, equal-token comparisons
+or a claim of overall superiority.
+
+All 20 fresh public responses and their 153 membership anchors reproduce the
+prior capture. All 50 source-order window/scoring arms match prior results.
+A separate same-agent verifier independently checks normalization on this ASCII
+question/label panel, every group score, all 100 ordered-window arms, raw source
+bytes, transcript costs, witness judgments and historical comparisons. Repeated
+verification is byte-identical. The shared helper also has Unicode tests; no
+universal cross-runtime normalization equivalence is claimed.
+
+All **202 benchmark tests and the product boundary pass**. Fifteen new tests
+cover frozen lexical constants, prior native question-term agreement, Unicode,
+snake/camel case, duplicate terms and labels, maximum-not-union group scores,
+source ties, ignored tool metadata, bounds, exact group permutations and fixed
+source interval ends. No production code changes in this checkpoint; native
+Rust, JavaScript, platform and packaging checks were not rerun. Product commit
+remains `293582c3`, package version 0.3.30.
+
+`paired_member_focus_review.json` publishes every quota, subject, gained/lost
+fact, actual cost and provenance hash. External `paired-member-focus-01` retains
+fresh MCP transcripts, ranked group traces, 100 source-window arms, the Redux
+boundary diagnosis and capture/replay scripts. The next retrieval work needs
+accurate available source extents, preservation of explicitly named symbols,
+and enough linked implementation evidence for multi-method facts. It must be
+qualified under a newly registered common workflow, preserving this negative
+result. Longer paths, authored answers, functional communities, actual god-object
+judgments and held-out confirmation remain open.
+
+## Longer directed call paths: route selection remains a gap
+
+The five new endpoint pairs in `longer_path_witnesses.json` extend the earlier
+chains to six calls in Chi, seven in Click (with a registered six-call
+alternative), five in jsoup, four in Redux and four in WalkDir. These are
+source-selected positive witnesses on known development repositories. They do
+not establish shortest paths, unconditional execution or held-out accuracy.
+Registration commit `0f3df063` precedes the new endpoint requests.
+
+Both tools use the same source symbol, file and declaration line. Compass uses
+its public exact scoped search; Graphify uses `file::symbol` lookup with the
+same source-coordinate check afterward. Each gets one lookup per endpoint,
+then one directed CLI request with the returned IDs. All failures remain in the
+five-task denominator. A separate native short-name control was registered at
+`3eaefede`, after the Chi ID-interface failure was observed. It does not replace
+or cherry-pick from the first arm.
+
+| Workflow | Compass | Graphify |
+| --- | ---: | ---: |
+| Public source-assisted IDs: supported call chains | 2/5 | 0/5 |
+| Native short names: supported call chains | 1/5 | 1/5 |
+
+Compass's source-assisted successes are Chi and Click, each six calls. Chi uses
+another valid `InsertRoute -> addChild` occurrence at `tree.go:234`; the frozen
+witness occurrence at line 183 remains distinct. In the native-label control,
+both tools succeed only on Click. Compass takes the text-output/writer branch;
+Graphify takes the text-input/reader branch. The latter was independently read
+from source after capture and accepted as a valid alternative, with no frozen
+occurrence credit. Both tools' labels, coordinates, edge direction, provenance
+and source anchors are retained in `longer_path_review.json`.
+
+The remaining results identify concrete gaps:
+
+- Compass's jsoup route uses instantiation and containment to reach a visitor
+  method, then calls `appendChild`. Its WalkDir route uses a call, return type
+  and containment to reach `from_loop`. These structural routes do not answer
+  a call-chain question. The jsoup depth-eight result is also marked truncated.
+- A separate post-capture graph diagnostic finds every registered Compass call
+  step for Chi, Click, jsoup and WalkDir. The jsoup and WalkDir misses therefore
+  expose route-selection policy even though the required call edges exist.
+  Private-graph traversal is not credited as a public answer.
+- Neither tool exposes Redux's returned named function `combination` at the
+  frozen coordinate. Returning that function from `combineReducers` is not a
+  call edge; substituting the outer function would invalidate the question.
+- Graphify's CLI does not preserve the supplied public IDs in these Chi and
+  jsoup requests. Chi renders different endpoints; jsoup resolves both IDs to
+  one unintended node and exits with an error. Its WalkDir resolver returns a
+  different `next` coordinate. The separate label control prevents treating
+  these interoperability failures as pure path-algorithm quality.
+
+All 18 Compass depth probes are retained: 13 bounded empty responses, four
+mixed-relation routes and one valid Click route at depth six. The empty bounded
+responses do not assert complete absence. Reverse requests remain diagnostics,
+with no source-global unreachability credit.
+
+The two arms are not an overall win: native labels tie, identity assistance
+has a measurable cost, and unresolved/ambiguous cases remain substantial.
+Resolver wire payload totals are 42,349 bytes for Compass and 2,172 for Graphify;
+forward ID-arm stdout totals are 64,086 and 258 bytes, with unsuccessful requests
+retained. These byte totals are not equal-work or latency measurements.
+
+All **204 benchmark tests and the product boundary pass**. The separate verifier
+checks source pins/hashes, graph and binary hashes, resolver requests and raw
+responses, all 42 CLI invocations, path identities, directed edge projection and
+source occurrences. Repeated verification is byte-identical. Failed verifier
+attempts and a corrected draft occurrence-credit label remain in external
+`longer-paths-01`. No production code changed; Rust, JavaScript, platform and
+packaging suites were not rerun. Product version remains 0.3.30.
+
+The next production change should provide an explicit calls-only trail policy
+through the typed query and public interfaces, retaining structural defaults,
+ambiguity handling, occurrence provenance and bounded-work semantics. Qualify
+it against shorter structural shortcuts, missing paths and these frozen real
+questions. Named-function-expression identity needs a separate owning-layer
+fix. Broader explanation, god-object, community and held-out claims remain open.
+
+## Explicit calls-only trails: native correction and fixed-graph replay
+
+Implementation `89916af9` adds an optional `callsOnly` typed request field,
+CLI `node --calls-only`, MCP `get_node` parameter `calls_only`, and explicit
+`ask` syntax `call path from SOURCE to TARGET` / `call chain from SOURCE to
+TARGET`. Structural defaults remain unchanged. The filter applies to endpoint
+role probes, traversal, depth-frontier checks and direction diagnostics.
+Existing ambiguity, heuristic opt-in, source occurrence and work/response
+limits remain in force. Undirected diagnostics charge examined incident edges
+before excluding structural relations, so exhausting that budget still cannot
+prove absence.
+
+Registration `4e22e1da` fixes the existing five source questions and frozen
+graphs before replay. Its wording correction in `89916af9` precedes capture;
+no endpoints or witnesses changed. `calls_only_trails_review.json` retains the
+raw-artifact hashes and all outcomes, including unresolved Redux identity.
+
+| Compass workflow | Source-supported static call paths |
+| --- | ---: |
+| Old and new structural defaults, source-assisted public IDs | 2/5 |
+| Explicit calls-only, source-assisted public IDs | 4/5 |
+| Explicit call-path `ask`, same public IDs | 4/5 |
+| Native short names, either policy | 1/5 |
+
+Chi, Click, jsoup and WalkDir return supported call edges. CLI, `ask` and actual
+stdio MCP result bodies agree for all four resolved pairs. Twenty fresh public
+resolver results remain unchanged, and all nine default stdout/stderr controls
+are byte-identical. This is a native before/after correction on known questions.
+Graphify's public path interfaces expose no corresponding relation filter;
+its earlier ID and native-label controls remain separate, with no equal-feature
+or overall superiority claim.
+
+The jsoup result requires a specific qualification. Its five-call route passes
+through `Document.body` and the missing-body `appendElement` fallback. The
+caller initializes a document shell containing a body, so execution feasibility
+in this context remains unproven. Source review supports the static call edges
+only. The initial verifier stopped on this unregistered alternative; the stopped
+verification and subsequent source adjudication are retained. The route receives
+no frozen-route or runtime-feasibility credit, and the input graph's existing
+incomplete-coverage warning remains. No route-selection rule was retuned to
+force the registered alternative.
+
+Validation passes: 56 targeted query tests, 43 CLI tests, 11 MCP tests, 1,106
+workspace library/binary tests (two existing ignored tests), nine product tests,
+204 benchmark tests, formatting, workspace Clippy, the product boundary and the
+CLI build. The independent calls-only oracle covers 729 four-node DAGs at three
+depth bounds; other regressions cover cycles, structural shortcuts, occurrence
+ordering, backend parity, limits and invalid inputs. Repeated source/capture
+verification is byte-identical. External `calls-only-trails-01` retains logs,
+requests, responses and verifiers. JavaScript, packaging, platform matrices,
+extraction fixtures and CompassQL suites were not rerun because those surfaces
+did not change. Version remains 0.3.30.
+
+Unscoped name ambiguity, Redux function-expression identity, runtime feasibility,
+authored explanations, actual god-object judgments, functional community quality
+and held-out confirmation remain open.
+
+## Shared public-neighbor call-path workflow
+
+Registration `553d2365` and harness `221e0b3a` fix a common FIFO breadth-first
+search over public outgoing `calls` neighbors. The same five source endpoint
+pairs, graph snapshots, depth-eight limit, 128-expansion limit, 512-request
+limit and 16 MiB workflow response budget apply to both tools. Endpoint lookups
+count toward the request and byte budgets. No graph contents or source files
+select requests; the verifier reads them only after capture.
+
+The adapters preserve an interface difference: Compass returns destination
+IDs and complete records, while Graphify returns labels. Graphify therefore
+needs public `get_node(label)` bridge lookups, cached including failures.
+Ambiguity is retained as an incomplete branch; no declaration is guessed from
+the caller's file or the call-site location. This measures an identity-preserving
+public workflow, not equal internal algorithm work or equal API capabilities.
+
+| Repository | Compass | Graphify |
+| --- | --- | --- |
+| Chi | Six supported static calls | Intermediate `Method` label ambiguous |
+| Click | Six supported static calls, stdin branch | Intermediate stdin/stdout labels ambiguous |
+| jsoup | Five supported static calls, `createShell` route | No outgoing calls at the starting node |
+| Redux | Endpoint unresolved | Endpoint unresolved |
+| WalkDir | Four supported static calls | Endpoint resolves to the wrong source coordinate |
+
+The workflow yields **4/5 versus 0/5 source-supported static call paths**.
+Graphify's native-label path already succeeds on Click in a separate arm;
+this result identifies a public-neighbor identity gap rather than inability to
+find that graph path. Empty projections and pruned ambiguous branches receive
+no global source-disconnection credit. No run exhausted its workflow budget.
+
+Every returned Compass parallel call record is source-checked. The Click stdin
+alternative was already reviewed in the earlier Graphify native-label arm.
+The jsoup node sequence follows the registered `createShell` route, but its
+returned `appendElement` occurrences are the head/body calls at lines 70/71,
+not frozen line 69. Both shell calls at lines 126/127 are retained. Only Chi
+and WalkDir contain a frozen occurrence for every step. Static source support,
+exact occurrence credit and runtime feasibility remain distinct. The earlier
+native jsoup `Document.body` fallback caveat still applies to that earlier
+result; this workflow does not replace it.
+
+All 110 public requests replay exactly, all 20 endpoint resolver results remain
+unchanged, and all 76 neighbor responses match their full graph projections.
+Source pins, source/graph/executable hashes, raw transcripts and the 227 installed
+Graphify package file hashes are checked. Repeated verification is byte-identical.
+`public_neighbor_path_review.json` retains the outcomes and external
+`public-neighbor-path-01` artifact hashes.
+
+Compass used 72 requests and 1,558,220 response bytes; Graphify used 38 requests
+and 11,001 bytes. These costs include unsuccessful lookups. Compass explored
+more nodes and returned richer records; the totals do not establish an
+efficiency advantage. Known jsoup/Redux graph coverage gaps remain explicit.
+
+All 218 benchmark tests and the product boundary pass. Fourteen new harness
+tests include an independent simple-path oracle over all 4,096 four-node
+directed graphs at three depth bounds, plus identity, truncation, direction,
+cycle, caching, parallel-record and resource-limit cases. The first full suite
+attempt hit an existing subprocess `killpg` permission error; the unchanged
+repeat passed and both logs are retained. No Rust, JavaScript, packaging or
+platform tests were rerun for this evaluation-only change. Product version
+remains 0.3.30. Authored explanations, actual god-object judgments, functional
+communities and held-out superiority remain unproven.
+
+## Next evidence to collect
+
+1. Re-review the invalidated pinned hierarchy scorecards from their sources.
+   The corrected fixture and selected real-source evidence above do not replace
+   those broader checks.
+2. Extend source-proven loop/result/iterator inference to recover the remaining
+   fd misses. Evaluate TypeScript identity independently of the bounded query
+   binding proof above. Extend Java evidence beyond the corrected varargs
+   cases, including untyped method results and unresolved receiver forms.
+   Keep exact
+   build/source provenance for subsequent release comparisons;
+   the latest query correction has native and fixed-graph regression evidence.
+3. Use the source-role census and connectivity breakdowns to review actual
+   responsibilities and source-edge correctness, including containment-heavy
+   modules and generic reference targets. Evaluate cluster responsibilities
+   and cross-community connections separately from graph consistency.
+4. Extend the development navigation-path judgments to directed call paths,
+   longer walks, parallel source occurrences, broader ambiguity/unreachable
+   cases, and real-repository work exhaustion. A negative or limit outcome
+   must never count as a path or proof of global disconnection.
+5. Use held-out repositories/questions and publish all failures, including
+   competitor wins. Separate extraction gaps, resolution gaps, retrieval gaps,
+   rendering gaps and oracle mistakes using actual source evidence.
+6. Improve the owning production layer for reproduced failures, retain native
+   regressions, then rerun equivalent questions. Report category-level evidence
+   and uncertainty rather than claiming universal dominance.
+
+## Externally rated Blob cohort: original bounded run
+
+The first external god-object label panel uses Lech Madeyski and Tomasz
+Lewowski's [MLCQ v1.1](https://zenodo.org/records/3666840), CC-BY-4.0, paper
+DOI 10.1145/3383219.3383264. The frozen registration selects every repository
+revision with at least two multi-reviewer unanimous `none` classes and two
+classes whose reviewers all assigned `major` or `critical`. Those are
+CloudStack `8d3feb100aab4a45b31a789f444038b892161eec` and Eclipse Platform UI
+`e3bbb556534a1fb945e1036948325d14a8dd9c7a`. The obsolete Eclipse repository URL
+failed; its current official repository supplied the same exact revision.
+
+The CSV has 4,019 Blob reviews covering 2,334 classes. All 55 classes and 104
+review rows in the selected revisions are retained. Eight classes form the
+primary panel: four positive and four `none`; 47 retain uncertain ratings.
+Repeated reviews by one reviewer do not add independent votes. All eight
+annotated spans were read in full and pinned before querying. The positive
+`DeprecatedUIWizardsAuto` case is a test class and stays in the denominator.
+Authored responsibility notes remain separate from developer ratings and tool
+answers. This purposive Java sample supplements the existing multilingual
+panel; it does not establish population prevalence or cross-language detection.
+
+### Extraction and artifact admission
+
+Both tools received the same clean whole-repository source roots and native-only
+extraction requests. Limits were registered before execution: 1,200 seconds per
+extraction, 16 MiB per output stream and 256 MiB per graph artifact. Tool-native
+file discovery and worker counts remain different. Timings below are single-run
+operational observations with concurrent repository runs, not a controlled speed
+comparison. Compass used the frozen **unoptimized Cargo dev binary**, with debug
+information and incremental compilation disabled; Graphify used its installed
+0.9.67 Python package. These timeout observations do not establish Compass
+release performance. The build-profile disclosure leaves every original graph
+hash, size, admission outcome and query result unchanged.
+
+| Repository/tool | Observation | Admitted for queries |
+| --- | --- | --- |
+| CloudStack / Compass | Harness timeout at 1,200.258 s; exit -9 | No |
+| CloudStack / Graphify | Exit 0 in 88.899 s; 227,334,534-byte graph | Yes |
+| Eclipse / Compass | Exit 0 in 671.990 s; 477,211,091-byte graph | No: above registered artifact bound |
+| Eclipse / Graphify | Exit 0 in 65.246 s; 189,557,807-byte graph | Yes |
+
+Compass Eclipse reported 6,162 indexed files, 95,084 nodes, 347,974 edges and
+317 communities, **with 62 omitted edges and a partial-graph warning**. Its
+exit code is not evidence of complete coverage. Graphify reported 6,775 code
+files for CloudStack and 6,162 for Eclipse; its admitted graphs contain
+93,793/70,420 nodes and 340,129/258,146 edges, respectively. These counts are
+coverage diagnostics, not correctness scores.
+
+The retained Graphify CloudStack stderr also discloses that **all 119 SQL files
+were skipped because `tree_sitter_sql` was not installed**, and three other files
+had syntax errors. The frozen installation and graph remain unchanged. The
+whole-repository request did not yield equal emitted language coverage, so its
+operational timing cannot isolate comparable extraction work.
+
+### Native ranking and separate source-assisted diagnosis
+
+The registered request is `god_nodes(top_n=100)`. At each cutoff 10, 50 and 100:
+
+| Tool | Positive class retrieval | `none` class retrieval |
+| --- | --- | --- |
+| Compass | Unavailable for all 4 cases | Unavailable for all 4 cases |
+| Graphify | 0/4 | 0/4 |
+
+Compass's original timeout and artifact-limit failures remain explicit. They
+are not four negative classification decisions. All eight reviewed classes
+exist at the exact coordinates in Graphify's graphs and resolve through its
+public `file::symbol` lookup, so their absence from the top 100 is not an
+extraction miss. Unlabeled returned hubs cannot establish precision-at-k or a
+false-positive rate.
+
+Across Graphify's 200 returned hub rows, 163 have unique graph label identities
+and matching distinct-pair degrees; 37 remain ambiguous. No identity is chosen
+using expected degree or the external rating. All eight source-assisted,
+unfiltered neighbor calls match stored displayed direction/label/relation
+triples (234 rows). They provide graph-consistency evidence, not source edge
+precision, direct neighbor IDs or responsibility synthesis. These follow-ups
+never replace the native ranking score.
+
+### Verification and next improvement
+
+The verifier rechecks raw requests/responses for 18 tool calls, source revisions
+and hashes, graph hashes, binary and Graphify installation fingerprints,
+registration provenance and class denominators. Its second run is byte-identical
+(`420eb2fc950039450f77c0561aea887e905f0c1a80c21de9fc99c95e031c8878`).
+All 237 benchmark tests and the product-boundary gate pass. No Rust or JavaScript
+production code changed in this checkpoint, so their build/test matrices were
+not rerun. Version remains 0.3.30.
+
+A two-second live sample during CloudStack extraction identifies SQL prefix
+scanning as a likely bottleneck. Code inspection shows
+`dollar_quote_delimiter_at` calls `statement_start_before` before rejecting
+bytes that cannot begin dollar delimiters. Per-byte callers can repeatedly scan
+the file prefix. CloudStack's largest SQL file is 411,080 bytes and contains no
+dollar signs. This is a measured profiling lead, not a tested optimization or
+whole-run attribution. A follow-up must preserve syntax semantics and compare
+old/new results on pinned sources. Any larger-artifact query run must be
+separately declared and retain the original admission failure.
+
+`mlcq_god_audit_review.json` records the full results and artifact digests under
+external run `mlcq-god-audit-01`; registration, source witnesses, source reviews
+and scorer are committed alongside it. This run proves neither Compass
+superiority nor a validated god-object classifier. Authored explanations,
+functional communities, broader source precision and held-out confirmation also
+remain open.
+
+## SQL prefix guard: matched development-build diagnosis
+
+The SQL guard in `1a1f6a69` rejects impossible dollar-delimiter syntax before
+scanning a statement prefix. Plausible delimiters retain the existing
+statement-sensitive identifier handling. It changes no graph schema, producer
+version, dependency or public command; Compass remains 0.3.30.
+
+`sql_prefix_scan_registration.json` froze four complete CloudStack SQL files
+before candidate measurements: byte-size quartile indices 29, 59, 89 and the
+largest index 118 out of 119 tracked SQL files at the original pinned revision.
+Both binaries used the same copied input directory per file. Three runs per
+binary alternated order, used fresh output directories and ordinary OS caches,
+and retained the 180-second process, 16 MiB stream and 256 MiB graph limits.
+No timeout was replaced or excluded.
+
+The frozen baseline and candidate are **unoptimized development binaries** with
+matching explicit settings: debug information disabled, incremental compilation
+disabled, two build jobs and the same offline parser bundle. The matching
+candidate build is `bbc6a419`. The original default-debug
+validation binary remains a separate artifact and was not timed. The host also
+ran unrelated work; timestamped load averages are retained and do not prove
+isolation. This is development diagnosis, not release-performance qualification.
+
+| SQL bytes | Baseline completed | Candidate completed | Baseline median | Candidate median | Full old/new graph equality |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 938 | 3/3 | 3/3 | 1.010 s | 1.152 s | Yes, all six graphs |
+| 1,949 | 3/3 | 3/3 | 1.004 s | 1.077 s | Yes, all six graphs |
+| 10,288 | 3/3 | 3/3 | 2.462 s | 2.284 s | Yes, all six graphs |
+| 411,080 | 0/3 | 3/3 | unavailable | 174.175 s | Unproven: unavailable baseline output |
+
+Equality compares complete JSON documents with array order intact and no field
+exclusions, alongside exact byte and canonical JSON hashes. All three candidate
+graphs on the largest file match, with 1,949 nodes and 3,732 edges. Unavailable
+baseline output prevents proving old/new equality for that file. No latency ratio is assigned to
+that censored comparison. Small-file timing variation includes regressions;
+three observations do not establish a general speed improvement. In particular,
+the smallest file's candidate median exceeds the baseline by more than the
+performance policy's 10% review threshold, so this run is not promoted as a
+qualified performance baseline.
+
+Verification rechecks the source revision, size-based selection, complete source
+hashes and copies, exact commands, binary/build hashes, stream hashes and sizes,
+peak-RSS parsing and every successful graph. A second verification is
+byte-identical. `sql_prefix_scan_review.json` retains all 24 outcomes, including
+timeouts, timings, RSS availability and host-load observations. External raw
+artifacts remain under `sql-prefix-scan-01`.
+
+Passed: four SQL unit tests, 34 SQL domain integration tests, formatting,
+workspace Clippy, 1,108 workspace tests with two existing ignored tests, nine CLI
+product tests, code-graph fixture qualification, all 237 benchmark tests and the
+product-boundary gate. The fixture gate's first attempt failed its missing
+parser-bundle preflight; the retry used this worktree's already downloaded bundle
+with an identical vendored definitions digest and passed. Both attempts remain
+in the report. The matched-build SQL and product checks also pass. Hosted
+platform, packaging and the release performance matrix were not run for this
+development diagnosis.
+
+This change does not implement god-object classification. The original MLCQ
+whole-repository timeout and artifact-admission failures remain unchanged. The
+registered whole-CloudStack follow-up and separately declared 1 GiB Blob query
+diagnostic are additional work; sample timing and graph repeatability cannot
+stand in for their outcomes or for superiority over Graphify.
+
+## Larger-artifact Blob follow-up: ranking misses remain
+
+The separately registered follow-up raises the graph-artifact limit to 1 GiB
+for both tools. It preserves the eight source-reviewed classes, native
+`god_nodes(top_n=100)` request, cutoffs 10/50/100, 120-second MCP request limit,
+16 MiB response limit and 64 MiB session cap. The larger limit was declared after
+observing the original failures and Graphify outputs; this is development
+evidence. It does not replace the original 256 MiB protocol.
+
+The SQL-prefix candidate's whole CloudStack extraction also timed out, at
+**1,200.448 seconds**, exit -9, with no admitted graph. Its wall time includes
+a recorded two-second process sample. The frozen unoptimized binary therefore
+remains unavailable for CloudStack. The sample shows repeated fixed SQL regex
+compilation in `add_access_matches`; source inspection confirms the patterns
+are compiled per statement. A separate release comparison is registered before
+any cache implementation or measurement. Neither this profile nor the completed
+SQL samples prove that the full-repository bottleneck is solved.
+
+The 477,211,091-byte Compass Eclipse graph is now admitted under the declared
+larger bound. Its **62 omitted edges and partial-graph warning remain explicit**.
+Both frozen Graphify graphs are reused. Its CloudStack SQL dependency omission
+and three files with syntax errors remain coverage limitations; its package and
+graphs are unchanged.
+
+At every registered cutoff:
+
+| Tool | Positive classes | `none` classes |
+| --- | --- | --- |
+| Compass | 0/2 admitted; 2 unavailable | 0/2 admitted; 2 unavailable |
+| Graphify | 0/4 | 0/4 |
+
+Both tools resolve all four Eclipse classes at the exact reviewed source
+coordinates. Their absence from the ranking is distinct from extraction absence
+or a negative classification. The following unfiltered neighbor observations
+also show why connectivity alone does not establish a responsibility defect:
+
+| Eclipse class | External Blob rating | Compass record appearances | Graphify displayed rows |
+| --- | --- | ---: | ---: |
+| `BindingModel` | Positive | 36 | 22 |
+| `SimpleValueProperty` | `none` | 54 | 52 |
+| `CSSValueListImpl` | `none` | 11 | 11 |
+| `DeprecatedUIWizardsAuto` | Positive | 21 | 19 |
+
+The `none`-rated property abstraction has more neighbor records than either
+positive class under both tools. These counts include structural relations;
+they are not complexity, cohesion, population precision or evidence that any
+particular class needs refactoring. The positive wizard class is a test class,
+as retained in the source review.
+
+All 100 Compass hub identities, stored degrees and stored source anchors match
+its graph; all 100 connectivity summaries and their text rows match stored
+records. Graphify again has 163 uniquely resolved labels with matching degrees
+across 200 rows, with 37 ambiguous labels retained. All four Compass unfiltered
+neighbor projections match 122 full records, and all eight Graphify projections
+match 234 displayed direction/label/relation rows. These are graph-consistency
+checks, with different identity exposure, not source-edge precision or an
+efficiency comparison.
+
+The first neighbor audit incorrectly expected `null` for an unfiltered request;
+the native typed response uses `relationFilter: ""`. Its mock test repeated the
+same mistake, so four successful responses were marked invalid. Two regressions
+fail before the auditor fix and pass afterward. The corrected auditor requires
+the native string field and rejects missing/null/wrong filters. Raw captures,
+the initial invalid verification and its verifier are preserved; no requests or
+ranking cutoffs changed. Both corrected verification runs are byte-identical
+(`a659988abe0c9e64449b8265f06e066425fb6963e340176ccfde8f0a1e258d3d`).
+All 27 tool calls are checked against raw requests/responses. All 238 benchmark
+tests and the product-boundary gate pass. This checkpoint changes evaluation
+code and documentation; native production code remains the tested prefix guard,
+so Rust/JavaScript/platform/packaging gates were not rerun here.
+
+`mlcq_admission_followup_review.json` retains the results, diagnostic warnings,
+auditor correction and artifact digests. Diagnostic text replaces the local home
+prefix with `<user-home>`; hash-bound original logs remain external. The unchanged
+release rebuild also confirms the copied regex-comparison baseline byte-for-byte.
+Actual god-object classification, authored explanations, functional communities
+and broader independent confirmation remain unproven. Version remains 0.3.30.
+
+## SQL access-regex cache: matching release comparison
+
+The SQL extractor now compiles its fixed access regexes—one read pattern and five
+write patterns—once per process. The patterns, iteration order, captures and alias/CTE handling
+are unchanged. A new native regression checks that every pattern is retained in
+order and repeated calls reuse the same compiled storage. Public commands,
+graph schemas and version 0.3.30 are unchanged.
+
+The registered diagnosis uses the same four complete CloudStack SQL inputs,
+three repetitions per binary, alternating order and fresh outputs. Both binaries
+use matching release settings: one codegen unit, thin LTO, abort-on-panic and
+stripped symbols. An unchanged release rebuild confirmed the frozen baseline
+hash before the cache edit. Build manifests, lockfile, toolchain and repository
+configuration are unchanged. Ordinary OS caches and unrelated host work remain
+limitations; timestamps, load averages and peak RSS are retained.
+
+| SQL bytes | Baseline median | Cached-regex median | Candidate / baseline | Full graph equality |
+| ---: | ---: | ---: | ---: | --- |
+| 938 | 0.596 s | 0.570 s | 0.956 | All six graphs |
+| 1,949 | 0.580 s | 0.594 s | 1.024 | All six graphs |
+| 10,288 | 0.657 s | 0.666 s | 1.014 | All six graphs |
+| 411,080 | 13.121 s | 1.650 s | 0.126 | All six graphs |
+
+All 24 observations succeeded, and the complete graph JSON is equal across all
+six runs of each input, with no excluded fields and preserved array order.
+These are four development files selected during an earlier diagnosis. The
+observed medians do not establish a confidence interval, whole-product release
+qualification, a Graphify speed ranking or independent confirmation. Earlier
+unoptimized observations, small-file regressions and whole-repository timeouts
+remain unchanged.
+
+Validation passed: formatting, five SQL unit tests, 34 domain-extraction tests,
+workspace Clippy, 1,109 workspace tests (two ignored), nine product tests, the
+complete code-graph fixture gate, all 238 benchmark tests, the product boundary
+and the matching release build. JavaScript source and viewer assets are
+unchanged; standalone npm checks were not rerun.
+
+The separately registered complete-source CloudStack follow-up uses fresh
+outputs, the same frozen release binaries, the original 1,200-second extraction
+limit and the declared 1 GiB admission cap. It must preserve each failure and
+partial-graph warning. Its result is pending at this checkpoint. Recovering
+that graph is a prerequisite for evaluating the unavailable Blob classes; it
+does not itself validate source correctness or god-object classification.
+
+All observations, binary/source digests and repeated verification are recorded in
+[`sql_regex_cache_review.json`](../../benchmarks/agent_query/sql_regex_cache_review.json)
+under external run `sql-regex-cache-01`.
+
+
+## Complete-source release recovery and the remaining Blob ranking gap
+
+The registered whole-CloudStack follow-up completed with both frozen release
+binaries on the same clean revision and full native discovery scope. Both
+indexed 6,783 files and published 173,689 nodes, 502,158 edges and 2,153
+communities. Their 671,502,979-byte graph artifacts are byte-identical, SHA-256
+`b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69`.
+Both report **one omitted node and 45 omitted edges**, with zero quarantined
+identity collisions. Preservation of these partial artifacts is not proof of
+complete source coverage or relationship correctness.
+
+| Frozen release binary | Single wall-time observation | Original 256 MiB bound | Follow-up 1 GiB bound |
+| --- | ---: | --- | --- |
+| Before regex caching | 193.966 s | Exceeded | Admitted |
+| With regex caching | 280.053 s | Exceeded | Admitted |
+
+The candidate took longer in this observation. The cause is unproven. The
+four-file SQL improvement cannot establish a whole-repository improvement;
+the registered fixed-order single observations are not a speedup experiment.
+The baseline already completes in release mode, so recovery cannot be credited
+solely to regex caching. The earlier unoptimized timeouts and original
+artifact-limit failures remain unchanged. Registration
+`sql_regex_cache_whole_repeat_registration.json` freezes three alternating
+observations per binary, with CPU time, peak RSS, all failures and full artifact
+comparison retained. No approved performance baseline follows from this panel.
+
+The separately registered release-server audit then made the same native
+`god_nodes(top_n=100)` request and source-assisted diagnostic queries for the
+same eight externally reviewed classes. CloudStack uses the fresh candidate
+graph. Eclipse reuses its original frozen Compass graph, including its 62-edge
+omission warning; it is not a fresh candidate extraction. Both Compass graphs
+are queried using the same frozen release server. Graphify's original graphs
+and environment are unchanged, including its omission of all 119 CloudStack SQL
+files. This is development follow-up on known cases, not held-out confirmation.
+
+| Tool | Positive classes returned at 10 / 50 / 100 | None-rated classes returned at 10 / 50 / 100 | Exact source-assisted class resolution |
+| --- | --- | --- | --- |
+| Compass | 0/4 / 0/4 / 0/4 | 0/4 / 0/4 / 0/4 | 8/8 |
+| Graphify | 0/4 / 0/4 / 0/4 | 0/4 / 0/4 / 0/4 | 8/8 |
+
+All classes are now admitted for both tools, so the native positive-class
+ranking misses are no longer masked by Compass availability failures. Missing
+ranking rows are not negative classifier decisions. Four none-rated classes do
+not establish a false-positive rate for the many unlabeled returned hubs, and
+source-assisted resolution cannot replace the native ranking score.
+
+Verification covers 36 raw tool calls. All 200 Compass hub rows have explicit
+IDs, matching stored degrees and source anchors, and matching connectivity
+summaries/text. Graphify resolves 163 of its 200 displayed hub identities
+uniquely with matching stored degree; 37 ambiguous displayed labels remain
+unresolved. All eight Compass unfiltered neighbor projections match 266 full
+record appearances. All eight Graphify projections match 234 displayed triples;
+that format does not expose neighbor IDs. These are stored-graph consistency
+checks, not source-edge precision or authored explanation scores.
+
+Both the whole-run verification and the four-session query verification repeat
+byte-for-byte. The reports preserve graph warnings, unchanged prior outcomes,
+resource/build provenance and the slower full-source candidate observation in
+`sql_regex_cache_whole_review.json` and `mlcq_release_followup_review.json`.
+No production code changed after the validated cache commit in this checkpoint;
+the previous native gates and 238 benchmark tests remain the applicable checks.
+Actual god-object diagnosis, authored explanations, functional communities and
+independent final confirmation remain open. Version remains 0.3.30.
+
+
+## Registered complete-source timing repeat
+
+The separately registered alternating CloudStack panel completed all three
+observations per frozen release binary. In execution order, wall times were
+baseline 235.574 s, candidate 204.082 s, candidate 210.928 s, baseline 215.288 s,
+baseline 213.526 s, candidate 203.430 s. Baseline median is 215.288 s; candidate
+median is 204.082 s (ratio 0.948). The registered greater-than-10% median
+regression flag is false. Median user/system CPU seconds are 260.56/23.68 for
+baseline and 227.06/23.12 for candidate. All resource measurements and host-load
+observations are retained in
+[`sql_regex_cache_whole_repeat_review.json`](../../benchmarks/agent_query/sql_regex_cache_whole_repeat_review.json).
+
+Both verifier passes checked all six raw streams, resource measurements,
+registered command arguments, frozen executable hashes, clean pinned source,
+artifact admission and full graph hashes. Their reports are byte-identical.
+Every graph is 671,502,979 bytes and matches the original published artifact,
+including ordering and metadata. Each run extracts 6,783 files with zero cache
+hits, publishes 173,689 nodes and 502,158 edges, and reports one omitted node,
+45 omitted edges and zero identity collisions. Equality does not establish
+source correctness or complete extraction.
+
+The initial 193.966 s baseline / 280.053 s candidate observation remains outside
+this panel and unchanged. This new panel does not reproduce that slowdown, but
+neither its cause nor a general speedup is established. No own compilation,
+other extraction, query capture or large-graph verification ran alongside these
+timed observations. Unrelated host work and ordinary OS caches were uncontrolled.
+The repository was already used for development; this is neither independent
+confirmation nor a Graphify speed comparison. Prior timeouts and the original
+256 MiB admission failures remain unchanged. No new production code was needed
+for this repeat; the candidate remains the previously validated SQL regex cache.
+
+
+## Java enum references: qualified production and full-census follow-up
+
+Production commit `a8b4a490` adds enum constants to the bounded Java lexical
+value index, preserving static value types, parameter/local/type-parameter
+shadowing and exact member tokens. Registered constant-specific bodies retain
+their method and field owners. Their fields shadow enclosing enum values;
+access to a body-specific field requires lexical ownership of that exact enum
+member, within the resolver budget. Enum values keep their enclosing enum type.
+
+Bare enum switch labels derive their target from the selector type. Unknown
+selectors remain unresolved, including when a same-named enclosing field exists.
+Qualified receiver lookup supports same-package types and preserves source-type
+precedence over imports. Unregistered local/anonymous owners, general hierarchy
+and cross-file value/type chains remain incomplete. AST cache semantics advance
+from 9 to 10; rebuild graphs for the new evidence. Graph/evidence schemas and
+package version 0.3.30 remain unchanged; historical realizations are immutable.
+
+### Compiler census: unchanged source and denominator
+
+The registered release follow-up uses the complete clean pinned jsoup tree,
+the unchanged 88-file Java 8 compiler capture, the frozen pre-enum release binary
+and Graphify graph. The candidate executable is bound to its qualified
+production/build inputs and corrected test digests. Its SHA-256 is
+`28ae29a3141164df250a237e88d8054af1bb00021b1dafd4387b674311b40889`.
+The executable was frozen before the production commit was recorded; the
+recorded inputs match that commit.
+
+| Source-reference kind | Pre-enum Compass | Candidate Compass | Frozen Graphify |
+| --- | ---: | ---: | ---: |
+| Ordinary fields | 3,047 / 3,785 | 3,106 / 3,785 | 0 / 3,785 |
+| Enum constants | 0 / 529 | 355 / 529 | 0 / 529 |
+
+All 3,047 previously verified references are retained; 414 references become
+newly verified. All 3,461 returned contacts in the registered cohort agree with
+the compiler on target declaration, source owner and UTF-8 occurrence span.
+Graphify has no positive-contact precision denominator. The candidate still
+misses **679 ordinary and 174 enum references**. Declaration coverage remains
+614/616 ordinary fields and 131/131 enum constants. No source or miss was removed
+from the denominator. Both independent verifier executions produce identical
+reports; they replay the same compiler oracle, not independent human judgments.
+
+The fresh baseline graph is byte-identical to the preserved original. Both
+jsoup graphs retain a two-edge omission warning. The candidate keeps all 6,116
+node identities and all 25,006 original edge records, adding 670 `references`.
+Of those additions, 414 are in the compiler cohort and **256 are in test sources
+outside it**. All 670 pass source-token, line, provenance and applicable callable
+containment checks; these checks do not establish binding correctness for the
+256 unscored test references. Full per-contact reviews, misses and source hashes
+remain available in the retained artifacts.
+
+### Other languages and community effects
+
+Before control extraction, a separate protocol fixed all four other existing
+cohort repositories: Chi/Go, Click/Python, Redux/TypeScript and WalkDir/Rust.
+All eight fresh-output observations succeed. Each candidate graph equals both
+its paired baseline and preserved original byte-for-byte, including metadata
+and array order. Warnings remain explicit, including Redux's two omitted edges.
+Repeated complete verification reports are identical. These are preservation
+controls on known development inputs; they add no new quality or timing score.
+All 227 frozen Graphify package files and 58 package versions verify unchanged.
+
+Only `community` attributes change on 4,111 jsoup nodes. The community count moves
+from 42 to 40. A post-change replay of all 75 unchanged source-defined task-pair
+outcomes across the five repositories yields identical outcomes, and repeats
+byte-identically. This small diagnostic does not establish functional cohesion,
+ideal responsibility boundaries or improved communities.
+
+### Native checks and retained corrections
+
+Formatting, 38 Java language integration tests, all 533 resolver tests, 33 cache
+contracts, focused and workspace Clippy, 1,109 workspace tests (two existing
+ignored), nine product tests, complete graph-fixture qualification, 238 benchmark
+tests, product boundary and the release build pass. The fixture gate includes
+the independent Markdown and React checks. These suites overlap and must not be
+summed into a unique-test count. No standalone browser/platform/packaging matrix
+was rerun locally.
+
+The unchanged production baseline first fails seven of eight language tests
+and three of six resolver tests. Retained follow-up failures caught constant-body
+initializer ownership and an implementation regression in source-type/import
+precedence. An initially invalid enum-static initializer fixture was replaced
+with a valid own-field initializer that also failed before the ownership fix;
+six positive fixture sources compile under javac 17 with `--release 8`.
+
+The first resolver scope negative looked for a nonexistent `file` scope and
+therefore tested a missing scope. It now checks an existing `module` scope
+separately, requiring that scope to exist, and retains missing-scope and depth
+cases. The full resolver suite and focused Clippy pass after this correction;
+the production binary is unchanged by the test-only correction.
+
+The [complete report](../../benchmarks/agent_query/java_enum_access_review.json)
+retains both registrations, native logs and source/binary digests, all original
+outcomes, full graph deltas, control results and repeated verification. This is
+one previously inspected Java build configuration. Authored answer quality,
+query usability, longer walks, functional communities, actual god-object
+classification and final independent superiority confirmation remain open.
+
+
+## Java dotted nominal owners: complete registered follow-up
+
+The resolver now joins an established dotted Java nominal receiver to its
+canonical nested declaration. It preserves duplicate receiver/enclosing-owner
+and package/type ambiguity before considering member availability. Exact
+source declarations retain precedence, target-kind constraints remain enforced,
+and nominal-prefix work shares the candidate budget. The implementation does
+not infer nominal types from arbitrary value-expression chains.
+
+Production commit `be2fb542` follows the registration in `c5a94aeb`. The
+[review](../../benchmarks/agent_query/java_dotted_owner_review.json) binds the
+qualified patch, all 748 build inputs, frozen release binary, commands, outputs
+and raw artifact hashes. The unchanged jsoup Java 8 compiler cohort contains
+88 source files and 4,314 internal references.
+
+| Exact occurrence target and owner | Prior candidate | Dotted-owner candidate | Frozen Graphify |
+| --- | ---: | ---: | ---: |
+| Ordinary fields | 3,106 / 3,785 | 3,115 / 3,785 | 0 / 3,785 |
+| Enum constants | 355 / 529 | 368 / 529 | 0 / 529 |
+
+All 3,461 earlier verified references remain. All 3,483 returned in-cohort
+contacts match the compiler; there are 670 ordinary and 161 enum misses. Empty
+Graphify contact sets have no positive-contact precision denominator. Both
+Compass graphs retain two omitted edges. No denominator, oracle, source commit
+or Graphify graph changed.
+
+All 6,116 nodes and 25,676 earlier edges remain. There are 49 added references:
+22 in the compiler cohort, 21 in tests and six in the Java 11 overlay. All 49
+pass token, range, provenance and callable-containment checks. Those checks do
+not establish semantic binding precision for the 27 outside-cohort additions.
+The only changed node field is community membership, affecting 4,097 nodes;
+other top-level graph fields are equal. Community count changes from 40 to 43.
+All 75 existing source task-pair outcomes remain unchanged across the five
+repositories in a post-change replay. This does not measure functional cohesion.
+
+All eight fresh Go/Python/TypeScript/Rust control extractions succeed, and each
+complete graph equals its paired baseline and preserved original. Redux retains
+its two omitted edges. Census, control and community verification reports are
+byte-identical on repetition. Repetition checks consistency, not oracle
+independence. The frozen Graphify environment still matches all 227 recorded
+package files and 58 package versions.
+
+A separate compiler fixture improves from zero to four supported references
+(three enum, one ordinary field). The earlier nested-expression fixture remains
+at five of eight enum references and five of five fields. Its three missed
+nested type-expression references are retained explicitly. Neither fixture is
+included in the real-source denominator. A compatibility diagnostic reuses all
+206 baseline version-10 AST cache entries with zero extracted files and produces
+a graph byte-identical to the fresh candidate. No extraction, graph schema,
+package version or historical realization changes are required; stored graphs
+must be rebuilt to apply this resolver correction.
+
+Native qualification passes formatting, focused and workspace Clippy, all 536
+resolver tests, 1,109 workspace tests (two existing ignored), nine product tests,
+the full code-graph fixture gate, 238 benchmark tests, product-boundary checking
+and release compilation. These suites overlap. Standalone browser, platform and
+packaging matrices were not rerun. The original failing imported-nested test
+remains recorded; later budget/ordinary-field extensions pass the full suite.
+Extraction durations are retained only as operational observations. This is a
+known development census, not independent final confirmation or evidence of
+better authored explanations, god-object diagnosis or functional communities.
+
+
+## JSON graph cache coherence and query-cost follow-up
+
+The standalone JSON query server now derives its compact, full, and typed graph
+views from one bounded read of an opened graph artifact. Its cache identity uses
+the artifact's content digest. This addresses a reproduced case where a graph
+changed while its size and modification time stayed the same: the old server
+could answer one request from the old community cache and another from the new
+graph. The old on-disk cache headers rebuild under new format markers. This
+change does not alter the graph schema, extraction, historical realizations, or
+the 0.3.30 package version.
+
+The [registered review](../../benchmarks/agent_query/graph_cache_coherence_review.json)
+binds 749 qualified Rust and manifest inputs, the frozen release binary, native
+logs, synthetic replay, and complete source-query controls. Formatting, focused
+and workspace Clippy, 1,112 workspace library/binary tests (two existing
+ignored), nine product tests, full code-graph fixture qualification, 238
+benchmark tests, product-boundary checking, and release compilation pass. These
+suites overlap. Seven separate core integration failures also reproduce on the
+unchanged committed baseline; they are recorded, not counted as passing.
+
+The synthetic panel checks 48 replacement cases across both binaries, two
+repeats, legacy and typed graphs, three write modes, and absent/present disk
+caches. All 432 raw calls verify against captured requests and responses. The
+candidate uses the new graph in all 72 post-replacement observations; the
+baseline's preserved-metadata stale-cache outcomes remain in the raw record.
+Independent repeated verification is byte-identical.
+
+The query panel uses five frozen real-repository graphs (Go, Python, Java,
+TypeScript, Rust) and a separate complete CloudStack diagnostic. Six fresh
+sessions per graph run each fixed question three times. All 828 executed calls
+complete with no tool or transport failures. All 46 available questions have
+identical **full tool responses** between binaries. The Redux path question has
+no exact graph endpoint; its 18 observations remain unavailable without a
+substitute. This is unchanged-query preservation evidence, not better source
+truth or a Graphify result.
+
+The correctness change has a measurable cost. Thirty-one warm question medians
+regress by more than 10%: all six lightweight questions on each language graph
+and CloudStack `graph_stats`. Their absolute medians range from about 1.65 to
+19.96 ms on the five language graphs; CloudStack `graph_stats` is 130.17 ms
+before and 747.95 ms after. Conversely, the available hub, neighbor, and path
+questions improve in this local panel. For example, CloudStack `god_nodes`
+falls from 4,320.25 to 1,252.60 ms, and jsoup `god_nodes` from 152.72 to
+31.74 ms. Every cold and warm RPC duration, ratio, and response comparison is
+in the review. Rehashing the complete graph on each request is a plausible
+cause of the lightweight-query cost; the measurement does not isolate it from
+other implementation changes.
+
+The median peak RSS of the mixed-query sessions rises from 78.7 to 120.6 MB
+for Chi, 205.9 to 305.7 MB for Click, 527.7 to 730.3 MB for jsoup, 188.7 to
+261.7 MB for Redux, and 58.2 to 80.3 MB for WalkDir. CloudStack has only one
+baseline memory result (7.13 GB) and no candidate memory result: the timing
+wrapper was terminated during teardown in the other five sessions. All five
+missing measurements remain explicit; no paired large-graph memory claim is
+supported. OS page cache and unrelated host activity remain uncontrolled.
+
+The correction improves a verified freshness failure and preserves all
+available fixed query outputs, while adding memory and lightweight-query cost.
+It does not establish better authored explanations, functional communities,
+actual god-object classification, or overall superiority to Graphify.
+
+### Core integration fixture inference policy
+
+The seven core integration failures in the cache review reproduce on the
+unchanged committed baseline. Their fixtures expect inferred semantic residue,
+but create `BuildOptions` without an inference level. The public default changed
+from `Max` to `Low` earlier; `Low` intentionally excludes inferred edges, so the
+fixtures were not exercising their stated semantic-preservation scenario. The
+test-only follow-up selects `Max` explicitly in seven tests and all 12 of their
+build configurations. It leaves every assertion unchanged and does not change
+the public `Low` default or production binary.
+
+All 13 tests in `loading_coverage` now pass under the pinned offline parser
+setup. Formatting, focused core integration Clippy, workspace library/binary
+Clippy, and 1,112 workspace library/binary tests (two existing ignored) pass.
+The [fixture review](../../benchmarks/agent_query/core_inference_fixture_review.json)
+binds the original seven failures, the sole changed Rust test file, the frozen
+production binary, and the before/after native logs. This restores the intended
+regression coverage; it does not prove any new graph query or god-object quality.
+
+
+## Class-span ranking diagnostic on the labeled Blob cohort
+
+The [registration](../../benchmarks/agent_query/mlcq_class_span_probe_registration.json)
+preceded a read-only, bounded scan of both frozen Compass typed graphs from the
+earlier MLCQ release-server follow-up. It fixes an intentionally simple
+alternative to topology degree: rank every source-located `class` node by the
+inclusive number of lines in its stored source span, breaking ties by exact
+node ID. This is a size diagnostic, not a responsibility or defect model. The
+scan keeps the same 55 reviewed classes and original four-positive/four-none
+primary panel; neither Compass nor Graphify was re-extracted or re-queried.
+
+The CloudStack graph contains 173,689 nodes and 6,373 admissible class spans;
+Eclipse contains 95,084 nodes and 6,628. The preregistered exact file/name/span
+join finds 48 of 55 reviewed classes uniquely. Seven uncertain secondary cases
+remain unavailable, with no alternate identity selected. All eight primary
+cases join uniquely. The four consensus-positive classes rank **131, 411, 426,
+and 714** in their respective repository class lists; the four consensus-none
+classes rank 3,532, 3,903, 4,333, and 5,692. Thus, size-only ranking retrieves
+**0/4 positive and 0/4 none** at each declared cutoff 10, 50 and 100. The
+earlier native hub panels also retrieve 0/4 positives for both Compass and
+Graphify at 100; those original results remain unchanged. This exploratory
+method provides no superiority result and should not be promoted as god-object
+detection.
+
+The first scanner attempt failed because the node array followed more than one
+MiB of graph metadata. Its raw failure is retained. A corrected streaming
+scanner kept the same registered ranking, labels, graph hashes and byte bounds;
+the complete 55-class verification repeats byte-identically. The
+[review](../../benchmarks/agent_query/mlcq_class_span_probe_review.json) binds
+both runs, all 55 joins, class counts, ranks and original native results. The
+cohort is known, purposively consensus-enriched Java development data. Source
+span measures neither functional cohesion nor independent responsibilities;
+the graph producer versions and CloudStack partial-coverage warning also remain
+explicit.
+
+## Full-class relation evidence inventory
+
+The [registration](../../benchmarks/agent_query/mlcq_relation_evidence_registration.json)
+preceded a bounded, read-only inventory of the same two frozen Java graphs. It
+requires direct directed `class --contains--> method/field` edges and a unique
+class owner before attributing method `calls` or `references` edges to a class.
+It preserves occurrence records separately from distinct targets, and records
+relation confidence, exact source anchors, unresolved targets and missing
+endpoints. This inventories stored graph facts; it is not an independent source
+oracle or a god-object classifier. The all-class raw record includes 13,001
+class IDs and their counts. The [public review](../../benchmarks/agent_query/mlcq_relation_evidence_review.json)
+contains graph aggregates and all 55 previously selected reviews, bound to the
+raw and verified SHA-256 digests. Two complete verifier runs are byte-identical.
+
+CloudStack has 173,689 nodes, 502,158 edges and 6,373 class nodes. Its direct
+class-member edges yield 84,998 uniquely owned members and zero members with
+multiple distinct class owners. Eclipse has 95,084 nodes, 347,974 edges and
+6,628 classes, with 69,878 uniquely owned members and zero multiple owners.
+Unowned method and field nodes remain explicit (CloudStack: 6,987 methods and
+856 fields; Eclipse: 3,824 methods and 2,751 fields). All 55 review rows retain
+their original label and exact identity join: 48 unique joins, seven unavailable
+uncertain cases, and all eight consensus cases uniquely joined.
+
+The graphs contain enough links to investigate cohesion in a follow-up, but
+their coverage has not been established against source. Of all class nodes,
+4,020 CloudStack and 4,176 Eclipse classes have at least one owned method with
+an own-field `references` edge; 2,325 and 3,250 have internal method calls.
+Only 253 and 653 have an owned method with a foreign-field `references` edge.
+Under this **registered `references`-only rule**, all eight consensus cases have
+zero observed foreign-field references. This does not imply that their source
+methods never access foreign state or that any class is cohesive. CloudStack
+also has 1,042 `reads` and 6,161 `writes` edges, which the preregistered field
+rule excludes; the older Eclipse producer has no such relation categories.
+Combining them requires a separately declared analysis and source checks.
+
+No WMC, ATFD, TCC, responsibility score, ranking, new Graphify result or
+held-out evaluation follows from this inventory. The two producer versions and
+CloudStack's earlier partial-coverage warning remain attached to its results.
+
+### CloudStack `reads` and `writes` relation boundary
+
+A [separate registration](../../benchmarks/agent_query/mlcq_access_relations_registration.json)
+fixed the endpoint-kind and unique-owner census before inspecting CloudStack's
+1,042 `reads` and 6,161 `writes` edges. The complete
+[review](../../benchmarks/agent_query/mlcq_access_relations_review.json)
+accounts for every such edge in five source-kind/target-kind pairs: 863
+database-view reads, 178 query reads and one database-procedure read of a
+database table; 6,160 query writes and one database-procedure write of a
+database table. There are zero method-to-field `reads` or `writes` edges, zero
+missing endpoints, and no exact AST relationship-site anchors in this frozen
+graph. The all-55 sample join remains unchanged; the Eclipse rows are marked
+as outside this CloudStack-only evaluation. Two verifier runs are byte-identical
+and bind the frozen graph and producer hashes.
+
+These relations describe SQL dependencies and must not be added to Java
+foreign-field access. The earlier `references`-only counts therefore remain the
+applicable stored Java field-contact evidence for this probe. Their source
+coverage and independent target accuracy remain unverified; the eight
+consensus classes' zero observed foreign-field references cannot be treated as
+zero foreign-state access or a god-object diagnosis.
+
+## Independent member-declaration check for rated Java classes
+
+The [registration](../../benchmarks/agent_query/mlcq_member_source_registration.json)
+fixed all eight consensus-rated source files and both frozen graph hashes before
+a public-JDK-17 syntax parse. The oracle parses those pinned files without
+project dependencies or attribution. It selects each class by the previously
+witnessed file, name and source line, then lists only its direct method,
+constructor and field declarations. Compass's direct `contains` members are
+matched by kind, name and overlapping source lines, with no first-candidate
+fallback. Source files and graphs remain byte-identical before and after.
+
+All **95 source methods and 65 source fields** across the eight classes match
+exactly one direct Compass member, with no extra graph method or field in those
+classes. All 95 method start and end lines match; all 65 field end lines match.
+Thirty-eight field start lines differ because the JDK includes preceding
+annotations in the declaration start while Compass starts at the field token.
+The JDK reports five explicit constructors, which this registered comparison
+does not match to graph `constructor` nodes. Full per-member records, source
+hashes, roles and both repeated-verification digests are in the
+[review](../../benchmarks/agent_query/mlcq_member_source_review.json).
+
+The first graph comparison wrongly treated Compass's displayed `.name()` as
+the source method name and therefore left all 95 methods unmatched; that raw
+run is retained. A corrected scanner explicitly removes the display wrapper
+before name matching, with the original source set, oracle output, graph hashes
+and class IDs unchanged. Independent verifier runs and repeated JDK oracle
+outputs are byte-identical. One externally rated positive class is an Eclipse
+**test class**, so these eight cases cannot be described as eight production
+god-object judgments.
+
+This establishes direct method/field *declaration coverage for this selected
+panel*. It does not validate their `calls` or `references` targets, demonstrate
+foreign-state access, measure cohesion, support a classifier, or generalize
+beyond these known Java cases. Those relation/source checks remain prerequisites
+for any responsibility score.
+
+### Explicit `this.field` source-token check
+
+The [registration](../../benchmarks/agent_query/mlcq_explicit_this_field_registration.json)
+fixed a syntax-only check on the same eight files. A separate JDK parser
+enumerated `this.name` tokens in direct method bodies, skipping nested class
+bodies. A token entered the field denominator only if its selected name had
+exactly one direct class field and was not a method call. Source UTF-16 offsets
+were converted to exact UTF-8 byte positions before comparing directed
+method-to-field `references` records and target IDs in both frozen graphs.
+
+Only **five** tokens met this deliberately narrow rule: four in Eclipse
+`BindingModel` and one in CloudStack `DeploymentPlannersResponse`. Every one
+has exactly one stored Compass edge from its source-matched method to its
+source-matched field at the exact token bytes, with exact AST provenance and
+no competing `references` record at that token. The oracle also records four
+`this.field` sites inside a constructor and one `this.getClass()` method call;
+all five are outside the registered direct-method field denominator. The
+[review](../../benchmarks/agent_query/mlcq_explicit_this_field_review.json)
+contains all ten source sites, their roles and limits, edge IDs and endpoints,
+source and graph hashes, and byte-identical oracle and verifier repeats.
+
+An initial collector preflight used list comparison instead of set subset
+checking for sample IDs and failed before reading either graph; the failed
+attempt is retained and the corrected run uses the same registration and
+frozen inputs. Five exact matches are useful source-to-graph evidence for
+those sites, but far too narrow to validate the remaining field references,
+foreign-state access, cohesion or god-object classification. A larger
+independent relationship oracle is still needed.
+
+### Compiler-bound direct-field relationship census
+
+The [registration](../../benchmarks/agent_query/mlcq_javac_field_binding_registration.json)
+expanded the same eight known Java files from explicit `this.field` syntax to
+every direct-method field expression that a public JDK 17 compiler could bind
+to a field declared directly in the witnessed class. The compiler used an
+empty external classpath and no annotation processors, and its missing
+dependency diagnostics are preserved. Only `VariableElement` bindings equal
+to one direct source field entered the denominator; unresolved or other
+bindings were not treated as absent field accesses.
+
+The JDK reported **265 bound direct-own-field tokens**: 142, 4, 43 and 2 in
+the four CloudStack classes, and 55, 0, 4 and 15 in the four Eclipse classes
+(in the fixed sample-ID order). It also found three same-named expressions
+bound to nonfield symbols. All 65 direct source fields had compiler elements.
+For every bound token, the frozen Compass graph has **exactly one** directed
+`references` edge from the independently matched method to the matched field
+at the exact UTF-8 byte interval, with exact AST provenance and no competing
+record at that token. Conversely, all 265 stored method-to-own-field records
+in these eight selected classes are represented in this compiler-bound set.
+The five earlier explicit `this.field` controls preserve the same edge IDs and
+targets. Source files and both graphs remain byte-identical; repeated oracle
+and verifier outputs are byte-identical.
+
+The first compiler capture set a 1,000-error display cap. It is preserved;
+the corrected capture raised the cap within the registered 10,000-diagnostic
+bound and recorded all **1,047 compiler errors**. Both captures produced the
+same 268 candidate bindings. The full errors, source tokens, graph endpoints,
+per-case counts and hashes are in the
+[review](../../benchmarks/agent_query/mlcq_javac_field_binding_review.json).
+This is strong agreement on the selected **direct own-field** relationship
+subset despite missing project dependencies. It does not prove recall for
+unresolved, inherited or foreign fields; it does not measure ATFD, TCC,
+responsibility defects, other languages or Graphify quality. The known rated
+panel, including one positive test class, remains development data.
+
+### Rust `fd` collected-builder receiver replay
+
+The recorded `fd-shadow-02` failure above is now addressed by source-backed
+Rust value flow. A `Result<Vec<_>>` collected from a standard vector iterator
+and a constructor returning standard `Result<Self>` can carry its element type
+through the `Ok` arm, whole-value vector loops, and `iter().map` closures.
+Custom `Result` or `Vec` aliases and constructors returning a different type
+stay unresolved in the native regression. The preceding receiver-shadowing
+regression still passes. Disposable AST cache version 11 invalidates older
+extraction facts; the Rust producer capability identity remains version 2.
+
+Fresh run `fd-result-vec-03` reused the registered `fd` suite SHA256
+`34cddd72fb17386bfe29d42e1fd8c3e9f0683a9b16ddd06500492b93cb273721`
+and pinned checkout `b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5`.
+It rebuilt both tools' graphs in a new output directory. The Compass debug
+binary SHA256 is `da2c565517ea7976`; Graphify 0.9.67 retains the recorded
+binary SHA256 prefix `a7fdb4ac8985755b`. The run, graph digests, responses,
+and commands are under the external evaluation workspace at
+`runs/fd-result-vec-03`. The committed
+[replay manifest](../../benchmarks/agent_query/fd_result_vec_replay.json)
+records graph hashes and reviewed call deltas. Compass now passes **12/12** selected text oracles
+versus Graphify **9/12**. Both pass the formerly Graphify-only
+`execute_batch` callees row. On the nine shared passes, the median estimated
+answer size remains higher for Compass, **288 versus 114 tokens**. These are
+text-oracle outcomes on one known Rust repository, not an independent
+cross-language superiority result or a speed comparison.
+
+The new graph has exact `calls` edges from `CommandSet::execute_batch` to
+`CommandBuilder::push` at `src/exec/mod.rs:104`, `finish` at line 111, and
+`exit_code` at line 116. The three other newly materialized call sites in
+that file are source-consistent: `CommandTemplate::generate` at line 86,
+`FormatTemplate::generate` at line 267, and the latter method in the test
+helper at line 283. No prior call edge disappeared. Another 213 newly
+materialized `references` relationship keys, mostly field contacts, have not
+received an independent precision census and are excluded from this call
+finding. Graphify's earlier wrong constructor target at line 97 remains in
+its fresh graph; its registered text pass is preserved.
+
+Verification for this correction passed the 212-case universal resolver
+integration suite, the 13-case Rust language conformance suite, the AST-cache
+pruning contract, workspace formatting, workspace library/binary Clippy,
+targeted integration-test Clippy, the full workspace library/binary test
+baseline, and fixtures-only code-graph qualification including the independent
+React frontend gate. The release package version remains 0.3.30.
+
+### Source-first Go, Python and Rust direct-call questions
+
+The [registered suite](../../benchmarks/agent_query/source_first_three_language_suite.toml)
+fixed 12 selected declaration, callee, caller and one-hop path questions before
+either tool queried three previously unused, clean source checkouts:
+`benbjohnson/litestream` at `6a71ccd9` (Go), `fastapi/fastapi` at `0c2b6aaf`
+(Python), and `denoland/celld` at `10cb1303` (Rust). Registration commit
+`ab93cd34` pins the exact suite SHA256
+`13338a37b219b82d6b0a99f5a8b884cc27efa8043b1a38d5a32dcfa88a53da0e`.
+The same runner rebuilt both graphs per repository and retained commands,
+responses, timings, source and graph hashes under external run
+`runs/source-first-3lang-01`. Compass used frozen debug binary SHA256 prefix
+`da2c565517ea7976`; Graphify 0.9.67 used prefix `a7fdb4ac8985755b`.
+Debug-versus-installed timing is not a fair performance comparison.
+
+The original registered **text** checks pass **9/12 for Compass and 8/12 for
+Graphify**. The separate [source-and-edge review](../../benchmarks/agent_query/source_first_three_language_review.json)
+preserves those outcomes and checks the six selected source call sites against
+exact caller and callee declarations, relationship direction and site line in
+each graph. It additionally requires a rendered one-hop `calls [EXTRACTED]`
+edge for each path question. Under that narrower source-supported question
+rule the results are **9/12 for Compass and 6/12 for Graphify**. The verifier
+pins run, suite, runner, binary, graph, source-file and raw stdout digests;
+two verifier executions gave byte-identical review files.
+
+| Repository | Registered text passes (Compass / Graphify) | Source-supported passes (Compass / Graphify) | Reviewed direct-call facts |
+| --- | ---: | ---: | --- |
+| Litestream | 4/4 / 2/4 | 4/4 / 1/4 | Compass has one exact call at each of `store.go:721`, `:735` and `:737`; Graphify has none. |
+| FastAPI | 1/4 / 2/4 | 1/4 / 1/4 | Both graphs have the exact call at `fastapi/routing.py:1232`. |
+| Celld | 4/4 / 4/4 | 4/4 / 4/4 | Both graphs have the exact calls at `peer_auth.rs:145` and `:149`. |
+
+Two Graphify path outputs met the registered token test while answering a
+different question. Its Litestream path is three structural hops through
+`Store` and `HeartbeatClient`, rather than the direct call at line 721. Its
+FastAPI path is four hops through a test override, `FastAPI` and
+`DefaultPlaceholder`, rather than the direct call at line 1232. The corrected
+review removes **only** these two path credits; it does not revise the frozen
+text score. The Celld path is a one-hop call in both tools.
+
+FastAPI also exposes an interface limitation. The registered subject names
+`APIRoute.get_route_handler`, but each CLI request supplies only the short
+method name. Seven declarations have that name in the full checkout.
+Compass refuses the ambiguous `explain`, `callees` and `path` requests instead
+of choosing one; Graphify refuses the first two and emits an ambiguous-source
+warning with its incorrect path. This is a navigation/identity failure for the
+registered workflow, not a missing call in either graph. A separate unscored
+diagnostic on the same frozen graphs confirms that Compass accepts both exact
+node IDs and full `fastapi.routing.APIRoute::get_route_handler` /
+`fastapi.routing.get_request_handler` names: `explain` identifies line 1225,
+`callees` shows the call at line 1232, and `path` prints one extracted call hop.
+Graphify's file-qualified `explain` also identifies the declaration and its
+call. Its file-qualified `path` rejects the pair after resolving both names
+to an unrelated node; its exact-ID `path` returns an unrelated two-hop import
+route with a target-ambiguity warning. The raw diagnostic responses are retained
+beside `runs/source-first-3lang-01`. These later probes do not change the
+preregistered scores or imply general selector behavior outside this example.
+
+These are six selected static call sites and 12 source-first development
+questions, not independent whole-graph precision, authored explanation
+quality, runtime reachability, god-object diagnosis, community quality or a
+representative superiority claim. A source-backed edge does not validate all
+other claims in the surrounding answer. No production code changed in this
+checkpoint; the review ran without a new Cargo build.
+
+### FastAPI owner-qualified query and navigation correction
+
+The three-language run exposed a user-intent mismatch: its subject named
+`APIRoute.get_route_handler`, while its commands passed only the ambiguous
+leaf `get_route_handler`. Seven source-backed declarations share that leaf.
+The frozen Compass graph already contains the exact `calls` edge from
+`fastapi/routing.py:1225` to `get_request_handler` at line 1232. Before this
+correction, typed `ask "what does APIRoute.get_route_handler call?"` reported
+`no_match` and fell back to lexical candidates; legacy `explain` and `path`
+could not resolve that owner-qualified spelling.
+
+Typed resolution now checks a dotted owner/member suffix against the bounded
+exact leaf-name posting, normalizing stored `::` only for comparison. It uses
+the candidate only when the complete posting proves uniqueness. Two matching
+owners remain ambiguous with their IDs; an exhausted posting remains
+truncated/ambiguous; a nonexistent owner cannot borrow another owner's
+same-named method. Exact ID/full-name precedence and the existing typo
+fallback for an absent leaf remain intact. The legacy `explain`/`path` exact
+selector applies the same suffix comparison after exact names and preserves
+its candidate list on ambiguity. Stored graph identities and schemas do not
+change.
+
+The [post-registration replay](../../benchmarks/agent_query/fastapi_owner_suffix_replay.json)
+uses the same pinned FastAPI checkout and byte-identical Compass graph SHA256
+`1dc5712533cce50634e91994fb6bf888ea35eb0b6b3818432da69518652ac09a`.
+Candidate binary SHA256 is `17620181b2ca2fb051b234fa022c1fe1bd03913fad2246f48b643603fe85c623`.
+The owner-qualified `ask` callees response now has the source-backed call
+without diagnostics, its call-path form has one directed hop, legacy `explain`
+identifies the method and line-1232 call, and legacy `path` renders one
+extracted call hop. `MissingRoute.get_route_handler` still fails. Raw command
+responses and their hashes are retained beside `runs/source-first-3lang-01`.
+This is a development replay of a known failure, **not** a revision of the
+registered 9/12 versus 8/12 text or 9/12 versus 6/12 source-supported scores.
+Graphify was not rerun for this correction.
+
+The native query regression covers JSON/store parity, unique/duplicate/missing
+owners, a one-hop call path, absent-module owner spelling, candidate truncation
+and the existing fuzzy typo case. The CLI regression executes `ask`, `explain`
+and `path` and checks the versioned JSON call plus ambiguity/no-match behavior.
+Focused suites, workspace library/binary Clippy and tests, CLI product tests,
+and the product-boundary check pass. The optional all-target query Clippy run
+stops on an existing redundant closure in `tests/explanation_members.rs`,
+outside this patch; with only that lint allowed, all targets pass. Package
+version remains 0.3.30. This one known Python
+case does not establish representative query superiority or explanation
+quality, god-object diagnosis, or community quality.
+
+### Source-first Go/Python/Rust hub retrieval on frozen graphs
+
+Registration commit `4d5ca44d` and
+[the pinned panel](../../benchmarks/agent_query/source_first_hub_three_language_registration.json)
+selected six declaration anchors across the same clean Litestream, FastAPI and
+Celld source checkouts **before** either public hub request. The panel pins
+source and graph hashes, both server environments and the common stdio MCP
+`god_nodes(top_n=100)` request. The bounded collector retains six raw requests,
+responses and server diagnostics under external run `runs/source-first-hubs-01`;
+all six requests succeeded. The
+[independent graph review](../../benchmarks/agent_query/source_first_hub_three_language_review.json)
+joins each witness by exact file, declaration line and symbol, then checks
+returned rows against each tool's own stored graph. Every selected declaration
+exists uniquely in both graphs.
+
+| Source witness | Compass rank / stored degree | Graphify rank / stored degree |
+| --- | ---: | ---: |
+| Litestream `Store` | 10 / 67 | 13 / 45 |
+| Litestream `HeartbeatClient` | outside top 100 / 11 | outside top 100 / 11 |
+| FastAPI `FastAPI` | 1 / 1,401 | 1 / 830 |
+| FastAPI `DefaultPlaceholder` | 31 / 42 | 31 / 26 |
+| Celld `PeerAuth` | outside top 100 / 27 | 55 / 26 |
+| Celld `CellActivityGuard` | outside top 100 / 6 | outside top 100 / 9 |
+
+Compass returns 100 explicit graph IDs and matching source anchors per
+repository; its 300 displayed degrees equal recomputed distinct endpoint-pair
+degrees. Graphify returns labels and degrees only. Its globally unique labels
+identify 75/100 Litestream, 86/100 FastAPI and 86/100 Celld rows; all 247
+identified degrees match its own graph. The remaining label-only rows stay
+unresolved, rather than borrowing an identity from rank or source context.
+Every returned registered witness is uniquely resolved.
+
+At the registered cutoffs, Compass retrieves 2/6 witnesses in the top 10,
+3/6 in the top 50 and 3/6 in the top 100. Graphify retrieves 1/6, 3/6 and
+4/6 respectively. These are selected source roles, not positive or negative
+god-object defect labels; the fractions are retrieval counts, not accuracy or
+precision. Each tool ranks a different extracted graph, so its degree and
+rank cannot be interpreted as a controlled algorithm comparison. In Celld,
+Compass's top positions include large JavaScript module nodes; this panel
+does not determine whether filtering such nodes would improve useful type
+retrieval. No production behavior changed in this checkpoint, and broad hub
+or god-object superiority remains unproven.
+
+### Paired class-only degree diagnostic on rated Java classes
+
+[Registration](../../benchmarks/agent_query/mlcq_class_degree_registration.json)
+commit `3ebdf975` fixed the rule and four frozen graph hashes before the
+[read-only scan](../../benchmarks/agent_query/mlcq_class_degree_review.json).
+The rule ranks every source-located class by distinct stored endpoint-pair
+degree, then exact ID. Compass uses `kind=class`; Graphify uses its
+`_callable_class=true` marker. No test or generated class is filtered. This
+is an offline, identical rule applied to both graphs; neither public
+`god_nodes` call was changed or rerun. The 16 graph IDs for eight externally
+rated classes come from the prior source-assisted release follow-up. Every
+identity remains present and eligible. The scan processes each graph in a
+separate 300-second bounded process and retains graph hashes, pool sizes,
+all top-100 IDs and degrees, primary ranks and raw outputs externally under
+`mlcq-class-degree-01`. Two runs produce byte-identical review files.
+
+| Frozen graph | Compass class pool | Compass positive ranks | Graphify class pool | Graphify positive ranks |
+| --- | ---: | --- | ---: | --- |
+| CloudStack | 6,373 | 340, 999 | 7,700 | 463, 1,315 |
+| Eclipse | 6,628 | 728, 1,529 | 7,597 | 1,403, 1,740 |
+
+Neither tool retrieves a consensus-positive or consensus-none primary class
+at cutoffs 10, 50 or 100. The closest consensus-none ranks are 366 for
+Compass and 382 for Graphify. All four graphs have zero dangling endpoint
+pairs. The stored Compass graphs are directed and the Graphify graphs are
+undirected; the registered rule counts ordered endpoint pairs for each, as
+the earlier response auditor did. Pool sizes and emitted graph coverage
+also differ. Therefore these ranks cannot isolate a better extraction or
+ranking algorithm, even though the rule is applied consistently.
+
+This falsifies class-only raw degree as an immediate repair for the known
+Java god-object misses. The cohort is purposively enriched, includes a
+positive-rated test class, and is development data. Class status and degree
+do not measure responsibilities or cohesion. A supported classifier would
+need source-checked method/field access and responsibility evidence with a
+separate held-out cohort; no classifier or production code changed here.
+
+### Paired source-member coverage in the rated Java classes
+
+[Registration](../../benchmarks/agent_query/mlcq_member_paired_registration.json)
+commit `3996067c` fixed the eight-class independent JDK syntax census, source
+hashes, class identities, both frozen graph pairs and the exact file/name/span
+join before the paired scan. The census has 95 direct methods, 65 direct
+fields and five constructors; constructors remain outside this registered
+denominator. Overloads remain separate source declarations. A candidate node
+must have a compatible kind or callable marker and an anchor within its
+source declaration span. The review records direct class ownership separately
+from node presence and never substitutes a same-name node on another line.
+
+| Graph | Direct methods with unique nodes / 95 | Direct fields with unique nodes / 65 | Direct owner links for matched methods / fields |
+| --- | ---: | ---: | ---: |
+| Compass | 95 | 65 | 95 / 65 |
+| Graphify | 90 | 0 | 90 / 0 |
+
+The [paired review](../../benchmarks/agent_query/mlcq_member_paired_review.json)
+retains every source declaration, candidate graph ID, owner relation, missing
+or ambiguous result, both graph hashes and source roles. All four graph scans
+succeeded under the 1 GiB artifact and 300-second per-graph bounds; two
+complete runs produced byte-identical reviews. The five Graphify method
+nonmatches are overloads: three in `BindingModel` and two in
+`SimpleValueProperty`. Its stored graph has one same-named method node at
+the first overload's source line, while class-to-method edges for that ID
+can refer to later overload lines. Those edges preserve some declaration
+evidence but do not give the later overloads separate node identities.
+Compass preserves a unique direct-owned method node for each of the 95.
+
+Graphify does not provide a typed field declaration node matching any of the
+65 source fields in these files under the registered line/name rule. Its
+class graph can still contain field-context references to other types; this
+result does not mean it extracted no information about fields. Since Graphify
+does not expose Compass's typed field kind, even a future matching
+noncallable node would be type-unverified under this protocol. This is a
+selected declaration-presence comparison, not a field-access correctness,
+source responsibility, class cohesion, or god-object classifier score.
+The frozen graphs have different direction and coverage, and one positive
+rating belongs to a test class. No production code changed in this checkpoint.
+
+### Stored member evidence in public hub results
+
+The native graph layer now adds `compass.hub-members/1` observations to
+directed typed class and struct hubs. It counts uniquely owned direct
+methods/constructors and fields/properties, marks members with more than one
+class/struct owner as ambiguous, and reports stored method-to-own-field
+`references` records, distinct method-field pairs and participating methods.
+Undirected or other node kinds return null member evidence. The text and
+structured MCP `god_nodes` results expose the same counts with
+`sourceCoverage: "unverified"`; hub eligibility, degree and order do not
+change. A zero is an observed graph count, not proof of absence in source.
+No god-object label or cohesion score is produced.
+
+The [two-pass Go/Python/Rust replay](../../benchmarks/agent_query/hub_members_three_language_replay.json)
+used the already frozen graphs and compared every new public MCP response
+against the previous 100-row result after removing only `memberEvidence`.
+All **300 prior IDs, ranks, degrees, source anchors and connectivity objects
+remain identical as structured values**; both passes returned identical
+new rows. Member evidence appears in 33/100 Litestream, 34/100 FastAPI and
+26/100 Celld rows. The returned Litestream `Store` has 27 stored direct
+methods and zero direct fields; FastAPI `FastAPI` has 23 methods and zero
+fields. Those zeros show why this cannot be treated as a cross-language
+source-complete field census. `PeerAuth` remains outside Celld's top 100;
+the new evidence does not repair its retrieval miss. Graphify was not rerun
+for this additive Compass result.
+
+A separate bounded public MCP read of the frozen Eclipse graph requested
+5,000 hubs and retained raw responses externally. The
+[Java replay summary](../../benchmarks/agent_query/hub_members_eclipse_replay.json)
+checks three returned rated classes against the earlier independent JDK
+member census and compiler-bound direct-own-field subset. `BindingModel` at
+rank 1,173 reports 15 methods/constructors, 11 fields and 55 own-field
+reference records; the selected source witnesses have exactly those counts.
+`DeprecatedUIWizardsAuto`, a positive-rated **test** class at rank 2,641,
+reports 15 methods/constructors, five fields and 15 selected field records,
+again matching its selected source witnesses. `SimpleValueProperty` at rank
+599 reports seven methods and no fields or selected field contacts, matching
+the same source checks. The fourth rated Eclipse class was outside the
+requested 5,000; no rank or evidence was invented for it. These are known
+development cases on unchanged graphs. They do not establish full field-use
+coverage, responsibility cohesion, a god-object classifier or broad
+superiority.
+
+Focused graph/MCP tests, workspace formatting, library/binary Clippy and
+tests, nine CLI product tests, the product boundary script and the full
+fixtures-only code-graph qualification passed using the per-worktree external
+Cargo target. The release fixture emitted its existing partial-graph warnings;
+no unrelated generated files entered the patch. Package version remains
+0.3.30.
+
+### Go direct struct-field evidence
+
+The Go universal producer now emits a source-anchored `field` declaration and
+direct `contains` relation for each explicitly named field of a named struct.
+Grouped names receive separate identities; embedded and blank fields and
+fields inside an anonymous nested struct are not credited as direct named
+members of the outer struct. Existing type-reference bindings remain. The
+disposable AST cache version advances from 11 to 12 so old extractions do not
+hide these facts. This changes rebuilt graph nodes, edges, degrees and
+communities without changing the graph schema or package version.
+
+The [selected registration](../../benchmarks/agent_query/go_struct_field_registration.json)
+froze two clean Litestream files and both old graphs before a Go standard
+parser enumerated all 33 direct named fields across five structs. The first
+probe stopped before scoring because Graphify's graph is undirected. The
+registered correction uses stored source/target ownership records without
+claiming navigable direction. Both frozen graphs have 0/33 exact field
+declarations. Graphify has 13 field-type context records on those source
+lines; they do not identify named fields.
+
+The separate [full-file registration](../../benchmarks/agent_query/go_full_field_registration.json)
+fixed all 146 tracked Go paths and the preliminary candidate graph before the
+wider census. The [full review](../../benchmarks/agent_query/go_full_field_review.json)
+reports **993 named fields in 167 structs** and 27 embedded fields kept outside
+the denominator. Under one exact file/owner/field/line and unique-ownership
+rule, the frozen Compass and Graphify graphs each have **0/993** matching field
+declaration nodes; the candidate Compass graph has **993/993**. Graphify has
+323 field-type context records, which remain visible as partial type evidence.
+An initial 326 tally counted one grouped-name source-line record four times;
+the corrected 323 tally counts each stored record once. Declaration outcomes
+are unchanged.
+All 993 candidate additions are source-matched field nodes, paired with 993
+new containment edges. Every old node and edge persists; 59 existing
+publication omissions are unchanged. The full verifier runs twice with
+byte-identical reports. A warm extraction reuses 199/199 cached files and
+produces the same graph bytes as the cold extraction.
+
+The public MCP `god_nodes(top_n=500)` candidate response now reports 21 direct
+fields for Litestream `Store` (rank 7, formerly rank 10) and six for
+`HeartbeatClient` (rank 114, still outside top 100). Both report zero stored
+own-field reference records. These are declaration improvements in one known
+Go development repository. They do not validate field-access targets,
+responsibility cohesion, a god-object classifier, other languages or broad
+superiority over Graphify.
+
+The code-graph fixture adds one source-matched Go `field` node and one direct
+ownership edge. Its clustered topology has 1,293 nodes, 1,283 edges, 238
+communities and two exact cross-community edges. The previous policy minima of
+239 communities and three exact cross-community edges fail on this valid
+addition; the minima now match the observed fixture graph. All other topology
+thresholds remain unchanged. The full fixtures-only gate passes after the
+policy update, including semantic assertions, cold/warm, rebuild,
+alternate-checkout and lifecycle byte comparisons, Markdown quality, and the
+independent React frontend qualification.
+
+## Go receiver-field access follow-up
+
+The [access registration](../../benchmarks/agent_query/go_field_access_registration.json)
+fixed the same pinned Litestream source and frozen graph identities before an
+independent Go parser enumerated direct receiver-field selectors. The oracle
+found 2,742 accepted source occurrences. The producer now preserves each
+selector identifier site; a typed receiver supplies an owner-qualified field
+candidate. The resolver checks the exact field before expanding its declared
+type alias. Missing, ambiguous and method-call selectors do not acquire a
+convenient field target. The disposable AST cache advances from version 12 to
+13; graph and evidence schemas and package version stay unchanged.
+
+The [review](../../benchmarks/agent_query/go_field_access_review.json)
+joins **2,742/2,742** accepted contacts to unique directed method-to-field
+references at the exact source byte. Both frozen graphs have 0 under the
+same exact field-target join. The candidate adds 4,650 member-access links,
+all targeting fields, with no removed node identity or old link and no changed
+old link payload. The 1,908 new links outside this narrow oracle are retained
+in the external raw report and uncredited: 719 on other receiver identifiers,
+225 on non-identifier receivers and 964 outside method-body oracle scope. This
+audit has not independently established their precision. A cold extraction
+processed 199 files; a warm extraction reused 199/199 and produced byte-identical
+graph JSON. Two full probe reports are byte identical.
+
+The candidate graph is 16,902,487 bytes, above the registration's original
+16 MiB read cap. The registration transparently amends the read cap to 24 MiB
+after capture without excluding records; this makes the bound change
+exploratory rather than preregistered. Public `god_nodes(top_n=500)` on the
+new graph shows 113 own-field reference records and 23 methods touching own
+fields for `Store` (rank 8); `HeartbeatClient` shows 13 and four (rank 164).
+These are stored contacts, not a god-object diagnosis. One known Go repository
+cannot establish broader graph precision, responsibility cohesion, community
+quality or superiority over Graphify.
+
+Focused Go producer and resolver tests, workspace formatting, workspace
+Clippy, workspace library/binary tests, the cache-version contract test and
+the product-boundary check pass.
+The full fixtures-only code-graph gate passed on revision `c1b0d78f` after
+mounted-volume capacity was restored. It covered manifest validation, scale
+checks, semantic assertions, cold/warm/rebuild/lifecycle byte comparisons,
+topology policy, and the independent React frontend qualification using a
+release binary. The first resumed attempt stopped on a missing snapshot file
+during the lifecycle phase; the complete diagnostic repeat passed. This
+single pass does not establish that the intermittent snapshot failure is
+resolved.
+
+### Explicitly typed Go parameter-field contacts
+
+The later [parameter registration](../../benchmarks/agent_query/go_parameter_field_registration.json)
+fixed all 146 tracked Go paths and the same three frozen graphs after the
+receiver-only audit had exposed 1,908 uncredited new links. A separate Go
+standard-parser oracle accepts only selectors bound by object identity to an
+ordinary method parameter with an explicit local nominal struct type and one
+direct named field. Called selectors, shadowed parameters, qualified/imported
+types, duplicate structs/fields and unsupported receiver expressions stay out
+of the denominator. A synthetic fixture checks parameter binding, shadowing
+and call exclusion.
+
+The [review](../../benchmarks/agent_query/go_parameter_field_review.json)
+finds **276/276** exact candidate method-to-field links at the source byte,
+versus zero in the frozen pre-access Compass graph. Graphify has no exact
+declaration target for these 98 fields, while retaining 19 field-type context
+records. All 276 sites were previously classified as `other_receiver` by the
+receiver-only oracle, with no overlapping credited edges. The two narrow
+oracles therefore credit **3,018 distinct links of 4,650**; **1,632 remain
+uncredited**. Both complete source outputs and graph-probe reports are byte
+identical across two runs. This expands independently verified coverage on
+one known Go repository; it does not establish precision for the remaining
+links or broad superiority across the requested tasks and languages.

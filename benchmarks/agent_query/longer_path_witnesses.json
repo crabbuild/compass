@@ -1,0 +1,655 @@
+{
+  "schema": "compass.longer-path-witnesses/1",
+  "scope": "Five new endpoint pairs in previously inspected development repositories. Four-to-seven-call positive witnesses, not held-out or population evidence.",
+  "witnesses": [
+    {
+      "id": "chi-longer-chain",
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "question": "Find a directed source-supported call chain from MethodFunc to tailSort. Identify each declaration and call site, and distinguish conditional calls from guaranteed execution.",
+      "nodes": [
+        {
+          "file": "mux.go",
+          "line": 137,
+          "text": "func (mx *Mux) MethodFunc(",
+          "symbol": "MethodFunc",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "mux.go",
+          "line": 127,
+          "text": "func (mx *Mux) Method(method,",
+          "symbol": "Method",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "mux.go",
+          "line": 430,
+          "text": "func (mx *Mux) handle(method",
+          "symbol": "handle",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "tree.go",
+          "line": 148,
+          "text": "func (n *node) InsertRoute(",
+          "symbol": "InsertRoute",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+        },
+        {
+          "file": "tree.go",
+          "line": 244,
+          "text": "func (n *node) addChild(child *node, prefix string) *node {",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79",
+          "symbol": "addChild"
+        },
+        {
+          "file": "tree.go",
+          "line": 834,
+          "text": "func (ns nodes) Sort()              { sort.Sort(ns); ns.tailSort() }",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79",
+          "symbol": "Sort"
+        },
+        {
+          "file": "tree.go",
+          "line": 841,
+          "text": "func (ns nodes) tailSort() {",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79",
+          "symbol": "tailSort"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 138,
+            "text": "mx.Method(method, pattern, handlerFn)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 132,
+            "text": "mx.handle(m, pattern, handler)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 450,
+            "text": "return mx.tree.InsertRoute(method, pattern, h)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "tree.go",
+            "line": 183,
+            "text": "hn := parent.addChild(child, search)",
+            "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "tree.go",
+            "line": 324,
+            "text": "n.children[child.typ].Sort()",
+            "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "tree.go",
+            "line": 834,
+            "text": "func (ns nodes) Sort()              { sort.Sort(ns); ns.tailSort() }",
+            "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+          }
+        }
+      ],
+      "sourceInterpretation": "Six static call steps. InsertRoute new-child branch; node.children is an array of nodes (tree.go:112,831). Sort invokes tailSort directly, independently of sort.Sort callback dispatch. Not a guarantee for every route registration."
+    },
+    {
+      "id": "click-longer-chain",
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "question": "Find a directed source-supported call chain from open_file to is_ascii_encoding. Identify each declaration and call site, and distinguish conditional calls from guaranteed execution.",
+      "nodes": [
+        {
+          "file": "src/click/utils.py",
+          "line": 381,
+          "text": "def open_file(",
+          "symbol": "open_file",
+          "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 374,
+          "text": "def open_stream(",
+          "symbol": "open_stream",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 347,
+          "text": "def get_text_stdout(encoding: str | None = None, errors: str | None = None) -> t.TextIO:",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "get_text_stdout"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 303,
+          "text": "def _force_correct_text_writer(",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "_force_correct_text_writer"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 241,
+          "text": "def _force_correct_text_stream(",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "_force_correct_text_stream"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 22,
+          "text": "def _make_text_stream(",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "_make_text_stream"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 51,
+          "text": "def get_best_encoding(stream: t.IO[t.Any]) -> str:",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "get_best_encoding"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 43,
+          "text": "def is_ascii_encoding(encoding: str) -> bool:",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+          "symbol": "is_ascii_encoding"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)",
+            "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 390,
+            "text": "return get_text_stdout(encoding=encoding, errors=errors), False",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 351,
+            "text": "return _force_correct_text_writer(sys.stdout, encoding, errors, force_writable=True)",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 309,
+            "text": "return _force_correct_text_stream(",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 278,
+            "text": "return _make_text_stream(",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 30,
+            "text": "encoding = get_best_encoding(stream)",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 54,
+            "text": "if is_ascii_encoding(rv):",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        }
+      ],
+      "sourceInterpretation": "Seven static calls: non-lazy open_file, text standard-output branch, no Windows stream override, rewrap needed and encoding omitted. There is also a shorter six-call path through _stream_is_misconfigured; neither witness proves a globally shortest path.",
+      "alternativeWitnesses": [
+        {
+          "nodes": [
+            {
+              "file": "src/click/utils.py",
+              "line": 381,
+              "text": "def open_file(",
+              "symbol": "open_file",
+              "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 374,
+              "text": "def open_stream(",
+              "symbol": "open_stream",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 347,
+              "text": "def get_text_stdout(encoding: str | None = None, errors: str | None = None) -> t.TextIO:",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "symbol": "get_text_stdout"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 303,
+              "text": "def _force_correct_text_writer(",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "symbol": "_force_correct_text_writer"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 241,
+              "text": "def _force_correct_text_stream(",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "symbol": "_force_correct_text_stream"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 212,
+              "text": "def _stream_is_misconfigured(stream: t.TextIO) -> bool:",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "symbol": "_stream_is_misconfigured"
+            },
+            {
+              "file": "src/click/_compat.py",
+              "line": 43,
+              "text": "def is_ascii_encoding(encoding: str) -> bool:",
+              "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+              "symbol": "is_ascii_encoding"
+            }
+          ],
+          "steps": [
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/utils.py",
+                "line": 422,
+                "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)",
+                "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+              }
+            },
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/_compat.py",
+                "line": 390,
+                "text": "return get_text_stdout(encoding=encoding, errors=errors), False",
+                "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+              }
+            },
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/_compat.py",
+                "line": 351,
+                "text": "return _force_correct_text_writer(sys.stdout, encoding, errors, force_writable=True)",
+                "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+              }
+            },
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/_compat.py",
+                "line": 309,
+                "text": "return _force_correct_text_stream(",
+                "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+              }
+            },
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/_compat.py",
+                "line": 257,
+                "text": "encoding is None and _stream_is_misconfigured(text_stream)",
+                "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+              }
+            },
+            {
+              "relation": "calls",
+              "direction": "forward",
+              "site": {
+                "file": "src/click/_compat.py",
+                "line": 218,
+                "text": "return is_ascii_encoding(getattr(stream, \"encoding\", None) or \"ascii\")",
+                "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "jsoup-longer-chain",
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "question": "Find a directed source-supported call chain from isValid to appendChild. Identify each declaration and call site, and distinguish conditional calls from guaranteed execution.",
+      "nodes": [
+        {
+          "file": "src/main/java/org/jsoup/Jsoup.java",
+          "line": 434,
+          "text": "public static boolean isValid(String",
+          "symbol": "isValid",
+          "fileSha256": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7"
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 124,
+          "text": "public boolean isValidBodyHtml(String",
+          "symbol": "isValidBodyHtml",
+          "fileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+        },
+        {
+          "file": "src/main/java/org/jsoup/nodes/Document.java",
+          "line": 65,
+          "text": "public static Document createShell(String baseUri) {",
+          "fileSha256": "cad397b7c5c767c294f27edf7971932c0d531ae8a368827e6ec34e1267a17502",
+          "symbol": "createShell"
+        },
+        {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "line": 918,
+          "text": "public Element appendElement(String tagName) {",
+          "fileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "symbol": "appendElement"
+        },
+        {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "line": 929,
+          "text": "public Element appendElement(String tagName, String namespace) {",
+          "fileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "symbol": "appendElement"
+        },
+        {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "line": 813,
+          "text": "public Element appendChild(Node child) {",
+          "fileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "symbol": "appendChild"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/Jsoup.java",
+            "line": 435,
+            "text": "return new Cleaner(safelist).isValidBodyHtml(bodyHtml);",
+            "fileSha256": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 126,
+            "text": "Document clean = Document.createShell(baseUri);",
+            "fileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/nodes/Document.java",
+            "line": 69,
+            "text": "Element html = doc.appendElement(\"html\");",
+            "fileSha256": "cad397b7c5c767c294f27edf7971932c0d531ae8a368827e6ec34e1267a17502"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 919,
+            "text": "return appendElement(tagName, tag.namespace());",
+            "fileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/nodes/Element.java",
+            "line": 932,
+            "text": "appendChild(child);",
+            "fileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+          }
+        }
+      ],
+      "sourceInterpretation": "Five calls, including inherited Element.appendElement on a concrete new Document, then one-argument to two-argument overload dispatch. Document extends Element at Document.java:26 and has no appendElement override. Constructor evaluation is not substituted for method invocation."
+    },
+    {
+      "id": "redux-longer-chain",
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "question": "Find a directed source-supported call chain from combination to ctorName. Identify each declaration and call site, and distinguish conditional calls from guaranteed execution.",
+      "nodes": [
+        {
+          "file": "src/combineReducers.ts",
+          "line": 157,
+          "text": "return function combination(",
+          "fileSha256": "52f4a8c5561bd9ea2532edd31d3a8958dabb13fcc0d11140d158c84e454ce1dc",
+          "symbol": "combination"
+        },
+        {
+          "file": "src/combineReducers.ts",
+          "line": 14,
+          "text": "function getUnexpectedStateShapeWarningMessage(",
+          "fileSha256": "52f4a8c5561bd9ea2532edd31d3a8958dabb13fcc0d11140d158c84e454ce1dc",
+          "symbol": "getUnexpectedStateShapeWarningMessage"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 62,
+          "text": "export function kindOf(",
+          "symbol": "kindOf",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 2,
+          "text": "export function miniKindOf(",
+          "symbol": "miniKindOf",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 40,
+          "text": "function ctorName(",
+          "symbol": "ctorName",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/combineReducers.ts",
+            "line": 166,
+            "text": "const warningMessage = getUnexpectedStateShapeWarningMessage(",
+            "fileSha256": "52f4a8c5561bd9ea2532edd31d3a8958dabb13fcc0d11140d158c84e454ce1dc"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/combineReducers.ts",
+            "line": 35,
+            "text": "`The ${argumentName} has unexpected type of \"${kindOf(",
+            "fileSha256": "52f4a8c5561bd9ea2532edd31d3a8958dabb13fcc0d11140d158c84e454ce1dc"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 66,
+            "text": "typeOfVal = miniKindOf(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          }
+        }
+      ],
+      "sourceInterpretation": "Four conditional calls from the returned named function expression itself, not from combineReducers. Development mode, nonempty reducer map, nonplain state, nonprimitive/non-Date/non-Error value. Returning a function is not a call edge."
+    },
+    {
+      "id": "walkdir-longer-chain",
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "question": "Find a directed source-supported call chain from next to from_loop. Identify each declaration and call site, and distinguish conditional calls from guaranteed execution.",
+      "nodes": [
+        {
+          "file": "src/lib.rs",
+          "line": 687,
+          "text": "fn next(&mut self) -> Option<Result<DirEntry>> {",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+          "symbol": "next"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 840,
+          "text": "    fn handle_entry(",
+          "symbol": "handle_entry",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 961,
+          "text": "    fn follow(&self",
+          "symbol": "follow",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 973,
+          "text": "    fn check_loop<P:",
+          "symbol": "check_loop",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/error.rs",
+          "line": 184,
+          "text": "    pub(crate) fn from_loop(",
+          "symbol": "from_loop",
+          "fileSha256": "ba58bf6f59d196567435d4b66699a928cc237fc7c8df01dc37ab822509905b7c"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 695,
+            "text": "if let Some(result) = self.handle_entry(dent) {",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 845,
+            "text": "dent = itry!(self.follow(dent));",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 968,
+            "text": "self.check_loop(dent.path())?;",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 981,
+            "text": "return Err(Error::from_loop(",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        }
+      ],
+      "sourceInterpretation": "Four calls from Iterator for IntoIter, not another next implementation. Conditional on following a directory symlink and finding an ancestor loop. The call at lib.rs:721 is a second supported occurrence from the same next method."
+    }
+  ]
+}
