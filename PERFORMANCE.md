@@ -1283,6 +1283,14 @@ controls, the static layout, the 200-row community DOM bound, and the visible
 edge disclosure to appear within three seconds. These are runner-specific
 diagnostic observations, not a cross-platform latency guarantee.
 
+Browser wall-clock qualification runs in the single-worker
+`chromium-performance` Playwright project after the functional Chromium tests
+finish, so concurrent test pages cannot consume its startup budget. The
+one-second small-graph and three-second large-graph limits and readiness
+assertions remain unchanged. Run only this qualification with
+`npm run test:performance -w @compass/viewer-tests`; the normal `npm run test:js`
+includes both projects in order.
+
 ### Django parallel fact-state qualification
 
 The 2026-08-05 large-repository fact-state hardening was measured from Compass

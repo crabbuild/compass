@@ -18,6 +18,18 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI
   },
   projects: [
-    { name: "chromium", use: { browserName: "chromium" } }
+    {
+      name: "chromium",
+      testIgnore: "performance.spec.ts",
+      use: { browserName: "chromium" }
+    },
+    {
+      name: "chromium-performance",
+      testMatch: "performance.spec.ts",
+      // Wall-clock qualification must not share CPU with other browser tests.
+      dependencies: ["chromium"],
+      workers: 1,
+      use: { browserName: "chromium" }
+    }
   ]
 });
