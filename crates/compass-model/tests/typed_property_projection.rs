@@ -49,6 +49,7 @@ fn projections_expose_only_registered_derived_properties() {
                 signature_digest: Some("sha256:signature".to_owned()),
                 implementation_digest: Some("sha256:implementation".to_owned()),
                 source_digest: Some("sha256:source".to_owned()),
+                call_sites: None,
             },
         )),
         evidence: vec![evidence()],

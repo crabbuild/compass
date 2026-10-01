@@ -928,3 +928,40 @@ fn typed_queries_and_legacy_views_reload_equal_metadata_together() -> Result<(),
     }
     Ok(())
 }
+
+#[test]
+fn impact_tools_filter_typed_relations_and_audit_omissions() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    let server = CompassMcp::new(graph);
+    let filtered = invoke(
+        &server,
+        "get_impact",
+        json!({"symbol":"Target","relations":["imports"]}),
+    )?;
+    assert_eq!(filtered["impactSummary"]["relations"], json!(["imports"]));
+    assert_eq!(filtered["impactSummary"]["directDependents"], json!([]));
+    assert!(
+        filtered["impactSummary"]["excludedDirectConnections"]
+            .as_u64()
+            .ok_or("missing excluded count")?
+            > 0
+    );
+    assert!(
+        invoke(
+            &server,
+            "get_impact",
+            json!({"symbol":"Target","relations":["imagined"]})
+        )
+        .is_err()
+    );
+    assert!(
+        invoke(
+            &server,
+            "get_impact",
+            json!({"symbol":"Target","relations":[]})
+        )
+        .is_err()
+    );
+    Ok(())
+}

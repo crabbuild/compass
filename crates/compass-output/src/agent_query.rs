@@ -1675,6 +1675,31 @@ fn text_page_entries(
             ),
         )
     }));
+    if operation == AgentOperation::Impact
+        && let Some(summary) = &response.impact_summary
+    {
+        // Group the full retained ledger, so pagination does not silently cap
+        // direct dependents to the primary-view limit.
+        entries.clear();
+        for group in &summary.groups {
+            let header = format!(
+                "module={} file={}",
+                escape_scalar(&group.module),
+                escape_scalar(group.file.as_deref().unwrap_or("<unanchored>"))
+            );
+            for (layer, ids) in [("direct", &group.direct), ("transitive", &group.transitive)] {
+                for id in ids {
+                    if let Some(node) = nodes.get(id) {
+                        let entity = agent_entity(node);
+                        entries.push((
+                            TextPageSection::PrimaryResults,
+                            format!("{header} {layer}: {}", render_entity(&entity, false)),
+                        ));
+                    }
+                }
+            }
+        }
+    }
     let mut paths = response
         .paths
         .iter()
@@ -2170,7 +2195,7 @@ fn primary_node_ids(
                     ordered_edges
                         .iter()
                         .map(|(_, edge)| *edge)
-                        .filter(|edge| edge.source == *source)
+                        .filter(|edge| edge.source == *source || response.call_summary.is_some())
                         .map(|edge| edge.target.clone()),
                 );
             } else {
@@ -2180,6 +2205,10 @@ fn primary_node_ids(
         }
         AgentOperation::Impact => {
             ordered.extend(requested);
+            if let Some(summary) = &response.impact_summary {
+                ordered.extend(summary.direct_dependents.iter().cloned());
+                ordered.extend(summary.transitive_dependents.iter().cloned());
+            }
             // A reverse walk reaches far more owner-level dependents than
             // direct ones, and the raw trail ledger is ordered by identity.
             // Order the impacted nodes by how close and how direct their
@@ -2760,6 +2789,8 @@ fn answer_for_code(
         };
     }
     if match_state == AgentMatch::Ambiguous
+        && response.call_summary.is_none()
+        && response.impact_summary.is_none()
         && let Some(selected) = response.diagnostics.iter().find_map(|diagnostic| {
             (diagnostic.code == QueryDiagnosticCode::AmbiguousMatch)
                 .then_some(diagnostic.node_id.as_ref())
@@ -2783,7 +2814,7 @@ fn answer_for_code(
         .first()
         .map(|entity| entity.label.clone())
         .unwrap_or_else(|| requested.clone());
-    let headline = match context.operation {
+    let mut headline = match context.operation {
         AgentOperation::Search => match result_state {
             AgentResultState::Candidates
                 if match_state == AgentMatch::Unknown && response.results.is_empty() =>
@@ -2811,6 +2842,33 @@ fn answer_for_code(
             response.edges.len(),
             "incoming usage relationship(s)",
         ),
+        AgentOperation::Callees
+            if result_state == AgentResultState::Answered && response.call_summary.is_some() =>
+        {
+            let summary = response.call_summary.as_ref();
+            match summary {
+                Some(summary) => match summary.unresolved_calls {
+                    Some(unresolved) => format!(
+                        "{} resolved calls, {unresolved} unresolved calls found for {subject}.{}",
+                        summary.resolved_calls,
+                        if summary.inventory_complete {
+                            ""
+                        } else {
+                            " Counts are bounded; source-call coverage is incomplete."
+                        }
+                    ),
+                    None if summary.observed_calls.is_some() => format!(
+                        "{} retained resolved calls for {subject}; the unresolved count is unavailable at this query/inventory bound. Increase --max-nodes/--max-edges or rebuild to inspect source-call coverage.",
+                        summary.resolved_calls
+                    ),
+                    None => format!(
+                        "{} resolved calls for {subject}; source-call coverage is unavailable. Rebuild the graph to inventory unresolved calls.",
+                        summary.resolved_calls
+                    ),
+                },
+                None => String::new(),
+            }
+        }
         AgentOperation::Callees => relationship_headline(
             result_state,
             &requested,
@@ -2819,7 +2877,23 @@ fn answer_for_code(
             "direct callee relationship(s)",
         ),
         AgentOperation::Impact => {
-            if result_state == AgentResultState::Answered {
+            if result_state == AgentResultState::Answered
+                && let Some(summary) = &response.impact_summary
+            {
+                format!(
+                    "{} direct and {} transitive dependents. {} direct connections audited: {} outgoing context, {} excluded by direction/type/confidence. Direct coverage {}.",
+                    summary.direct_dependents.len(),
+                    summary.transitive_dependents.len(),
+                    summary.observed_direct_connections,
+                    summary.outgoing_context.len(),
+                    summary.excluded_direct_connections,
+                    if summary.direct_coverage_complete {
+                        "complete"
+                    } else {
+                        "bounded or incomplete"
+                    }
+                )
+            } else if result_state == AgentResultState::Answered {
                 format!(
                     "Found {} potentially affected node(s) within depth {}.",
                     primary_results.len(),
@@ -2865,6 +2939,19 @@ fn answer_for_code(
         }
         AgentOperation::Discovery => "Discovery returned candidate anchors.".to_owned(),
     };
+    if match_state == AgentMatch::Ambiguous
+        && let Some(selected) = response.diagnostics.iter().find_map(|diagnostic| {
+            (diagnostic.code == QueryDiagnosticCode::AmbiguousMatch)
+                .then_some(diagnostic.node_id.as_ref())
+                .flatten()
+                .and_then(|id| response.nodes.iter().find(|node| &node.id == id))
+        })
+    {
+        headline = format!(
+            "Auto-picked {} from multiple candidates. {headline}",
+            display_label(selected)
+        );
+    }
     let mut basis = Vec::new();
     if let Some(entity) = primary_results.first() {
         basis.push(AgentBasis {

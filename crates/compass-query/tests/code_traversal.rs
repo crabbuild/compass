@@ -55,6 +55,10 @@ fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
     assert!(enriched.nodes.iter().any(|node| node.id == "n:heuristic"));
 
     let callees = engine.callees(request)?;
+    assert!(
+        callees.call_summary.is_none(),
+        "producers without call inventories retain relationship counts"
+    );
     assert!(callees.nodes.iter().any(|node| node.id == "n:callee"));
     assert!(
         callees
@@ -1042,5 +1046,97 @@ fn calls_only_retains_heuristic_opt_in_and_exact_name_ambiguity()
             .iter()
             .any(|d| d.code == QueryDiagnosticCode::AmbiguousMatch)
     );
+    Ok(())
+}
+#[test]
+fn class_callees_include_calls_owned_by_its_methods() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph.nodes.push(support::node(
+        "n:service",
+        compass_model::code_graph::NodeKind::Class,
+        "UserService",
+        "UserService",
+    ));
+    let mut contains = graph.links.first().cloned().ok_or("edge template")?;
+    contains.source = "n:service".to_owned();
+    contains.target = "n:list".to_owned();
+    contains.kind = EdgeKind::Contains;
+    contains.id = edge_id(
+        &contains.source,
+        contains.kind,
+        &contains.target,
+        contains.relationship_site.as_ref(),
+        None,
+    );
+    contains.key.clone_from(&contains.id);
+    graph.links.push(contains);
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let engine = open(&path, None, &directory.path().join("cache"))?;
+    let answer = engine.callees(CallRequest {
+        symbol: "n:service".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(
+        answer.edges.iter().any(|edge| edge.kind == EdgeKind::Calls
+            && edge.source == "n:list"
+            && edge.target == "n:callee"),
+        "class must not claim zero outgoing calls: {answer:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn python_callable_includes_initializer_calls_but_not_nested_callable_bodies()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::code_graph::NodeKind;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    let owner = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "n:list")
+        .ok_or("owner")?;
+    owner.language = Some("python".to_owned());
+    let template = graph.links.first().cloned().ok_or("edge template")?;
+    for (id, kind) in [
+        ("n:initializer", NodeKind::Variable),
+        ("n:nested", NodeKind::Function),
+    ] {
+        let mut node = support::node(id, kind, id, id);
+        node.language = Some("python".to_owned());
+        graph.nodes.push(node);
+        for (source, target, kind) in [
+            ("n:list", id, EdgeKind::Contains),
+            (id, "n:callee", EdgeKind::Calls),
+        ] {
+            let mut edge = template.clone();
+            edge.source = source.to_owned();
+            edge.target = target.to_owned();
+            edge.kind = kind;
+            edge.id = edge_id(source, kind, target, edge.relationship_site.as_ref(), None);
+            edge.key.clone_from(&edge.id);
+            graph.links.push(edge);
+        }
+    }
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let engine = open(&path, None, &directory.path().join("cache"))?;
+    let answer = engine.callees(CallRequest {
+        symbol: "n:list".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(
+        answer
+            .edges
+            .iter()
+            .any(|edge| edge.source == "n:initializer")
+    );
+    assert!(!answer.edges.iter().any(|edge| edge.source == "n:nested"));
     Ok(())
 }

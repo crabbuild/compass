@@ -1602,3 +1602,47 @@ Compass was inspired by
 [Graphify](https://github.com/Graphify-Labs/graphify). This attribution records
 project lineage only; it does not create a runtime, testing, or compatibility
 dependency between the products.
+
+## Python call coverage and impact auditing
+
+Rebuilt Python graphs contain optional `details.callSites` inventories on Python
+symbols, including callable bodies and class/field initializers. Each inventory
+retains sorted, unique invocation anchors,
+including calls whose receiver cannot be resolved, and a `truncated` flag at the
+4,096-site per-symbol bound. Missing inventories in older graphs mean unknown
+coverage, not zero calls. Disposable AST cache semantics advance from 13 to 14.
+Stored graphs and historical realizations are not rewritten.
+
+Annotated parameters/locals, annotated class fields, direct constructor injection
+and direct constructor assignments can establish nominal receivers. Project
+resolution follows member types and callable return contracts. Duplicate types,
+multiple or conditional field writes and rebinding do not establish a convenient
+target. Dynamic receivers retain source observations; maximum inference builds
+also retain explicitly inferred deferred receiver edges. Deferred placeholders
+are excluded from terminal-name stub rewrites. These facts do not prove runtime
+object identity or arbitrary dynamic Python dispatch.
+
+Typed class callee queries aggregate contained executable owners while keeping
+the actual method endpoints. `compass.query/1` adds optional `callSummary` and
+`impactSummary` fields, and graph v1 adds the optional symbol inventory. Consumers
+that reject unknown optional properties must update their contract types before
+reading new results. Node IDs, relation direction and graph/query major schemas
+remain unchanged.
+
+Impact follows the expanded dependency default in reverse. CLI `--relation TYPE`
+(repeatable) and MCP `get_impact.relations` replace that default. The direct audit
+counts distinct `(direction, neighbor)` contacts, matching explain's connection
+units; parallel occurrences do not inflate the count. Outgoing contacts are
+review context, not claimed dependents. Incoming types/confidences outside the
+chosen policy are counted as excluded. An unbounded query that omits a selected
+direct dependent fails with a typed consistency error. Bounded audits mark direct
+coverage incomplete. Self-references are audited as context/exclusions rather than
+counting the seed as its own affected dependent. The audit covers published
+adjacency; partial source graphs retain their separate
+`IncompleteCoverage` diagnostic and do not claim complete repository coverage.
+File/module groups separate direct from transitive retained dependents
+independently of the bounded path ledger.
+
+The resolver also preserves qualified external Rust receivers established by
+source factory return contracts, subject to the existing inference policy. An
+absent method on a source-local return type remains unresolved.

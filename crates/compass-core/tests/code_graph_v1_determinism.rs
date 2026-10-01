@@ -991,3 +991,46 @@ fn force_extract_with_cache_reuse_has_no_prior_published_semantic_input()
     }));
     Ok(())
 }
+
+#[test]
+fn python_call_inventory_survives_publication_and_class_queries() -> Result<(), Box<dyn Error>> {
+    use compass_model::query_contract::{CallRequest, CodeQueryLimits};
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(
+        root.join("service.py"),
+        "class Service:\n    initial = missing.repository.get()\n    def execute(self, uow):\n        uow.repositories.get()\n        callback = uow.callback\n        callback()\n",
+    )?;
+    let (first, _) = build(root)?;
+    let graph = GraphDocument::load(&root.join("compass-out/graph.json"))?;
+    let method = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name.ends_with("Service::execute"))
+        .ok_or("missing service method")?;
+    let Some(NodeDetails::Symbol(details)) = &method.details else {
+        return Err("missing symbol details".into());
+    };
+    let inventory = details.call_sites.as_ref().ok_or("missing inventory")?;
+    assert_eq!(inventory.sites.len(), 2);
+    assert!(!inventory.truncated);
+    assert!(inventory.sites.iter().all(|site| site.file == "service.py"));
+    let engine = compass_query::open(
+        &root.join("compass-out/graph.json"),
+        None,
+        &root.join("query-cache"),
+    )?;
+    let result = engine.callees(CallRequest {
+        symbol: "Service".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+    let summary = result.call_summary.ok_or("missing summary")?;
+    assert_eq!(summary.resolved_calls, 0);
+    assert_eq!(summary.unresolved_calls, Some(3));
+    assert_eq!(summary.observed_calls, Some(3));
+    assert!(summary.inventory_complete);
+    let (second, _) = build(root)?;
+    assert_eq!(first, second);
+    Ok(())
+}

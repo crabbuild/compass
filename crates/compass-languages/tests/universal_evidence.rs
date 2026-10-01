@@ -2116,3 +2116,42 @@ func direct(current *Bad, values []*Good) {
         10
     );
 }
+
+#[test]
+fn python_call_result_can_receive_a_nominal_alias_but_other_binding_kinds_cannot() {
+    let mut batch = valid_batch();
+    batch
+        .pipeline
+        .capabilities
+        .push(LanguageCapability::TypeReferences);
+    let mut receiver = batch.bindings[0].clone();
+    receiver.id = "binding:receiver".to_owned();
+    receiver.kind = BindingKind::LocalAlias;
+    batch.bindings.push(receiver);
+    batch.bindings[0].kind = BindingKind::CallResult;
+    batch.bindings[0].receiver_binding_id = Some("binding:receiver".to_owned());
+    validate_evidence(&batch, EvidenceLimits::default()).expect("Python nominal receiver");
+    batch.bindings[1].kind = BindingKind::Import;
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
+    batch.bindings[1].kind = BindingKind::LocalAlias;
+    batch.pipeline.language = "rust".to_owned();
+    batch.pipeline.id = "compass.rust".to_owned();
+    batch.pipeline.emitter = "tree-sitter-rust".to_owned();
+    for fact in &mut batch.declarations {
+        fact.language = "rust".to_owned();
+    }
+    for fact in &mut batch.scopes {
+        fact.language = "rust".to_owned();
+    }
+    for fact in &mut batch.bindings {
+        fact.language = "rust".to_owned();
+    }
+    for fact in &mut batch.occurrences {
+        fact.language = "rust".to_owned();
+    }
+    for fact in &mut batch.candidates {
+        fact.language = "rust".to_owned();
+        fact.constraints.exact_language = Some("rust".to_owned());
+    }
+    assert_code(&batch, EvidenceErrorCode::InvalidFact);
+}

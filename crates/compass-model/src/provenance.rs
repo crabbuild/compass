@@ -153,7 +153,7 @@ pub fn append_endpoint_rewrite_evidence(
 }
 
 /// A repository-relative, half-open source range.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceAnchor {
     pub file: String,

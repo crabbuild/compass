@@ -537,7 +537,30 @@ other format. On the evaluation corpus the same caller answers cost 1.7k-2.0k
 tokens in brief form instead of 6.3k-6.8k.
 
 `callers` returns incoming relationship evidence: calls, routes, references,
-imports, exports, and aliases. `callees` remains the direct outgoing call view.
+imports, exports, and aliases. `callees` returns outgoing calls and constructions. For a class/type, it includes
+calls owned by contained methods while preserving their actual source endpoints.
+Python graphs rebuilt with AST cache version 14 retain source-call inventories;
+`callSummary` distinguishes resolved call sites, unresolved invocations and
+inventory completeness. Older graphs report unavailable coverage instead of
+assuming their absent inventory means zero calls.
+
+`impact --relation TYPE` accepts repeatable stored relationship names and replaces
+the default dependency policy. The default includes calls, constructions,
+inheritance/conformance, type and return contracts, references, imports/exports,
+aliases, overrides/decorators and stored effect/routing relations. Containment and
+document mentions are not traversed by default. Heuristic edges still require
+`--include-heuristic`. MCP `get_impact` accepts the same policy as a `relations`
+array. `impactSummary` groups retained direct and transitive dependents by file
+and parent module. Paged text prints these groups before paths and relationships.
+
+Impact independently audits distinct incoming and outgoing neighbors, matching
+`explain` connection units. It reports outgoing review context and incoming
+policy/confidence exclusions rather than presenting them as affected nodes.
+Missing selected direct dependents fail a complete query with a typed consistency
+error; budgets instead mark direct coverage incomplete. Partial source graphs retain a
+separate incomplete-source-coverage caveat; the direct audit covers published
+adjacency. Use
+larger `--max-nodes`/`--max-edges` bounds to inspect a bounded audit.
 When an import or reference ends at a containing module rather than the
 selected declaration, `callers`, `impact`, and `affected` retain the real
 owner-targeted edge and emit an `incomplete_coverage` precision warning.

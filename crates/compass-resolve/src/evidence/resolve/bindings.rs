@@ -53,6 +53,17 @@ impl ResolutionDb<'_> {
         }
         match self.bound_member_target(language, binding, candidate) {
             Ok(Some(qualified)) => {
+                if language == "python"
+                    && candidate.relation == CandidateRelation::Calls
+                    && let Some((receiver, _)) = qualified.rsplit_once("::")
+                {
+                    return Some(self.resolve_c3_receiver_dispatch(
+                        language,
+                        receiver,
+                        compass_languages::ReceiverDispatchStrategy::C3FromReceiver,
+                        candidate,
+                    ));
+                }
                 let key = (language.to_owned(), qualified.clone());
                 if let Some(decision) = self.unique_decision(
                     self.indexes.names.by_qualified.get(&key),
@@ -88,7 +99,20 @@ impl ResolutionDb<'_> {
                 {
                     return Some(decision);
                 }
-                if !candidate.constraints.allow_external {
+                // A Rust factory's source return contract may establish a
+                // qualified external receiver even when the original call only
+                // named a local builder. Keep that proven nominal boundary;
+                // absent methods on source-local return types stay unresolved.
+                let external_return_receiver = language == "rust"
+                    && binding.kind == compass_languages::BindingKind::CallResult
+                    && qualified.rsplit_once("::").is_some_and(|(owner, _)| {
+                        !self
+                            .indexes
+                            .names
+                            .by_qualified
+                            .contains_key(&(language.to_owned(), owner.to_owned()))
+                    });
+                if !candidate.constraints.allow_external && !external_return_receiver {
                     return Some(ResolutionDecision::Unresolved);
                 }
                 return Some(ResolutionDecision::QualifiedExternal {
@@ -114,6 +138,13 @@ impl ResolutionDb<'_> {
                 // the candidate on its prior qualified/deferred path instead
                 // of suppressing source-valid fallback evidence.
                 return None;
+            }
+            Ok(None)
+                if language == "python"
+                    && qualified_occurrence
+                    && binding.kind == compass_languages::BindingKind::LocalAlias =>
+            {
+                return Some(ResolutionDecision::Unresolved);
             }
             Ok(None) => {}
             Err(candidate_count) => {

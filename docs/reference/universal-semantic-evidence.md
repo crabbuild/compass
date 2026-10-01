@@ -86,8 +86,10 @@ collections:
   exact callable that initialized a receiver and may record the zero-based
   output selected by a destructuring assignment. It may preserve an exact
   nominal result type proven in the same file, reference an earlier
-  call-result binding to represent a bounded receiver chain, and retain one
-  non-call-result fallback binding for incomplete project-wide evidence. Chain
+  call-result binding to represent a bounded receiver chain, or a source-backed
+  Python local-alias binding establishing a nominal receiver for a factory
+  method. Other binding kinds and non-Python local aliases are rejected as
+  call-result receivers. It may retain one non-call-result fallback binding for incomplete project-wide evidence. Chain
   references must exist, remain acyclic, and stay within the evidence depth
   limit. Resolution otherwise requires a unique
   callable and either one published return type or an in-range exact output

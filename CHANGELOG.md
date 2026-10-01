@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Resolve Python calls through annotated receivers and unit-of-work member chains,
+  injected constructor fields, and source return contracts. Preserve unknown
+  invocations as bounded source-call inventories and optional inferred receiver
+  edges. Class callee queries include their methods and report resolved versus
+  unresolved call sites instead of claiming a false zero.
+- Preserve qualified external Rust factory return receivers without inventing
+  absent methods on source-local types.
+- Expand impact defaults to construction, inheritance, annotations and other
+  dependency relationships. Add CLI `--relation` and MCP `relations` filters,
+  direct/transitive file grouping, and an independent direct-connection audit.
+
 - Route natural-language usage, dependency, impact, and connection questions
   into typed graph queries. Continue ambiguous questions with a disclosed,
   deterministically ranked candidate and retain alternative identities.

@@ -295,6 +295,35 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
         if let Some(anchor) = &node.source {
             validate_anchor(&node.id, anchor, &files, &mut errors);
         }
+        if let Some(NodeDetails::Symbol(details)) = &node.details
+            && let Some(inventory) = &details.call_sites
+        {
+            if inventory.sites.len() > crate::code_graph::MAX_SYMBOL_CALL_SITES {
+                errors.push(format!(
+                    "node {} call-site inventory exceeds its bound",
+                    node.id
+                ));
+            }
+            for site in &inventory.sites {
+                validate_anchor(&node.id, site, &files, &mut errors);
+                if node
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.file != site.file)
+                {
+                    errors.push(format!(
+                        "node {} call site belongs to a different file",
+                        node.id
+                    ));
+                }
+            }
+            if inventory.sites.windows(2).any(|pair| pair[0] >= pair[1]) {
+                errors.push(format!(
+                    "node {} call sites must be unique and sorted",
+                    node.id
+                ));
+            }
+        }
         if !details_match_kind(node.kind, node.details.as_ref()) {
             errors.push(format!(
                 "node {} has details incompatible with kind {}",

@@ -54,6 +54,12 @@ pub(super) fn search_schema() -> Value {
     result
 }
 
+pub(super) fn impact_schema() -> Value {
+    let mut result = schema(&["symbol"]);
+    result["properties"]["relations"] = json!({"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"},"description":"Stored relationship types to follow in reverse, such as calls, instantiates, references, extends, type_of, returns, or imports. Omit for the full dependency default."});
+    result
+}
+
 pub(super) fn trail_schema() -> Value {
     let mut result = schema(&["source", "target"]);
     result["properties"]["calls_only"] = json!({"type":"boolean","default":false,"description":"Only directed calls edges; excludes structural shortcuts and applies to direction diagnostics too."});
@@ -77,6 +83,11 @@ pub(super) fn invoke_with_engine(
     {
         return Err(super::InvocationError::InvalidParams(
             "exact symbol filters require search_symbols".to_owned(),
+        ));
+    }
+    if name != "get_impact" && arguments.contains_key("relations") {
+        return Err(super::InvocationError::InvalidParams(
+            "relations requires get_impact".to_owned(),
         ));
     }
     let limits = limits(arguments)?;
@@ -141,11 +152,32 @@ pub(super) fn invoke_with_engine(
             include_heuristic: boolean(arguments, "include_heuristic")?,
             limits,
         }),
-        "get_impact" => engine.impact(ImpactRequest {
-            symbol: required_string(arguments, "symbol")?,
-            include_heuristic: boolean(arguments, "include_heuristic")?,
-            limits,
-        }),
+        "get_impact" => {
+            let request = ImpactRequest {
+                symbol: required_string(arguments, "symbol")?,
+                include_heuristic: boolean(arguments, "include_heuristic")?,
+                limits,
+            };
+            if let Some(value) = arguments.get("relations") {
+                let values = value
+                    .as_array()
+                    .filter(|values| !values.is_empty() && values.len() <= 32)
+                    .ok_or_else(|| {
+                        "relations must contain 1 to 32 stored relationship types".to_owned()
+                    })?;
+                let relations = values
+                    .iter()
+                    .map(|value| {
+                        serde_json::from_value(value.clone()).map_err(|_| {
+                            "relations contains an unknown stored relationship type".to_owned()
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                engine.impact_with_relations(request, &relations)
+            } else {
+                engine.impact(request)
+            }
+        }
         "explore_code" => engine.explore(ExploreRequest {
             symbols: arguments
                 .get("symbols")

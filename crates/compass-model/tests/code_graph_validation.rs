@@ -853,3 +853,37 @@ fn unknown_rewrite_like_names_remain_valid_open_ended_producer_rules() {
     assert!(validate_code_graph(&graph).is_ok());
 }
 use std::error::Error;
+
+#[test]
+fn symbol_call_inventories_validate_bounds_files_and_ordering() {
+    use compass_model::code_graph::{CallSiteInventory, NodeDetails, SymbolNodeDetails};
+    let mut graph = document();
+    let details = SymbolNodeDetails {
+        signature: None,
+        modifiers: Vec::new(),
+        overload_discriminator: None,
+        declaring_type: None,
+        signature_digest: None,
+        implementation_digest: None,
+        source_digest: None,
+        call_sites: Some(CallSiteInventory {
+            sites: vec![anchor()],
+            truncated: false,
+        }),
+    };
+    graph.nodes[1].details = Some(NodeDetails::Symbol(details.clone()));
+    assert!(validate_code_graph(&graph).is_ok());
+    let mut duplicate = details.clone();
+    duplicate
+        .call_sites
+        .as_mut()
+        .expect("inventory")
+        .sites
+        .push(anchor());
+    graph.nodes[1].details = Some(NodeDetails::Symbol(duplicate));
+    assert!(validate_code_graph(&graph).is_err());
+    let mut outside = details;
+    outside.call_sites.as_mut().expect("inventory").sites[0].file = "other.py".to_owned();
+    graph.nodes[1].details = Some(NodeDetails::Symbol(outside));
+    assert!(validate_code_graph(&graph).is_err());
+}

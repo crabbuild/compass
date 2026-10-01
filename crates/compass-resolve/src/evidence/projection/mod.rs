@@ -127,6 +127,7 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal declaration projection", &mut profile_started);
+        self.materialize_python_call_sites(nodes, &graph_ids);
         let inventory_kinds = nodes
             .iter()
             .map(|node| (node.id.clone(), node.string("symbol_kind")))
@@ -151,7 +152,32 @@ impl UniversalResolutionIndex {
             .filter_map(|candidate_slot| {
                 let candidate = self.facts.candidates.at(candidate_slot)?;
                 let candidate_id = candidate.id.as_str();
-                let decision = db.resolve_candidate(&candidate, admission);
+                let mut decision = db.resolve_candidate(&candidate, admission);
+                if admission.admits_deferred_receiver()
+                    && decision == ResolutionDecision::Unresolved
+                    && candidate.language == "python"
+                    && candidate.relation == CandidateRelation::Calls
+                    && let Some(qualifier) =
+                        db.occurrence(&candidate).and_then(OccurrenceRef::qualifier)
+                    && let Some(owner) = self
+                        .facts
+                        .declarations
+                        .get(&candidate.source_declaration_id)
+                {
+                    // This endpoint names an observed invocation, not a guessed
+                    // repository method. Scope unknown receivers to their
+                    // source owner so unrelated dynamic calls cannot collapse.
+                    decision = ResolutionDecision::DeferredReceiver {
+                        qualified_name: format!(
+                            "{}::<{}>.{}",
+                            owner.qualified_name, qualifier, candidate.target_spelling
+                        ),
+                        evidence: ResolutionEvidence {
+                            rule: ResolutionRule::DeferredReceiver,
+                            candidate_count: 0,
+                        },
+                    };
+                }
                 let exact_declaration_id = match &decision {
                     ResolutionDecision::Resolved { declaration_id, .. } => {
                         Some(declaration_id.clone())

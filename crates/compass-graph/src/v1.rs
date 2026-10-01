@@ -1982,6 +1982,7 @@ fn ensure_external_placeholder_details(nodes: &mut [NodeRecord]) {
             signature_digest: None,
             implementation_digest: None,
             source_digest: None,
+            call_sites: None,
         }));
     }
 }
@@ -3699,6 +3700,9 @@ fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDe
         NodeDetails::File(_) | NodeDetails::Resource(_) => {}
         NodeDetails::Document(details) => insert_raw_document_details(attributes, details),
         NodeDetails::Symbol(details) => {
+            if let Some(inventory) = &details.call_sites {
+                attributes.insert("call_sites".to_owned(), serde_json::json!(inventory));
+            }
             insert_optional_string(attributes, "signature", details.signature.as_ref());
             insert_optional_string(
                 attributes,
@@ -5266,6 +5270,24 @@ fn node_details(
     record: &str,
     root: &Path,
 ) -> Result<Option<NodeDetails>, GraphError> {
+    let call_sites = attributes
+        .get("call_sites")
+        .map(|value| {
+            let mut inventory: compass_model::code_graph::CallSiteInventory =
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    raw_error(record, &format!("invalid call-site inventory: {error}"))
+                })?;
+            if inventory.sites.len() > compass_model::code_graph::MAX_SYMBOL_CALL_SITES {
+                return Err(raw_error(record, "call-site inventory exceeds its bound"));
+            }
+            for site in &mut inventory.sites {
+                site.file = portable_path(&site.file, root)?;
+            }
+            inventory.sites.sort();
+            inventory.sites.dedup();
+            Ok(inventory)
+        })
+        .transpose()?;
     let details = match kind {
         NodeKind::File => {
             let file = file_facts.get(source_path).ok_or_else(|| {
@@ -5434,6 +5456,7 @@ fn node_details(
             signature_digest: optional_string(attributes, "signature_hash"),
             implementation_digest: optional_string(attributes, "implementation_hash"),
             source_digest: optional_string(attributes, "source_hash"),
+            call_sites,
         })),
     };
     Ok(details)

@@ -4051,7 +4051,10 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
         if label.is_empty() {
             continue;
         }
-        if source.is_empty() && !is_canonical_external_symbol(node) {
+        if source.is_empty()
+            && !is_canonical_external_symbol(node)
+            && !is_deferred_receiver_symbol(node)
+        {
             stubs.insert(node.id.clone(), label);
         } else if is_type_like_definition(node)
             && let Some(family @ "jvm") = language_family(&source)
@@ -4687,7 +4690,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         .nodes
         .iter()
         .filter(|node| {
-            string_attribute(node, "source_file").is_empty() && !is_canonical_external_symbol(node)
+            string_attribute(node, "source_file").is_empty()
+                && !is_canonical_external_symbol(node)
+                && !is_deferred_receiver_symbol(node)
         })
         .filter_map(|node| {
             let label = normalized_label(node);
@@ -4921,6 +4926,17 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
     }
     let label = node.label().trim();
     !label.is_empty() && !label.ends_with(')') && !label.starts_with('.') && !label.contains('.')
+}
+
+// A deferred receiver records an observed invocation, not a nominal target.
+// A unique terminal name is never enough to resolve its runtime receiver.
+fn is_deferred_receiver_symbol(node: &NodeRecord) -> bool {
+    node.string("language") == "python"
+        && node
+            .attributes
+            .get("deferred_receiver")
+            .and_then(Value::as_bool)
+            == Some(true)
 }
 
 fn is_canonical_external_symbol(node: &NodeRecord) -> bool {
