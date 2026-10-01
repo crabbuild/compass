@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-10-01
+
 - Match engineering business vocabulary through bounded synonyms and witnessed
   Markdown-to-code links, with typed approximate-match provenance. Retain bounded
   document and Python docstring excerpts in resource details for prose search.
