@@ -357,6 +357,8 @@ pub struct CodeQueryEngine {
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
     pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
     pub(crate) deadline: Option<Instant>,
+    pub(crate) semantic_search: bool,
+    pub(crate) semantic_index: Mutex<Option<crate::semantic_search::SemanticIndex>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -910,7 +912,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn store_term_candidates(
+    pub(crate) fn store_term_candidates(
         &self,
         terms: &[String],
         limit: usize,
@@ -1609,6 +1611,19 @@ impl CodeQueryEngine {
         Ok(response)
     }
 
+    /// Enable local corpus-trained latent-semantic fallback. No network or model
+    /// download is performed; exact structured lookup remains unchanged.
+    #[must_use]
+    pub fn with_semantic_search(mut self, enabled: bool) -> Self {
+        self.semantic_search = enabled;
+        self
+    }
+
+    /// Configure one request while holding exclusive access to a cached engine.
+    pub fn set_semantic_search(&mut self, enabled: bool) {
+        self.semantic_search = enabled;
+    }
+
     /// Bound every following typed query with an absolute deadline.
     ///
     /// The CLI arms one deadline per command and reuses it across retries so a
@@ -1736,7 +1751,7 @@ impl CodeQueryEngine {
         self.finish_response(&mut response)
     }
 
-    pub(crate) fn search_instrumented(
+    pub(crate) fn search_lexical_instrumented(
         &self,
         request: SearchRequest,
         instrumentation: &mut QueryInstrumentation,
@@ -1764,7 +1779,7 @@ impl CodeQueryEngine {
         }
         let candidate_limit = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
         let admit = |_: &NodeRecord| true;
-        let mut check = || Ok(());
+        let mut check = || self.check_deadline();
         let assembly = self.assemble_search_candidates(
             &request.query,
             &terms,
@@ -1773,7 +1788,8 @@ impl CodeQueryEngine {
                 max_candidates: candidate_limit,
                 source_lookup_limit: candidate_limit,
                 max_candidate_reads: usize::try_from(
-                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ,
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ
+                        .saturating_sub(instrumentation.work.candidates_read),
                 )
                 .unwrap_or(usize::MAX),
                 max_candidate_probes: usize::try_from(

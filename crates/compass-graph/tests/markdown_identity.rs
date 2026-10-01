@@ -413,3 +413,41 @@ fn markdown_explicit_link_evidence_survives_absolute_path_aliases() -> Result<()
     assert!(edge.relationship_site.is_some());
     Ok(())
 }
+
+#[test]
+fn published_markdown_retains_bounded_prose_and_trusted_round_trip() -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    let path = root.join("README.md");
+    fs::write(
+        &path,
+        format!(
+            "# Operations\n\n{} Account suspension is implemented here.\n",
+            "Context ".repeat(100)
+        ),
+    )?;
+    let raw = Engine::default().extract(&path)?;
+    let graph = normalize_document_v1(
+        &build_from_extraction(&raw, true, Some(root)),
+        root,
+        "sha256:test",
+        None,
+    )?;
+    let paragraph = graph.nodes.iter().find(|node| matches!(&node.details, Some(NodeDetails::Resource(details)) if details.content.as_ref().is_some_and(|text| text.contains("Account suspension")))).ok_or("prose missing")?;
+    assert!(!paragraph.name.contains("Account suspension"));
+    assert!(compass_model::search::document_search_terms(paragraph).contains("suspension"));
+    let round_trip: compass_model::code_graph::GraphDocument =
+        serde_json::from_slice(&serde_json::to_vec(&graph)?)?;
+    assert_eq!(round_trip, graph);
+    let recomposition = compass_graph::extraction_from_v1(&graph);
+    let raw = recomposition
+        .nodes
+        .iter()
+        .find(|node| node.id == paragraph.id)
+        .ok_or("missing recomposition record")?;
+    assert!(
+        raw.string("resource_content")
+            .contains("Account suspension")
+    );
+    Ok(())
+}

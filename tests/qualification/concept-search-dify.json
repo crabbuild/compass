@@ -1,0 +1,235 @@
+{
+  "schema": "compass.concept-qualification/1",
+  "repository": "https://github.com/langgenius/dify",
+  "commit": "1a918ea407990ecd2156af2614932db8c9c43091",
+  "root": "api",
+  "author": "agent-authored novice-style questions; expected modules established by source inspection before querying",
+  "criterion": "correct if one of first three distinct production source paths starts with an expected prefix; also report top-one accuracy",
+  "minimum_correct": 24,
+  "cases": [
+    {
+      "question": "How does authorization work?",
+      "expected_paths": [
+        "libs/workspace_permission.py",
+        "controllers/common/wraps.py",
+        "controllers/console/wraps.py"
+      ]
+    },
+    {
+      "question": "Where is access control enforced?",
+      "expected_paths": [
+        "libs/workspace_permission.py",
+        "controllers/common/wraps.py",
+        "controllers/console/wraps.py"
+      ]
+    },
+    {
+      "question": "What checks workspace permissions?",
+      "expected_paths": [
+        "libs/workspace_permission.py",
+        "controllers/common/wraps.py",
+        "controllers/console/wraps.py"
+      ]
+    },
+    {
+      "question": "How does authentication work?",
+      "expected_paths": [
+        "extensions/ext_login.py",
+        "libs/login.py",
+        "services/account/login_service.py",
+        "controllers/console/auth/"
+      ]
+    },
+    {
+      "question": "Where does a user sign in?",
+      "expected_paths": [
+        "extensions/ext_login.py",
+        "libs/login.py",
+        "services/account/login_service.py",
+        "controllers/console/auth/"
+      ]
+    },
+    {
+      "question": "What handles OAuth authentication?",
+      "expected_paths": [
+        "libs/oauth.py",
+        "controllers/console/auth/oauth.py",
+        "services/account/oauth_service.py"
+      ]
+    },
+    {
+      "question": "Where is configuration loaded?",
+      "expected_paths": [
+        "configs/"
+      ]
+    },
+    {
+      "question": "How are environment variables read?",
+      "expected_paths": [
+        "configs/"
+      ]
+    },
+    {
+      "question": "What handles persistence?",
+      "expected_paths": [
+        "repositories/",
+        "extensions/ext_database.py"
+      ]
+    },
+    {
+      "question": "Where is database access implemented?",
+      "expected_paths": [
+        "repositories/",
+        "extensions/ext_database.py"
+      ]
+    },
+    {
+      "question": "Where is uploaded file validation implemented?",
+      "expected_paths": [
+        "factories/file_factory/validation.py",
+        "factories/file_factory/",
+        "services/file_service.py"
+      ]
+    },
+    {
+      "question": "What implements request throttling?",
+      "expected_paths": [
+        "libs/rate_limit.py",
+        "libs/helper.py",
+        "core/app/features/rate_limiting/"
+      ]
+    },
+    {
+      "question": "How does rate limiting work?",
+      "expected_paths": [
+        "libs/rate_limit.py",
+        "libs/helper.py",
+        "core/app/features/rate_limiting/"
+      ]
+    },
+    {
+      "question": "Where do background jobs run?",
+      "expected_paths": [
+        "tasks/",
+        "extensions/ext_celery.py"
+      ]
+    },
+    {
+      "question": "How are recurring jobs scheduled?",
+      "expected_paths": [
+        "schedule/",
+        "extensions/ext_celery.py"
+      ]
+    },
+    {
+      "question": "How does caching work?",
+      "expected_paths": [
+        "extensions/ext_redis.py",
+        "core/rag/embedding/cached_embedding.py",
+        "core/helper/"
+      ]
+    },
+    {
+      "question": "What handles database transactions?",
+      "expected_paths": [
+        "extensions/ext_database.py",
+        "repositories/"
+      ]
+    },
+    {
+      "question": "Where are feature flags checked?",
+      "expected_paths": [
+        "services/feature_query_service.py",
+        "configs/feature/",
+        "models/model.py"
+      ]
+    },
+    {
+      "question": "How does observability work?",
+      "expected_paths": [
+        "core/telemetry/",
+        "services/telemetry_service.py",
+        "extensions/ext_otel.py",
+        "extensions/ext_enterprise_telemetry.py"
+      ]
+    },
+    {
+      "question": "Where is application logging configured?",
+      "expected_paths": [
+        "extensions/ext_logging.py",
+        "core/logging/"
+      ]
+    },
+    {
+      "question": "What prevents simultaneous database migrations?",
+      "expected_paths": [
+        "libs/db_migration_lock.py"
+      ]
+    },
+    {
+      "question": "What handles transient database failures?",
+      "expected_paths": [
+        "services/retention/workflow_run/db_retry.py"
+      ]
+    },
+    {
+      "question": "How are request timeouts configured?",
+      "expected_paths": [
+        "configs/"
+      ]
+    },
+    {
+      "question": "Where are stored credentials encrypted?",
+      "expected_paths": [
+        "libs/rsa.py",
+        "core/helper/encrypter.py",
+        "libs/key_providers/"
+      ]
+    },
+    {
+      "question": "What handles file uploads?",
+      "expected_paths": [
+        "services/file_service.py",
+        "factories/file_factory/"
+      ]
+    },
+    {
+      "question": "How does email delivery work?",
+      "expected_paths": [
+        "extensions/ext_mail.py",
+        "tasks/mail_",
+        "libs/email_template_renderer.py"
+      ]
+    },
+    {
+      "question": "What implements result paging?",
+      "expected_paths": [
+        "libs/pagination.py",
+        "libs/infinite_scroll_pagination.py"
+      ]
+    },
+    {
+      "question": "Where are subscription payments handled?",
+      "expected_paths": [
+        "services/billing_service.py",
+        "services/billing_portal_service.py",
+        "controllers/console/billing/"
+      ]
+    },
+    {
+      "question": "Where are health checks implemented?",
+      "expected_paths": [
+        "celery_healthcheck.py"
+      ]
+    },
+    {
+      "question": "How does data retention work?",
+      "expected_paths": [
+        "services/retention/",
+        "tasks/",
+        "schedule/",
+        "configs/"
+      ]
+    }
+  ]
+}

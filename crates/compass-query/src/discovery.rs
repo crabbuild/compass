@@ -150,12 +150,11 @@ impl CodeQueryEngine {
         let Ok(plan) = plan_natural_query(&request.question) else {
             return Ok(None);
         };
-        if !plan.routes_to_typed_query()
-            || matches!(
-                plan.intent(),
-                NaturalQueryIntent::Search | NaturalQueryIntent::Fallback
-            )
-        {
+        let concept_search = matches!(
+            plan.intent(),
+            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback
+        );
+        if !concept_search && !plan.routes_to_typed_query() {
             return Ok(None);
         }
         if plan.intent() == NaturalQueryIntent::NodeTrail && request.limits.max_seeds < 2 {
@@ -173,8 +172,25 @@ impl CodeQueryEngine {
                 ..CodeQueryLimits::default()
             },
         })?;
-        let typed = profiled.response;
-        if typed.nodes.is_empty() {
+        let mut typed = profiled.response;
+        for matched in &typed.concept_matches {
+            if typed
+                .results
+                .first()
+                .is_some_and(|hit| hit.node_id == matched.node_id)
+            {
+                typed.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::NoMatch,
+                    message: format!(
+                        "Approximate: matched {:?} → {:?} via {:?}; document path {:?}",
+                        matched.query, matched.matched, matched.method, matched.via
+                    ),
+                    node_id: Some(matched.node_id.clone()),
+                    path: None,
+                });
+            }
+        }
+        if typed.nodes.is_empty() || (concept_search && typed.concept_matches.is_empty()) {
             return Ok(None);
         }
         if profiled.profile.work.edges_expanded > request.limits.max_expanded_relationships {
@@ -186,7 +202,18 @@ impl CodeQueryEngine {
         }
         let mut seeds = Vec::new();
         let backend = self.backend.pin_discovery()?;
-        for operand in plan.operands() {
+        let concept_operands = typed
+            .results
+            .iter()
+            .take(usize::try_from(request.limits.max_seeds).unwrap_or(usize::MAX))
+            .map(|hit| hit.node_id.clone())
+            .collect::<Vec<_>>();
+        let seed_operands = if concept_search {
+            &concept_operands[..]
+        } else {
+            plan.operands()
+        };
+        for operand in seed_operands {
             let normalized = normalize_symbol(operand);
             let selected = selections
                 .iter()
@@ -202,10 +229,11 @@ impl CodeQueryEngine {
             let Some(selected) = selected else {
                 continue;
             };
-            let id_match = selected.id == *operand;
-            let exact = id_match
-                || normalize_symbol(&selected.name) == normalized
-                || normalize_symbol(&selected.qualified_name) == normalized;
+            let id_match = !concept_search && selected.id == *operand;
+            let exact = !concept_search
+                && (id_match
+                    || normalize_symbol(&selected.name) == normalized
+                    || normalize_symbol(&selected.qualified_name) == normalized);
             let (others, truncated) = backend.nodes_by_normalized_name(&normalized, 5)?;
             let alternatives = others
                 .into_iter()
@@ -230,7 +258,15 @@ impl CodeQueryEngine {
                 },
                 rank: u32::try_from(seeds.len() + 1).unwrap_or(u32::MAX),
                 matched_terms: vec![operand.clone()],
-                matched_fields: vec![format!("intent:{:?}", plan.intent())],
+                matched_fields: if concept_search {
+                    typed
+                        .results
+                        .iter()
+                        .find(|hit| hit.node_id == selected.id)
+                        .map_or_else(Vec::new, |hit| hit.matched_fields.clone())
+                } else {
+                    vec![format!("intent:{:?}", plan.intent())]
+                },
                 source: selected.source.clone(),
                 candidate_source: if id_match {
                     DiscoverySeedSource::ExactId
@@ -601,6 +637,108 @@ impl CodeQueryEngine {
     }
 
     fn indexed_candidates(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        question: &str,
+        scope: &[DiscoveryScope],
+        direction: DiscoveryDirection,
+        limits: &DiscoveryLimits,
+        guard: &DiscoveryGuard<'_>,
+    ) -> Result<DiscoveryCandidateSelection, QueryError> {
+        let mut selected =
+            self.indexed_lexical_candidates(backend, question, scope, direction, limits, guard)?;
+        if selected.candidates.iter().any(|candidate| {
+            matches!(
+                candidate.source,
+                DiscoverySeedSource::ExactId | DiscoverySeedSource::ExactName
+            )
+        }) {
+            return Ok(selected);
+        }
+        let remaining = limits
+            .max_expanded_relationships
+            .saturating_sub(selected.expanded_relationships);
+        if remaining == 0 {
+            return Ok(selected);
+        }
+        guard.check()?;
+        let mut instrumentation = crate::telemetry::QueryInstrumentation::default();
+        instrumentation.work.candidates_read = selected.nodes_read;
+        let recalled = self.search_concepts_instrumented(
+            compass_model::query_contract::SearchRequest {
+                query: question.to_owned(),
+                limits: compass_model::query_contract::CodeQueryLimits {
+                    max_nodes: limits.max_candidates.min(64),
+                    max_candidates: limits.max_candidates.min(64),
+                    max_depth: limits.max_depth,
+                    max_edges: u32::try_from(remaining.min(u64::from(limits.max_edges)))
+                        .unwrap_or(u32::MAX),
+                    max_response_bytes: limits.max_response_bytes,
+                    ..Default::default()
+                },
+            },
+            &mut instrumentation,
+            &|node| discovery_scope_matches(node, scope),
+        )?;
+        guard.check()?;
+        selected.nodes_read = instrumentation.work.candidates_read;
+        selected.expanded_relationships = selected
+            .expanded_relationships
+            .saturating_add(instrumentation.work.edges_expanded);
+        let mut concepts = Vec::new();
+        for hit in &recalled.results {
+            guard.check()?;
+            let matched = recalled
+                .concept_matches
+                .iter()
+                .filter(|item| item.node_id == hit.node_id)
+                .collect::<Vec<_>>();
+            if matched.is_empty() {
+                continue;
+            }
+            let Some(node) = backend.node_by_id(&hit.node_id)? else {
+                continue;
+            };
+            if !discovery_scope_matches(&node, scope) {
+                continue;
+            }
+            let mut fields = hit.matched_fields.clone();
+            fields.extend(matched.iter().map(|item| {
+                format!(
+                    "approximate:{:?}:{}→{}",
+                    item.method, item.query, item.matched
+                )
+            }));
+            concepts.push(RankedDiscoveryCandidate {
+                node,
+                score: hit.score,
+                channel_rank: 0,
+                relation_evidence: None,
+                operation_root: None,
+                matched_terms: matched.iter().map(|item| item.matched.clone()).collect(),
+                matched_fields: fields,
+                source: DiscoverySeedSource::Fuzzy,
+            });
+        }
+        if !concepts.is_empty() {
+            let ids = concepts
+                .iter()
+                .map(|candidate| candidate.node.id.clone())
+                .collect::<BTreeSet<_>>();
+            selected
+                .candidates
+                .retain(|candidate| !ids.contains(&candidate.node.id));
+            concepts.extend(selected.candidates);
+            selected.truncated |= recalled.truncated
+                || concepts.len() > usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
+            concepts.truncate(usize::try_from(limits.max_candidates).unwrap_or(usize::MAX));
+            selected.candidates = concepts;
+            selected.ambiguity_complete &= !recalled.truncated;
+        }
+        Ok(selected)
+    }
+
+    fn indexed_lexical_candidates(
         &self,
         backend: &PinnedDiscoveryBackend<'_>,
         question: &str,
@@ -2819,6 +2957,8 @@ mod tests {
             search_query_cache: std::sync::Mutex::new(SearchQueryCache::default()),
             fuzzy_lookup_cache: std::sync::Mutex::new(FuzzyLookupCache::default()),
             deadline: None,
+            semantic_search: false,
+            semantic_index: std::sync::Mutex::new(None),
         }
     }
 

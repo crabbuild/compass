@@ -1833,7 +1833,7 @@ fn normalize_v1_with_mode(
 /// and derive stable identities. `compass.graph/1` keeps its established wire
 /// shape: document nodes publish as `Resource(document)` and express Markdown
 /// structure through source-backed nodes, meaningful names, qualified names,
-/// containment, and reference edges.
+/// containment, reference edges, and an optional bounded content excerpt.
 fn downgrade_document_details_for_graph_v1(nodes: &mut [NodeRecord]) {
     for node in nodes {
         let details = match node.details.take() {
@@ -1866,6 +1866,7 @@ fn downgrade_document_details_for_graph_v1(nodes: &mut [NodeRecord]) {
             resource_kind: ResourceKind::Document,
             uri: details.uri,
             media_type,
+            content: details.content,
         }));
     }
 }
@@ -3697,7 +3698,12 @@ fn insert_raw_evidence(attributes: &mut Map<String, Value>, evidence: &Provenanc
 
 fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDetails) {
     match details {
-        NodeDetails::File(_) | NodeDetails::Resource(_) => {}
+        NodeDetails::File(_) => {}
+        NodeDetails::Resource(details) => {
+            insert_optional_string(attributes, "resource_content", details.content.as_ref());
+            insert_optional_string(attributes, "uri", details.uri.as_ref());
+            insert_optional_string(attributes, "media_type", details.media_type.as_ref());
+        }
         NodeDetails::Document(details) => insert_raw_document_details(attributes, details),
         NodeDetails::Symbol(details) => {
             if let Some(inventory) = &details.call_sites {
@@ -5365,6 +5371,7 @@ fn node_details(
                             .map(|slug| format!("#{slug}"))
                     }),
                     media_type: optional_string(attributes, "media_type"),
+                    content: optional_string(attributes, "resource_content"),
                 }))
             }
         }

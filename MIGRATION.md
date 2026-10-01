@@ -7,6 +7,15 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+To enable full bounded document/prose recall, rebuild with
+`compass extract <root> --force`. Document/rationale resources now carry optional
+`details.data.content` (up to 4 KiB), and strict query consumers must admit
+optional `conceptMatches` and its closed match-method enum. AST cache v15 and
+JSON query-index format v2 invalidate older disposable entries automatically.
+Rebuild existing SQLite sidecars from the new graph to get prose postings;
+historical realizations retain their original content and indexes. Default
+concept recall needs no credentials; corpus-LSA search remains explicit opt-in.
+
 Rebuild Python graphs with `compass extract <root> --code-only --force` to obtain
 receiver-chain resolution and source-call inventories. AST cache version 14
 recomputes older entries automatically. Add `--inference-level max` to retain

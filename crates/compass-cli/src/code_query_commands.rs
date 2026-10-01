@@ -266,9 +266,17 @@ fn execute(
         open_with_engine(&graph, program.as_deref(), &cache, engine)
             .map_err(|error| error.to_string())?
     }
-    .with_deadline(deadline);
+    .with_deadline(deadline)
+    .with_semantic_search(args.iter().any(|arg| arg == "--semantic-search"));
     let limits = limits(args, page_scale)?;
     let include_heuristic = args.iter().any(|arg| arg == "--include-heuristic");
+    if args.iter().any(|arg| arg == "--semantic-search") && !matches!(operation, "ask" | "search") {
+        return Err("--semantic-search is supported by compass ask and search".to_owned());
+    }
+    if args.iter().any(|arg| arg == "--semantic-search") && args.iter().any(|arg| arg == "--exact")
+    {
+        return Err("--semantic-search cannot be combined with --exact".to_owned());
+    }
     let relations = impact_relations(operation, args)?;
     let (response, question, operands) = match operation {
         "ask" => {

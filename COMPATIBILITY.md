@@ -1,5 +1,24 @@
 # Compass compatibility
 
+Concept recall adds optional `conceptMatches` to `compass.query/1` with closed
+methods `synonym`, `document_link`, and `semantic_lsa`. Strict consumers must
+update to the matching enum/field manifest and fingerprint. Absence means no
+concept recall; approximate matching never promotes structural confidence.
+CLI `ask`/non-exact `search` and MCP bounded discovery/search enable synonym and
+document-link recall by default; `--semantic-search` / `semantic_search: true`
+explicitly enable offline corpus-LSA fallback per request. Exact lookup retains
+its existing meaning. Semantic corpus limits return typed errors, not no-match.
+
+Graph/1 resource details gain optional `content`, a source-backed excerpt of at
+most 4 KiB for document/rationale resources. Document identity, edge direction,
+and reference provenance remain unchanged. Closed resource-details decoders
+must admit this additive field. Markdown normalization preserves its bounded
+prose, and Python rationale extraction retains docstring excerpts under AST
+cache v15. Disposable JSON query-index format v2 adds prose terms; older caches
+rebuild automatically. Existing immutable store indexes/graphs must be newly
+published to obtain prose postings; history is never rewritten. Native names
+and existing reference edges remain queryable in older graphs.
+
 Compass is an independent native product. Its compatibility contract is defined
 by the shipped `compass` CLI, documented file and protocol formats, native tests,
 and migration notes. Compass does not execute, import, check out, or test against

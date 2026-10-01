@@ -331,6 +331,17 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
                 node.kind.as_str()
             ));
         }
+        if let Some(NodeDetails::Resource(details)) = node.details.as_ref()
+            && let Some(content) = &details.content
+            && (content.len() > MAX_DOCUMENT_TEXT_BYTES
+                || !matches!(
+                    details.resource_kind,
+                    crate::code_graph::ResourceKind::Document
+                        | crate::code_graph::ResourceKind::Rationale
+                ))
+        {
+            errors.push(format!("node {} resource content requires document/rationale kind and at most {MAX_DOCUMENT_TEXT_BYTES} bytes", node.id));
+        }
         if let Some(NodeDetails::Document(details)) = node.details.as_ref() {
             validate_document_details(&node.id, details, node.source.as_ref(), &files, &mut errors);
             for reference in &details.references {

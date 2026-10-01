@@ -123,6 +123,7 @@ impl CodeQueryEngine {
         let mut operands = plan.operands.clone();
         let mut selections = Vec::new();
         let mut match_diagnostics = Vec::new();
+        let mut concept_matches = Vec::new();
         let mut match_truncated = false;
         if plan.routes_to_typed_query()
             && !matches!(
@@ -131,7 +132,7 @@ impl CodeQueryEngine {
             )
         {
             for operand in &mut operands {
-                let (selected, diagnostics, truncated) = self.select_natural_symbol(
+                let (selected, diagnostics, truncated, matched) = self.select_natural_symbol(
                     operand,
                     &request.question,
                     &request.limits,
@@ -142,6 +143,7 @@ impl CodeQueryEngine {
                     *operand = selected;
                 }
                 match_diagnostics.extend(diagnostics);
+                concept_matches.extend(matched);
                 match_truncated |= truncated;
             }
         }
@@ -206,6 +208,9 @@ impl CodeQueryEngine {
                 )
             }
         }?;
+        concept_matches
+            .retain(|matched| response.nodes.iter().any(|node| node.id == matched.node_id));
+        response.concept_matches.extend(concept_matches);
         response.diagnostics.extend(match_diagnostics);
         response.truncated |= match_truncated;
         let response = self.finish_natural_response(response)?;

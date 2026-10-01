@@ -375,6 +375,40 @@ operation and returns `compass.query/1`. `--at REV` reads one immutable trusted
 revision graph; it does not fall back to a legacy projection. Rebuild a revision
 whose realization does not contain the current trusted graph contract.
 
+Concept recall is enabled for `ask`, non-exact `search`, and bounded MCP
+`query_graph` / `search_symbols`. Engineering synonyms such as authorization →
+authz/permission/policy are ranked alternatives. Matching Markdown sections
+follow published containment and reference edges to code; missing or ambiguous
+mentions never invent a target. The optional `conceptMatches` array in
+`compass.query/1` records `nodeId`, `method`, `query`, `matched`, and the document
+ID path `via`. Text headlines label these results approximate. Strict
+`search --exact` and exact structured symbol resolution retain their contracts.
+
+`compass ask QUESTION --semantic-search` and `compass search QUERY
+--semantic-search` opt into an offline latent-semantic fallback after name and
+synonym recall fail. MCP uses `semantic_search: true` on `query_graph` or
+`search_symbols`; each request defaults to false. This cannot be combined with
+exact lookup or legacy traversal controls. The graph's names, retained
+Python rationale/docstring excerpts, and document excerpts provide the corpus.
+TF-IDF and deterministic truncated-SVD embeddings are learned locally and cached
+for that immutable engine. There is no model download, credential, network call,
+or vector database. It can bridge vocabulary that co-occurs in the graph; an
+unknown corpus term has no semantic match. Results use `semantic_lsa` provenance
+and never change structural evidence confidence.
+
+Synonym recall uses at most 12 alternatives and 768 posting candidates per
+alternative, with a shared indexed-read ceiling. Ranking precedes the retained
+candidate cap; truncation is reported. Compact code names, matching filenames,
+question context and implementation kinds are ranking hints, not proof of
+meaning. Data-transfer/error declarations and test code rank lower.
+
+Semantic construction fails explicitly above 32,768 nodes, 64 MiB of canonical
+node payload, 8,192 terms, or one million sparse entries. Build a smaller scoped
+graph or omit the flag when a limit is reached. Document/rationale excerpts are
+bounded to 4 KiB; prose indexes retain at most 512 normalized terms per node.
+Older graphs retain their existing names/links until rebuilt; see
+[MIGRATION.md](../../MIGRATION.md).
+
 CompassQL:
 
 ```text

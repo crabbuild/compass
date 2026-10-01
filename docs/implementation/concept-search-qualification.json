@@ -1,0 +1,341 @@
+{
+  "schema": "compass.concept-qualification-report/1",
+  "repository": "https://github.com/langgenius/dify",
+  "commit": "1a918ea407990ecd2156af2614932db8c9c43091",
+  "correct_top_one": 16,
+  "correct_top_three": 26,
+  "questions": 30,
+  "minimum_correct": 24,
+  "cases": [
+    {
+      "question": "How does authorization work?",
+      "top_paths": [
+        "libs/workspace_permission.py",
+        "services/plugin/plugin_permission_service.py",
+        "extensions/storage/clickzetta_volume/volume_permissions.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where is access control enforced?",
+      "top_paths": [
+        "libs/workspace_permission.py",
+        "services/plugin/plugin_permission_service.py",
+        "extensions/storage/clickzetta_volume/volume_permissions.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What checks workspace permissions?",
+      "top_paths": [
+        "libs/workspace_permission.py",
+        "services/knowledge/dataset_access.py",
+        "services/workspace/service.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How does authentication work?",
+      "top_paths": [
+        "extensions/ext_login.py",
+        "libs/login.py",
+        "libs/oauth.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where does a user sign in?",
+      "top_paths": [
+        "extensions/ext_login.py",
+        "libs/login.py",
+        "libs/oauth.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What handles OAuth authentication?",
+      "top_paths": [
+        "libs/oauth_bearer.py",
+        "libs/oauth.py",
+        "repositories/oauth_access_token_repository.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where is configuration loaded?",
+      "top_paths": [
+        "configs/app_config.py",
+        "configs/middleware/vdb/elasticsearch_config.py",
+        "configs/middleware/vdb/opengauss_config.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How are environment variables read?",
+      "top_paths": [
+        "configs/app_config.py",
+        "configs/middleware/vdb/elasticsearch_config.py",
+        "migrations/env.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What handles persistence?",
+      "top_paths": [
+        "libs/db_migration_lock.py",
+        "extensions/ext_database.py",
+        "repositories/explore_banner_query_repository.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where is database access implemented?",
+      "top_paths": [
+        "libs/db_migration_lock.py",
+        "extensions/ext_database.py",
+        "services/rag_pipeline/pipeline_template/database/database_retrieval.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where is uploaded file validation implemented?",
+      "top_paths": [
+        "libs/validators.py",
+        "core/workflow/nodes/agent_v2/file_tenant_validator.py",
+        "factories/file_factory/validation.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What implements request throttling?",
+      "top_paths": [
+        "libs/rate_limit.py",
+        "core/app/features/rate_limiting/rate_limit.py",
+        "migrations/versions/2025_01_14_0617-f051706725cc_add_rate_limit_logs.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How does rate limiting work?",
+      "top_paths": [
+        "libs/rate_limit.py",
+        "core/app/features/rate_limiting/rate_limit.py",
+        "migrations/versions/2025_01_14_0617-f051706725cc_add_rate_limit_logs.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where do background jobs run?",
+      "top_paths": [
+        "libs/schedule_utils.py",
+        "services/workflow/scheduler.py",
+        "services/trigger/schedule_service.py"
+      ],
+      "top_one": false,
+      "top_three": false,
+      "truncated": true
+    },
+    {
+      "question": "How are recurring jobs scheduled?",
+      "top_paths": [
+        "libs/schedule_utils.py",
+        "services/trigger/schedule_service.py",
+        "schedule/workflow_schedule_task.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How does caching work?",
+      "top_paths": [
+        "extensions/ext_redis.py",
+        "core/helper/provider_cache.py",
+        "core/helper/tool_parameter_cache.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What handles database transactions?",
+      "top_paths": [
+        "core/db/session_factory.py",
+        "extensions/ext_oauth_bearer.py",
+        "core/app/apps/advanced_chat/generate_task_pipeline.py"
+      ],
+      "top_one": false,
+      "top_three": false,
+      "truncated": true
+    },
+    {
+      "question": "Where are feature flags checked?",
+      "top_paths": [
+        "services/feature_service.py",
+        "services/feature_query_service.py",
+        "controllers/console/feature.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How does observability work?",
+      "top_paths": [
+        "extensions/ext_enterprise_telemetry.py",
+        "services/telemetry_service.py",
+        "tasks/enterprise_telemetry_task.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where is application logging configured?",
+      "top_paths": [
+        "extensions/ext_request_logging.py",
+        "extensions/ext_logging.py",
+        "extensions/logstore/aliyun_logstore.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What prevents simultaneous database migrations?",
+      "top_paths": [
+        "libs/db_migration_lock.py",
+        "extensions/ext_redis.py",
+        "services/legacy_model_type_migration.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What handles transient database failures?",
+      "top_paths": [
+        "services/retention/workflow_run/db_retry.py",
+        "core/app/workflow/retry_history.py",
+        "tasks/retry_document_indexing_task.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How are request timeouts configured?",
+      "top_paths": [
+        "extensions/ext_redis.py",
+        "tasks/human_input_timeout_tasks.py",
+        "configs/enterprise/__init__.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where are stored credentials encrypted?",
+      "top_paths": [
+        "libs/gmpy2_pkcs10aep_cipher.py",
+        "libs/rsa.py",
+        "services/data_source/credential_adapters.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What handles file uploads?",
+      "top_paths": [
+        "libs/file_utils.py",
+        "services/upload_file_delivery_service.py",
+        "services/plugin_file_upload_gateway.py"
+      ],
+      "top_one": false,
+      "top_three": false,
+      "truncated": true
+    },
+    {
+      "question": "How does email delivery work?",
+      "top_paths": [
+        "extensions/ext_mail.py",
+        "libs/smtp.py",
+        "libs/email_i18n.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "What implements result paging?",
+      "top_paths": [
+        "libs/infinite_scroll_pagination.py",
+        "libs/pagination.py",
+        "services/enterprise/rbac_service.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "Where are subscription payments handled?",
+      "top_paths": [
+        "services/trigger/trigger_subscription_operator_service.py",
+        "services/trigger/trigger_subscription_builder_service.py",
+        "libs/broadcast_channel/redis/_subscription.py"
+      ],
+      "top_one": false,
+      "top_three": false,
+      "truncated": true
+    },
+    {
+      "question": "Where are health checks implemented?",
+      "top_paths": [
+        "extensions/ext_app_metrics.py",
+        "celery_healthcheck.py",
+        "extensions/ext_redis.py"
+      ],
+      "top_one": false,
+      "top_three": true,
+      "truncated": true
+    },
+    {
+      "question": "How does data retention work?",
+      "top_paths": [
+        "tasks/delete_conversation_task.py",
+        "events/event_handlers/clean_when_dataset_deleted.py",
+        "services/retention/workflow_run/delete_archived_workflow_run.py"
+      ],
+      "top_one": true,
+      "top_three": true,
+      "truncated": true
+    }
+  ]
+}

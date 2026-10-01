@@ -1101,6 +1101,17 @@ def top_level(arg: InputType) -> OutputType:
             .iter()
             .any(|edge| edge.string("relation") == "rationale_for")
     );
+    assert!(extraction.nodes.iter().any(|node| {
+        node.string("resource_content")
+            .contains("function rationale")
+    }));
+    assert!(
+        extraction
+            .nodes
+            .iter()
+            .filter(|node| node.string("file_type") == "rationale")
+            .all(|node| node.string("resource_content").len() <= 4096)
+    );
     assert!(extraction.raw_calls.is_none());
     let evidence = extraction
         .semantic_evidence

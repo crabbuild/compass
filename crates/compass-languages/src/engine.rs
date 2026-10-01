@@ -1465,6 +1465,10 @@ fn push_rationale(
             attributes: Map::from_iter([
                 ("label".to_owned(), Value::String(label)),
                 (
+                    "resource_content".to_owned(),
+                    Value::String(text.chars().take(1024).collect()),
+                ),
+                (
                     "file_type".to_owned(),
                     Value::String("rationale".to_owned()),
                 ),

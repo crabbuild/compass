@@ -3330,7 +3330,7 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
 }
 
 fn searchable_node_terms(node: &NodeRecord) -> BTreeSet<String> {
-    let mut terms = BTreeSet::new();
+    let mut terms = compass_model::search::document_search_terms(node);
     terms.extend(search_terms(&node.name));
     terms.extend(search_terms(&node.qualified_name));
     terms.extend(compass_model::search::identifier_search_terms(&node.name));

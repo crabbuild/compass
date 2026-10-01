@@ -556,6 +556,28 @@ pub struct CodeQueryResponse {
     pub call_summary: Option<CallSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub impact_summary: Option<ImpactSummary>,
+    /// Approximate concept recall; never changes structural edge evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub concept_matches: Vec<ConceptMatch>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConceptMatchMethod {
+    Synonym,
+    DocumentLink,
+    SemanticLsa,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConceptMatch {
+    pub node_id: String,
+    pub method: ConceptMatchMethod,
+    pub query: String,
+    pub matched: String,
+    /// Published document/section path used to reach code, empty for name recall.
+    pub via: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -611,6 +633,7 @@ impl CodeQueryResponse {
             truncated: false,
             call_summary: None,
             impact_summary: None,
+            concept_matches: Vec::new(),
         }
     }
 
@@ -621,6 +644,15 @@ impl CodeQueryResponse {
                 .total_cmp(&left.score)
                 .then_with(|| left.node_id.cmp(&right.node_id))
         });
+        self.concept_matches.sort_by(|left, right| {
+            left.node_id
+                .cmp(&right.node_id)
+                .then_with(|| left.method.cmp(&right.method))
+                .then_with(|| left.query.cmp(&right.query))
+                .then_with(|| left.matched.cmp(&right.matched))
+                .then_with(|| left.via.cmp(&right.via))
+        });
+        self.concept_matches.dedup();
         self.nodes.sort_by(|left, right| left.id.cmp(&right.id));
         self.edges.sort_by(|left, right| left.id.cmp(&right.id));
         self.files.sort_by(|left, right| left.path.cmp(&right.path));

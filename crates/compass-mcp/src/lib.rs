@@ -1061,9 +1061,17 @@ fn invoke_typed_tool(
     context: Option<&GraphContext>,
 ) -> Result<ToolInvocation, InvocationError> {
     let engine = cached_typed_engine(store, graph_path, context)?;
-    let engine = engine
+    let mut engine = engine
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let semantic = arguments
+        .get("semantic_search")
+        .map_or(Ok(false), |value| {
+            value.as_bool().ok_or_else(|| {
+                InvocationError::InvalidParams("semantic_search must be a boolean".to_owned())
+            })
+        })?;
+    engine.set_semantic_search(semantic);
     let response = code_query::invoke_with_engine(name, arguments, &engine)?;
     let context = typed_agent_query_context(name, arguments, &response, &engine);
     let view = build_code_query_view(&response, context)
@@ -1159,9 +1167,17 @@ fn invoke_discovery_tool(
 ) -> Result<ToolInvocation, InvocationError> {
     let started = Instant::now();
     let engine = cached_typed_engine(store, graph_path, context)?;
-    let engine = engine
+    let mut engine = engine
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let semantic = arguments
+        .get("semantic_search")
+        .map_or(Ok(false), |value| {
+            value.as_bool().ok_or_else(|| {
+                InvocationError::InvalidParams("semantic_search must be a boolean".to_owned())
+            })
+        })?;
+    engine.set_semantic_search(semantic);
     let response = code_query::invoke_discovery_with_engine(arguments, &engine)?;
     let question = arguments
         .get("question")
@@ -1364,6 +1380,7 @@ fn tool_specs() -> Vec<Tool> {
                 "relation_contexts":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES},"description":"Canonical discovery relationship contexts"},
                 "scope":{"type":"array","maxItems":MAX_DISCOVERY_FILTERS,"items":{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["community","source","package","node"]},"value":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_FILTER_BYTES}},"required":["kind","value"]},"description":"Repeatable OR discovery scopes"},
                 "traversal":{"type":"string","enum":["bfs","dfs"],"description":"Bounded discovery traversal order; omitted uses bfs"},
+                "semantic_search":{"type":"boolean","default":false,"description":"Opt into bounded offline local-LSA embeddings when name/concept lookup has no match."},
                 "include_heuristic":{"type":"boolean"},
                 "max_depth":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_DEPTH},
                 "max_seeds":{"type":"integer","minimum":1,"maximum":MAX_DISCOVERY_SEEDS},
