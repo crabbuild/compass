@@ -1338,8 +1338,8 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "get_impact",
-            "Return the bounded transitive impact radius for a symbol.",
-            code_query::schema(&["symbol"]),
+            "Return direct and transitive dependents grouped by file/module, with a direct-connection coverage audit.",
+            code_query::impact_schema(),
         ),
         tool(
             "explore_code",

@@ -2,6 +2,60 @@
 
 use super::*;
 
+impl UniversalResolutionIndex {
+    pub(super) fn materialize_python_call_sites(
+        &self,
+        nodes: &mut [NodeRecord],
+        graph_ids: &AHashMap<String, String>,
+    ) {
+        use compass_model::code_graph::{CallSiteInventory, MAX_SYMBOL_CALL_SITES};
+        use compass_model::provenance::SourceAnchor;
+        let mut inventories = BTreeMap::new();
+        for declaration in
+            self.facts.declarations.values().filter(|declaration| {
+                declaration.language == "python" && declaration.kind != "file"
+            })
+        {
+            if let Some(id) = graph_ids.get(&declaration.id) {
+                inventories.insert(
+                    id.clone(),
+                    CallSiteInventory {
+                        sites: Vec::new(),
+                        truncated: false,
+                    },
+                );
+            }
+        }
+        for (owner, range) in self.facts.occurrences.call_sites() {
+            let Some(inventory) = graph_ids.get(owner).and_then(|id| inventories.get_mut(id))
+            else {
+                continue;
+            };
+            if inventory.sites.len() == MAX_SYMBOL_CALL_SITES {
+                inventory.truncated = true;
+                continue;
+            }
+            inventory.sites.push(SourceAnchor {
+                file: range.source_file.clone(),
+                start_byte: range.start_byte,
+                end_byte: range.end_byte,
+                start_line: range.start_line,
+                end_line: range.end_line,
+                start_column: range.start_column,
+                end_column: range.end_column,
+            });
+        }
+        for node in nodes {
+            if let Some(mut inventory) = inventories.remove(&node.id) {
+                inventory.sites.sort();
+                inventory.sites.dedup();
+                node.attributes
+                    .insert("call_sites".to_owned(), serde_json::json!(inventory));
+            }
+        }
+    }
+}
+
 pub(super) fn declaration_node(
     declaration: &DeclarationFact,
     definition_range: Option<&EvidenceRange>,

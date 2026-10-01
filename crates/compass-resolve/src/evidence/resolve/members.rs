@@ -239,7 +239,7 @@ impl ResolutionDb<'_> {
         let Some(qualifier) = self.occurrence(candidate).and_then(|occurrence| {
             occurrence
                 .qualifier()
-                .filter(|qualifier| qualifier.contains('.'))
+                .filter(|qualifier| language == "python" || qualifier.contains('.'))
         }) else {
             return Ok(None);
         };
@@ -248,6 +248,9 @@ impl ResolutionDb<'_> {
             return Ok(None);
         }
         let mut target = binding.qualified_target.clone();
+        if language == "python" && !self.python_unique_nominal_receiver(&target)? {
+            return Ok(None);
+        }
         for member in parts {
             let Some(targets) = self.indexes.members.members.get(&(
                 language.to_owned(),
@@ -260,8 +263,33 @@ impl ResolutionDb<'_> {
                 return Err(targets.len());
             };
             target.clone_from(next);
+            if language == "python" && !self.python_unique_nominal_receiver(&target)? {
+                return Ok(None);
+            }
         }
         Ok(Some(format!("{target}::{}", candidate.target_spelling)))
+    }
+
+    fn python_unique_nominal_receiver(&self, qualified_name: &str) -> Result<bool, usize> {
+        let owners = self
+            .indexes
+            .names
+            .by_qualified
+            .get(&("python".to_owned(), qualified_name.to_owned()));
+        let owners = owners
+            .into_iter()
+            .flatten()
+            .filter(|slot| {
+                self.declaration(**slot)
+                    .is_some_and(|declaration| declaration.kind == "class")
+            })
+            .take(2)
+            .count();
+        match owners {
+            0 => Ok(false),
+            1 => Ok(true),
+            count => Err(count),
+        }
     }
 
     pub(in crate::evidence) fn call_result_return_type(
@@ -294,6 +322,11 @@ impl ResolutionDb<'_> {
         if let Some(return_type) = binding.result_type_qualified_name.as_ref() {
             return Ok(Some(return_type.clone()));
         }
+        if language == "python" && binding.kind == compass_languages::BindingKind::LocalAlias {
+            return self
+                .python_unique_nominal_receiver(&binding.qualified_target)
+                .map(|unique| unique.then(|| binding.qualified_target.clone()));
+        }
         let qualified_callable =
             if let Some(receiver_binding_id) = binding.receiver_binding_id.as_ref() {
                 let Some(receiver_binding) = self.facts.bindings.get(receiver_binding_id) else {
@@ -309,11 +342,54 @@ impl ResolutionDb<'_> {
                 else {
                     return Ok(None);
                 };
-                format!("{receiver_type}::{}", binding.qualified_target)
+                if language == "python" {
+                    let mut owner = receiver_type;
+                    let mut members = binding.qualified_target.split('.').peekable();
+                    while let Some(member) = members.next() {
+                        if members.peek().is_none() {
+                            break;
+                        }
+                        let Some(targets) = self.indexes.members.members.get(&(
+                            language.to_owned(),
+                            owner.clone(),
+                            member.to_owned(),
+                        )) else {
+                            return Ok(None);
+                        };
+                        let [next] = targets.as_slice() else {
+                            return Err(targets.len());
+                        };
+                        owner.clone_from(next);
+                        if !self.python_unique_nominal_receiver(&owner)? {
+                            return Ok(None);
+                        }
+                    }
+                    format!(
+                        "{owner}::{}",
+                        binding
+                            .qualified_target
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or_default()
+                    )
+                } else {
+                    format!("{receiver_type}::{}", binding.qualified_target)
+                }
             } else {
                 binding.qualified_target.clone()
             };
 
+        // This lookup identifies the inner factory, not the outer method
+        // invocation. Its argument shape must not be borrowed from the latter.
+        let mut factory_candidate;
+        let candidate = if language == "python" {
+            factory_candidate = candidate.clone();
+            factory_candidate.constraints.argument_count = None;
+            factory_candidate.constraints.argument_types.clear();
+            &factory_candidate
+        } else {
+            candidate
+        };
         let mut callable_ids = BTreeSet::new();
         callable_ids.extend(
             self.callable_declarations(language, &qualified_callable)
@@ -355,6 +431,9 @@ impl ResolutionDb<'_> {
         let Some(callable) = self.declaration(*callable_id) else {
             return Ok(None);
         };
+        if language == "python" && callable.kind == "class" {
+            return Ok(Some(callable.qualified_name.clone()));
+        }
         let key = (language.to_owned(), callable.qualified_name.clone());
         let return_candidates = if language == "rust" {
             self.indexes

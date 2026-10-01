@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +16,7 @@ use super::model::{
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
 mod java_fields;
+mod python_receivers;
 
 // Go selector attribution can cross a closure, a multi-return call, and a
 // range expression before reaching the receiver type. Keep that traversal
@@ -1017,6 +1018,7 @@ struct DirectEvidenceState<'source> {
     python_parameters: HashMap<usize, DeclarationContext>,
     python_callable_return_types: HashMap<String, String>,
     python_ambiguous_callable_returns: HashSet<String>,
+    python_mutated_receiver_members: HashSet<(String, String)>,
     python_call_result_binding_ids: HashMap<(String, String, usize), String>,
     rust_containers: HashMap<usize, DeclarationContext>,
     rust_impls: HashMap<usize, RustImplContext>,
@@ -1112,6 +1114,7 @@ impl<'source> DirectEvidenceState<'source> {
             python_parameters: HashMap::new(),
             python_callable_return_types: HashMap::new(),
             python_ambiguous_callable_returns: HashSet::new(),
+            python_mutated_receiver_members: HashSet::new(),
             python_call_result_binding_ids: HashMap::new(),
             rust_containers: HashMap::new(),
             rust_impls: HashMap::new(),
@@ -1269,6 +1272,8 @@ impl<'source> DirectEvidenceState<'source> {
         })?;
         self.collect_python_declarations(root, &file)?;
         self.collect_python_imports(root, &file)?;
+        self.index_python_mutated_receiver_members(root);
+        self.collect_python_receiver_members(root, &file, None)?;
         self.collect_python_partial_aliases(root, &file)?;
         self.collect_python_module_variables(root, &file)?;
         let module_bound = crate::engine::python_bound_names(root, self.source, true);
@@ -1880,6 +1885,26 @@ impl<'source> DirectEvidenceState<'source> {
                         CandidateRelation::TypeOf,
                         &canonical,
                     )?;
+                    if variable.kind == "field"
+                        && !self.python_mutated_receiver_members.contains(&(
+                            variable
+                                .enclosing_type_qualified_name
+                                .clone()
+                                .unwrap_or_default(),
+                            variable.name.clone(),
+                        ))
+                    {
+                        for target in &canonical.runtime_targets {
+                            self.builder.bind(
+                                BindingKind::Member,
+                                &variable.name,
+                                target,
+                                None,
+                                Some(&variable.scope_id),
+                                range_for_node(self.source_file, annotation),
+                            )?;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -2012,6 +2037,19 @@ impl<'source> DirectEvidenceState<'source> {
                 };
                 if candidate.is_some_and(|candidate| candidate.kind() == "identifier") {
                     self.add_python_value_reference(owner, candidate, "argument", bound)?;
+                }
+            }
+        }
+        if matches!(node.kind(), "except_clause" | "raise_statement") {
+            let mut cursor = node.walk();
+            for value in node
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "block")
+            {
+                let mut identifiers = Vec::new();
+                crate::engine::collect_python_reference_values(value, &mut identifiers);
+                for identifier in identifiers {
+                    self.add_python_value_reference(owner, Some(identifier), "exception", bound)?;
                 }
             }
         }
@@ -8243,6 +8281,20 @@ impl<'source> DirectEvidenceState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
+        let observed_occurrence = if self.language == "python" {
+            // Retain invocation evidence even when conservative target lookup
+            // rejects a shadowed, dynamic, or otherwise unresolved receiver.
+            Some(self.builder.occur(
+                SemanticRole::Call,
+                &owner.fact_id,
+                spelling,
+                qualifier,
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, function),
+            )?)
+        } else {
+            None
+        };
         let python_super_receiver = (self.language == "python")
             .then(|| python_super_receiver(function, self.source))
             .flatten();
@@ -8363,10 +8415,22 @@ impl<'source> DirectEvidenceState<'source> {
                 })
                 .transpose()?
                 .flatten()
+        } else if self.language == "python" {
+            self.python_chained_receiver_binding(owner, function, call, 0)?
         } else {
             None
         };
-        let binding = call_result_binding.or_else(|| {
+        let typed_python_binding = if self.language == "python" && receiver_dispatch.is_none() {
+            qualifier
+                .map(|qualifier| {
+                    self.python_typed_receiver_binding(owner, function, call, qualifier)
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let binding = call_result_binding.or(typed_python_binding).or_else(|| {
             if self.language == "go"
                 && qualifier.is_some()
                 && let Some((value, _)) =
@@ -8433,14 +8497,18 @@ impl<'source> DirectEvidenceState<'source> {
                     })?
                 })
         };
-        let occurrence_id = self.builder.occur(
-            role,
-            &owner.fact_id,
-            spelling,
-            qualifier,
-            Some(&owner.scope_id),
-            range_for_node(self.source_file, function),
-        )?;
+        let occurrence_id = if let Some(id) = observed_occurrence {
+            id
+        } else {
+            self.builder.occur(
+                role,
+                &owner.fact_id,
+                spelling,
+                qualifier,
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, function),
+            )?
+        };
         self.builder.relate(
             relation,
             &owner.fact_id,

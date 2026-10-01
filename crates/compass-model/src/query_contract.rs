@@ -552,6 +552,47 @@ pub struct CodeQueryResponse {
     pub diagnostics: Vec<QueryDiagnostic>,
     pub limits: CodeQueryLimits,
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_summary: Option<CallSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact_summary: Option<ImpactSummary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImpactSummary {
+    pub relations: Vec<EdgeKind>,
+    /// All observed neighbors, distinguished by stored direction, as explain
+    /// does. Parallel relationship records do not inflate this count.
+    pub observed_direct_connections: u64,
+    pub direct_dependents: Vec<String>,
+    pub transitive_dependents: Vec<String>,
+    pub outgoing_context: Vec<String>,
+    pub excluded_direct_connections: u64,
+    /// All selected direct neighbors in the published graph were retained.
+    /// Repository/source completeness remains in response diagnostics.
+    pub direct_coverage_complete: bool,
+    pub groups: Vec<ImpactFileGroup>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImpactFileGroup {
+    pub file: Option<String>,
+    pub module: String,
+    pub direct: Vec<String>,
+    pub transitive: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CallSummary {
+    pub resolved_calls: u64,
+    /// Source-observed calls lacking an exact graph target. None means the
+    /// producer or historical graph did not retain a call-site inventory.
+    pub unresolved_calls: Option<u64>,
+    pub observed_calls: Option<u64>,
+    pub inventory_complete: bool,
 }
 
 impl CodeQueryResponse {
@@ -568,6 +609,8 @@ impl CodeQueryResponse {
             diagnostics: Vec::new(),
             limits,
             truncated: false,
+            call_summary: None,
+            impact_summary: None,
         }
     }
 

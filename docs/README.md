@@ -114,6 +114,7 @@ They are not evidence that an uncompleted design has shipped.
 | [Architecture graph hardening qualification](implementation/architecture-graph-hardening-qualification.md) | Real-repository metrics, screenshots, acceptance gates, and residual diagnostics |
 | [Community detection quality technical design](implementation/community-detection-quality-technical-design.md) | Versioned topology, shared quality evidence, native Leiden, bounded selection, and incremental rollout |
 | [Community detection quality qualification](implementation/community-detection-quality-qualification.md) | Fixture results, performance decision, and remaining corpus evidence |
+| [Python call and impact qualification](implementation/python-call-impact-qualification.md) | Pinned Dify source-call capture and direct-connection audits |
 | [Agent query evaluation](implementation/agent-query-evaluation-2026-09-23.md) | Five-repository Compass/Graphify question suite, graph-anchor results, token cost, and remaining gaps |
 | [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
 | [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |

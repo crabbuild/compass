@@ -69,6 +69,7 @@ type StringSlot = u32;
 struct CompactOccurrence {
     id: StringSlot,
     role: compass_languages::SemanticRole,
+    owner: StringSlot,
     spelling: StringSlot,
     qualifier: Option<StringSlot>,
     context: Option<StringSlot>,
@@ -87,6 +88,12 @@ pub(in crate::evidence) struct OccurrenceTable {
 }
 
 impl OccurrenceTable {
+    pub(in crate::evidence) fn call_sites(&self) -> impl Iterator<Item = (&str, &EvidenceRange)> {
+        self.values
+            .iter()
+            .filter(|occurrence| occurrence.role == compass_languages::SemanticRole::Call)
+            .map(|occurrence| (self.string(occurrence.owner), &occurrence.range))
+    }
     pub(in crate::evidence) fn from_values(values: Vec<OccurrenceFact>) -> Result<Self, String> {
         let mut strings = StringPoolBuilder::default();
         let mut compact = Vec::with_capacity(values.len());
@@ -138,6 +145,7 @@ impl CompactOccurrence {
         Ok(Self {
             id: strings.intern(occurrence.id)?,
             role: occurrence.role,
+            owner: strings.intern(occurrence.owner_declaration_id)?,
             spelling: strings.intern(occurrence.spelling)?,
             qualifier: strings.intern_option(occurrence.qualifier)?,
             context: strings.intern_option(occurrence.context)?,

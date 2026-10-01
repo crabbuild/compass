@@ -1061,3 +1061,62 @@ fn search_exact_match_display_uses_typed_name_normalization() -> Result<(), Box<
     assert_eq!(view.status.result_state, AgentResultState::Answered);
     Ok(())
 }
+
+#[test]
+fn unresolved_call_inventory_never_becomes_a_zero_call_claim() -> Result<(), Box<dyn Error>> {
+    use compass_model::query_contract::CallSummary;
+    let mut response = response(CodeQueryOperation::Callees);
+    response
+        .nodes
+        .push(node("n:service", "Service", &anchor("service.py", 1)));
+    response.call_summary = Some(CallSummary {
+        resolved_calls: 0,
+        unresolved_calls: Some(3),
+        observed_calls: Some(3),
+        inventory_complete: true,
+    });
+    let view = build_code_query_view(
+        &response,
+        context(AgentOperation::Callees)
+            .with_operand(compass_output::AgentOperandRole::Symbol, "n:service"),
+    )?;
+    assert!(
+        view.answer
+            .headline
+            .contains("0 resolved calls, 3 unresolved calls found"),
+        "{}",
+        view.answer.headline
+    );
+    response
+        .call_summary
+        .as_mut()
+        .ok_or("summary")?
+        .unresolved_calls = None;
+    response
+        .call_summary
+        .as_mut()
+        .ok_or("summary")?
+        .inventory_complete = false;
+    let view = build_code_query_view(
+        &response,
+        context(AgentOperation::Callees)
+            .with_operand(compass_output::AgentOperandRole::Symbol, "n:service"),
+    )?;
+    assert!(
+        view.answer
+            .headline
+            .contains("unresolved count is unavailable")
+    );
+    response
+        .call_summary
+        .as_mut()
+        .ok_or("summary")?
+        .observed_calls = None;
+    let view = build_code_query_view(
+        &response,
+        context(AgentOperation::Callees)
+            .with_operand(compass_output::AgentOperandRole::Symbol, "n:service"),
+    )?;
+    assert!(view.answer.headline.contains("coverage is unavailable"));
+    Ok(())
+}

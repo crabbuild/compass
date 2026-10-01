@@ -443,13 +443,16 @@ fn validate_fact(
                 bindings,
             )?;
             if let Some(receiver_id) = fact.receiver_binding_id.as_deref()
-                && bindings
-                    .get(receiver_id)
-                    .is_some_and(|receiver| receiver.kind != crate::BindingKind::CallResult)
+                && bindings.get(receiver_id).is_some_and(|receiver| {
+                    receiver.kind != crate::BindingKind::CallResult
+                        && !(fact.language == "python"
+                            && receiver.language == fact.language
+                            && receiver.kind == crate::BindingKind::LocalAlias)
+                })
             {
                 return Err(invalid_fact(
                     &fact.id,
-                    "call-result receiver must reference another call-result binding",
+                    "call-result receiver must reference a call-result binding or a Python nominal local alias",
                 ));
             }
             if let Some(fallback_id) = fact.fallback_binding_id.as_deref()

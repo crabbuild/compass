@@ -123,6 +123,7 @@ fn qualification_composes_verified_priority_sections_and_memory_deterministicall
         signature_digest: None,
         implementation_digest: Some("sha256:implementation".to_owned()),
         source_digest: None,
+        call_sites: None,
     }));
     graph.nodes = vec![
         target,

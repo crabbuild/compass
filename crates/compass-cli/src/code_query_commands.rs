@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use compass_model::code_graph::EdgeKind;
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
@@ -268,6 +269,7 @@ fn execute(
     .with_deadline(deadline);
     let limits = limits(args, page_scale)?;
     let include_heuristic = args.iter().any(|arg| arg == "--include-heuristic");
+    let relations = impact_relations(operation, args)?;
     let (response, question, operands) = match operation {
         "ask" => {
             let question = required(&positional, 0, "ask <QUESTION>")?.to_owned();
@@ -332,11 +334,18 @@ fn execute(
                     include_heuristic,
                     limits,
                 }),
-                "impact" => engine.impact(ImpactRequest {
-                    symbol: symbol.clone(),
-                    include_heuristic,
-                    limits,
-                }),
+                "impact" => {
+                    let request = ImpactRequest {
+                        symbol: symbol.clone(),
+                        include_heuristic,
+                        limits,
+                    };
+                    if relations.is_empty() {
+                        engine.impact(request)
+                    } else {
+                        engine.impact_with_relations(request, &relations)
+                    }
+                }
                 _ => unreachable!(),
             }
             .map_err(query_error)?;
@@ -488,6 +497,7 @@ fn positional(args: &[String]) -> Vec<String> {
         "--file",
         "--line",
         "--kind",
+        "--relation",
     ];
     let mut values = Vec::new();
     let mut skip = false;
@@ -501,6 +511,37 @@ fn positional(args: &[String]) -> Vec<String> {
         }
     }
     values
+}
+
+fn impact_relations(operation: &str, args: &[String]) -> Result<Vec<EdgeKind>, String> {
+    let mut relations = Vec::new();
+    let mut values = args.iter();
+    while let Some(arg) = values.next() {
+        let value = if arg == "--relation" {
+            Some(
+                values
+                    .next()
+                    .ok_or("--relation requires a relationship type")?
+                    .as_str(),
+            )
+        } else {
+            arg.strip_prefix("--relation=")
+        };
+        if let Some(value) = value {
+            if operation != "impact" {
+                return Err("--relation is supported only by compass impact".to_owned());
+            }
+            let relation = serde_json::from_value::<EdgeKind>(serde_json::Value::String(value.to_owned()))
+                .map_err(|_| format!("unknown impact relationship {value:?}; use a stored graph type such as calls, instantiates, references, extends, or imports"))?;
+            if relations.len() >= 32 {
+                return Err("--relation exceeds the 32-type bound".to_owned());
+            }
+            if !relations.contains(&relation) {
+                relations.push(relation);
+            }
+        }
+    }
+    Ok(relations)
 }
 
 fn required<'a>(values: &'a [String], index: usize, usage: &str) -> Result<&'a str, String> {

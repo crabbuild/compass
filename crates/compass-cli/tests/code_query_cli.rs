@@ -2767,3 +2767,52 @@ fn calls_only_cli_and_ask_reject_structural_routes_and_invalid_flags() -> Result
     assert!(String::from_utf8(help.stdout)?.contains("--calls-only"));
     Ok(())
 }
+
+#[test]
+fn impact_relation_filter_is_typed_and_reports_excluded_contacts() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let filtered = run(
+        Frontend::Compass,
+        [
+            OsString::from("impact"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--relation"),
+            OsString::from("imports"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(filtered.code, 0, "{}", filtered.stderr);
+    let value: Value = serde_json::from_str(&filtered.stdout)?;
+    assert_eq!(
+        value["impactSummary"]["relations"],
+        serde_json::json!(["imports"])
+    );
+    assert_eq!(
+        value["impactSummary"]["directDependents"],
+        serde_json::json!([])
+    );
+    assert!(
+        value["impactSummary"]["excludedDirectConnections"]
+            .as_u64()
+            .ok_or("missing count")?
+            > 0
+    );
+    let bad = run(
+        Frontend::Compass,
+        [
+            OsString::from("impact"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--relation"),
+            OsString::from("imagined"),
+        ],
+    );
+    assert_ne!(bad.code, 0);
+    assert!(bad.stderr.contains("unknown impact relationship"));
+    Ok(())
+}

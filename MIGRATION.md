@@ -7,6 +7,17 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild Python graphs with `compass extract <root> --code-only --force` to obtain
+receiver-chain resolution and source-call inventories. AST cache version 14
+recomputes older entries automatically. Add `--inference-level max` to retain
+inferred deferred receiver edges; the source inventory remains available at low
+inference. Older/historical graphs remain readable but unresolved-call coverage
+is explicitly unavailable until a new graph is built. Strict machine consumers
+must admit optional `details.callSites`, `callSummary`, and `impactSummary`.
+Impact's broader default may return more dependents; use repeatable
+`compass impact <symbol> --relation calls` (or MCP `relations`) for a narrower
+policy. Counts distinguish incoming dependents from outgoing review context.
+
 Disposable graph query/impact/traversal and typed content caches are rebuilt
 automatically when read by this version. No source graph rebuild or historical
 rewrite is needed for cache freshness. An in-flight MCP request retains its

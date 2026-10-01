@@ -119,7 +119,9 @@ fn python_rebound_local_class_receiver_does_not_invent_inherited_dispatch() {
     );
 
     assert!(resolved.edges.iter().all(|edge| {
-        edge.string("relation") != "calls" || edge.string("source_location") != "L9"
+        edge.string("relation") != "calls"
+            || edge.string("source_location") != "L9"
+            || edge.string("resolution_rule") == "deferred-receiver"
     }));
 }
 
@@ -217,7 +219,9 @@ fn python_super_call_with_multiple_bases_cannot_terminal_match_an_unrelated_meth
     );
 
     assert!(resolved.edges.iter().all(|edge| {
-        edge.string("relation") != "calls" || edge.string("source_location") != "L9"
+        edge.string("relation") != "calls"
+            || edge.string("source_location") != "L9"
+            || edge.string("resolution_rule") == "deferred-receiver"
     }));
 }
 
@@ -451,7 +455,9 @@ fn python_mixin_receiver_does_not_match_an_unrelated_same_name_member() {
     );
 
     assert!(!resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "calls" && edge.string("source_location") == "L3"
+        edge.string("relation") == "calls"
+            && edge.string("source_location") == "L3"
+            && edge.string("resolution_rule") != "deferred-receiver"
     }));
 }
 
@@ -468,7 +474,9 @@ fn python_mixin_receiver_rejects_an_inconsistent_descendant_c3() {
     );
 
     assert!(!resolved.edges.iter().any(|edge| {
-        edge.string("relation") == "calls" && edge.string("source_location") == "L12"
+        edge.string("relation") == "calls"
+            && edge.string("source_location") == "L12"
+            && edge.string("resolution_rule") != "deferred-receiver"
     }));
 }
 
@@ -723,7 +731,13 @@ fn python_shadowed_or_unknown_receivers_never_invent_recursive_calls() {
         .filter(|edge| {
             edge.string("relation") == "calls" && declarations.contains(edge.target.as_str())
         })
-        .map(|edge| edge.string("source_location"))
+        .map(|edge| {
+            (
+                edge.string("source_location"),
+                edge.string("resolution_rule"),
+                edge.target.clone(),
+            )
+        })
         .collect::<Vec<_>>();
     assert!(
         false_shadow_edges.is_empty(),
@@ -754,4 +768,153 @@ fn python_global_directive_preserves_module_recursive_call() {
             && edge.string("relation") == "calls"
             && edge.string("source_location") == "L3"
     }));
+}
+#[test]
+fn python_unit_of_work_attribute_calls_resolve_through_typed_fields() {
+    let repositories = extract(
+        "app/repositories.py",
+        b"class Repository:\n    def get(self, key):\n        return key\n",
+    );
+    let uow = extract("app/uow.py", b"from app.repositories import Repository\nclass UnitOfWork:\n    field_lookup_tables: Repository\n");
+    let service = extract("app/services.py", b"from app.uow import UnitOfWork\nclass MutationService:\n    def update(self, uow: UnitOfWork):\n        uow.field_lookup_tables.get(1)\n        uow.field_lookup_tables.get(2)\n");
+    let resolved = compass_resolve::resolve(&[repositories, uow, service], &HashMap::new());
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.repositories.Repository::get")
+        .expect("repository method");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == target.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        2,
+        "both source occurrences must resolve: {:#?}",
+        resolved.edges
+    );
+    assert_eq!(calls[0].string("source_file"), "app/services.py");
+    assert_ne!(
+        calls[0].attributes.get("start_byte"),
+        calls[1].attributes.get("start_byte")
+    );
+}
+
+#[test]
+fn python_injected_dependencies_and_constructor_assignments_keep_member_targets() {
+    let source = b"class Repository:\n    def get(self):\n        return None\nclass UnitOfWork:\n    def __init__(self, repository: Repository):\n        self.repository = repository\nclass Service:\n    def __init__(self, uow: UnitOfWork):\n        self.uow = uow\n    def run(self):\n        self.uow.repository.get()\nclass ConstructedService:\n    def __init__(self):\n        self.repository = Repository()\n    def run(self):\n        self.repository.get()\n";
+    let extracted = extract("app/services.py", source);
+    let resolved = compass_resolve::resolve(&[extracted], &HashMap::new());
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.services.Repository::get")
+        .expect("repository method");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == target.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        2,
+        "injected and constructed receiver calls: {:#?}",
+        resolved.edges
+    );
+}
+
+#[test]
+fn python_chained_calls_follow_cross_file_return_contracts() {
+    let provider = extract("app/repositories.py", b"class Repository:\n    def get(self):\n        return None\ndef factory() -> Repository:\n    return Repository()\n");
+    let source = b"from app.repositories import factory, Repository\nclass Service:\n    def execute(self):\n        factory().get()\n        Repository().get()\n";
+    let resolved = compass_resolve::resolve(
+        &[provider, extract("app/services.py", source)],
+        &HashMap::from([(
+            "app/services.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.repositories.Repository::get")
+        .expect("repository method");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == target.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "{:#?}", resolved.edges);
+    assert!(
+        calls
+            .iter()
+            .all(|edge| edge.string("confidence") == "EXTRACTED")
+    );
+}
+
+#[test]
+fn python_receiver_field_reassignments_do_not_reuse_stale_constructor_types() {
+    let source = b"class Repository:\n    def get(self):\n        return None\nclass Service:\n    def __init__(self, repo: Repository):\n        self.repo = repo\n    def replace(self, other):\n        self.repo = other\n    def execute(self):\n        return self.repo.get()\n";
+    let resolved = compass_resolve::resolve(
+        &[extract("app/service.py", source)],
+        &HashMap::from([(
+            "app/service.py".to_owned(),
+            String::from_utf8(source.to_vec()).expect("source"),
+        )]),
+    );
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("relation") == "calls" && edge.string("source_location") == "L10"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].string("resolution_rule"), "deferred-receiver");
+    assert_eq!(calls[0].string("confidence"), "INFERRED");
+    assert!(resolved.nodes.iter().any(|node| node.id == calls[0].target
+        && node.attributes.get("deferred_receiver") == Some(&serde_json::Value::Bool(true))));
+}
+
+#[test]
+fn python_exception_construction_and_catch_types_retain_dependencies() {
+    let source = b"class ValidationError(Exception):\n    pass\ndef validate():\n    raise ValidationError()\ndef handle():\n    try:\n        validate()\n    except ValidationError:\n        return None\n";
+    let resolved =
+        compass_resolve::resolve(&[extract("app/validation.py", source)], &HashMap::new());
+    let error = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.validation.ValidationError")
+        .expect("error class");
+    for line in ["L4", "L8"] {
+        assert!(
+            resolved.edges.iter().any(|edge| edge.target == error.id
+                && edge.string("source_location") == line
+                && matches!(edge.string("relation").as_str(), "calls" | "references")),
+            "missing exception dependency at {line}"
+        );
+    }
+}
+
+#[test]
+fn python_typed_factory_method_chains_validate_and_resolve() {
+    let source = b"class Repository:\n    def get(self):\n        return None\nclass UnitOfWork:\n    def repository(self) -> Repository:\n        return Repository()\nclass Service:\n    def factory(self) -> UnitOfWork:\n        return UnitOfWork()\n    def run(self, uow: UnitOfWork):\n        self.factory().repository().get()\n        uow.repository().get()\n";
+    let resolved = compass_resolve::resolve(&[extract("app/service.py", source)], &HashMap::new());
+    let repository = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "app.service.Repository::get")
+        .expect("repository");
+    let calls = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls" && edge.target == repository.id)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "{:#?}", resolved.edges);
+    assert!(
+        calls
+            .iter()
+            .all(|edge| edge.string("confidence") == "EXTRACTED")
+    );
 }

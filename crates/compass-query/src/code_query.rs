@@ -1,3 +1,5 @@
+mod impact_summary;
+
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -14,10 +16,10 @@ use compass_model::code_graph::{
 };
 use compass_model::provenance::{EvidenceConfidence, ResolutionState};
 use compass_model::query_contract::{
-    CallRequest, CodeQueryOperation, CodeQueryResponse, DiscoveryScopeKind, ExploreRequest,
-    ImpactRequest, NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge,
-    QueryEvidence, QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit, SearchRequest,
-    discovery_scope_postings,
+    CallRequest, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, DiscoveryScopeKind,
+    ExploreRequest, ImpactRequest, NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode,
+    QueryEdge, QueryEvidence, QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit,
+    SearchRequest, discovery_scope_postings,
 };
 use compass_store::SqliteStore;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -319,6 +321,18 @@ const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Triggers,
     EdgeKind::MapsTo,
     EdgeKind::Renders,
+    EdgeKind::Extends,
+    EdgeKind::Implements,
+    EdgeKind::MixesIn,
+    EdgeKind::TypeOf,
+    EdgeKind::Returns,
+    EdgeKind::Instantiates,
+    EdgeKind::Overrides,
+    EdgeKind::Decorates,
+    EdgeKind::Embeds,
+    EdgeKind::Registers,
+    EdgeKind::Handles,
+    EdgeKind::Tests,
 ];
 
 /// Optional conjunctive filters for exact symbol lookup. Paths are compared to
@@ -2868,12 +2882,8 @@ impl CodeQueryEngine {
             return response;
         };
         let execution_started = Instant::now();
-        let kinds: &[EdgeKind] = if inbound {
-            CALLER_KINDS
-        } else {
-            &[EdgeKind::Calls]
-        };
         let max_edges = usize::try_from(request.limits.max_edges).unwrap_or(usize::MAX);
+        let mut call_owners = BTreeSet::from([seed.clone()]);
         let (selected_edges, truncated, observed_importers, observed_importers_truncated) =
             if inbound {
                 self.resolved_incoming_relationships(
@@ -2883,13 +2893,12 @@ impl CodeQueryEngine {
                     max_edges,
                 )?
             } else {
-                let (edges, truncated) = self.backend.matching_bounded(
+                let (edges, truncated, owners) = self.owned_callee_relationships(
                     &seed,
-                    inbound,
-                    kinds,
                     request.include_heuristic,
-                    max_edges,
+                    &request.limits,
                 )?;
+                call_owners = owners;
                 (edges, truncated, 0, false)
             };
         instrumentation.work.nodes_expanded = instrumentation.work.nodes_expanded.saturating_add(1);
@@ -2914,21 +2923,183 @@ impl CodeQueryEngine {
                 Self::owner_level_relationship_diagnostic(&mut response, &seed);
             }
         }
-        let mut ids = HashSet::from([seed.clone()]);
+        let mut ids = call_owners.iter().cloned().collect::<HashSet<_>>();
         for edge in &selected_edges {
             ids.insert(edge.source.clone());
             ids.insert(edge.target.clone());
             response.edges.push(query_edge(edge));
         }
         self.add_nodes(&ids, &mut response)?;
-        let response = self.finish_response(&mut response);
+        let mut response = self.finish_response(&mut response)?;
+        let has_call_inventory = response.nodes.iter().any(|node| {
+            call_owners.contains(&node.id)
+                && matches!(&node.details,
+                    Some(compass_model::code_graph::NodeDetails::Symbol(details))
+                        if details.call_sites.is_some())
+        });
+        let python_seed = response
+            .nodes
+            .iter()
+            .any(|node| node.id == seed && node.language.as_deref() == Some("python"));
+        if !inbound && (python_seed || has_call_inventory) {
+            Self::summarize_calls(&mut response, &call_owners);
+            if self.partial_graph_message.is_some()
+                && let Some(summary) = &mut response.call_summary
+            {
+                summary.inventory_complete = false;
+            }
+            enforce_response_size(&mut response)?;
+        }
         instrumentation.execution += execution_started.elapsed();
-        response
+        Ok(response)
+    }
+
+    /// A class's executable calls belong to its contained methods. Retain the
+    /// actual method endpoint instead of inventing class-to-callee edges.
+    fn owned_callee_relationships(
+        &self,
+        seed: &str,
+        include_heuristic: bool,
+        limits: &CodeQueryLimits,
+    ) -> Result<(Vec<EdgeRecord>, bool, BTreeSet<String>), QueryError> {
+        let max_edges = usize::try_from(limits.max_edges).unwrap_or(usize::MAX);
+        let max_nodes = usize::try_from(limits.max_nodes).unwrap_or(usize::MAX);
+        let aggregate = self.backend.node_by_id(seed)?.is_some_and(|node| {
+            matches!(
+                node.kind,
+                NodeKind::Class | NodeKind::Struct | NodeKind::Interface | NodeKind::Trait
+            ) || (node.language.as_deref() == Some("python") && node.kind.is_callable())
+        });
+        let mut pending = VecDeque::from([(seed.to_owned(), 0_u32)]);
+        let mut owners = BTreeSet::new();
+        let mut selected = BTreeMap::new();
+        let mut truncated = false;
+        while let Some((owner, depth)) = pending.pop_front() {
+            self.check_deadline()?;
+            if !owners.insert(owner.clone()) {
+                continue;
+            }
+            let (calls, limited) = self.backend.matching_bounded(
+                &owner,
+                false,
+                &[EdgeKind::Calls, EdgeKind::Instantiates],
+                include_heuristic,
+                max_edges.saturating_sub(selected.len()),
+            )?;
+            truncated |= limited;
+            for edge in calls {
+                selected.insert(edge.id.clone(), edge);
+            }
+            if !aggregate {
+                continue;
+            }
+            let (members, limited) = self.backend.matching_bounded(
+                &owner,
+                false,
+                &[EdgeKind::Contains],
+                false,
+                max_nodes,
+            )?;
+            truncated |= limited;
+            for member in members {
+                let Some(node) = self.backend.node_by_id(&member.target)? else {
+                    continue;
+                };
+                // Initializers belong to their enclosing callable. A nested
+                // function's body does not execute merely because its owner does.
+                let owner_is_callable = self
+                    .backend
+                    .node_by_id(&owner)?
+                    .is_some_and(|owner| owner.kind.is_callable());
+                let is_initializer = matches!(
+                    node.kind,
+                    NodeKind::Field | NodeKind::Variable | NodeKind::Constant | NodeKind::Parameter
+                );
+                let is_executable_member = matches!(
+                    node.kind,
+                    NodeKind::Method | NodeKind::Function | NodeKind::Constructor | NodeKind::Class
+                );
+                if !is_initializer && (owner_is_callable || !is_executable_member) {
+                    continue;
+                }
+                if depth >= limits.max_depth
+                    || owners.len().saturating_add(pending.len()) >= max_nodes
+                {
+                    truncated = true;
+                    continue;
+                }
+                pending.push_back((node.id, depth + 1));
+            }
+        }
+        Ok((selected.into_values().collect(), truncated, owners))
+    }
+
+    fn summarize_calls(response: &mut CodeQueryResponse, owners: &BTreeSet<String>) {
+        use compass_model::code_graph::NodeDetails;
+        use compass_model::query_contract::CallSummary;
+        let mut observed = BTreeSet::new();
+        let mut missing = owners
+            .iter()
+            .any(|id| !response.nodes.iter().any(|node| &node.id == id));
+        let mut complete = !response.truncated;
+        for node in &response.nodes {
+            if !owners.contains(&node.id) {
+                continue;
+            }
+            if let Some(NodeDetails::Symbol(details)) = &node.details
+                && let Some(inventory) = &details.call_sites
+            {
+                complete &= !inventory.truncated;
+                observed.extend(inventory.sites.iter().cloned());
+            } else {
+                missing = true;
+            }
+        }
+        let resolved = response
+            .edges
+            .iter()
+            .filter(|edge| {
+                matches!(edge.kind, EdgeKind::Calls | EdgeKind::Instantiates)
+                    && !edge.evidence.is_empty()
+                    && edge.evidence.iter().all(|evidence| {
+                        evidence.resolution == ResolutionState::Exact
+                            && evidence.confidence == EvidenceConfidence::Exact
+                    })
+            })
+            .filter_map(|edge| edge.relationship_site.clone())
+            .collect::<BTreeSet<_>>();
+        response.call_summary = Some(CallSummary {
+            resolved_calls: u64::try_from(resolved.len()).unwrap_or(u64::MAX),
+            unresolved_calls: (complete && !missing)
+                .then(|| u64::try_from(observed.difference(&resolved).count()).unwrap_or(u64::MAX)),
+            observed_calls: (!missing).then(|| u64::try_from(observed.len()).unwrap_or(u64::MAX)),
+            inventory_complete: complete && !missing,
+        });
     }
 
     pub fn impact(&self, request: ImpactRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
         self.impact_instrumented(request, &mut QueryInstrumentation::default())
+    }
+
+    /// Restrict dependent traversal to an explicit relationship family. Direct
+    /// coverage is checked against that same family, never an unrelated count.
+    pub fn impact_with_relations(
+        &self,
+        request: ImpactRequest,
+        relations: &[EdgeKind],
+    ) -> Result<CodeQueryResponse, QueryError> {
+        if relations.is_empty() || relations.len() > ALL_EDGE_KINDS.len() {
+            return Err(QueryError::new(
+                QueryErrorKind::InvalidParameter,
+                "invalid_impact_relations",
+                "provide one or more known impact relationship types",
+            ));
+        }
+        let mut kinds = relations.to_vec();
+        kinds.sort_by_key(|kind| kind.as_str());
+        kinds.dedup();
+        self.impact_instrumented_with_kinds(request, &kinds, &mut QueryInstrumentation::default())
     }
 
     /// Resolve inbound dependency relationships for the compatibility
@@ -3119,9 +3290,15 @@ impl CodeQueryEngine {
             .edges
             .extend(selected_edges.values().map(query_edge));
         self.apply_path_bound(&mut response);
-        let response = self.finish_response(&mut response);
+        let mut response = self.finish_response(&mut response)?;
+        self.summarize_impact(
+            &mut response,
+            &seed,
+            relationship_kinds,
+            request.include_heuristic,
+        )?;
         instrumentation.execution += execution_started.elapsed();
-        response
+        Ok(response)
     }
 
     pub fn explore(&self, request: ExploreRequest) -> Result<CodeQueryResponse, QueryError> {

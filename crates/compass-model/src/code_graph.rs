@@ -466,6 +466,19 @@ pub struct SymbolNodeDetails {
     pub implementation_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_digest: Option<String>,
+    /// Source-observed invocations, including calls whose target could not be
+    /// resolved. Absent on older graphs and producers without this coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_sites: Option<CallSiteInventory>,
+}
+
+pub const MAX_SYMBOL_CALL_SITES: usize = 4_096;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CallSiteInventory {
+    pub sites: Vec<SourceAnchor>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
