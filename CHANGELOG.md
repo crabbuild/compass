@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Match engineering business vocabulary through bounded synonyms and witnessed
+  Markdown-to-code links, with typed approximate-match provenance. Retain bounded
+  document and Python docstring excerpts in resource details for prose search.
+- Reuse valid disposable FTS indexes on reopen; validate FTS with a writable
+  handle before opening the query connection read-only.
+- Add optional offline corpus-LSA embeddings to `ask`/`search` and MCP discovery/
+  search. Exact lookup is unchanged; semantic corpus limits fail explicitly.
+
 - Resolve Python calls through annotated receivers and unit-of-work member chains,
   injected constructor fields, and source return contracts. Preserve unknown
   invocations as bounded source-call inventories and optional inferred receiver

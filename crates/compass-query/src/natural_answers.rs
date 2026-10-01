@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::query_contract::{
-    CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, QueryDiagnostic, QueryDiagnosticCode,
-    QueryNode, SearchRequest,
+    CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, ConceptMatch, QueryDiagnostic,
+    QueryDiagnosticCode, QueryNode, SearchRequest,
 };
 
 use crate::QueryError;
@@ -17,6 +17,13 @@ const NATURAL_ALTERNATIVES: usize = 4;
 const CONNECTIVITY_PROBE: usize = 32;
 const NATURAL_RANK_CANDIDATES: usize = 32;
 
+type NaturalSymbolResolution = (
+    Option<String>,
+    Vec<QueryDiagnostic>,
+    bool,
+    Vec<ConceptMatch>,
+);
+
 impl CodeQueryEngine {
     pub(crate) fn select_natural_symbol(
         &self,
@@ -24,11 +31,11 @@ impl CodeQueryEngine {
         question: &str,
         limits: &CodeQueryLimits,
         instrumentation: &mut QueryInstrumentation,
-    ) -> Result<(Option<String>, Vec<QueryDiagnostic>, bool), QueryError> {
+    ) -> Result<NaturalSymbolResolution, QueryError> {
         self.check_deadline()?;
         if let Some(node) = self.backend.node_by_id(operand)? {
             instrumentation.work.candidates_read += 1;
-            return Ok((Some(node.id), Vec::new(), false));
+            return Ok((Some(node.id), Vec::new(), false, Vec::new()));
         }
         let normalized = normalize_symbol(operand);
         let (mut exact_nodes, exact_truncated) = self.backend.nodes_by_normalized_name(
@@ -60,6 +67,7 @@ impl CodeQueryEngine {
                         path: None,
                     }],
                     true,
+                    Vec::new(),
                 ));
             }
             if qualified.nodes.is_empty() && qualified.has_leaf_candidates {
@@ -72,10 +80,12 @@ impl CodeQueryEngine {
                         path: None,
                     }],
                     false,
+                    Vec::new(),
                 ));
             }
             exact_nodes = qualified.nodes;
         }
+        let mut concept_matches = Vec::new();
         let has_exact = !exact_nodes.is_empty();
         let (mut candidates, mut diagnostics, mut candidate_truncated) = if has_exact {
             (
@@ -94,6 +104,7 @@ impl CodeQueryEngine {
                 },
                 instrumentation,
             )?;
+            concept_matches = search.concept_matches.clone();
             let candidates = search
                 .results
                 .iter()
@@ -102,7 +113,13 @@ impl CodeQueryEngine {
                         .nodes
                         .iter()
                         .find(|node| node.id == hit.node_id)
-                        .filter(|node| natural_fuzzy_relevant(operand, node))
+                        .filter(|node| {
+                            natural_fuzzy_relevant(operand, node)
+                                || search
+                                    .concept_matches
+                                    .iter()
+                                    .any(|matched| matched.node_id == node.id)
+                        })
                         .map(|node| (node.clone(), hit.score))
                 })
                 .collect();
@@ -171,7 +188,7 @@ impl CodeQueryEngine {
                 .then_with(|| left.0.id.cmp(&right.0.id))
         });
         let Some((selected, ..)) = ranked.first() else {
-            return Ok((None, diagnostics, candidate_truncated));
+            return Ok((None, diagnostics, candidate_truncated, Vec::new()));
         };
         let alternatives = ranked
             .iter()
@@ -199,7 +216,13 @@ impl CodeQueryEngine {
                 node_id: Some(selected.id.clone()), path: None,
             });
         }
-        Ok((Some(selected.id.clone()), diagnostics, candidate_truncated))
+        concept_matches.retain(|matched| matched.node_id == selected.id);
+        Ok((
+            Some(selected.id.clone()),
+            diagnostics,
+            candidate_truncated,
+            concept_matches,
+        ))
     }
 
     pub(crate) fn natural_dependencies(

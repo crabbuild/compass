@@ -887,3 +887,28 @@ fn symbol_call_inventories_validate_bounds_files_and_ordering() {
     graph.nodes[1].details = Some(NodeDetails::Symbol(outside));
     assert!(validate_code_graph(&graph).is_err());
 }
+
+#[test]
+fn resource_prose_is_bounded_and_restricted_to_document_or_rationale() {
+    use compass_model::code_graph::{NodeDetails, ResourceKind, ResourceNodeDetails};
+    let mut graph = document();
+    let node = &mut graph.nodes[0];
+    node.kind = NodeKind::Resource;
+    node.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+        resource_kind: ResourceKind::Document,
+        uri: None,
+        media_type: Some("text/markdown".into()),
+        content: Some("source-backed prose".into()),
+    }));
+    graph.links.clear();
+    assert!(validate_code_graph(&graph).is_ok());
+    if let Some(NodeDetails::Resource(details)) = &mut graph.nodes[0].details {
+        details.content = Some("x".repeat(4097));
+    }
+    assert!(validate_code_graph(&graph).is_err());
+    if let Some(NodeDetails::Resource(details)) = &mut graph.nodes[0].details {
+        details.content = Some("small".into());
+        details.resource_kind = ResourceKind::Image;
+    }
+    assert!(validate_code_graph(&graph).is_err());
+}

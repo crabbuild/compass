@@ -127,3 +127,13 @@ have independent bounds. Membership comes from recorded directed structural
 relationships; inferred/deferred records, calls and references are excluded.
 Source failures and budget exhaustion remain explicit. Missing digests never
 become verified merely because an owner-to-member relationship is present.
+
+Optional concept semantic search (`--semantic-search` / MCP `semantic_search`)
+learns bounded corpus-LSA embeddings from the selected local graph. It uses no
+network, credentials, runtime model download, or external vector service. Names
+and bounded document/docstring excerpts stay in the graph and engine memory;
+this option does not upload source. Graph publication may now retain up to 4 KiB
+of source-backed prose per document/rationale resource, so exported artifacts
+include those excerpts as well as existing names and provenance. Apply the same
+repository disclosure policy to these graph artifacts. Corpus size/deadline
+failures remain explicit and do not publish a partially built semantic index.

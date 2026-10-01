@@ -27,7 +27,7 @@ use crate::graph_engine::{
     read_store_ref,
 };
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/2";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,22 +349,16 @@ fn open_from_graph_engine(
     let index_dir = cache_root.join("code-query").join(&key);
     fs::create_dir_all(&index_dir).map_err(|error| io_error("create_index_dir", error))?;
     let index_path = index_dir.join("index.sqlite3");
-    if index_path.exists() && !valid_index(&index_path, &key) {
-        fs::remove_file(&index_path).map_err(|error| io_error("remove_invalid_index", error))?;
-    }
     if !valid_index(&index_path, &key) {
-        build_with_lock(&index_path, &key, &graph, program.as_ref())?;
-    }
-    let connection = Connection::open_with_flags(&index_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(sql_error)?;
-    if !valid_connection(&connection, &key) {
-        drop(connection);
         if index_path.exists() {
             fs::remove_file(&index_path)
-                .map_err(|error| io_error("remove_corrupt_index", error))?;
+                .map_err(|error| io_error("remove_invalid_index", error))?;
         }
         build_with_lock(&index_path, &key, &graph, program.as_ref())?;
     }
+    // FTS5's integrity-check virtual-table operation needs a writable handle,
+    // even though it does not change the index. Validate the disposable cache
+    // before opening the query connection read-only.
     let connection = Connection::open_with_flags(&index_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(sql_error)?;
     let adjacency = crate::code_query::CodeAdjacencyIndex::build(&graph);
@@ -397,6 +391,8 @@ fn open_from_graph_engine(
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
         deadline: None,
+        semantic_search: false,
+        semantic_index: std::sync::Mutex::new(None),
     })
 }
 
@@ -423,6 +419,8 @@ fn open_from_local_store(
         search_query_cache: std::sync::Mutex::new(Default::default()),
         fuzzy_lookup_cache: std::sync::Mutex::new(Default::default()),
         deadline: None,
+        semantic_search: false,
+        semantic_index: std::sync::Mutex::new(None),
     })
 }
 
@@ -617,6 +615,7 @@ fn build_index(
                         .copied(),
                 )
                 .flat_map(identifier_search_terms)
+                .chain(compass_model::search::document_search_terms(node))
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect::<Vec<_>>()
@@ -804,7 +803,7 @@ fn valid_index(path: &Path, key: &str) -> bool {
     if !path.is_file() {
         return false;
     }
-    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
         .ok()
         .is_some_and(|connection| valid_connection(&connection, key))
 }

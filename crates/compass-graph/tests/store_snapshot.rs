@@ -373,6 +373,7 @@ fn immutable_snapshot_indexes_semantic_markdown_table_nodes() -> Result<(), Box<
         resource_kind: ResourceKind::Document,
         uri: Some("#owners".to_owned()),
         media_type: Some("text/markdown".to_owned()),
+        content: None,
     }));
 
     let mut row = node("table-row");
@@ -384,6 +385,7 @@ fn immutable_snapshot_indexes_semantic_markdown_table_nodes() -> Result<(), Box<
         resource_kind: ResourceKind::Document,
         uri: None,
         media_type: Some("text/markdown".to_owned()),
+        content: None,
     }));
     document.nodes.extend([table, row]);
 

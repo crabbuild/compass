@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CODE_QUERY_CONTRACT_MANIFEST,
+  CodeNodeDetailsSchema,
   CodeRouteStageSchema,
   CodeQueryResponseSchema,
   decodeCodeQueryResponse
@@ -16,6 +17,14 @@ function example(): unknown {
 }
 
 describe("compass.query/1", () => {
+  it("bounds resource prose in UTF-8 bytes and rejects other resource kinds", () => {
+    const resource = (resourceKind: string, content: string) => ({
+      type: "resource", data: { resourceKind, content }
+    });
+    expect(CodeNodeDetailsSchema.safeParse(resource("document", "界".repeat(1365))).success).toBe(true);
+    expect(CodeNodeDetailsSchema.safeParse(resource("rationale", "界".repeat(1366))).success).toBe(false);
+    expect(CodeNodeDetailsSchema.safeParse(resource("image", "prose")).success).toBe(false);
+  });
   it("decodes the checked-in Rust example and fingerprints the shared manifest", () => {
     expect(decodeCodeQueryResponse(example()).schema).toBe("compass.query/1");
     const manifestBytes = readFileSync(`${contracts}/compass-query-v1.manifest.json`);
@@ -57,6 +66,14 @@ describe("compass.query/1", () => {
     };
     expect(CodeQueryResponseSchema.safeParse(unsafe).success).toBe(false);
     expect(CodeRouteStageSchema.safeParse("authorization").success).toBe(false);
+  });
+
+  it("accepts typed concept provenance while rejecting unknown methods", () => {
+    const value = example() as Record<string, unknown>;
+    value.conceptMatches = [{ nodeId: "n", method: "synonym", query: "authorization", matched: "authz", via: [] }];
+    expect(decodeCodeQueryResponse(value).conceptMatches?.[0]?.method).toBe("synonym");
+    value.conceptMatches = [{ nodeId: "n", method: "future", query: "q", matched: "x", via: [] }];
+    expect(CodeQueryResponseSchema.safeParse(value).success).toBe(false);
   });
 
   it("accepts dependency and security route stages", () => {

@@ -2816,3 +2816,54 @@ fn impact_relation_filter_is_typed_and_reports_excluded_contacts() -> Result<(),
     assert!(bad.stderr.contains("unknown impact relationship"));
     Ok(())
 }
+
+#[test]
+fn concept_search_discloses_synonyms_and_keeps_exact_mode_strict() -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let path = support::write_typed_graph(dir.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == "Target")
+        .ok_or("missing Target")?;
+    target.name = "AuthzGate".into();
+    target.qualified_name = "Fixture.AuthzGate".into();
+    let target_id = target.id.clone();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let execute = |command: &str, format: &str, extra: &[&str]| {
+        let mut args = vec![
+            OsString::from(command),
+            OsString::from("authorization"),
+            OsString::from("--graph"),
+            path.as_os_str().to_owned(),
+            OsString::from("--format"),
+            OsString::from(format),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let found = execute("search", "json", &[]);
+    assert_eq!(found.code, 0, "{}", found.stderr);
+    let response: Value = serde_json::from_str(&found.stdout)?;
+    assert!(response["conceptMatches"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["nodeId"] == target_id && item["method"] == "synonym")
+    }));
+    let text = execute("ask", "text", &["--semantic-search"]);
+    assert_eq!(text.code, 0, "{}", text.stderr);
+    assert!(
+        text.stdout.contains("Approximate") && text.stdout.contains("via synonym"),
+        "{}",
+        text.stdout
+    );
+    let exact = execute("search", "json", &["--exact"]);
+    assert_eq!(exact.code, 0, "{}", exact.stderr);
+    let response: Value = serde_json::from_str(&exact.stdout)?;
+    assert_eq!(response["nodes"], serde_json::json!([]));
+    let rejected = execute("search", "json", &["--exact", "--semantic-search"]);
+    assert_ne!(rejected.code, 0);
+    assert!(rejected.stderr.contains("cannot be combined with --exact"));
+    Ok(())
+}

@@ -50,6 +50,7 @@ export const CODE_QUERY_CONTRACT_MANIFEST = {
     evidenceOrigin: ["ast", "config", "convention", "artifact", "heuristic"],
     confidence: ["exact", "inferred", "ambiguous"],
     resolution: ["exact", "ambiguous", "unresolved"],
+    conceptMatchMethod: ["synonym", "document_link", "semantic_lsa"],
     diagnosticCode: [
       "no_match", "ambiguous_match", "relationship_inconsistency", "direction_mismatch", "unresolved_handler", "incomplete_coverage",
       "stale_source_digest", "bounded_truncation", "program_orphan",
@@ -59,7 +60,7 @@ export const CODE_QUERY_CONTRACT_MANIFEST = {
   fields: {
     response: [
       "schema", "operation", "results", "nodes", "edges", "files", "paths",
-      "diagnostics", "limits", "truncated"
+      "diagnostics", "limits", "truncated", "conceptMatches"
     ],
     limits: [
       "maxDepth", "maxNodes", "maxEdges", "maxPaths", "maxCandidates",
@@ -73,6 +74,7 @@ export const CODE_QUERY_CONTRACT_MANIFEST = {
       "layer", "origin", "extractor", "confidence", "anchor", "rule",
       "wiringSite", "resolution", "candidates"
     ],
+    conceptMatch: ["nodeId", "method", "query", "matched", "via"],
     candidate: ["nodeId", "reason", "confidence", "score", "anchor"],
     node: [
       "id", "kind", "roles", "name", "qualifiedName", "language", "framework",
@@ -200,8 +202,15 @@ const ResourceNodeDetailsSchema = z.strictObject({
   data: z.strictObject({
     resourceKind: z.enum(["document", "paper", "image", "concept", "rationale"]),
     uri: z.string().nullable().optional(),
-    mediaType: z.string().nullable().optional()
-  })
+    mediaType: z.string().nullable().optional(),
+    content: z.string().max(4096).refine(
+      (value) => new TextEncoder().encode(value).length <= 4096,
+      "Resource content exceeds 4096 UTF-8 bytes"
+    ).nullable().optional()
+  }).refine(
+    (data) => data.content == null || ["document", "rationale"].includes(data.resourceKind),
+    "Only document and rationale resources contain prose"
+  )
 });
 const MessagingNodeDetailsSchema = z.strictObject({
   type: z.literal("messaging"),
@@ -379,6 +388,13 @@ export const CodeQueryResponseSchema = z.strictObject({
   edges: z.array(CodeQueryEdgeSchema),
   files: z.array(CodeQueryFileSchema),
   paths: z.array(CodeQueryPathSchema),
+  conceptMatches: z.array(z.strictObject({
+    nodeId: z.string(),
+    method: z.enum(["synonym", "document_link", "semantic_lsa"]),
+    query: z.string(),
+    matched: z.string(),
+    via: z.array(z.string())
+  })).optional(),
   diagnostics: z.array(CodeQueryDiagnosticSchema),
   limits: CodeQueryLimitsSchema,
   truncated: z.boolean()

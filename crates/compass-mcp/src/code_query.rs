@@ -47,6 +47,7 @@ pub(super) fn schema(required: &[&str]) -> Value {
 
 pub(super) fn search_schema() -> Value {
     let mut result = schema(&["query"]);
+    result["properties"]["semantic_search"] = json!({"type":"boolean","default":false,"description":"Optional offline local-LSA fallback; cannot be combined with exact."});
     result["properties"]["exact"] = json!({"type":"boolean","default":false,"description":"Only exact ID or normalized name matches; no lexical fallback."});
     result["properties"]["source_file"] = json!({"type":"string","minLength":1,"maxLength":4096,"description":"Exact stored source path; requires exact=true."});
     result["properties"]["start_line"] = json!({"type":"integer","minimum":1,"maximum":u32::MAX,"description":"Declaration start line; requires exact=true and source_file."});
@@ -90,6 +91,13 @@ pub(super) fn invoke_with_engine(
             "relations requires get_impact".to_owned(),
         ));
     }
+    if arguments.contains_key("semantic_search")
+        && !matches!(name, "query_graph" | "search_symbols")
+    {
+        return Err(super::InvocationError::InvalidParams(
+            "semantic_search requires query_graph or search_symbols".to_owned(),
+        ));
+    }
     let limits = limits(arguments)?;
     match name {
         "query_graph" => engine.query_natural(NaturalQueryRequest {
@@ -103,6 +111,11 @@ pub(super) fn invoke_with_engine(
                 limits,
             };
             let exact = boolean(arguments, "exact")?;
+            if exact && boolean(arguments, "semantic_search")? {
+                return Err(super::InvocationError::InvalidParams(
+                    "semantic_search cannot be combined with exact".to_owned(),
+                ));
+            }
             if !exact
                 && ["source_file", "start_line", "kind"]
                     .iter()
@@ -245,6 +258,7 @@ pub(super) fn validate_query_graph_arguments(
 ) -> Result<(), super::InvocationError> {
     const ALLOWED: &[&str] = &[
         "question",
+        "semantic_search",
         "project_path",
         "mode",
         "depth",
@@ -275,6 +289,11 @@ pub(super) fn validate_query_graph_arguments(
     let legacy = ["mode", "depth", "token_budget", "context_filter"]
         .iter()
         .any(|name| arguments.contains_key(*name));
+    if legacy && arguments.contains_key("semantic_search") {
+        return Err(super::InvocationError::InvalidParams(
+            "semantic_search requires bounded discovery; omit legacy traversal controls".to_owned(),
+        ));
+    }
     if legacy && has_discovery_arguments(arguments) {
         return Err(super::InvocationError::InvalidParams(
             "legacy traversal controls cannot be combined with discovery controls".to_owned(),

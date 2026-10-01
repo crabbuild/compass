@@ -703,6 +703,9 @@ pub struct ResourceNodeDetails {
     pub uri: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
+    /// Source-backed document or rationale excerpt, bounded to 4 KiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

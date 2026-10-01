@@ -965,3 +965,53 @@ fn impact_tools_filter_typed_relations_and_audit_omissions() -> Result<(), Box<d
     );
     Ok(())
 }
+
+#[test]
+fn concept_tools_accept_explicit_semantic_opt_in_and_label_synonyms() -> Result<(), Box<dyn Error>>
+{
+    let dir = tempfile::tempdir()?;
+    let path = write_typed_graph(dir.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == "Target")
+        .ok_or("missing Target")?;
+    target.name = "AuthzGate".into();
+    target.qualified_name = "Fixture.AuthzGate".into();
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let server = CompassMcp::new(path);
+    let response = invoke(
+        &server,
+        "search_symbols",
+        json!({"query":"authorization", "semantic_search":true}),
+    )?;
+    assert!(
+        response["conceptMatches"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["method"] == "synonym"))
+    );
+    let discovered = invoke(
+        &server,
+        "query_graph",
+        json!({"question":"How does authorization work?", "semantic_search":true}),
+    )?;
+    assert!(!discovered["seeds"].as_array().ok_or("no seeds")?.is_empty());
+    let exact = invoke(
+        &server,
+        "search_symbols",
+        json!({"query":"authorization", "exact":true}),
+    )?;
+    assert_eq!(exact["nodes"], json!([]));
+    for args in [
+        json!({"query":"authorization","semantic_search":"yes"}),
+        json!({"query":"authorization","semantic_search":true,"exact":true}),
+    ] {
+        let output = server.invoke(
+            "search_symbols",
+            args.as_object().cloned().unwrap_or_else(Map::new),
+        );
+        assert!(output.contains("semantic_search"), "{output}");
+    }
+    Ok(())
+}

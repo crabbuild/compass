@@ -2952,6 +2952,24 @@ fn answer_for_code(
             display_label(selected)
         );
     }
+    if let Some(matched) = response.concept_matches.iter().find(|matched| {
+        response
+            .results
+            .first()
+            .is_none_or(|first| matched.node_id == first.node_id)
+    }) {
+        let method = match matched.method {
+            compass_model::query_contract::ConceptMatchMethod::Synonym => "synonym",
+            compass_model::query_contract::ConceptMatchMethod::DocumentLink => "document link",
+            compass_model::query_contract::ConceptMatchMethod::SemanticLsa => {
+                "local semantic embedding"
+            }
+        };
+        headline = format!(
+            "Approximate: matched {:?} → {:?} via {method}. {headline}",
+            matched.query, matched.matched
+        );
+    }
     let mut basis = Vec::new();
     if let Some(entity) = primary_results.first() {
         basis.push(AgentBasis {

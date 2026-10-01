@@ -50,6 +50,26 @@ pub fn identifier_search_terms(value: &str) -> BTreeSet<String> {
     terms
 }
 
+/// Bounded prose terms for document discovery. This is recall evidence, not
+/// declaration identity or an alias. Older store indexes require a rebuild.
+#[must_use]
+pub fn document_search_terms(node: &crate::code_graph::NodeRecord) -> BTreeSet<String> {
+    let content = match &node.details {
+        Some(crate::code_graph::NodeDetails::Document(details)) => details.content.as_deref(),
+        Some(crate::code_graph::NodeDetails::Resource(details)) => details.content.as_deref(),
+        _ => None,
+    };
+    let text = content
+        .unwrap_or_default()
+        .chars()
+        .take(8192)
+        .collect::<String>();
+    identifier_search_terms(&text)
+        .into_iter()
+        .take(512)
+        .collect()
+}
+
 /// Build exact identifier-concept postings for trusted direct callers.
 ///
 /// Each concept maps to source-backed callable IDs that directly call a
