@@ -130,6 +130,13 @@ fn scoped_views_use_path_and_module_boundaries() -> Result<(), Box<dyn Error>> {
     let invalid = execute(directory.path(), &["hotspots", "--scope", "../outside"])?;
     assert_eq!(invalid.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("relative path"));
+    for scope in ["a".repeat(5000), "src/\u{1b}[31m".into()] {
+        let invalid = execute(directory.path(), &["hotspots", "--scope", &scope])?;
+        assert_eq!(invalid.status.code(), Some(2));
+        let error = String::from_utf8(invalid.stderr)?;
+        assert!(error.len() < 200);
+        assert!(!error.contains('\u{1b}'));
+    }
     Ok(())
 }
 

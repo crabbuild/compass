@@ -51,14 +51,20 @@ impl OverviewScope {
                 .strip_prefix("module:")
                 .or_else(|| filter.strip_prefix("path:"))
                 .unwrap_or(&filter);
+            if filter.len() > 4096 {
+                return Err(OverviewError::Scope("filter exceeds 4096 bytes".into()));
+            }
+            if value.chars().any(char::is_control) {
+                return Err(OverviewError::Scope(
+                    "control characters are not allowed".into(),
+                ));
+            }
             if value.is_empty()
-                || filter.len() > 4096
                 || value.starts_with('/')
                 || value.split('/').any(|part| part == "..")
-                || value.chars().any(char::is_control)
                 || (!filter.starts_with("module:") && value.contains(':'))
             {
-                return Err(OverviewError::Scope(filter));
+                return Err(OverviewError::Scope(filter.chars().take(64).collect()));
             }
             let normalized_filter = if filter.starts_with("module:") {
                 format!("module:{}", value.trim_end_matches('/'))
@@ -452,6 +458,14 @@ mod tests {
                 OverviewScope::new(vec![invalid.into()]).is_err(),
                 "{invalid}"
             );
+        }
+        for invalid in ["a".repeat(5000), "src/\u{1b}[31m".into()] {
+            let error = OverviewScope::new(vec![invalid])
+                .err()
+                .ok_or("invalid scope accepted")?
+                .to_string();
+            assert!(error.len() < 200);
+            assert!(!error.chars().any(char::is_control));
         }
         let scope = OverviewScope::new(vec!["path:./src/".into()])?;
         assert_eq!(scope.filters, vec!["src"]);
