@@ -188,6 +188,60 @@ fn markdown_tables_keep_structural_nodes_and_stable_semantic_identities()
 }
 
 #[test]
+fn markdown_row_identity_keeps_lossy_slug_collisions_distinct_and_stable()
+-> Result<(), Box<dyn Error>> {
+    for identities in [
+        [
+            format!("{}analysis.md", "common-directory/".repeat(6)),
+            format!("{}design.md", "common-directory/".repeat(6)),
+        ],
+        ["ModelA".to_owned(), "modela".to_owned()],
+        ["foo.bar".to_owned(), "foo-bar".to_owned()],
+    ] {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let path = root.join("inventory.md");
+        let source = format!(
+            "# Inventory\n\n| Identity | Status |\n| --- | --- |\n| {} | active |\n| {} | active |\n",
+            identities[0], identities[1]
+        );
+        let graph_for = |contents: &str| -> Result<_, Box<dyn Error>> {
+            fs::write(&path, contents)?;
+            let extraction = Engine::default().extract(&path)?;
+            let flexible = build_from_extraction(&extraction, true, Some(root));
+            let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
+            assert!(
+                graph
+                    .graph
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| { !diagnostic.code.starts_with("publication_") })
+            );
+            Ok(graph)
+        };
+        let identities_for = |contents: &str| -> Result<BTreeMap<String, String>, Box<dyn Error>> {
+            let graph = graph_for(contents)?;
+            let rows = graph
+                .nodes
+                .iter()
+                .filter(|node| node.qualified_name.contains("::pipe_table_row#"))
+                .map(|node| (node.qualified_name.clone(), node.id.clone()))
+                .collect::<BTreeMap<_, _>>();
+            assert_eq!(rows.len(), 6, "both rows and all four cells must survive");
+            Ok(rows)
+        };
+
+        let before = identities_for(&source)?;
+        let shifted = format!(
+            "Introductory prose.\n\n{}",
+            source.replace("active", "planned")
+        );
+        assert_eq!(identities_for(&shifted)?, before);
+    }
+    Ok(())
+}
+
+#[test]
 fn markdown_document_references_resolve_only_unique_exact_targets() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

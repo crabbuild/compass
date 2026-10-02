@@ -43,10 +43,12 @@ pub const COMMUNITY_HIERARCHY_BUDGET: &str = "community-hierarchy-budget/v1";
 pub const COMMUNITY_HIERARCHY_MERGE_POLICY: &str = "relationship-then-location-affinity/v1";
 
 /// Identity of the rule that derives group signatures and durable ids.
-pub const COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM: &str = "hierarchy-signature/v1";
+pub const COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM: &str = "hierarchy-signature/v2";
+const LEGACY_COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM: &str = "hierarchy-signature/v1";
 
 /// Length of a group signature in hex characters.
 const GROUP_SIGNATURE_LENGTH: usize = 16;
+const GROUP_ID_DISAMBIGUATION_ATTEMPTS: usize = 1_024;
 
 /// Root groups a hierarchy aims for.
 pub const DEFAULT_ROOT_TARGET: usize = 24;
@@ -446,7 +448,9 @@ impl CommunityHierarchy {
         if self.merge_policy != COMMUNITY_HIERARCHY_MERGE_POLICY {
             return Err(invalid("unexpected merge policy"));
         }
-        if self.signature_algorithm != COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM {
+        if self.signature_algorithm != COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM
+            && self.signature_algorithm != LEGACY_COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM
+        {
             return Err(invalid("unexpected signature algorithm"));
         }
         if self.budget.max_levels == 0
@@ -1067,7 +1071,7 @@ pub fn reconcile_hierarchy(
             .iter()
             .map(|group| group.member_count)
             .collect::<Vec<_>>();
-        let next_ids = next.levels[position]
+        let mut next_ids = next.levels[position]
             .groups
             .iter()
             .map(|group| group.id.clone())
@@ -1116,9 +1120,9 @@ pub fn reconcile_hierarchy(
                     if predecessors.get(*next_index).map_or(0, Vec::len) > 1 {
                         continue;
                     }
-                    let Some(next_id) = next_ids.get(*next_index) else {
+                    if next_ids.get(*next_index).is_none() {
                         continue;
-                    };
+                    }
                     if position > 0
                         && let (Some(previous_parent), Some(next_parent)) = (
                             previous_parent_of(previous_index),
@@ -1135,32 +1139,47 @@ pub fn reconcile_hierarchy(
                     {
                         group.id = previous_id.clone();
                     }
-                    let _ = next_id;
                     matched_here.insert(previous_index, *next_index);
                     stable += 1;
                 }
-                [(best, best_index), (runner_up, _), ..] => {
+                [(best, _), (runner_up, _), ..] => {
                     // Two successors this close mean the evidence does not name
                     // a single heir, so no id is inherited.
                     if best - runner_up <= policy.ambiguity_margin {
                         ambiguous += 1;
-                        events.push(HierarchyEvent {
-                            kind: HierarchyEventKind::Ambiguous,
-                            level: next_level_number,
-                            previous_ids: vec![previous_id.clone()],
-                            next_ids: row
-                                .iter()
-                                .filter_map(|(_, next_index)| next_ids.get(*next_index).cloned())
-                                .collect(),
-                            overlap: *best,
-                            member_count: next_members
-                                .get(*best_index)
-                                .copied()
-                                .unwrap_or_default(),
-                        });
                     }
                 }
             }
+        }
+        let claimed = matched_here.values().copied().collect::<BTreeSet<_>>();
+        disambiguate_reconciled_group_ids(
+            next,
+            position,
+            next_level_number,
+            &mut next_ids,
+            &claimed,
+        )?;
+        for (previous_index, row) in rows.iter().enumerate() {
+            let [(best, best_index), (runner_up, _), ..] = row.as_slice() else {
+                continue;
+            };
+            if best - runner_up > policy.ambiguity_margin {
+                continue;
+            }
+            let Some(previous_id) = previous_ids.get(previous_index) else {
+                continue;
+            };
+            events.push(HierarchyEvent {
+                kind: HierarchyEventKind::Ambiguous,
+                level: next_level_number,
+                previous_ids: vec![previous_id.clone()],
+                next_ids: row
+                    .iter()
+                    .filter_map(|(_, next_index)| next_ids.get(*next_index).cloned())
+                    .collect(),
+                overlap: *best,
+                member_count: next_members.get(*best_index).copied().unwrap_or_default(),
+            });
         }
         for (previous_index, row) in rows.iter().enumerate() {
             if row.len() < 2 {
@@ -1230,7 +1249,6 @@ pub fn reconcile_hierarchy(
                 });
             }
         }
-        let claimed = matched_here.values().copied().collect::<BTreeSet<_>>();
         for (next_index, next_id) in next_ids.iter().enumerate() {
             if claimed.contains(&next_index) || !predecessors[next_index].is_empty() {
                 continue;
@@ -1284,6 +1302,100 @@ pub fn reconcile_hierarchy(
         events,
         omitted_events,
     })
+}
+
+fn disambiguate_reconciled_group_ids(
+    next: &mut CommunityHierarchy,
+    level_index: usize,
+    level_number: usize,
+    next_ids: &mut [String],
+    retained_indices: &BTreeSet<usize>,
+) -> Result<(), CommunityHierarchyArtifactError> {
+    let mut occupied = BTreeSet::<String>::new();
+    for index in retained_indices {
+        let id = next
+            .levels
+            .get(level_index)
+            .and_then(|level| level.groups.get(*index))
+            .map(|group| group.id.clone())
+            .ok_or_else(|| {
+                CommunityHierarchyArtifactError::InvalidEvidence(
+                    "retained group is missing from its level".to_owned(),
+                )
+            })?;
+        if !occupied.insert(id.clone()) {
+            return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+                "retained group ids are not unique within a level".to_owned(),
+            ));
+        }
+        let Some(slot) = next_ids.get_mut(*index) else {
+            return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+                "retained group id is missing its level entry".to_owned(),
+            ));
+        };
+        slot.clone_from(&id);
+    }
+
+    let mut collisions = Vec::new();
+    for (index, id) in next_ids.iter().enumerate() {
+        if retained_indices.contains(&index) {
+            continue;
+        }
+        if !occupied.insert(id.clone()) {
+            collisions.push(index);
+        }
+    }
+
+    for index in collisions {
+        let signature = next
+            .levels
+            .get(level_index)
+            .and_then(|level| level.groups.get(index))
+            .map(|group| group.signature.clone())
+            .ok_or_else(|| {
+                CommunityHierarchyArtifactError::InvalidEvidence(
+                    "colliding group is missing its signature".to_owned(),
+                )
+            })?;
+        let mut replacement = None;
+        for attempt in 0..GROUP_ID_DISAMBIGUATION_ATTEMPTS {
+            let seed = format!(
+                "{COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM}:collision:{level_number}:{signature}:{attempt}"
+            );
+            let digest = format!("{:x}", Sha256::digest(seed.as_bytes()));
+            let suffix = digest
+                .chars()
+                .take(GROUP_SIGNATURE_LENGTH)
+                .collect::<String>();
+            let candidate = format!("h{level_number}-{suffix}");
+            if occupied.insert(candidate.clone()) {
+                replacement = Some(candidate);
+                break;
+            }
+        }
+        let Some(id) = replacement else {
+            return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+                "bounded group id collision disambiguation was exhausted".to_owned(),
+            ));
+        };
+        let Some(slot) = next_ids.get_mut(index) else {
+            return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+                "colliding group id is missing its level entry".to_owned(),
+            ));
+        };
+        slot.clone_from(&id);
+        let Some(group) = next
+            .levels
+            .get_mut(level_index)
+            .and_then(|level| level.groups.get_mut(index))
+        else {
+            return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+                "colliding group is missing from its level".to_owned(),
+            ));
+        };
+        group.id = id;
+    }
+    Ok(())
 }
 
 struct LevelState {
@@ -2601,6 +2713,15 @@ mod tests {
             artifact.validate(),
             Err(CommunityHierarchyArtifactError::DigestMismatch)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_accepts_the_previous_known_signature_algorithm() -> TestResult {
+        let mut artifact = artifact(4, HierarchyBudget::default())?;
+        artifact.signature_algorithm = LEGACY_COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM.to_owned();
+        artifact.result_digest = artifact.calculate_digest()?;
+        artifact.validate()?;
         Ok(())
     }
 

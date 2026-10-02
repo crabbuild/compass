@@ -38,7 +38,7 @@ use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Normalization/publication semantics used by `compass.graph/1`.
-pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/1";
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
 const MAX_DOCUMENT_REFERENCE_CANDIDATES: usize = 20;
 const MAX_DOCUMENT_REFERENCE_PROBES: usize = 100_000;
 use sha2::{Digest, Sha256};
@@ -1991,6 +1991,21 @@ fn ensure_external_placeholder_details(nodes: &mut [NodeRecord]) {
 fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
     let mut node = serde_json::from_value::<NodeRecord>(value)
         .map_err(|error| raw_error(raw_id, &error.to_string()))?;
+    if node.kind == NodeKind::Resource
+        && matches!(
+            node.details.as_ref(),
+            Some(NodeDetails::Resource(ResourceNodeDetails {
+                resource_kind: ResourceKind::Document,
+                media_type: Some(media_type),
+                ..
+            })) if media_type == "text/html"
+        )
+    {
+        // HTML block identity is occurrence-based. The trusted graph record
+        // already carries the validated ID selected from that occurrence, and
+        // the resource projection no longer carries its original document role.
+        return Ok(node);
+    }
     // Trusted records already carry typed semantics. Recompute document IDs
     // from the same semantic/occurrence rules used for raw normalization so a
     // legacy producer's global document ID cannot collapse repeated blocks.
@@ -1998,21 +2013,24 @@ fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, Grap
         && let Some(site) = node.source.as_ref()
     {
         let semantic = match node.details.as_ref() {
-            Some(NodeDetails::Document(details)) => Some(matches!(
-                details.role,
-                DocumentRole::Document
-                    | DocumentRole::Heading
-                    | DocumentRole::Table
-                    | DocumentRole::TableRow
-            )),
+            Some(NodeDetails::Document(details)) => Some(
+                details.role == DocumentRole::Document
+                    || (details.format == DocumentFormat::Markdown
+                        && matches!(
+                            details.role,
+                            DocumentRole::Heading | DocumentRole::Table | DocumentRole::TableRow
+                        )),
+            ),
             Some(NodeDetails::Resource(ResourceNodeDetails {
                 resource_kind: ResourceKind::Document,
                 uri,
+                media_type,
                 ..
             })) => Some(
-                uri.as_deref().is_some_and(|value| value.starts_with('#'))
-                    || graph_v1_table_qualified_name(&node.qualified_name)
-                    || (site.start_byte == 0 && node.name == node.qualified_name),
+                media_type.as_deref() != Some("text/html")
+                    && (uri.as_deref().is_some_and(|value| value.starts_with('#'))
+                        || graph_v1_table_qualified_name(&node.qualified_name)
+                        || (site.start_byte == 0 && node.name == node.qualified_name)),
             ),
             _ => None,
         };
@@ -5585,7 +5603,14 @@ fn node_identity(
             let semantic = matches!(
                 details,
                 Some(NodeDetails::Document(DocumentNodeDetails {
-                    role: DocumentRole::Document | DocumentRole::Table | DocumentRole::TableRow,
+                    role: DocumentRole::Document,
+                    ..
+                }))
+            ) || matches!(
+                details,
+                Some(NodeDetails::Document(DocumentNodeDetails {
+                    format: DocumentFormat::Markdown,
+                    role: DocumentRole::Heading | DocumentRole::Table | DocumentRole::TableRow,
                     ..
                 }))
             ) || raw_markdown_table_structure(attributes);
@@ -5723,11 +5748,13 @@ fn raw_markdown_heading(attributes: &Map<String, Value>) -> bool {
 }
 
 fn raw_markdown_table_structure(attributes: &Map<String, Value>) -> bool {
-    matches!(
-        optional_string(attributes, "document_kind").as_deref(),
-        Some("pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell")
-    ) && optional_string(attributes, "qualified_name")
-        .is_some_and(|name| name.contains("::pipe_table"))
+    document_format(attributes) == DocumentFormat::Markdown
+        && matches!(
+            optional_string(attributes, "document_kind").as_deref(),
+            Some("pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell")
+        )
+        && optional_string(attributes, "qualified_name")
+            .is_some_and(|name| name.contains("::pipe_table"))
 }
 
 fn raw_anchor(

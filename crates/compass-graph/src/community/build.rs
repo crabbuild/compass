@@ -1023,6 +1023,57 @@ mod tests {
     }
 
     #[test]
+    fn quality_incremental_run_reclusters_a_prior_community_split_by_unchanged_nodes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document = planted_graph();
+        let no_changes = BTreeSet::new();
+        let initial = build_communities(
+            &document,
+            &CommunityRequest {
+                profile: CommunityProfile::QualityV1,
+                resolution: ResolutionPolicy::Fixed(1.0),
+                exclude_hubs_percentile: None,
+                previous: None,
+                incremental: false,
+                changed_sources: &no_changes,
+                limits: CommunityLimits::default(),
+            },
+        )?;
+        let previous = previous_from(&initial);
+        assert_eq!(
+            canonical_memberships(&initial.communities),
+            [["a", "b", "c", "d"], ["w", "x", "y", "z"]]
+        );
+
+        let mut split = document;
+        split.links.retain(|edge| {
+            !matches!(
+                (edge.source.as_str(), edge.target.as_str()),
+                ("a", "c") | ("a", "d") | ("b", "c") | ("b", "d")
+            )
+        });
+        let mut limits = CommunityLimits::default();
+        limits.incremental.max_affected_fraction = 1.0;
+        for changed_sources in [BTreeSet::new(), BTreeSet::from(["src/z.rs".to_owned()])] {
+            let request = CommunityRequest {
+                profile: CommunityProfile::QualityV1,
+                resolution: ResolutionPolicy::Fixed(1.0),
+                exclude_hubs_percentile: None,
+                previous: Some(&previous),
+                incremental: true,
+                changed_sources: &changed_sources,
+                limits,
+            };
+            let first = build_communities(&split, &request)?;
+            let second = build_communities(&split, &request)?;
+            assert_eq!(first.quality.disconnected_community_count, 0);
+            assert_eq!(first.quality.assigned_node_count, split.nodes.len());
+            assert_eq!(first.communities, second.communities);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn quality_profile_recovers_planted_groups_and_is_permutation_invariant()
     -> Result<(), Box<dyn std::error::Error>> {
         let document = planted_graph();

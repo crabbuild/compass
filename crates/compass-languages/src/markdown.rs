@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::facts::stamp_source_range;
 use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use tree_sitter::{Node, Parser};
 use tree_sitter_language_pack::{DataNode, DataNodeKind, ProcessConfig};
 use tree_sitter_md::{INLINE_LANGUAGE, LANGUAGE};
@@ -412,12 +413,13 @@ fn compact_identity(value: &str) -> String {
             output.push('-');
         }
     }
-    let trimmed = output.trim_matches('-');
-    if trimmed.is_empty() {
+    let readable = if output.trim_matches('-').is_empty() {
         "row".to_owned()
     } else {
-        trimmed.to_owned()
-    }
+        output.trim_matches('-').to_owned()
+    };
+    let digest = format!("{:x}", Sha256::digest(value.as_bytes()));
+    format!("{readable}-{digest}")
 }
 
 fn truncate_utf8(text: &str, limit: usize) -> String {
@@ -1188,15 +1190,15 @@ impl State<'_, '_> {
             );
             let identity_occurrence = row_occurrences.entry(identity_key.clone()).or_default();
             *identity_occurrence = identity_occurrence.saturating_add(1);
+            let compact_key = compact_identity(&identity_key);
             let row_qualified_name = format!(
                 "{table_qualified_name}::pipe_table_row#{}-{}",
-                compact_identity(&identity_key),
-                *identity_occurrence
+                compact_key, *identity_occurrence
             );
             let row_id = crate::make_id(&[
                 &table_id,
                 "markdown_table_row",
-                &identity_key,
+                &compact_key,
                 &identity_occurrence.to_string(),
             ]);
             let mut row_extra = Map::new();
