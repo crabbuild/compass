@@ -1,0 +1,122 @@
+[
+  {
+    "graph": "${EVALUATION_ROOT}/builds/cobra/compass/trial-0/compass-out/snapshots/snapshot-1790964111616929000-16407-0/graph.json",
+    "repository": "cobra",
+    "sha256": "3b730a7fbdac4d226ca97ea010d17653c1e0ebd5d64971d4763dfd644993ff9e",
+    "tool": "compass"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/cobra/graphify/trial-0/graphify-out/graph.json",
+    "repository": "cobra",
+    "sha256": "3140e3435762517c15fa4f2537d4d7414fa985c9b1502b4d96b0a5145eaed910",
+    "tool": "graphify"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/cobra/compass-sqlite/trial-0/compass-out/snapshots/snapshot-1790964140834327000-17285-0/graph.json",
+    "repository": "cobra",
+    "sha256": "786c4b6ed42ef55a7fb5193491fe8d61a334688accb51e5e4e7a5b68fb292817",
+    "tool": "compass-sqlite"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/flask/compass/trial-0/compass-out/snapshots/snapshot-1790964155115949000-17540-0/graph.json",
+    "repository": "flask",
+    "sha256": "cb8ae1caffd2f67816263f90621d13c8b9a4c05f9638b93dd5888daad9df7bb0",
+    "tool": "compass"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/flask/graphify/trial-0/graphify-out/graph.json",
+    "repository": "flask",
+    "sha256": "b70bd555909a80d54af2cd79bffd079bcfd83c85c288bfe6baf9681287e3bdcd",
+    "tool": "graphify"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/flask/compass-sqlite/trial-0/compass-out/snapshots/snapshot-1790964198602755000-18600-0/graph.json",
+    "repository": "flask",
+    "sha256": "87c23e72b0c2561ec6626057acb48c6fb636884f7881031b312f1e472fab94b2",
+    "tool": "compass-sqlite"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/gson/compass/trial-0/compass-out/snapshots/snapshot-1790964215138178000-18914-0/graph.json",
+    "repository": "gson",
+    "sha256": "64360ac15618cc94dce65fdd40422e44114ebafb138d68d961bc6cd915052811",
+    "tool": "compass"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/gson/graphify/trial-0/graphify-out/graph.json",
+    "repository": "gson",
+    "sha256": "48949b50347b377f59c10ebe8575089c840461f7ce3694fdd0e4c0c0f8df4e53",
+    "tool": "graphify"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/gson/compass-sqlite/trial-0/compass-out/snapshots/snapshot-1790964278881301000-20132-0/graph.json",
+    "repository": "gson",
+    "sha256": "eea6832773d627b21623c3c95ef897db836ff3edda3ec7ff0250ac870df1af3a",
+    "tool": "compass-sqlite"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/zod/compass/trial-0/compass-out/snapshots/snapshot-1790964344616827000-21376-0/graph.json",
+    "repository": "zod",
+    "sha256": "c92f4eb52e02d395a851f53e5b615092124f7508be6bdb56c622053979999ccc",
+    "tool": "compass"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/zod/graphify/trial-0/graphify-out/graph.json",
+    "repository": "zod",
+    "sha256": "ea5778d7515f65b9df0ca67a4262a784a7362b78d78491e5631d037f360784c7",
+    "tool": "graphify"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/zod/compass-sqlite/trial-0/compass-out/snapshots/snapshot-1790964582028830000-26629-0/graph.json",
+    "repository": "zod",
+    "sha256": "b4b98614bcfe53a36da4ab31eb9e40d8856937b2edc29c44aaa2a20803a524bd",
+    "tool": "compass-sqlite"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/axum/compass/trial-0/compass-out/snapshots/snapshot-1790964748611072000-35636-0/graph.json",
+    "repository": "axum",
+    "sha256": "b0d8bfd41b7e97ff0570989e69be5f12867a18758ea7c9879b470806372cc2eb",
+    "tool": "compass"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/axum/graphify/trial-0/graphify-out/graph.json",
+    "repository": "axum",
+    "sha256": "b7f6567e314a182020c9446d47c5ced568025239e5e75d83e94eb266a99e9150",
+    "tool": "graphify"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/axum/compass-sqlite/trial-0/compass-out/snapshots/snapshot-1790964856128397000-37977-0/graph.json",
+    "repository": "axum",
+    "sha256": "bad62c4b5edbd284ab93851fbff797973faf06a00363aa6e15994a18e3d46b8f",
+    "tool": "compass-sqlite"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/cobra/graphify-leiden/trial-0/graphify-out/graph.json",
+    "repository": "cobra",
+    "sha256": "a0f44457c516fcc50d86934cc5867aae441f3aa02d06afea7a774901f9defd79",
+    "tool": "graphify-leiden"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/flask/graphify-leiden/trial-0/graphify-out/graph.json",
+    "repository": "flask",
+    "sha256": "bfc9463f9239682fc3751c9d4d40ccdc441b67061ae56a0d816ec31326ffbf95",
+    "tool": "graphify-leiden"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/gson/graphify-leiden/trial-0/graphify-out/graph.json",
+    "repository": "gson",
+    "sha256": "8f81fd5d5988c5fd3a1b3a2828c0271dae3b113c89b4d73c8a403aaed3dc232e",
+    "tool": "graphify-leiden"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/zod/graphify-leiden/trial-0/graphify-out/graph.json",
+    "repository": "zod",
+    "sha256": "c856eb10a980b34575166117f846229bc731c42df5e5bb9ba4777f4a3c0accc4",
+    "tool": "graphify-leiden"
+  },
+  {
+    "graph": "${EVALUATION_ROOT}/builds/axum/graphify-leiden/trial-0/graphify-out/graph.json",
+    "repository": "axum",
+    "sha256": "3ab8bdb31ab990087c201061698c51a4e1d63a4bbe6525f89812de5091a6ebbe",
+    "tool": "graphify-leiden"
+  }
+]

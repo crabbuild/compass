@@ -1,0 +1,20 @@
+{
+  "buildObservations": 120,
+  "compassHead": "b7b7fa819b127464566430cc454fd2085d5d5b62",
+  "queryObservations": 1020,
+  "queryTimeouts": 1,
+  "scriptsSha256": {
+    "census.py": "17beeed9c6932c94146462312cfcf24c1d27a637c4f23e4094e62444a5c96086",
+    "directional_audit.py": "cdb4d0785bbd9f9e5ab9ffae332e65e38dcb4acff07aa05c21b02524e1d5d5fb",
+    "evaluate.py": "e09529a5ccdbec34b87d1fe64207c5ad6eb6b3c78304c36dee5af4077dcd2aff",
+    "source_audit.py": "4397599684a69e133b65b25846f53c9f1b3c7f750a4e26edc3187c953f6870a3",
+    "summarize.py": "7c83ecb22f3f8efd066bc543f8a9b43cd5736f53b8927ab42a1f80e10047368b",
+    "supplement.py": "0d4dd7f466b2096cf6327770e8ac7551af37fa475260e9bb01e7ee6bac4b7c88",
+    "transitions.py": "f0fef0559231be6236cba9590374501108bdc4d33bfa3aaf128661aab0948bcd",
+    "verify_evidence.py": "9af80d5dd34f6487ee6c180e3ca239346efec9d78bb80bf1861257dab4b2851e"
+  },
+  "sourceVerification": "All five pinned clean corpus HEADs, suite source digests and before-build call-oracle source digests passed.",
+  "verification": "Graph digests, query graph identities, binary identities, both Graphify package source trees and benchmark helper identities unchanged.",
+  "verifiedAt": "2026-10-02T19:07:08.029053+00:00",
+  "verifiedFrozenGraphs": 120
+}

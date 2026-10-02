@@ -1,0 +1,47 @@
+import ast,json,hashlib,subprocess,sys,os
+from pathlib import Path
+from datetime import datetime,timezone
+from evaluate import ROOT,SOURCES
+from source_audit import identity
+
+def register():
+    p=SOURCES['flask'];files=sorted(p.glob('src/flask/**/*.py'));rows=[]
+    for f in files:
+        tree=ast.parse(f.read_text(),filename=str(f))
+        for n in ast.walk(tree):
+            if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)):
+                rows.append(dict(file=str(f.relative_to(p)),name=n.name,line=n.lineno,kind='class' if isinstance(n,ast.ClassDef) else 'function'))
+    py={'provider':'CPython stdlib ast','files':[str(f.relative_to(p)) for f in files],'declarations':rows}
+    p=SOURCES['cobra'];names=subprocess.check_output(['git','ls-files','-z'],cwd=p).decode().split('\0');names=sorted(f for f in names if f.endswith('.go') and not f.endswith('_test.go'))
+    env=dict(os.environ,GOCACHE=str(ROOT/'go-cache'),GOMODCACHE=str(ROOT/'go-mod-cache'))
+    subprocess.run(['go','build','-o',str(ROOT/'go-census'),str(ROOT/'go_census.go')],env=env,check=True,timeout=120)
+    go=json.loads(subprocess.check_output([str(ROOT/'go-census'),str(p),*names],timeout=30))
+    out={'registeredBeforeGraphBuilds':True,'registeredAt':datetime.now(timezone.utc).isoformat(),'scope':'Complete syntactic declaration census of Flask src/flask Python and tracked non-test Cobra Go files. Definition start and terminal name are exact; fields also require direct containment by exact source owner. No call-binding precision or whole-graph accuracy claim.','repositories':{'flask':py,'cobra':go}}
+    for r,record in out['repositories'].items():
+        record['sourceSha256']={f:hashlib.sha256((SOURCES[r]/f).read_bytes()).hexdigest() for f in record['files']}
+    path=ROOT/'source-census.json';assert not path.exists();path.write_text(json.dumps(out,indent=2)+'\n')
+    print([(r,len(v['files']),len(v['declarations'])) for r,v in out['repositories'].items()])
+
+def audit():
+    source=json.loads((ROOT/'source-census.json').read_text());graphs=json.loads((ROOT/'graphs.json').read_text());rows=[]
+    for entry in graphs:
+        r=entry['repository'];tool=entry['tool']
+        if r not in source['repositories'] or tool=='compass-sqlite':continue
+        g=json.loads(Path(entry['graph']).read_text());nodes=g['nodes'];byid={n['id']:n for n in nodes}
+        for d in source['repositories'][r]['declarations']:
+            hits=[n for n in nodes if identity(n,tool,dict(file=d['file'],line=d['line'],symbol=d['name']))]
+            if d['kind']=='field':
+                # Require distinct field-compatible declaration and direct containing type.
+                type_decl=next(x for x in source['repositories'][r]['declarations'] if x['file']==d['file'] and x['kind']=='type' and x['name']==d['owner'])
+                owners=[n for n in nodes if identity(n,tool,dict(file=d['file'],line=type_decl['line'],symbol=d['owner']))]
+                owner_ids={n['id'] for n in owners}
+                hits=[n for n in hits if (n.get('kind') or n.get('type')) in (None,'field','property','attribute') and any(e.get('source') in owner_ids and e.get('target')==n['id'] and (e.get('kind') or e.get('relation')) in ('contains','field') for e in g.get('links',[]))]
+            rows.append(dict(repository=r,tool=tool,declaration=d,count=len(hits),matched=len(hits)==1))
+    (ROOT/'source-census-audit.json').write_text(json.dumps(rows,indent=2)+'\n')
+    for r in source['repositories']:
+        for t in ('compass','graphify'):
+            for kind in ('function','class','type','field'):
+                x=[v for v in rows if v['repository']==r and v['tool']==t and v['declaration']['kind']==kind]
+                if x: print(r,t,kind,sum(v['matched'] for v in x),'/',len(x))
+
+if __name__=='__main__':{'register':register,'audit':audit}[sys.argv[1]]()

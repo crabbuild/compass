@@ -1,0 +1,7 @@
+{
+  "binary": "${EVALUATION_ROOT}/graphify-leiden-venv/bin/graphify",
+  "binarySha256": "47619809b278ee3bfcd4949bb0dd92a865be89c3fde359e2a2ca64f444dfadd9",
+  "digestScope": "executable-file-only",
+  "name": "graphify",
+  "version": "graphify 0.9.74"
+}

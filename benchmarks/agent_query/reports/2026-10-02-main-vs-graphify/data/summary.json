@@ -1,0 +1,3568 @@
+{
+  "builds": [
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 85.765625,
+      "medianCpuSeconds": 0.900955,
+      "medianSampledTreeMiB": 79.671875,
+      "medianSeconds": 2.101684082997963,
+      "mode": "cold",
+      "rangeSeconds": [
+        1.6751945419237018,
+        2.406866499921307
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 26.84375,
+      "medianCpuSeconds": 0.076897,
+      "medianSampledTreeMiB": 21.125,
+      "medianSeconds": 0.2942731250077486,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.2898507921490818,
+        1.0813853750005364
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 81.75,
+      "medianCpuSeconds": 1.2308160000000001,
+      "medianSampledTreeMiB": 80.03125,
+      "medianSeconds": 3.100524874869734,
+      "mode": "cold",
+      "rangeSeconds": [
+        2.946756040910259,
+        3.4386354160960764
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 26.609375,
+      "medianCpuSeconds": 0.07622699999999999,
+      "medianSampledTreeMiB": 23.171875,
+      "medianSeconds": 0.3295660000294447,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.2994898329488933,
+        0.3740685419179499
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 60.875,
+      "medianCpuSeconds": 3.680185,
+      "medianSampledTreeMiB": 644.75,
+      "medianSeconds": 4.163668750086799,
+      "mode": "cold",
+      "rangeSeconds": [
+        1.91088604205288,
+        5.592421292094514
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 68.078125,
+      "medianCpuSeconds": 0.6670399999999999,
+      "medianSampledTreeMiB": 68.0,
+      "medianSeconds": 1.8313500417862087,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        1.5899904591497034,
+        2.0906599999871105
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 62.765625,
+      "medianCpuSeconds": 3.74285,
+      "medianSampledTreeMiB": 623.796875,
+      "medianSeconds": 3.556283000158146,
+      "mode": "cold",
+      "rangeSeconds": [
+        2.9618591249454767,
+        4.73216679203324
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 67.140625,
+      "medianCpuSeconds": 0.683528,
+      "medianSampledTreeMiB": 67.0,
+      "medianSeconds": 2.092738959006965,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        1.6897489170078188,
+        2.5556488330475986
+      ],
+      "repository": "cobra",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 123.390625,
+      "medianCpuSeconds": 1.9814129999999999,
+      "medianSampledTreeMiB": 117.234375,
+      "medianSeconds": 3.565455042058602,
+      "mode": "cold",
+      "rangeSeconds": [
+        3.119795582955703,
+        5.471648042090237
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 36.65625,
+      "medianCpuSeconds": 0.13599699999999998,
+      "medianSampledTreeMiB": 36.4375,
+      "medianSeconds": 0.6366389158647507,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.4817152919713408,
+        0.7602554161567241
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 122.625,
+      "medianCpuSeconds": 2.264922,
+      "medianSampledTreeMiB": 113.03125,
+      "medianSeconds": 3.8218800420872867,
+      "mode": "cold",
+      "rangeSeconds": [
+        3.4785733341705054,
+        4.1182029999326915
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 36.375,
+      "medianCpuSeconds": 0.135486,
+      "medianSampledTreeMiB": 36.375,
+      "medianSeconds": 0.5955416250508279,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.3639532499946654,
+        0.741886124946177
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 100.875,
+      "medianCpuSeconds": 5.2777199999999995,
+      "medianSampledTreeMiB": 613.640625,
+      "medianSeconds": 5.809097750112414,
+      "mode": "cold",
+      "rangeSeconds": [
+        4.129545541945845,
+        8.911232207901776
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 81.390625,
+      "medianCpuSeconds": 1.554909,
+      "medianSampledTreeMiB": 80.46875,
+      "medianSeconds": 2.9913583749439567,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        2.0367957500275224,
+        4.134171208133921
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 102.984375,
+      "medianCpuSeconds": 5.264202,
+      "medianSampledTreeMiB": 652.078125,
+      "medianSeconds": 6.483971459092572,
+      "mode": "cold",
+      "rangeSeconds": [
+        5.9902770419139415,
+        9.3770114579238
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 82.65625,
+      "medianCpuSeconds": 1.5792059999999999,
+      "medianSampledTreeMiB": 81.78125,
+      "medianSeconds": 3.993814165936783,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        3.857369374949485,
+        5.497434541815892
+      ],
+      "repository": "flask",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 297.734375,
+      "medianCpuSeconds": 5.220339,
+      "medianSampledTreeMiB": 291.90625,
+      "medianSeconds": 6.079321667086333,
+      "mode": "cold",
+      "rangeSeconds": [
+        4.685359291965142,
+        7.3351022091228515
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 97.109375,
+      "medianCpuSeconds": 0.32562599999999997,
+      "medianSampledTreeMiB": 95.859375,
+      "medianSeconds": 1.2632460410241038,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.9803737499751151,
+        1.2924246250186116
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 302.59375,
+      "medianCpuSeconds": 7.606302,
+      "medianSampledTreeMiB": 297.40625,
+      "medianSeconds": 10.838423459092155,
+      "mode": "cold",
+      "rangeSeconds": [
+        9.373360125115141,
+        11.553350124973804
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 97.234375,
+      "medianCpuSeconds": 0.35272499999999996,
+      "medianSampledTreeMiB": 95.875,
+      "medianSeconds": 1.091741125099361,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.8977930000983179,
+        1.2354722500313073
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 115.53125,
+      "medianCpuSeconds": 7.9441440000000005,
+      "medianSampledTreeMiB": 684.0,
+      "medianSeconds": 7.099911707919091,
+      "mode": "cold",
+      "rangeSeconds": [
+        5.977972500026226,
+        8.524995459010825
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 156.53125,
+      "medianCpuSeconds": 2.59801,
+      "medianSampledTreeMiB": 156.046875,
+      "medianSeconds": 3.301766375079751,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        3.0325114158913493,
+        4.317039416870102
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 109.421875,
+      "medianCpuSeconds": 8.531331,
+      "medianSampledTreeMiB": 687.3125,
+      "medianSeconds": 20.03428583405912,
+      "mode": "cold",
+      "rangeSeconds": [
+        18.382980125024915,
+        27.45444062491879
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 138.5,
+      "medianCpuSeconds": 2.695154,
+      "medianSampledTreeMiB": 137.28125,
+      "medianSeconds": 11.272023249883205,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        10.521302082808688,
+        28.3796523748897
+      ],
+      "repository": "gson",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 864.203125,
+      "medianCpuSeconds": 24.977845,
+      "medianSampledTreeMiB": 843.1875,
+      "medianSeconds": 34.27549625001848,
+      "mode": "cold",
+      "rangeSeconds": [
+        32.386420249938965,
+        55.19848812511191
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 303.703125,
+      "medianCpuSeconds": 0.9106599999999999,
+      "medianSampledTreeMiB": 296.375,
+      "medianSeconds": 2.479843290988356,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        2.3107386669144034,
+        3.636201333021745
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 779.578125,
+      "medianCpuSeconds": 34.165761,
+      "medianSampledTreeMiB": 751.53125,
+      "medianSeconds": 62.85250829090364,
+      "mode": "cold",
+      "rangeSeconds": [
+        58.990946542005986,
+        87.04308191686869
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 303.703125,
+      "medianCpuSeconds": 0.95107,
+      "medianSampledTreeMiB": 297.984375,
+      "medianSeconds": 2.4657619171775877,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        2.0673320000059903,
+        4.789555917028338
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 339.765625,
+      "medianCpuSeconds": 16.235742000000002,
+      "medianSampledTreeMiB": 794.125,
+      "medianSeconds": 15.2488831251394,
+      "mode": "cold",
+      "rangeSeconds": [
+        13.135665541980416,
+        18.190451332833618
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 115.71875,
+      "medianCpuSeconds": 2.9368849999999997,
+      "medianSampledTreeMiB": 115.703125,
+      "medianSeconds": 5.418943957891315,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        4.299670707900077,
+        6.007018167059869
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 325.484375,
+      "medianCpuSeconds": 16.89373,
+      "medianSampledTreeMiB": 794.34375,
+      "medianSeconds": 21.208279125159606,
+      "mode": "cold",
+      "rangeSeconds": [
+        21.20659783296287,
+        32.885164874838665
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 111.75,
+      "medianCpuSeconds": 3.3869619999999996,
+      "medianSampledTreeMiB": 111.53125,
+      "medianSeconds": 10.045654207933694,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        8.445308458060026,
+        11.852035708958283
+      ],
+      "repository": "zod",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 139.453125,
+      "medianCpuSeconds": 2.274726,
+      "medianSampledTreeMiB": 128.09375,
+      "medianSeconds": 6.930360999889672,
+      "mode": "cold",
+      "rangeSeconds": [
+        4.697570083895698,
+        13.502911792136729
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 46.09375,
+      "medianCpuSeconds": 0.15506199999999998,
+      "medianSampledTreeMiB": 46.0,
+      "medianSeconds": 0.8552039589267224,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.5203151248861104,
+        2.1326693748123944
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "compass"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 133.8125,
+      "medianCpuSeconds": 2.8122160000000003,
+      "medianSampledTreeMiB": 127.640625,
+      "medianSeconds": 13.908565124962479,
+      "mode": "cold",
+      "rangeSeconds": [
+        6.48782749986276,
+        27.29156995913945
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 47.046875,
+      "medianCpuSeconds": 0.152862,
+      "medianSampledTreeMiB": 26.84375,
+      "medianSeconds": 0.7713186668697745,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        0.6246712089050561,
+        0.9417495408561081
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 64.5625,
+      "medianCpuSeconds": 4.7929379999999995,
+      "medianSampledTreeMiB": 612.84375,
+      "medianSeconds": 9.435939792077988,
+      "mode": "cold",
+      "rangeSeconds": [
+        8.722471125191078,
+        9.442384290974587
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 68.703125,
+      "medianCpuSeconds": 0.9783279999999999,
+      "medianSampledTreeMiB": 68.625,
+      "medianSeconds": 7.352388083003461,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        7.203842000104487,
+        8.150885582901537
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "graphify"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 67.15625,
+      "medianCpuSeconds": 4.092306,
+      "medianSampledTreeMiB": 637.484375,
+      "medianSeconds": 5.082954333163798,
+      "mode": "cold",
+      "rangeSeconds": [
+        3.694969916017726,
+        5.1993400829378515
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": 0,
+      "medianChildPeakMiB": 73.125,
+      "medianCpuSeconds": 0.875099,
+      "medianSampledTreeMiB": 73.109375,
+      "medianSeconds": 3.080998749937862,
+      "mode": "unchanged",
+      "rangeSeconds": [
+        2.9803705830127,
+        4.42889262503013
+      ],
+      "repository": "axum",
+      "samples": 3,
+      "variant": "graphify-leiden"
+    }
+  ],
+  "determinism": [
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "cobra",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "cobra",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "cobra",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "cobra",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "flask",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "flask",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "flask",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "flask",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "gson",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "gson",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "gson",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "gson",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "zod",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "zod",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "zod",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "zod",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "axum",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "axum",
+      "unchangedMatches": [
+        true,
+        true,
+        true
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "axum",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify"
+    },
+    {
+      "coldDistinctRawDigests": 1,
+      "repository": "axum",
+      "unchangedMatches": [
+        false,
+        false,
+        false
+      ],
+      "variant": "graphify-leiden"
+    }
+  ],
+  "directionalQueryAudit": {
+    "compass": {
+      "failedQuestions": [],
+      "passedAllTrials": 10,
+      "questions": 10
+    },
+    "compass-sqlite": {
+      "failedQuestions": [],
+      "passedAllTrials": 10,
+      "questions": 10
+    },
+    "graphify": {
+      "failedQuestions": [
+        "gson2-callers-newjsonwriter",
+        "zod2-callees-convertschema"
+      ],
+      "passedAllTrials": 8,
+      "questions": 10
+    },
+    "graphify-leiden": {
+      "failedQuestions": [
+        "gson2-callers-newjsonwriter",
+        "zod2-callees-convertschema"
+      ],
+      "passedAllTrials": 8,
+      "questions": 10
+    }
+  },
+  "failures": [
+    {
+      "failures": [
+        [
+          "missing 'route_endpoint'"
+        ],
+        [
+          "missing 'route_endpoint'"
+        ],
+        [
+          "missing 'route_endpoint'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-impact-validate-path",
+      "repository": "axum",
+      "variant": "compass"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "cobra2-broad-resolve-run",
+      "repository": "cobra",
+      "variant": "compass"
+    },
+    {
+      "failures": [
+        [
+          "missing 'route_endpoint'"
+        ],
+        [
+          "missing 'route_endpoint'"
+        ],
+        [
+          "missing 'route_endpoint'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-impact-validate-path",
+      "repository": "axum",
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "cobra2-broad-resolve-run",
+      "repository": "cobra",
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": [
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ],
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ],
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-file-path-routing",
+      "repository": "axum",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ],
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ],
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-source-validate-path",
+      "repository": "axum",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ],
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ],
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "cobra2-source-find",
+      "repository": "cobra",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'def wsgi_app'"
+        ],
+        [
+          "missing 'def wsgi_app'"
+        ],
+        [
+          "missing 'def wsgi_app'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "flask2-source-wsgiapp",
+      "repository": "flask",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ],
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ],
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "gson2-source-newjsonwriter",
+      "repository": "gson",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'function convertSchema(schema:'"
+        ],
+        [
+          "missing 'function convertSchema(schema:'"
+        ],
+        [
+          "missing 'function convertSchema(schema:'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "zod2-source-convertschema",
+      "repository": "zod",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ],
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ],
+        [
+          "missing 'mod.rs'",
+          "missing 'path_router.rs'",
+          "command exited 1"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-file-path-routing",
+      "repository": "axum",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ],
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ],
+        [
+          "missing 'fn validate_path(v7_checks: bool'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "axum2-source-validate-path",
+      "repository": "axum",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ],
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ],
+        [
+          "missing 'func (c *Command) Find(args []string)'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "cobra2-source-find",
+      "repository": "cobra",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'def wsgi_app'"
+        ],
+        [
+          "missing 'def wsgi_app'"
+        ],
+        [
+          "missing 'def wsgi_app'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "flask2-source-wsgiapp",
+      "repository": "flask",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ],
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ],
+        [
+          "missing 'public JsonWriter newJsonWriter(Writer writer)'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "gson2-source-newjsonwriter",
+      "repository": "gson",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'function convertSchema(schema:'"
+        ],
+        [
+          "missing 'function convertSchema(schema:'"
+        ],
+        [
+          "missing 'function convertSchema(schema:'"
+        ]
+      ],
+      "panel": "structured",
+      "passedTrials": 0,
+      "question": "zod2-source-convertschema",
+      "repository": "zod",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-broad",
+      "repository": "cobra",
+      "variant": "compass"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Gson.java'"
+        ],
+        [
+          "missing 'Gson.java'"
+        ],
+        [
+          "missing 'Gson.java'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "gson-natural-broad",
+      "repository": "gson",
+      "variant": "compass"
+    },
+    {
+      "failures": [
+        [
+          "missing 'convertBaseSchema'",
+          "command timed out"
+        ],
+        [],
+        []
+      ],
+      "panel": "natural",
+      "passedTrials": 2,
+      "question": "zod-natural-callees",
+      "repository": "zod",
+      "variant": "compass"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-broad",
+      "repository": "cobra",
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Gson.java'"
+        ],
+        [
+          "missing 'Gson.java'"
+        ],
+        [
+          "missing 'Gson.java'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "gson-natural-broad",
+      "repository": "gson",
+      "variant": "compass-sqlite"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-broad",
+      "repository": "cobra",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-callees",
+      "repository": "cobra",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Traverse'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-impact",
+      "repository": "cobra",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ],
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ],
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-callees",
+      "repository": "flask",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'wsgi_app'"
+        ],
+        [
+          "missing 'wsgi_app'"
+        ],
+        [
+          "missing 'wsgi_app'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-callers",
+      "repository": "flask",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ],
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ],
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-impact",
+      "repository": "flask",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ],
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ],
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "gson-natural-callees",
+      "repository": "gson",
+      "variant": "graphify"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ],
+        [
+          "missing 'Find'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-broad",
+      "repository": "cobra",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Find'",
+          "missing 'Traverse'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-callees",
+      "repository": "cobra",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Traverse'"
+        ],
+        [
+          "missing 'Traverse'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "cobra-natural-impact",
+      "repository": "cobra",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ],
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ],
+        [
+          "missing 'preprocess_request'",
+          "missing 'finalize_request'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-callees",
+      "repository": "flask",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'wsgi_app'"
+        ],
+        [
+          "missing 'wsgi_app'"
+        ],
+        [
+          "missing 'wsgi_app'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-callers",
+      "repository": "flask",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ],
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ],
+        [
+          "missing 'wsgi_app'",
+          "missing '__call__'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "flask-natural-impact",
+      "repository": "flask",
+      "variant": "graphify-leiden"
+    },
+    {
+      "failures": [
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ],
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ],
+        [
+          "missing 'setHtmlSafe'",
+          "missing 'setSerializeNulls'"
+        ]
+      ],
+      "panel": "natural",
+      "passedTrials": 0,
+      "question": "gson-natural-callees",
+      "repository": "gson",
+      "variant": "graphify-leiden"
+    }
+  ],
+  "graphTransitions": [
+    {
+      "changedNodeFields": {
+        "_origin": 24
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "cobra",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 24
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "cobra",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 66
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "flask",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 66
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "flask",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 237
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "gson",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 237
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "gson",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 39,
+        "community": 4787
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 5,
+      "nodesAdded": 0,
+      "nodesRemoved": 4,
+      "removedEdgeRecords": [
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "configs_rollup_config",
+          "source_file": ".configs/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_bench_benchutil",
+          "source_file": "packages/bench/benchUtil.ts",
+          "target": "zod4"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_docs_next_config",
+          "source_file": "packages/docs/next.config.mjs",
+          "target": "next"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_treeshake_rollup_config",
+          "source_file": "packages/treeshake/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_zod_src_v4_classic_tests_error_test",
+          "source_file": "packages/zod/src/v4/classic/tests/error.test.ts",
+          "target": "v4"
+        }
+      ],
+      "removedNodeRecords": [
+        {
+          "_origin": "ast",
+          "community": 175,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "next",
+          "label": "next",
+          "norm_label": "next",
+          "source_file": "next"
+        },
+        {
+          "_origin": "ast",
+          "community": 74,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "rollup",
+          "label": "rollup",
+          "norm_label": "rollup",
+          "source_file": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "community": 115,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "v4",
+          "label": "zod/v4",
+          "norm_label": "zod/v4",
+          "source_file": "zod/v4"
+        },
+        {
+          "_origin": "ast",
+          "community": 36,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "zod4",
+          "label": "zod4",
+          "norm_label": "zod4",
+          "source_file": "zod4"
+        }
+      ],
+      "repository": "zod",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 39,
+        "community": 4287
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 5,
+      "nodesAdded": 0,
+      "nodesRemoved": 4,
+      "removedEdgeRecords": [
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "configs_rollup_config",
+          "source_file": ".configs/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_bench_benchutil",
+          "source_file": "packages/bench/benchUtil.ts",
+          "target": "zod4"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_docs_next_config",
+          "source_file": "packages/docs/next.config.mjs",
+          "target": "next"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_treeshake_rollup_config",
+          "source_file": "packages/treeshake/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_zod_src_v4_classic_tests_error_test",
+          "source_file": "packages/zod/src/v4/classic/tests/error.test.ts",
+          "target": "v4"
+        }
+      ],
+      "removedNodeRecords": [
+        {
+          "_origin": "ast",
+          "community": 52,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "next",
+          "label": "next",
+          "norm_label": "next",
+          "source_file": "next"
+        },
+        {
+          "_origin": "ast",
+          "community": 76,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "rollup",
+          "label": "rollup",
+          "norm_label": "rollup",
+          "source_file": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "community": 114,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "v4",
+          "label": "zod/v4",
+          "norm_label": "zod/v4",
+          "source_file": "zod/v4"
+        },
+        {
+          "_origin": "ast",
+          "community": 46,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "zod4",
+          "label": "zod4",
+          "norm_label": "zod4",
+          "source_file": "zod4"
+        }
+      ],
+      "repository": "zod",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 108
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "axum",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 108
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "axum",
+      "tool": "graphify-leiden",
+      "trial": 0
+    }
+  ],
+  "health": [
+    {
+      "diagnostics": {
+        "binary_input": 1,
+        "unsupported_input": 10
+      },
+      "directed": true,
+      "edges": 3923,
+      "extractedFilesByLanguage": {
+        "go": 36,
+        "markdown": 17,
+        "package-manifest": 1
+      },
+      "fileStatuses": {
+        "binary": 1,
+        "extracted": 54,
+        "unsupported": 10
+      },
+      "graphMiB": 3.8921689987182617,
+      "multigraph": true,
+      "nodes": 758,
+      "publicationOmissions": [],
+      "repository": "cobra",
+      "variant": "compass"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 2515,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.0075349807739258,
+      "multigraph": false,
+      "nodes": 708,
+      "publicationOmissions": [],
+      "repository": "cobra",
+      "variant": "graphify"
+    },
+    {
+      "diagnostics": {
+        "binary_input": 1,
+        "unsupported_input": 10
+      },
+      "directed": true,
+      "edges": 3923,
+      "extractedFilesByLanguage": {
+        "go": 36,
+        "markdown": 17,
+        "package-manifest": 1
+      },
+      "fileStatuses": {
+        "binary": 1,
+        "extracted": 54,
+        "unsupported": 10
+      },
+      "graphMiB": 3.8921689987182617,
+      "multigraph": true,
+      "nodes": 758,
+      "publicationOmissions": [],
+      "repository": "cobra",
+      "variant": "compass-sqlite"
+    },
+    {
+      "diagnostics": {
+        "binary_input": 8,
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 80,
+        "unsupported_input": 109
+      },
+      "directed": true,
+      "edges": 3987,
+      "extractedFilesByLanguage": {
+        "bash": 1,
+        "html": 20,
+        "json": 2,
+        "markdown": 6,
+        "package-manifest": 4,
+        "python": 83,
+        "sql": 2
+      },
+      "fileStatuses": {
+        "binary": 8,
+        "extracted": 118,
+        "unsupported": 109
+      },
+      "graphMiB": 6.921628952026367,
+      "multigraph": true,
+      "nodes": 3038,
+      "publicationOmissions": [],
+      "repository": "flask",
+      "variant": "compass"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 3444,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.847381591796875,
+      "multigraph": false,
+      "nodes": 2141,
+      "publicationOmissions": [],
+      "repository": "flask",
+      "variant": "graphify"
+    },
+    {
+      "diagnostics": {
+        "binary_input": 8,
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 80,
+        "unsupported_input": 109
+      },
+      "directed": true,
+      "edges": 3987,
+      "extractedFilesByLanguage": {
+        "bash": 1,
+        "html": 20,
+        "json": 2,
+        "markdown": 6,
+        "package-manifest": 4,
+        "python": 83,
+        "sql": 2
+      },
+      "fileStatuses": {
+        "binary": 8,
+        "extracted": 118,
+        "unsupported": 109
+      },
+      "graphMiB": 6.921628952026367,
+      "multigraph": true,
+      "nodes": 3038,
+      "publicationOmissions": [],
+      "repository": "flask",
+      "variant": "compass-sqlite"
+    },
+    {
+      "diagnostics": {
+        "dropped_non_recursive_self_loop": 2,
+        "normalized_constructor_call": 2402,
+        "publication_omission_summary": 1,
+        "publication_omitted_edge": 2,
+        "unsupported_input": 24
+      },
+      "directed": true,
+      "edges": 21579,
+      "extractedFilesByLanguage": {
+        "java": 264,
+        "json": 1,
+        "markdown": 16,
+        "package-manifest": 8
+      },
+      "fileStatuses": {
+        "extracted": 289,
+        "unsupported": 24
+      },
+      "graphMiB": 26.418834686279297,
+      "multigraph": true,
+      "nodes": 5425,
+      "publicationOmissions": [
+        "partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap"
+      ],
+      "repository": "gson",
+      "variant": "compass"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 16372,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 9.650065422058105,
+      "multigraph": false,
+      "nodes": 4601,
+      "publicationOmissions": [],
+      "repository": "gson",
+      "variant": "graphify"
+    },
+    {
+      "diagnostics": {
+        "dropped_non_recursive_self_loop": 2,
+        "normalized_constructor_call": 2402,
+        "publication_omission_summary": 1,
+        "publication_omitted_edge": 2,
+        "unsupported_input": 24
+      },
+      "directed": true,
+      "edges": 21579,
+      "extractedFilesByLanguage": {
+        "java": 264,
+        "json": 1,
+        "markdown": 16,
+        "package-manifest": 8
+      },
+      "fileStatuses": {
+        "extracted": 289,
+        "unsupported": 24
+      },
+      "graphMiB": 26.418834686279297,
+      "multigraph": true,
+      "nodes": 5425,
+      "publicationOmissions": [
+        "partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap"
+      ],
+      "repository": "gson",
+      "variant": "compass-sqlite"
+    },
+    {
+      "diagnostics": {
+        "binary_input": 65,
+        "dropped_non_recursive_self_loop": 34,
+        "generated_input": 1,
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 185,
+        "publication_omission_summary": 1,
+        "publication_omitted_edge": 44,
+        "unsupported_input": 55
+      },
+      "directed": true,
+      "edges": 70006,
+      "extractedFilesByLanguage": {
+        "bash": 1,
+        "html": 2,
+        "javascript": 7,
+        "json": 40,
+        "markdown": 50,
+        "mcp-config": 1,
+        "tsx": 34,
+        "typescript": 481
+      },
+      "fileStatuses": {
+        "binary": 65,
+        "extracted": 616,
+        "generated": 1,
+        "unsupported": 55
+      },
+      "graphMiB": 86.19602012634277,
+      "multigraph": true,
+      "nodes": 34964,
+      "publicationOmissions": [
+        "partial graph published after quarantining 0 nodes and 44 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap"
+      ],
+      "repository": "zod",
+      "variant": "compass"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 9561,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 5.305209159851074,
+      "multigraph": false,
+      "nodes": 5898,
+      "publicationOmissions": [],
+      "repository": "zod",
+      "variant": "graphify"
+    },
+    {
+      "diagnostics": {
+        "binary_input": 65,
+        "dropped_non_recursive_self_loop": 34,
+        "generated_input": 1,
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 185,
+        "publication_omission_summary": 1,
+        "publication_omitted_edge": 44,
+        "unsupported_input": 55
+      },
+      "directed": true,
+      "edges": 70006,
+      "extractedFilesByLanguage": {
+        "bash": 1,
+        "html": 2,
+        "javascript": 7,
+        "json": 40,
+        "markdown": 50,
+        "mcp-config": 1,
+        "tsx": 34,
+        "typescript": 481
+      },
+      "fileStatuses": {
+        "binary": 65,
+        "extracted": 616,
+        "generated": 1,
+        "unsupported": 55
+      },
+      "graphMiB": 86.19602012634277,
+      "multigraph": true,
+      "nodes": 34964,
+      "publicationOmissions": [
+        "partial graph published after quarantining 0 nodes and 44 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap"
+      ],
+      "repository": "zod",
+      "variant": "compass-sqlite"
+    },
+    {
+      "diagnostics": {
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 103,
+        "unsupported_input": 1
+      },
+      "directed": true,
+      "edges": 7918,
+      "extractedFilesByLanguage": {
+        "markdown": 23,
+        "rust": 60
+      },
+      "fileStatuses": {
+        "extracted": 83,
+        "unsupported": 1
+      },
+      "graphMiB": 9.2983980178833,
+      "multigraph": true,
+      "nodes": 2687,
+      "publicationOmissions": [],
+      "repository": "axum",
+      "variant": "compass"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 3423,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.6393213272094727,
+      "multigraph": false,
+      "nodes": 1730,
+      "publicationOmissions": [],
+      "repository": "axum",
+      "variant": "graphify"
+    },
+    {
+      "diagnostics": {
+        "low_inference_declaration_compaction": 1,
+        "normalized_constructor_call": 103,
+        "unsupported_input": 1
+      },
+      "directed": true,
+      "edges": 7918,
+      "extractedFilesByLanguage": {
+        "markdown": 23,
+        "rust": 60
+      },
+      "fileStatuses": {
+        "extracted": 83,
+        "unsupported": 1
+      },
+      "graphMiB": 9.2983980178833,
+      "multigraph": true,
+      "nodes": 2687,
+      "publicationOmissions": [],
+      "repository": "axum",
+      "variant": "compass-sqlite"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 2515,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.0075321197509766,
+      "multigraph": false,
+      "nodes": 708,
+      "publicationOmissions": [],
+      "repository": "cobra",
+      "variant": "graphify-leiden"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 3444,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.8473701477050781,
+      "multigraph": false,
+      "nodes": 2141,
+      "publicationOmissions": [],
+      "repository": "flask",
+      "variant": "graphify-leiden"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 16372,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 9.650134086608887,
+      "multigraph": false,
+      "nodes": 4601,
+      "publicationOmissions": [],
+      "repository": "gson",
+      "variant": "graphify-leiden"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 9561,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 5.305245399475098,
+      "multigraph": false,
+      "nodes": 5898,
+      "publicationOmissions": [],
+      "repository": "zod",
+      "variant": "graphify-leiden"
+    },
+    {
+      "diagnostics": {},
+      "directed": false,
+      "edges": 3423,
+      "extractedFilesByLanguage": {},
+      "fileStatuses": {},
+      "graphMiB": 1.6393070220947266,
+      "multigraph": false,
+      "nodes": 1730,
+      "publicationOmissions": [],
+      "repository": "axum",
+      "variant": "graphify-leiden"
+    }
+  ],
+  "matchedSuccessfulLatency": [
+    {
+      "medianWallMs": 1058.5,
+      "panel": "structured",
+      "questions": [
+        "axum2-ambiguous-with-state",
+        "axum2-broad-routing",
+        "axum2-callees-validate-path",
+        "axum2-callers-validate-path",
+        "axum2-explain-methodfilter",
+        "axum2-negative",
+        "axum2-path-validate-v07",
+        "cobra2-ambiguous-command",
+        "cobra2-callees-executec",
+        "cobra2-callers-find",
+        "cobra2-explain-parseflags",
+        "cobra2-file-path-md-docs",
+        "cobra2-impact-parseflags",
+        "cobra2-negative",
+        "cobra2-path-find-legacyargs",
+        "flask2-ambiguous-urlfor",
+        "flask2-broad-url-rule",
+        "flask2-callees-fulldispatch",
+        "flask2-callers-fulldispatch",
+        "flask2-explain-fulldispatch",
+        "flask2-file-path-views-app",
+        "flask2-impact-fulldispatch",
+        "flask2-negative",
+        "flask2-path-fulldispatch-finalize",
+        "gson2-ambiguous-tojson",
+        "gson2-broad-deserialize",
+        "gson2-callees-newjsonwriter",
+        "gson2-explain-newjsonwriter",
+        "gson2-file-path-typeadapter-jsonwriter",
+        "gson2-impact-newjsonwriter",
+        "gson2-negative",
+        "gson2-path-newjsonwriter-jsonwriter",
+        "zod2-ambiguous-safeparse",
+        "zod2-broad-json-schema",
+        "zod2-callers-detectversion",
+        "zod2-explain-detectversion",
+        "zod2-file-path-json-schema",
+        "zod2-impact-detectversion",
+        "zod2-negative",
+        "zod2-path-detectversion-convertschema"
+      ],
+      "variant": "compass"
+    },
+    {
+      "medianWallMs": 219.5,
+      "panel": "structured",
+      "questions": [
+        "axum2-ambiguous-with-state",
+        "axum2-broad-routing",
+        "axum2-callees-validate-path",
+        "axum2-callers-validate-path",
+        "axum2-explain-methodfilter",
+        "axum2-negative",
+        "axum2-path-validate-v07",
+        "cobra2-ambiguous-command",
+        "cobra2-callees-executec",
+        "cobra2-callers-find",
+        "cobra2-explain-parseflags",
+        "cobra2-file-path-md-docs",
+        "cobra2-impact-parseflags",
+        "cobra2-negative",
+        "cobra2-path-find-legacyargs",
+        "flask2-ambiguous-urlfor",
+        "flask2-broad-url-rule",
+        "flask2-callees-fulldispatch",
+        "flask2-callers-fulldispatch",
+        "flask2-explain-fulldispatch",
+        "flask2-file-path-views-app",
+        "flask2-impact-fulldispatch",
+        "flask2-negative",
+        "flask2-path-fulldispatch-finalize",
+        "gson2-ambiguous-tojson",
+        "gson2-broad-deserialize",
+        "gson2-callees-newjsonwriter",
+        "gson2-explain-newjsonwriter",
+        "gson2-file-path-typeadapter-jsonwriter",
+        "gson2-impact-newjsonwriter",
+        "gson2-negative",
+        "gson2-path-newjsonwriter-jsonwriter",
+        "zod2-ambiguous-safeparse",
+        "zod2-broad-json-schema",
+        "zod2-callers-detectversion",
+        "zod2-explain-detectversion",
+        "zod2-file-path-json-schema",
+        "zod2-impact-detectversion",
+        "zod2-negative",
+        "zod2-path-detectversion-convertschema"
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "medianWallMs": 1190.5,
+      "panel": "structured",
+      "questions": [
+        "axum2-ambiguous-with-state",
+        "axum2-broad-routing",
+        "axum2-callees-validate-path",
+        "axum2-callers-validate-path",
+        "axum2-explain-methodfilter",
+        "axum2-negative",
+        "axum2-path-validate-v07",
+        "cobra2-ambiguous-command",
+        "cobra2-callees-executec",
+        "cobra2-callers-find",
+        "cobra2-explain-parseflags",
+        "cobra2-file-path-md-docs",
+        "cobra2-impact-parseflags",
+        "cobra2-negative",
+        "cobra2-path-find-legacyargs",
+        "flask2-ambiguous-urlfor",
+        "flask2-broad-url-rule",
+        "flask2-callees-fulldispatch",
+        "flask2-callers-fulldispatch",
+        "flask2-explain-fulldispatch",
+        "flask2-file-path-views-app",
+        "flask2-impact-fulldispatch",
+        "flask2-negative",
+        "flask2-path-fulldispatch-finalize",
+        "gson2-ambiguous-tojson",
+        "gson2-broad-deserialize",
+        "gson2-callees-newjsonwriter",
+        "gson2-explain-newjsonwriter",
+        "gson2-file-path-typeadapter-jsonwriter",
+        "gson2-impact-newjsonwriter",
+        "gson2-negative",
+        "gson2-path-newjsonwriter-jsonwriter",
+        "zod2-ambiguous-safeparse",
+        "zod2-broad-json-schema",
+        "zod2-callers-detectversion",
+        "zod2-explain-detectversion",
+        "zod2-file-path-json-schema",
+        "zod2-impact-detectversion",
+        "zod2-negative",
+        "zod2-path-detectversion-convertschema"
+      ],
+      "variant": "graphify"
+    },
+    {
+      "medianWallMs": 1304.0,
+      "panel": "structured",
+      "questions": [
+        "axum2-ambiguous-with-state",
+        "axum2-broad-routing",
+        "axum2-callees-validate-path",
+        "axum2-callers-validate-path",
+        "axum2-explain-methodfilter",
+        "axum2-negative",
+        "axum2-path-validate-v07",
+        "cobra2-ambiguous-command",
+        "cobra2-callees-executec",
+        "cobra2-callers-find",
+        "cobra2-explain-parseflags",
+        "cobra2-file-path-md-docs",
+        "cobra2-impact-parseflags",
+        "cobra2-negative",
+        "cobra2-path-find-legacyargs",
+        "flask2-ambiguous-urlfor",
+        "flask2-broad-url-rule",
+        "flask2-callees-fulldispatch",
+        "flask2-callers-fulldispatch",
+        "flask2-explain-fulldispatch",
+        "flask2-file-path-views-app",
+        "flask2-impact-fulldispatch",
+        "flask2-negative",
+        "flask2-path-fulldispatch-finalize",
+        "gson2-ambiguous-tojson",
+        "gson2-broad-deserialize",
+        "gson2-callees-newjsonwriter",
+        "gson2-explain-newjsonwriter",
+        "gson2-file-path-typeadapter-jsonwriter",
+        "gson2-impact-newjsonwriter",
+        "gson2-negative",
+        "gson2-path-newjsonwriter-jsonwriter",
+        "zod2-ambiguous-safeparse",
+        "zod2-broad-json-schema",
+        "zod2-callers-detectversion",
+        "zod2-explain-detectversion",
+        "zod2-file-path-json-schema",
+        "zod2-impact-detectversion",
+        "zod2-negative",
+        "zod2-path-detectversion-convertschema"
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "medianWallMs": 1464.5,
+      "panel": "natural",
+      "questions": [
+        "axum-natural-broad",
+        "axum-natural-callees",
+        "axum-natural-callers",
+        "axum-natural-impact",
+        "axum-natural-path",
+        "cobra-natural-callers",
+        "cobra-natural-path",
+        "flask-natural-broad",
+        "flask-natural-path",
+        "gson-natural-callers",
+        "gson-natural-impact",
+        "gson-natural-path",
+        "zod-natural-broad",
+        "zod-natural-callers",
+        "zod-natural-impact",
+        "zod-natural-path"
+      ],
+      "variant": "compass"
+    },
+    {
+      "medianWallMs": 708.0,
+      "panel": "natural",
+      "questions": [
+        "axum-natural-broad",
+        "axum-natural-callees",
+        "axum-natural-callers",
+        "axum-natural-impact",
+        "axum-natural-path",
+        "cobra-natural-callers",
+        "cobra-natural-path",
+        "flask-natural-broad",
+        "flask-natural-path",
+        "gson-natural-callers",
+        "gson-natural-impact",
+        "gson-natural-path",
+        "zod-natural-broad",
+        "zod-natural-callers",
+        "zod-natural-impact",
+        "zod-natural-path"
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "medianWallMs": 1104.5,
+      "panel": "natural",
+      "questions": [
+        "axum-natural-broad",
+        "axum-natural-callees",
+        "axum-natural-callers",
+        "axum-natural-impact",
+        "axum-natural-path",
+        "cobra-natural-callers",
+        "cobra-natural-path",
+        "flask-natural-broad",
+        "flask-natural-path",
+        "gson-natural-callers",
+        "gson-natural-impact",
+        "gson-natural-path",
+        "zod-natural-broad",
+        "zod-natural-callers",
+        "zod-natural-impact",
+        "zod-natural-path"
+      ],
+      "variant": "graphify"
+    },
+    {
+      "medianWallMs": 1235.5,
+      "panel": "natural",
+      "questions": [
+        "axum-natural-broad",
+        "axum-natural-callees",
+        "axum-natural-callers",
+        "axum-natural-impact",
+        "axum-natural-path",
+        "cobra-natural-callers",
+        "cobra-natural-path",
+        "flask-natural-broad",
+        "flask-natural-path",
+        "gson-natural-callers",
+        "gson-natural-impact",
+        "gson-natural-path",
+        "zod-natural-broad",
+        "zod-natural-callers",
+        "zod-natural-impact",
+        "zod-natural-path"
+      ],
+      "variant": "graphify-leiden"
+    },
+    {
+      "medianWallMs": 402.0,
+      "panel": "ask",
+      "questions": [
+        "axum-ask-callees",
+        "axum-ask-callers",
+        "cobra-ask-callees",
+        "cobra-ask-callers",
+        "flask-ask-callees",
+        "flask-ask-callers",
+        "gson-ask-callees",
+        "gson-ask-callers",
+        "zod-ask-callees",
+        "zod-ask-callers"
+      ],
+      "variant": "compass"
+    },
+    {
+      "medianWallMs": 44.5,
+      "panel": "ask",
+      "questions": [
+        "axum-ask-callees",
+        "axum-ask-callers",
+        "cobra-ask-callees",
+        "cobra-ask-callers",
+        "flask-ask-callees",
+        "flask-ask-callers",
+        "gson-ask-callees",
+        "gson-ask-callers",
+        "zod-ask-callees",
+        "zod-ask-callers"
+      ],
+      "variant": "compass-sqlite"
+    },
+    {
+      "medianWallMs": 584.5,
+      "panel": "ask",
+      "questions": [
+        "axum-ask-callees",
+        "axum-ask-callers",
+        "cobra-ask-callees",
+        "cobra-ask-callers",
+        "flask-ask-callees",
+        "flask-ask-callers",
+        "gson-ask-callees",
+        "gson-ask-callers",
+        "zod-ask-callees",
+        "zod-ask-callers"
+      ],
+      "variant": "graphify"
+    },
+    {
+      "medianWallMs": 562.5,
+      "panel": "ask",
+      "questions": [
+        "axum-ask-callees",
+        "axum-ask-callers",
+        "cobra-ask-callees",
+        "cobra-ask-callers",
+        "flask-ask-callees",
+        "flask-ask-callers",
+        "gson-ask-callees",
+        "gson-ask-callers",
+        "zod-ask-callees",
+        "zod-ask-callers"
+      ],
+      "variant": "graphify-leiden"
+    }
+  ],
+  "quality": {
+    "compass": {
+      "callTotal": 22,
+      "declarationTotal": 827,
+      "declarations": 827,
+      "exactCalls": 21,
+      "negativePass": 5,
+      "negativeTotal": 5
+    },
+    "graphify": {
+      "callTotal": 22,
+      "declarationTotal": 827,
+      "declarations": 700,
+      "exactCalls": 18,
+      "negativePass": 5,
+      "negativeTotal": 5
+    },
+    "graphify-leiden": {
+      "callTotal": 22,
+      "declarationTotal": 827,
+      "declarations": 700,
+      "exactCalls": 18,
+      "negativePass": 5,
+      "negativeTotal": 5
+    }
+  },
+  "queries": [
+    {
+      "meanTokens": 423.78,
+      "medianFirstTrialWallMs": 1340.5,
+      "medianPerQuestionWallMs": 1121.0,
+      "panel": "structured",
+      "passedAllTrials": 48,
+      "questions": 50,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 43,
+      "sourceExcerptExcludedQuestions": 45,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 423.78,
+      "medianFirstTrialWallMs": 787.0,
+      "medianPerQuestionWallMs": 522.5,
+      "panel": "structured",
+      "passedAllTrials": 48,
+      "questions": 50,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 43,
+      "sourceExcerptExcludedQuestions": 45,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 512.04,
+      "medianFirstTrialWallMs": 1404.0,
+      "medianPerQuestionWallMs": 1177.0,
+      "panel": "structured",
+      "passedAllTrials": 44,
+      "questions": 50,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 44,
+      "sourceExcerptExcludedQuestions": 45,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 512.46,
+      "medianFirstTrialWallMs": 1117.5,
+      "medianPerQuestionWallMs": 1219.5,
+      "panel": "structured",
+      "passedAllTrials": 44,
+      "questions": 50,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 44,
+      "sourceExcerptExcludedQuestions": 45,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 658.3,
+      "medianFirstTrialWallMs": 286.0,
+      "medianPerQuestionWallMs": 196.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 658.3,
+      "medianFirstTrialWallMs": 245.0,
+      "medianPerQuestionWallMs": 157.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 354.2,
+      "medianFirstTrialWallMs": 846.0,
+      "medianPerQuestionWallMs": 644.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 355.7,
+      "medianFirstTrialWallMs": 780.0,
+      "medianPerQuestionWallMs": 641.0,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 291.8,
+      "medianFirstTrialWallMs": 977.5,
+      "medianPerQuestionWallMs": 788.5,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 291.8,
+      "medianFirstTrialWallMs": 873.0,
+      "medianPerQuestionWallMs": 324.0,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 150.3,
+      "medianFirstTrialWallMs": 1589.5,
+      "medianPerQuestionWallMs": 1297.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 150.5,
+      "medianFirstTrialWallMs": 1035.0,
+      "medianPerQuestionWallMs": 1134.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 372.7,
+      "medianFirstTrialWallMs": 2135.5,
+      "medianPerQuestionWallMs": 1806.0,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 372.7,
+      "medianFirstTrialWallMs": 747.5,
+      "medianPerQuestionWallMs": 758.0,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 1728.3,
+      "medianFirstTrialWallMs": 2079.5,
+      "medianPerQuestionWallMs": 1780.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 1728.5,
+      "medianFirstTrialWallMs": 1606.5,
+      "medianPerQuestionWallMs": 1649.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 372.4,
+      "medianFirstTrialWallMs": 10620.0,
+      "medianPerQuestionWallMs": 11337.0,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 372.4,
+      "medianFirstTrialWallMs": 2873.5,
+      "medianPerQuestionWallMs": 2468.0,
+      "panel": "structured",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 163.7,
+      "medianFirstTrialWallMs": 1970.5,
+      "medianPerQuestionWallMs": 1653.0,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 163.7,
+      "medianFirstTrialWallMs": 1433.0,
+      "medianPerQuestionWallMs": 1545.0,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 9,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 423.7,
+      "medianFirstTrialWallMs": 1117.5,
+      "medianPerQuestionWallMs": 1052.0,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 423.7,
+      "medianFirstTrialWallMs": 626.5,
+      "medianPerQuestionWallMs": 219.5,
+      "panel": "structured",
+      "passedAllTrials": 9,
+      "questions": 10,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 163.7,
+      "medianFirstTrialWallMs": 1084.0,
+      "medianPerQuestionWallMs": 782.5,
+      "panel": "structured",
+      "passedAllTrials": 8,
+      "questions": 10,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 163.9,
+      "medianFirstTrialWallMs": 1113.5,
+      "medianPerQuestionWallMs": 1108.0,
+      "panel": "structured",
+      "passedAllTrials": 8,
+      "questions": 10,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 8,
+      "sourceExcerptExcludedQuestions": 9,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 536.5066666666667,
+      "medianFirstTrialWallMs": 1083,
+      "medianPerQuestionWallMs": 737,
+      "panel": "natural",
+      "passedAllTrials": 22,
+      "questions": 25,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 22,
+      "sourceExcerptExcludedQuestions": 25,
+      "timeouts": 1,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 547.12,
+      "medianFirstTrialWallMs": 953,
+      "medianPerQuestionWallMs": 617,
+      "panel": "natural",
+      "passedAllTrials": 23,
+      "questions": 25,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 23,
+      "sourceExcerptExcludedQuestions": 25,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 757.72,
+      "medianFirstTrialWallMs": 1390,
+      "medianPerQuestionWallMs": 1331,
+      "panel": "natural",
+      "passedAllTrials": 18,
+      "questions": 25,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 18,
+      "sourceExcerptExcludedQuestions": 25,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 759.04,
+      "medianFirstTrialWallMs": 1298,
+      "medianPerQuestionWallMs": 1255,
+      "panel": "natural",
+      "passedAllTrials": 18,
+      "questions": 25,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 18,
+      "sourceExcerptExcludedQuestions": 25,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 588,
+      "medianFirstTrialWallMs": 452,
+      "medianPerQuestionWallMs": 275,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 588,
+      "medianFirstTrialWallMs": 651,
+      "medianPerQuestionWallMs": 82,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 755.4,
+      "medianFirstTrialWallMs": 1006,
+      "medianPerQuestionWallMs": 692,
+      "panel": "natural",
+      "passedAllTrials": 2,
+      "questions": 5,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 755.6,
+      "medianFirstTrialWallMs": 1108,
+      "medianPerQuestionWallMs": 889,
+      "panel": "natural",
+      "passedAllTrials": 2,
+      "questions": 5,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 412.2,
+      "medianFirstTrialWallMs": 760,
+      "medianPerQuestionWallMs": 513,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 412.2,
+      "medianFirstTrialWallMs": 279,
+      "medianPerQuestionWallMs": 145,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 768.4,
+      "medianFirstTrialWallMs": 904,
+      "medianPerQuestionWallMs": 1012,
+      "panel": "natural",
+      "passedAllTrials": 2,
+      "questions": 5,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 769.6,
+      "medianFirstTrialWallMs": 1059,
+      "medianPerQuestionWallMs": 1146,
+      "panel": "natural",
+      "passedAllTrials": 2,
+      "questions": 5,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 611.4,
+      "medianFirstTrialWallMs": 3369,
+      "medianPerQuestionWallMs": 3753,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 611.4,
+      "medianFirstTrialWallMs": 953,
+      "medianPerQuestionWallMs": 617,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 770.6,
+      "medianFirstTrialWallMs": 1479,
+      "medianPerQuestionWallMs": 1522,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 773,
+      "medianFirstTrialWallMs": 1898,
+      "medianPerQuestionWallMs": 2447,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 635.5333333333333,
+      "medianFirstTrialWallMs": 18345,
+      "medianPerQuestionWallMs": 14804,
+      "panel": "natural",
+      "passedAllTrials": 4,
+      "questions": 5,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 4,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 1,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 688.6,
+      "medianFirstTrialWallMs": 7379,
+      "medianPerQuestionWallMs": 5687,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 740.4,
+      "medianFirstTrialWallMs": 2964,
+      "medianPerQuestionWallMs": 2834,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 742,
+      "medianFirstTrialWallMs": 4007,
+      "medianPerQuestionWallMs": 2743,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 435.4,
+      "medianFirstTrialWallMs": 1021,
+      "medianPerQuestionWallMs": 661,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 435.4,
+      "medianFirstTrialWallMs": 933,
+      "medianPerQuestionWallMs": 799,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 753.8,
+      "medianFirstTrialWallMs": 939,
+      "medianPerQuestionWallMs": 608,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 755,
+      "medianFirstTrialWallMs": 529,
+      "medianPerQuestionWallMs": 529,
+      "panel": "natural",
+      "passedAllTrials": 5,
+      "questions": 5,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 5,
+      "sourceExcerptExcludedQuestions": 5,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 251,
+      "medianFirstTrialWallMs": 925.0,
+      "medianPerQuestionWallMs": 402.0,
+      "panel": "ask",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 10,
+      "sourceExcerptExcludedQuestions": 10,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 251,
+      "medianFirstTrialWallMs": 259.5,
+      "medianPerQuestionWallMs": 44.5,
+      "panel": "ask",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 10,
+      "sourceExcerptExcludedQuestions": 10,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 1519.2,
+      "medianFirstTrialWallMs": 608.5,
+      "medianPerQuestionWallMs": 584.5,
+      "panel": "ask",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 10,
+      "sourceExcerptExcludedQuestions": 10,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 1521.5,
+      "medianFirstTrialWallMs": 617.5,
+      "medianPerQuestionWallMs": 562.5,
+      "panel": "ask",
+      "passedAllTrials": 10,
+      "questions": 10,
+      "repository": "all",
+      "sourceExcerptExcludedPassed": 10,
+      "sourceExcerptExcludedQuestions": 10,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 403.5,
+      "medianFirstTrialWallMs": 280.0,
+      "medianPerQuestionWallMs": 210.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 403.5,
+      "medianFirstTrialWallMs": 169.5,
+      "medianPerQuestionWallMs": 46.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 2257.5,
+      "medianFirstTrialWallMs": 316.0,
+      "medianPerQuestionWallMs": 365.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 2259,
+      "medianFirstTrialWallMs": 356.0,
+      "medianPerQuestionWallMs": 365.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "cobra",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 159,
+      "medianFirstTrialWallMs": 522.0,
+      "medianPerQuestionWallMs": 303.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 159,
+      "medianFirstTrialWallMs": 185.0,
+      "medianPerQuestionWallMs": 35.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 995,
+      "medianFirstTrialWallMs": 536.5,
+      "medianPerQuestionWallMs": 456.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 997,
+      "medianFirstTrialWallMs": 500.0,
+      "medianPerQuestionWallMs": 445.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "flask",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 328.5,
+      "medianFirstTrialWallMs": 1832.5,
+      "medianPerQuestionWallMs": 1617.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 328.5,
+      "medianFirstTrialWallMs": 525.5,
+      "medianPerQuestionWallMs": 162.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 1665,
+      "medianFirstTrialWallMs": 718.0,
+      "medianPerQuestionWallMs": 999.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 1670,
+      "medianFirstTrialWallMs": 746.0,
+      "medianPerQuestionWallMs": 807.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "gson",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 255,
+      "medianFirstTrialWallMs": 7253.5,
+      "medianPerQuestionWallMs": 7490.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 255,
+      "medianFirstTrialWallMs": 1226.5,
+      "medianPerQuestionWallMs": 53.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 702.5,
+      "medianFirstTrialWallMs": 1505.0,
+      "medianPerQuestionWallMs": 1556.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 704,
+      "medianFirstTrialWallMs": 1444.0,
+      "medianPerQuestionWallMs": 1221.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "zod",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    },
+    {
+      "meanTokens": 109,
+      "medianFirstTrialWallMs": 958.5,
+      "medianPerQuestionWallMs": 395.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass"
+    },
+    {
+      "meanTokens": 109,
+      "medianFirstTrialWallMs": 359.5,
+      "medianPerQuestionWallMs": 44.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "compass-sqlite"
+    },
+    {
+      "meanTokens": 1976,
+      "medianFirstTrialWallMs": 774.0,
+      "medianPerQuestionWallMs": 539.5,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify"
+    },
+    {
+      "meanTokens": 1977.5,
+      "medianFirstTrialWallMs": 585.5,
+      "medianPerQuestionWallMs": 526.0,
+      "panel": "ask",
+      "passedAllTrials": 2,
+      "questions": 2,
+      "repository": "axum",
+      "sourceExcerptExcludedPassed": 2,
+      "sourceExcerptExcludedQuestions": 2,
+      "timeouts": 0,
+      "variant": "graphify-leiden"
+    }
+  ],
+  "queryVariability": [
+    {
+      "panel": "natural",
+      "question": "zod-natural-callees",
+      "variant": "compass"
+    }
+  ]
+}

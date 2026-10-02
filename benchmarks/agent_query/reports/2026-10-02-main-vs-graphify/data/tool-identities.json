@@ -1,0 +1,21 @@
+{
+  "compass": {
+    "binary": "${COMPASS_BINARY}",
+    "binarySha256": "39e0c2dc3ed8ba309e4317c9bbd39247da55cf23d0687a006d20346b9e6c30dc",
+    "digestScope": "executable-file-only",
+    "name": "compass",
+    "version": "compass 0.4.1"
+  },
+  "compassSource": "b7b7fa819b127464566430cc454fd2085d5d5b62",
+  "graphify": {
+    "binary": "${EVALUATION_ROOT}/graphify-venv/bin/graphify",
+    "binarySha256": "dc3c5845dea50f365e72b70c2187b1e5751b830df5dcd900e53231699ad24cbd",
+    "digestScope": "executable-file-only",
+    "name": "graphify",
+    "version": "graphify 0.9.74"
+  },
+  "graphifyPackageSourceSha256": "e29b0dabcb197f31996373fc9b99721b201ff45a8f65f02e521b6ae50bd5014e",
+  "measurementSha256": "4c1436b38d3a8e0045a022fd793d5bd36e09f3c6c2162cef3807e3d4248e8abc",
+  "runnerSha256": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "scriptSha256": "38968e6552ea93577c1a86aac722a96aaa18f327d0a17e0a1e212c385fdb61e4"
+}

@@ -1,0 +1,623 @@
+{
+  "method": "Selected direct calls and reversed-call negatives read from pinned source before graphs. Exact identity, stored direction, calls relation and occurrence line required. Selected development evidence; not whole-graph precision.",
+  "negative": [
+    {
+      "expected": "absent",
+      "relation": "calls",
+      "repository": "cobra",
+      "reviewedBody": {
+        "end": 40,
+        "sha256": "5604b597beae6d55ba61500e582dc1bffe416e7e1bde97b4068828e0a5a2f2b4",
+        "start": 28
+      },
+      "source": {
+        "file": "args.go",
+        "line": 28,
+        "symbol": "legacyArgs",
+        "text": "func legacyArgs(cmd *Command, args []string) error {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 757,
+        "symbol": "Find",
+        "text": "func (c *Command) Find(args []string) (*Command, []string, error) {"
+      }
+    },
+    {
+      "expected": "absent",
+      "relation": "calls",
+      "repository": "flask",
+      "reviewedBody": {
+        "end": 1397,
+        "sha256": "6c07e18344f4d2d67829d4074865c8102c22106fdd83fec276bd2f2cc46c09be",
+        "start": 1369
+      },
+      "source": {
+        "file": "src/flask/app.py",
+        "line": 1369,
+        "symbol": "preprocess_request",
+        "text": "def preprocess_request(self, ctx: AppContext) -> ft.ResponseReturnValue | None:"
+      },
+      "target": {
+        "file": "src/flask/app.py",
+        "line": 995,
+        "symbol": "full_dispatch_request",
+        "text": "def full_dispatch_request(self, ctx: AppContext) -> Response:"
+      }
+    },
+    {
+      "expected": "absent",
+      "relation": "calls",
+      "repository": "gson",
+      "reviewedBody": {
+        "end": 369,
+        "sha256": "a4fa5c84bf0a924caebaef471cfb8095a50479a4d8e93640d87c27c6db9fe90b",
+        "start": 367
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+        "line": 367,
+        "symbol": "setHtmlSafe",
+        "text": "public final void setHtmlSafe(boolean htmlSafe) {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      }
+    },
+    {
+      "expected": "absent",
+      "relation": "calls",
+      "repository": "zod",
+      "reviewedBody": {
+        "end": 121,
+        "sha256": "4a2a1abc97832ca0e4ef0ac49ed3a3e3a512dc094d427be83ae6f81639fce4b3",
+        "start": 105
+      },
+      "source": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 105,
+        "symbol": "detectVersion",
+        "text": "function detectVersion(schema: JSONSchema.JSONSchema, defaultTarget?: JSONSchemaVersion): JSONSchemaVersion {"
+      },
+      "target": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 917,
+        "symbol": "fromJSONSchema",
+        "text": "export function fromJSONSchema(schema: JSONSchema.JSONSchema | boolean, params?: FromJSONSchemaParams): ZodType {"
+      }
+    },
+    {
+      "expected": "absent",
+      "relation": "calls",
+      "repository": "axum",
+      "reviewedBody": {
+        "end": 56,
+        "sha256": "5dba24ee6adf68d5e0bd9e7355e6005779c2037ab9c5832cf4ffd969bae44e0f",
+        "start": 36
+      },
+      "source": {
+        "file": "src/routing/path_router.rs",
+        "line": 36,
+        "symbol": "validate_v07_paths",
+        "text": "fn validate_v07_paths(path: &str) -> Result<(), &'static str> {"
+      },
+      "target": {
+        "file": "src/routing/path_router.rs",
+        "line": 22,
+        "symbol": "validate_path",
+        "text": "fn validate_path(v7_checks: bool, path: &str) -> Result<(), &'static str> {"
+      }
+    }
+  ],
+  "positive": [
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 1121,
+        "text": "cmd, flags, err = c.Traverse(args)"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 1084,
+        "symbol": "ExecuteC",
+        "text": "func (c *Command) ExecuteC() (cmd *Command, err error) {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 821,
+        "symbol": "Traverse",
+        "text": "func (c *Command) Traverse(args []string) (*Command, []string, error) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 1123,
+        "text": "cmd, flags, err = c.Find(args)"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 1084,
+        "symbol": "ExecuteC",
+        "text": "func (c *Command) ExecuteC() (cmd *Command, err error) {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 757,
+        "symbol": "Find",
+        "text": "func (c *Command) Find(args []string) (*Command, []string, error) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 1148,
+        "text": "err = cmd.execute(flags)"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 1084,
+        "symbol": "ExecuteC",
+        "text": "func (c *Command) ExecuteC() (cmd *Command, err error) {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 905,
+        "symbol": "execute",
+        "text": "func (c *Command) execute(a []string) (err error) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 1276,
+        "text": "cmd, _, e := c.Root().Find(args)"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 1263,
+        "symbol": "InitDefaultHelpCmd",
+        "text": "func (c *Command) InitDefaultHelpCmd() {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 757,
+        "symbol": "Find",
+        "text": "func (c *Command) Find(args []string) (*Command, []string, error) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 1294,
+        "text": "cmd, _, e := c.Root().Find(args)"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 1263,
+        "symbol": "InitDefaultHelpCmd",
+        "text": "func (c *Command) InitDefaultHelpCmd() {"
+      },
+      "target": {
+        "file": "command.go",
+        "line": 757,
+        "symbol": "Find",
+        "text": "func (c *Command) Find(args []string) (*Command, []string, error) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "cobra",
+      "site": {
+        "file": "command.go",
+        "line": 776,
+        "text": "return commandFound, a, legacyArgs(commandFound, stripFlags(a, commandFound))"
+      },
+      "source": {
+        "file": "command.go",
+        "line": 757,
+        "symbol": "Find",
+        "text": "func (c *Command) Find(args []string) (*Command, []string, error) {"
+      },
+      "target": {
+        "file": "args.go",
+        "line": 28,
+        "symbol": "legacyArgs",
+        "text": "func legacyArgs(cmd *Command, args []string) error {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "flask",
+      "site": {
+        "file": "src/flask/app.py",
+        "line": 1600,
+        "text": "response = self.full_dispatch_request(ctx)"
+      },
+      "source": {
+        "file": "src/flask/app.py",
+        "line": 1569,
+        "symbol": "wsgi_app",
+        "text": "def wsgi_app("
+      },
+      "target": {
+        "file": "src/flask/app.py",
+        "line": 995,
+        "symbol": "full_dispatch_request",
+        "text": "def full_dispatch_request(self, ctx: AppContext) -> Response:"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "flask",
+      "site": {
+        "file": "src/flask/app.py",
+        "line": 1017,
+        "text": "rv = self.preprocess_request(ctx)"
+      },
+      "source": {
+        "file": "src/flask/app.py",
+        "line": 995,
+        "symbol": "full_dispatch_request",
+        "text": "def full_dispatch_request(self, ctx: AppContext) -> Response:"
+      },
+      "target": {
+        "file": "src/flask/app.py",
+        "line": 1369,
+        "symbol": "preprocess_request",
+        "text": "def preprocess_request(self, ctx: AppContext) -> ft.ResponseReturnValue | None:"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "flask",
+      "site": {
+        "file": "src/flask/app.py",
+        "line": 1019,
+        "text": "rv = self.dispatch_request(ctx)"
+      },
+      "source": {
+        "file": "src/flask/app.py",
+        "line": 995,
+        "symbol": "full_dispatch_request",
+        "text": "def full_dispatch_request(self, ctx: AppContext) -> Response:"
+      },
+      "target": {
+        "file": "src/flask/app.py",
+        "line": 969,
+        "symbol": "dispatch_request",
+        "text": "def dispatch_request(self, ctx: AppContext) -> ft.ResponseReturnValue:"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "flask",
+      "site": {
+        "file": "src/flask/app.py",
+        "line": 1022,
+        "text": "return self.finalize_request(ctx, rv)"
+      },
+      "source": {
+        "file": "src/flask/app.py",
+        "line": 995,
+        "symbol": "full_dispatch_request",
+        "text": "def full_dispatch_request(self, ctx: AppContext) -> Response:"
+      },
+      "target": {
+        "file": "src/flask/app.py",
+        "line": 1024,
+        "symbol": "finalize_request",
+        "text": "def finalize_request("
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 802,
+        "text": "jsonWriter.setFormattingStyle(formattingStyle);"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+        "line": 266,
+        "symbol": "setFormattingStyle",
+        "text": "public final void setFormattingStyle(FormattingStyle formattingStyle) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 803,
+        "text": "jsonWriter.setHtmlSafe(htmlSafe);"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+        "line": 367,
+        "symbol": "setHtmlSafe",
+        "text": "public final void setHtmlSafe(boolean htmlSafe) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 804,
+        "text": "jsonWriter.setStrictness(strictness == null ? Strictness.LEGACY_STRICT : strictness);"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+        "line": 345,
+        "symbol": "setStrictness",
+        "text": "public final void setStrictness(Strictness strictness) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 805,
+        "text": "jsonWriter.setSerializeNulls(serializeNulls);"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+        "line": 386,
+        "symbol": "setSerializeNulls",
+        "text": "public final void setSerializeNulls(boolean serializeNulls) {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 642,
+        "text": "JsonWriter jsonWriter = newJsonWriter(Streams.writerForAppendable(writer));"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 640,
+        "symbol": "toJson",
+        "text": "public void toJson(Object src, Type typeOfSrc, Appendable writer) throws JsonIOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "gson",
+      "site": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 724,
+        "text": "JsonWriter jsonWriter = newJsonWriter(Streams.writerForAppendable(writer));"
+      },
+      "source": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 722,
+        "symbol": "toJson",
+        "text": "public void toJson(JsonElement jsonElement, Appendable writer) throws JsonIOException {"
+      },
+      "target": {
+        "file": "gson/src/main/java/com/google/gson/Gson.java",
+        "line": 797,
+        "symbol": "newJsonWriter",
+        "text": "public JsonWriter newJsonWriter(Writer writer) throws IOException {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "zod",
+      "site": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 931,
+        "text": "const version = detectVersion(normalized, params?.defaultTarget);"
+      },
+      "source": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 917,
+        "symbol": "fromJSONSchema",
+        "text": "export function fromJSONSchema(schema: JSONSchema.JSONSchema | boolean, params?: FromJSONSchemaParams): ZodType {"
+      },
+      "target": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 105,
+        "symbol": "detectVersion",
+        "text": "function detectVersion(schema: JSONSchema.JSONSchema, defaultTarget?: JSONSchemaVersion): JSONSchemaVersion {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "zod",
+      "site": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 943,
+        "text": "return convertSchema(normalized, ctx);"
+      },
+      "source": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 917,
+        "symbol": "fromJSONSchema",
+        "text": "export function fromJSONSchema(schema: JSONSchema.JSONSchema | boolean, params?: FromJSONSchemaParams): ZodType {"
+      },
+      "target": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 808,
+        "symbol": "convertSchema",
+        "text": "function convertSchema(schema: JSONSchema.JSONSchema | boolean, ctx: ConversionContext): ZodType {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "zod",
+      "site": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 814,
+        "text": "let baseSchema = convertBaseSchema(schema, ctx);"
+      },
+      "source": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 808,
+        "symbol": "convertSchema",
+        "text": "function convertSchema(schema: JSONSchema.JSONSchema | boolean, ctx: ConversionContext): ZodType {"
+      },
+      "target": {
+        "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+        "line": 390,
+        "symbol": "convertBaseSchema",
+        "text": "function convertBaseSchema(schema: JSONSchema.JSONSchema, ctx: ConversionContext): ZodType {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "axum",
+      "site": {
+        "file": "src/routing/path_router.rs",
+        "line": 71,
+        "text": "validate_path(self.v7_checks, path)?;"
+      },
+      "source": {
+        "file": "src/routing/path_router.rs",
+        "line": 66,
+        "symbol": "route",
+        "text": "pub(super) fn route("
+      },
+      "target": {
+        "file": "src/routing/path_router.rs",
+        "line": 22,
+        "symbol": "validate_path",
+        "text": "fn validate_path(v7_checks: bool, path: &str) -> Result<(), &'static str> {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "axum",
+      "site": {
+        "file": "src/routing/path_router.rs",
+        "line": 125,
+        "text": "validate_path(self.v7_checks, path)?;"
+      },
+      "source": {
+        "file": "src/routing/path_router.rs",
+        "line": 120,
+        "symbol": "route_endpoint",
+        "text": "pub(super) fn route_endpoint("
+      },
+      "target": {
+        "file": "src/routing/path_router.rs",
+        "line": 22,
+        "symbol": "validate_path",
+        "text": "fn validate_path(v7_checks: bool, path: &str) -> Result<(), &'static str> {"
+      }
+    },
+    {
+      "expected": "present",
+      "relation": "calls",
+      "repository": "axum",
+      "site": {
+        "file": "src/routing/path_router.rs",
+        "line": 30,
+        "text": "validate_v07_paths(path)?;"
+      },
+      "source": {
+        "file": "src/routing/path_router.rs",
+        "line": 22,
+        "symbol": "validate_path",
+        "text": "fn validate_path(v7_checks: bool, path: &str) -> Result<(), &'static str> {"
+      },
+      "target": {
+        "file": "src/routing/path_router.rs",
+        "line": 36,
+        "symbol": "validate_v07_paths",
+        "text": "fn validate_v07_paths(path: &str) -> Result<(), &'static str> {"
+      }
+    }
+  ],
+  "registeredAt": "2026-10-02T17:43:32.800511+00:00",
+  "registeredBeforeGraphBuilds": true,
+  "sourceReviewCorrection": "Checked-in Zod suite prose says convertSchema call line 952; pinned source has line 943. Query required names unchanged; exact occurrence oracle uses 943.",
+  "sourceSha256": {
+    "axum": {
+      "src/routing/path_router.rs": "84e683428cb90484fd74b54b2005a1941bfaff24229f2e90e469dd4ec493586c"
+    },
+    "cobra": {
+      "args.go": "15b870d1e8a0a10341675ddee8e20bef92a21883257b6b3b11110944a573a2e7",
+      "command.go": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90"
+    },
+    "flask": {
+      "src/flask/app.py": "975de70f74626460f7afd2f16e3a513cbc2fe65cbd961f95c2f92eec4f7ecff8"
+    },
+    "gson": {
+      "gson/src/main/java/com/google/gson/Gson.java": "1a33f3eb5ddc01f0a33bbe2b43dc26f8474fc8d5b80876ad9a2f33056224fc94",
+      "gson/src/main/java/com/google/gson/stream/JsonWriter.java": "6b739b0ba2cc5a8e6809f1bdd31244c12e4f9a7145f6e93cd8f39ea193bf0e5b"
+    },
+    "zod": {
+      "packages/zod/src/v4/classic/from-json-schema.ts": "1b27140e0709c0cc65786808c2f929289c980bc6c3142264860bdffac8b0cdf6"
+    }
+  }
+}

@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Task-owned paired benchmark; all corpus inputs remain read-only."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import statistics
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+ROOT = Path(__file__).resolve().parent
+REPO = Path('${COMPASS_CHECKOUT}')
+sys.path.insert(0, str(REPO))
+from benchmarks.agent_query import runner
+
+BIN = {'compass': Path('${COMPASS_BINARY}'),
+       'graphify': ROOT / 'graphify-venv/bin/graphify'}
+SOURCES = {'cobra': Path('${CORPUS_ROOT}/spf13/cobra'),
+           'flask': Path('${CORPUS_ROOT}/pallets/flask'),
+           'gson': Path('${CORPUS_ROOT}/google/gson'),
+           'zod': Path('${CORPUS_ROOT}/colinhacks/zod'),
+           'axum': Path('${CORPUS_ROOT}/tokio-rs/axum/axum')}
+SUITES = {n: runner.load_suite(REPO / 'benchmarks/agent_query' / f'{s}.toml')
+          for n, s in [('structured','suite_v2'), ('natural','suite_natural'),('ask','suite_ask')]}
+
+def sha(p):
+    return runner._sha256_file(p)
+
+def save(name, value):
+    p=ROOT/name
+    p.write_text(json.dumps(value,indent=2,sort_keys=True)+'\n')
+
+def git(source, *args):
+    return subprocess.check_output(['git',*args],cwd=source,text=True,timeout=30).strip()
+
+def graph(out, tool):
+    if tool=='graphify': return runner._graphify_graph(out)
+    if (out/'compass-out/current-snapshot').is_file(): return runner._compass_graph(out)
+    p=out/'compass-out/graph.json'
+    if not p.is_file(): raise RuntimeError(f'missing graph: {p}')
+    return p
+
+def measure(cmd, source, stem, timeout=600):
+    helper=REPO/'benchmarks/performance/compass/measure_child.py'
+    log=ROOT/'logs'/stem
+    log.parent.mkdir(parents=True,exist_ok=True)
+    argv=[sys.executable,str(helper),'--cwd',str(source),'--stdout',str(log)+'.stdout',
+          '--stderr',str(log)+'.stderr','--timeout-seconds',str(timeout),'--',*map(str,cmd)]
+    load_before=os.getloadavg()
+    process=subprocess.Popen(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    tree_samples=[]
+    while process.poll() is None:
+        sample=subprocess.check_output(['ps','-axo','pid=,ppid=,rss='],text=True,timeout=5)
+        inventory=[tuple(map(int,line.split())) for line in sample.splitlines() if len(line.split())==3]
+        descendants={process.pid}
+        for _ in range(32):
+            found={pid for pid,ppid,rss in inventory if ppid in descendants}
+            if found<=descendants:break
+            descendants.update(found)
+        live=[rss for pid,ppid,rss in inventory if pid in descendants and pid!=process.pid]
+        tree_samples.append({'rssKiB':sum(live),'processes':len(live)})
+        time.sleep(0.1)
+    stdout,stderr=process.communicate(timeout=5)
+    if process.returncode: raise RuntimeError(stderr[-2000:])
+    record=json.loads(stdout)
+    record.update(sampledTreePeakRssKiB=max((x['rssKiB'] for x in tree_samples),default=0),
+                  treeSampleCount=len(tree_samples),maxObservedProcesses=max((x['processes'] for x in tree_samples),default=0))
+    record.update(hostLoadBefore=load_before,hostLoadAfter=os.getloadavg())
+    for s in ('stdout_path','stderr_path'):
+        if Path(record[s]).stat().st_size>16*1024*1024: raise RuntimeError('output bound exceeded')
+    return record
+
+def build_cmd(tool, source, out, store='json'):
+    cmd=[BIN[tool],'extract',source,'--code-only','--out',out]
+    if tool=='compass': cmd+=['--no-viz','--store',store,'--inference-level','low']
+    return cmd
+
+def freeze_graph(g, stem):
+    p=ROOT/'frozen-graphs'/f'{stem}.json'
+    p.parent.mkdir(exist_ok=True)
+    if g.stat().st_size>128*1024*1024:raise RuntimeError('graph exceeds registered bound')
+    shutil.copyfile(g,p)
+    return {'graph':str(p),'graphSha256':sha(p),'graphBytes':p.stat().st_size}
+
+def register():
+    data={'registeredAt':datetime.now(timezone.utc).isoformat(),
+          'compassCommit':git(REPO,'rev-parse','HEAD'), 'compassTree':git(REPO,'rev-parse','HEAD^{tree}'),
+          'graphifyVersion':'0.9.74', 'platform':platform.platform(),
+          'python':sys.version,'buildRepeats':3,'queryRepeats':3,
+          'ordering':'Serial; alternate tool order by repetition; no compilation during measurements.',
+          'profiles':'Code-only, community clustering enabled, no model calls; Compass low inference. JSON structural and SQLite practical modes reported separately.',
+          'limits':'Build 600 seconds; individual query 60 seconds; captured query output 16 MiB per stream; graph read 128 MiB.',
+          'claims':'Existing development suites are selected, not blinded or population-representative. Text anchor presence measures recall proxy, not precision. Exact directed call sites audited separately.',
+          'suites':{n:{'path':str(s.path),'sha256':s.digest} for n,s in SUITES.items()},
+          'repositories':[]}
+    for r in SUITES['structured'].repositories:
+        p=SOURCES[r.name]
+        runner._verify_source(r,p)
+        paths=subprocess.check_output(['git','ls-files','-z'],cwd=p,timeout=30).split(b'\0')
+        sizes=[(p/os.fsdecode(f)).stat().st_size for f in paths if f and (p/os.fsdecode(f)).is_file()]
+        data['repositories'].append({'name':r.name,'language':r.language,'source':str(p),
+            'commit':r.commit,'tree':git(p,'rev-parse','HEAD^{tree}'),
+            'trackedFiles':len(sizes),'trackedBytes':sum(sizes),
+            'sourceRoot':'package root' if r.name=='axum' else 'repository root'})
+    save('registration.json',data)
+    print('Registered fixed panel before builds.',flush=True)
+
+def builds():
+    rows=[]; chosen={}; metrics=[]
+    for r in SUITES['structured'].repositories:
+        for trial in range(3):
+            for tool in (('compass','graphify') if trial%2==0 else ('graphify','compass')):
+                out=ROOT/'builds'/r.name/tool/f'trial-{trial}'
+                out.mkdir(parents=True,exist_ok=False)
+                cmd=build_cmd(tool,SOURCES[r.name],out)
+                for mode in ('cold','unchanged'):
+                    row=measure(cmd,SOURCES[r.name],f'{r.name}-{tool}-{trial}-{mode}')
+                    row.update(repository=r.name,tool=tool,trial=trial,mode=mode,store='json')
+                    if row['return_code']==0 and not row['timed_out']:
+                        g=graph(out,tool)
+                        row.update(freeze_graph(g,f'{r.name}-{tool}-{trial}-{mode}'))
+                    rows.append(row); save('builds.json',rows)
+                    print('BUILD',r.name,tool,trial,mode,round(row['wall_seconds'],3),row['return_code'],flush=True)
+                if trial==0:
+                    g=graph(out,tool); chosen[(r.name,tool)]=g
+                    m=runner.graph_metrics(r,tool,g); m.update(repository=r.name,language=r.language)
+                    metrics.append(m)
+        # Practical SQLite mode gets three fresh and three unchanged samples too.
+        for trial in range(3):
+            out=ROOT/'builds'/r.name/'compass-sqlite'/f'trial-{trial}'
+            out.mkdir(parents=True,exist_ok=False)
+            cmd=build_cmd('compass',SOURCES[r.name],out,'sqlite')
+            for mode in ('cold','unchanged'):
+                row=measure(cmd,SOURCES[r.name],f'{r.name}-compass-sqlite-{trial}-{mode}')
+                row.update(repository=r.name,tool='compass',trial=trial,mode=mode,store='sqlite')
+                if row['return_code']==0 and not row['timed_out']:
+                    g=graph(out,'compass'); row.update(freeze_graph(g,f'{r.name}-compass-sqlite-{trial}-{mode}'))
+                rows.append(row);save('builds.json',rows)
+                print('BUILD',r.name,'compass-sqlite',trial,mode,round(row['wall_seconds'],3),row['return_code'],flush=True)
+            if trial==0: chosen[(r.name,'compass-sqlite')]=graph(out,'compass')
+        runner._verify_source(r,SOURCES[r.name])
+    save('graph-metrics.json',metrics)
+    save('graphs.json',[{'repository':r,'tool':t,'graph':str(g),'sha256':sha(g)} for (r,t),g in chosen.items()])
+
+def queries():
+    graphs={(x['repository'],x['tool']):Path(x['graph']) for x in json.loads((ROOT/'graphs.json').read_text())}
+    rows=[]
+    for panel,suite in SUITES.items():
+        for repo in suite.repositories:
+            for q in repo.questions:
+                for trial in range(3):
+                    variants=('compass','graphify','compass-sqlite','graphify-leiden') if trial%2==0 else ('graphify-leiden','compass-sqlite','graphify','compass')
+                    for variant in variants:
+                        tool='compass' if variant.startswith('compass') else 'graphify'
+                        g=graphs[(repo.name,variant)]
+                        binary=ROOT/'graphify-leiden-venv/bin/graphify' if variant=='graphify-leiden' else BIN[tool]
+                        obs=runner.run_question(repo,q,tool=tool,binary=binary,graph=g,cwd=SOURCES[repo.name],
+                            raw_dir=ROOT/'queries'/panel/repo.name/variant/f'trial-{trial}',timeout_seconds=60)
+                        row=obs.as_record(); row.update(panel=panel,variant=variant,trial=trial,graphSha256=sha(g))
+                        rows.append(row);save('queries.json',rows)
+                print('QUERY',panel,repo.name,q.identifier,
+                      [(v,sum(x['passed'] for x in rows if x['question']==q.identifier and x['variant']==v)) for v in variants],flush=True)
+            runner._verify_source(repo,SOURCES[repo.name])
+
+def identities():
+    data={'compass':runner._tool_identity('compass',BIN['compass']),
+          'graphify':runner._tool_identity('graphify',BIN['graphify']),
+          'compassSource':git(REPO,'rev-parse','HEAD'),
+          'runnerSha256':sha(REPO/'benchmarks/agent_query/runner.py'),
+          'measurementSha256':sha(REPO/'benchmarks/performance/compass/measure_child.py'),
+          'scriptSha256':sha(Path(__file__))}
+    installed=subprocess.check_output([str(ROOT/'graphify-venv/bin/python'),'-m','pip','freeze'],text=True) if False else subprocess.check_output(['uv','pip','freeze','--python',str(ROOT/'graphify-venv/bin/python')],text=True)
+    (ROOT/'graphify-packages.txt').write_text(installed)
+    files=sorted((ROOT/'graphify-venv/lib/python3.12/site-packages/graphify').rglob('*.py'))
+    data['graphifyPackageSourceSha256']=hashlib.sha256(''.join(str(p.relative_to(files[0].parents[1]))+':'+sha(p)+'\n' for p in files).encode()).hexdigest()
+    save('tool-identities.json',data)
+
+if __name__=='__main__':
+    os.environ['GRAPHIFY_NO_AUTO_REFRESH']='1'
+    for key in list(os.environ):
+        if any(s in key for s in ('API_KEY','ACCESS_TOKEN','AUTH_TOKEN')) or key in ('COMPASS_BACKEND','GRAPHIFY_BACKEND','PYTHONHASHSEED'):
+            del os.environ[key]
+    action=sys.argv[1]
+    {'register':register,'builds':builds,'queries':queries,'identities':identities}[action]()

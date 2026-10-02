@@ -1,0 +1,6 @@
+{
+  "at": "2026-10-02T17:51:52.567313+00:00",
+  "beforeMeasurements": true,
+  "measurement": "Keep isolated RUSAGE_CHILDREN peak RSS and CPU time. Additionally sample descendants of measurement helper with ps every approximately 100ms, summing reported RSS excluding helper. Capture observed process count and sample count. Sum counts shared pages multiple times and can miss short peaks; it is not unique physical memory. ps sampling overhead and host contention remain limitations.",
+  "scriptSha256": "38968e6552ea93577c1a86aac722a96aaa18f327d0a17e0a1e212c385fdb61e4"
+}

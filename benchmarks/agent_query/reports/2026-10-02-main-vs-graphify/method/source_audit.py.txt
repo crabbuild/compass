@@ -1,0 +1,73 @@
+import json, hashlib
+from pathlib import Path
+from datetime import datetime,timezone
+from evaluate import ROOT,SOURCES
+from benchmarks.agent_query.heldout_three_language_edge_review import node_site,edge_site
+
+G='gson/src/main/java/com/google/gson/Gson.java'
+W='gson/src/main/java/com/google/gson/stream/JsonWriter.java'
+Z='packages/zod/src/v4/classic/from-json-schema.ts'
+A='src/routing/path_router.rs'
+F='src/flask/app.py'
+
+def register():
+    facts=[]
+    def add(repo,sf,sl,sn,tf,tl,tn,site):
+        src=(SOURCES[repo]/sf).read_text().splitlines();tar=(SOURCES[repo]/tf).read_text().splitlines()
+        assert sn in src[sl-1], (repo,sl,src[sl-1])
+        assert tn in tar[tl-1], (repo,tl,tar[tl-1])
+        assert tn in src[site-1], (repo,site,src[site-1])
+        facts.append(dict(repository=repo,source=dict(file=sf,line=sl,symbol=sn,text=src[sl-1].strip()),target=dict(file=tf,line=tl,symbol=tn,text=tar[tl-1].strip()),site=dict(file=sf,line=site,text=src[site-1].strip()),relation='calls',expected='present'))
+    for sl,sn,tl,tn,site in [(1084,'ExecuteC',821,'Traverse',1121),(1084,'ExecuteC',757,'Find',1123),(1084,'ExecuteC',905,'execute',1148),(1263,'InitDefaultHelpCmd',757,'Find',1276),(1263,'InitDefaultHelpCmd',757,'Find',1294)]:
+        add('cobra','command.go',sl,sn,'command.go',tl,tn,site)
+    add('cobra','command.go',757,'Find','args.go',28,'legacyArgs',776)
+    for sl,sn,tl,tn,site in [(1569,'wsgi_app',995,'full_dispatch_request',1600),(995,'full_dispatch_request',1369,'preprocess_request',1017),(995,'full_dispatch_request',969,'dispatch_request',1019),(995,'full_dispatch_request',1024,'finalize_request',1022)]:add('flask',F,sl,sn,F,tl,tn,site)
+    for line,name,site in [(266,'setFormattingStyle',802),(367,'setHtmlSafe',803),(345,'setStrictness',804),(386,'setSerializeNulls',805)]:add('gson',G,797,'newJsonWriter',W,line,name,site)
+    for sl,site in [(640,642),(722,724)]:add('gson',G,sl,'toJson',G,797,'newJsonWriter',site)
+    for sl,sn,tl,tn,site in [(917,'fromJSONSchema',105,'detectVersion',931),(917,'fromJSONSchema',808,'convertSchema',943),(808,'convertSchema',390,'convertBaseSchema',814)]:add('zod',Z,sl,sn,Z,tl,tn,site)
+    for sl,sn,tl,tn,site in [(66,'route',22,'validate_path',71),(120,'route_endpoint',22,'validate_path',125),(22,'validate_path',36,'validate_v07_paths',30)]:add('axum',A,sl,sn,A,tl,tn,site)
+    negatives=[]
+    for repo,sf,sl,sn,tf,tl,tn,end in [('cobra','args.go',28,'legacyArgs','command.go',757,'Find',40),('flask',F,1369,'preprocess_request',F,995,'full_dispatch_request',1397),('gson',W,367,'setHtmlSafe',G,797,'newJsonWriter',369),('zod',Z,105,'detectVersion',Z,917,'fromJSONSchema',121),('axum',A,36,'validate_v07_paths',A,22,'validate_path',56)]:
+        lines=(SOURCES[repo]/sf).read_text().splitlines();target=(SOURCES[repo]/tf).read_text().splitlines()
+        body='\n'.join(lines[sl-1:end]);assert tn+'(' not in body
+        negatives.append(dict(repository=repo,source=dict(file=sf,line=sl,symbol=sn,text=lines[sl-1].strip()),target=dict(file=tf,line=tl,symbol=tn,text=target[tl-1].strip()),relation='calls',expected='absent',reviewedBody=dict(start=sl,end=end,sha256=hashlib.sha256(body.encode()).hexdigest())))
+    files={r:{f:hashlib.sha256((SOURCES[r]/f).read_bytes()).hexdigest() for f in {x[k]['file'] for x in facts+negatives if x['repository']==r for k in ['source','target']}} for r in SOURCES}
+    out={'registeredBeforeGraphBuilds':True,'registeredAt':datetime.now(timezone.utc).isoformat(),'method':'Selected direct calls and reversed-call negatives read from pinned source before graphs. Exact identity, stored direction, calls relation and occurrence line required. Selected development evidence; not whole-graph precision.','positive':facts,'negative':negatives,'sourceSha256':files,'sourceReviewCorrection':'Checked-in Zod suite prose says convertSchema call line 952; pinned source has line 943. Query required names unchanged; exact occurrence oracle uses 943.'}
+    p=ROOT/'source-call-oracle.json'
+    if p.exists():raise RuntimeError('refusing to replace registered oracle')
+    p.write_text(json.dumps(out,indent=2)+'\n')
+    print(len(facts),'positive call occurrences;',len(negatives),'negative pairs')
+
+def identity(n,tool,fact):
+    return node_site(n,tool)==(fact['file'],fact['line']) and fact['symbol'] in {x.split('(',1)[0].replace('::','.').rsplit('.',1)[-1] for x in (n.get('name',''),n.get('qualifiedName',''),n.get('label','')) if isinstance(x,str)} and (n.get('kind') or n.get('type')) not in ('file','export','parameter','variable')
+
+def audit():
+    oracle=json.loads((ROOT/'source-call-oracle.json').read_text());graphs=json.loads((ROOT/'graphs.json').read_text());rows=[]
+    for r,fs in oracle['sourceSha256'].items():
+        for f,d in fs.items():assert hashlib.sha256((SOURCES[r]/f).read_bytes()).hexdigest()==d
+    for entry in graphs:
+        if entry['tool']=='compass-sqlite':continue
+        p=Path(entry['graph']);assert p.stat().st_size<128*1024*1024
+        g=json.loads(p.read_text());tool=entry['tool']
+        for fact in oracle['positive']+oracle['negative']:
+            if fact['repository']!=entry['repository']:continue
+            s=[n for n in g['nodes'] if identity(n,tool,fact['source'])];t=[n for n in g['nodes'] if identity(n,tool,fact['target'])]
+            out=dict(repository=entry['repository'],tool=tool,source=fact['source'],target=fact['target'],expected=fact['expected'],sourceCount=len(s),targetCount=len(t))
+            if len(s)!=1 or len(t)!=1:out.update(status='declaration_missing_or_ambiguous',pairPresent=False,exactOccurrence=False)
+            else:
+                edges=[e for e in g.get('links',g.get('edges',[])) if e['source']==s[0]['id'] and e['target']==t[0]['id'] and (e.get('kind') or e.get('relation'))=='calls']
+                out.update(pairPresent=bool(edges),edgeCount=len(edges))
+                if fact['expected']=='present':
+                    exact=[e for e in edges if edge_site(e,tool)==(fact['site']['file'],fact['site']['line'])]
+                    out.update(site=fact['site'],exactOccurrence=len(exact)==1,status='exact' if len(exact)==1 else 'missing_or_wrong_occurrence')
+                else:out.update(status='negative_pass' if not edges else 'false_direct_call',exactOccurrence=False)
+            rows.append(out)
+    (ROOT/'source-call-audit.json').write_text(json.dumps(rows,indent=2)+'\n')
+    for r in SOURCES:
+        for tool in ['compass','graphify']:
+            x=[v for v in rows if v['repository']==r and v['tool']==tool and v['expected']=='present']
+            print(r,tool,'exact',sum(v['exactOccurrence'] for v in x),'/',len(x),'pair',sum(v['pairPresent'] for v in x))
+
+if __name__=='__main__':
+    import sys
+    {'register':register,'audit':audit}[sys.argv[1]]()

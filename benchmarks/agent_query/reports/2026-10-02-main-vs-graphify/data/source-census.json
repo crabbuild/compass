@@ -1,0 +1,5171 @@
+{
+  "registeredAt": "2026-10-02T17:46:44.123739+00:00",
+  "registeredBeforeGraphBuilds": true,
+  "repositories": {
+    "cobra": {
+      "declarations": [
+        {
+          "file": "active_help.go",
+          "kind": "function",
+          "line": 38,
+          "name": "AppendActiveHelp"
+        },
+        {
+          "file": "active_help.go",
+          "kind": "function",
+          "line": 47,
+          "name": "GetActiveHelpConfig"
+        },
+        {
+          "file": "active_help.go",
+          "kind": "function",
+          "line": 58,
+          "name": "activeHelpEnvVar"
+        },
+        {
+          "file": "args.go",
+          "kind": "type",
+          "line": 22,
+          "name": "PositionalArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 28,
+          "name": "legacyArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 42,
+          "name": "NoArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 51,
+          "name": "OnlyValidArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 69,
+          "name": "NoDuplicateArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 82,
+          "name": "ArbitraryArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 87,
+          "name": "MinimumNArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 97,
+          "name": "MaximumNArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 107,
+          "name": "ExactArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 117,
+          "name": "RangeArgs"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 127,
+          "name": "MatchAll"
+        },
+        {
+          "file": "args.go",
+          "kind": "function",
+          "line": 142,
+          "name": "ExactValidArgs"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 36,
+          "name": "writePreamble"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 404,
+          "name": "writePostscript"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 447,
+          "name": "writeCommands"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 459,
+          "name": "writeFlagHandler"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 497,
+          "name": "writeShortFlag"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 508,
+          "name": "writeFlag"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 523,
+          "name": "writeLocalNonPersistentFlag"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 536,
+          "name": "prepareCustomAnnotationsForFlags"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 551,
+          "name": "writeFlags"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 593,
+          "name": "writeRequiredFlag"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 615,
+          "name": "writeRequiredNouns"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 629,
+          "name": "writeCmdAliases"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 644,
+          "name": "writeArgAliases"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 652,
+          "name": "gen"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 683,
+          "name": "GenBashCompletion"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 696,
+          "name": "nonCompletableFlag"
+        },
+        {
+          "file": "bash_completions.go",
+          "kind": "function",
+          "line": 701,
+          "name": "GenBashCompletionFile"
+        },
+        {
+          "file": "bash_completionsV2.go",
+          "kind": "function",
+          "line": 24,
+          "name": "genBashCompletion"
+        },
+        {
+          "file": "bash_completionsV2.go",
+          "kind": "function",
+          "line": 31,
+          "name": "genBashComp"
+        },
+        {
+          "file": "bash_completionsV2.go",
+          "kind": "function",
+          "line": 470,
+          "name": "GenBashCompletionFileV2"
+        },
+        {
+          "file": "bash_completionsV2.go",
+          "kind": "function",
+          "line": 482,
+          "name": "GenBashCompletionV2"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 85,
+          "name": "AddTemplateFunc"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 91,
+          "name": "AddTemplateFuncs"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 99,
+          "name": "OnInitialize"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 105,
+          "name": "OnFinalize"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 114,
+          "name": "Gt"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 144,
+          "name": "Eq"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 159,
+          "name": "trimRightSpace"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 166,
+          "name": "appendIfNotPresent"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 174,
+          "name": "rpad"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 179,
+          "name": "tmpl"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 192,
+          "name": "ld"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 225,
+          "name": "stringInSlice"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 235,
+          "name": "CheckErr"
+        },
+        {
+          "file": "cobra.go",
+          "kind": "function",
+          "line": 243,
+          "name": "WriteStringAndCheck"
+        },
+        {
+          "file": "command.go",
+          "kind": "type",
+          "line": 42,
+          "name": "FParseErrWhitelist"
+        },
+        {
+          "file": "command.go",
+          "kind": "type",
+          "line": 45,
+          "name": "Group"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 46,
+          "name": "ID",
+          "owner": "Group"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 47,
+          "name": "Title",
+          "owner": "Group"
+        },
+        {
+          "file": "command.go",
+          "kind": "type",
+          "line": 54,
+          "name": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 64,
+          "name": "Use",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 67,
+          "name": "Aliases",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 71,
+          "name": "SuggestFor",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 74,
+          "name": "Short",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 77,
+          "name": "GroupID",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 80,
+          "name": "Long",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 83,
+          "name": "Example",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 86,
+          "name": "ValidArgs",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 90,
+          "name": "ValidArgsFunction",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 93,
+          "name": "Args",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 98,
+          "name": "ArgAliases",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 102,
+          "name": "BashCompletionFunction",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 105,
+          "name": "Deprecated",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 109,
+          "name": "Annotations",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 115,
+          "name": "Version",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 128,
+          "name": "PersistentPreRun",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 130,
+          "name": "PersistentPreRunE",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 132,
+          "name": "PreRun",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 134,
+          "name": "PreRunE",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 136,
+          "name": "Run",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 138,
+          "name": "RunE",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 140,
+          "name": "PostRun",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 142,
+          "name": "PostRunE",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 144,
+          "name": "PersistentPostRun",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 146,
+          "name": "PersistentPostRunE",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 149,
+          "name": "commandgroups",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 152,
+          "name": "args",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 154,
+          "name": "flagErrorBuf",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 156,
+          "name": "flags",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 158,
+          "name": "pflags",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 161,
+          "name": "lflags",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 164,
+          "name": "iflags",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 166,
+          "name": "parentsPflags",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 169,
+          "name": "globNormFunc",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 172,
+          "name": "usageFunc",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 174,
+          "name": "usageTemplate",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 177,
+          "name": "flagErrorFunc",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 179,
+          "name": "helpTemplate",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 181,
+          "name": "helpFunc",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 184,
+          "name": "helpCommand",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 186,
+          "name": "helpCommandGroupID",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 189,
+          "name": "completionCommandGroupID",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 192,
+          "name": "versionTemplate",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 195,
+          "name": "errPrefix",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 198,
+          "name": "inReader",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 200,
+          "name": "outWriter",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 202,
+          "name": "errWriter",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 205,
+          "name": "FParseErrWhitelist",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 208,
+          "name": "CompletionOptions",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 211,
+          "name": "commandsAreSorted",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 213,
+          "name": "commandCalledAs",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 218,
+          "name": "ctx",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 221,
+          "name": "commands",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 223,
+          "name": "parent",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 225,
+          "name": "commandsMaxUseLen",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 226,
+          "name": "commandsMaxCommandPathLen",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 227,
+          "name": "commandsMaxNameLen",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 230,
+          "name": "TraverseChildren",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 233,
+          "name": "Hidden",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 236,
+          "name": "SilenceErrors",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 239,
+          "name": "SilenceUsage",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 243,
+          "name": "DisableFlagParsing",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 247,
+          "name": "DisableAutoGenTag",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 251,
+          "name": "DisableFlagsInUseLine",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 255,
+          "name": "DisableSuggestions",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 259,
+          "name": "SuggestionsMinimumDistance",
+          "owner": "Command"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 269,
+          "name": "Context"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 275,
+          "name": "SetContext"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 281,
+          "name": "SetArgs"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 289,
+          "name": "SetOutput"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 296,
+          "name": "SetOut"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 302,
+          "name": "SetErr"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 308,
+          "name": "SetIn"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 313,
+          "name": "SetUsageFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 318,
+          "name": "SetUsageTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 328,
+          "name": "SetFlagErrorFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 333,
+          "name": "SetHelpFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 338,
+          "name": "SetHelpCommand"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 343,
+          "name": "SetHelpCommandGroupID"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 352,
+          "name": "SetCompletionCommandGroupID"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 358,
+          "name": "SetHelpTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 367,
+          "name": "SetVersionTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 376,
+          "name": "SetErrPrefix"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 382,
+          "name": "SetGlobalNormalizationFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 393,
+          "name": "OutOrStdout"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 398,
+          "name": "OutOrStderr"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 403,
+          "name": "ErrOrStderr"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 408,
+          "name": "InOrStdin"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 412,
+          "name": "getOut"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 422,
+          "name": "getErr"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 432,
+          "name": "getIn"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 444,
+          "name": "UsageFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 464,
+          "name": "getUsageTemplateFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 478,
+          "name": "Usage"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 484,
+          "name": "HelpFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 505,
+          "name": "getHelpTemplateFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 520,
+          "name": "Help"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 526,
+          "name": "UsageString"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 547,
+          "name": "FlagErrorFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 563,
+          "name": "UsagePadding"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 573,
+          "name": "CommandPathPadding"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 583,
+          "name": "NamePadding"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 592,
+          "name": "UsageTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 605,
+          "name": "HelpTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 618,
+          "name": "VersionTemplate"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 631,
+          "name": "getVersionTemplateFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 643,
+          "name": "ErrPrefix"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 654,
+          "name": "hasNoOptDefVal"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 662,
+          "name": "shortHasNoOptDefVal"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 674,
+          "name": "stripFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 715,
+          "name": "argsMinusFirstX"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 750,
+          "name": "isFlagArg"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 757,
+          "name": "Find"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 781,
+          "name": "findSuggestions"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 798,
+          "name": "findNext"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 821,
+          "name": "Traverse"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 863,
+          "name": "SuggestionsFor"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 884,
+          "name": "VisitParents"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 892,
+          "name": "Root"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 901,
+          "name": "ArgsLenAtDash"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 905,
+          "name": "execute"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1047,
+          "name": "preRun"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1053,
+          "name": "postRun"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1062,
+          "name": "ExecuteContext"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1070,
+          "name": "Execute"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1078,
+          "name": "ExecuteContextC"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1084,
+          "name": "ExecuteC"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1172,
+          "name": "ValidateArgs"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1180,
+          "name": "ValidateRequiredFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1205,
+          "name": "checkCommandGroups"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1219,
+          "name": "InitDefaultHelpFlag"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1238,
+          "name": "InitDefaultVersionFlag"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1263,
+          "name": "InitDefaultHelpCmd"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1317,
+          "name": "ResetCommands"
+        },
+        {
+          "file": "command.go",
+          "kind": "type",
+          "line": 1325,
+          "name": "commandSorterByName"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1327,
+          "name": "Len"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1328,
+          "name": "Swap"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1329,
+          "name": "Less"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1332,
+          "name": "Commands"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1342,
+          "name": "AddCommand"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1371,
+          "name": "Groups"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1376,
+          "name": "AllChildCommandsHaveGroup"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1386,
+          "name": "ContainsGroup"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1396,
+          "name": "AddGroup"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1401,
+          "name": "RemoveCommand"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1435,
+          "name": "Print"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1440,
+          "name": "Println"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1445,
+          "name": "Printf"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1450,
+          "name": "PrintErr"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1455,
+          "name": "PrintErrln"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1460,
+          "name": "PrintErrf"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1465,
+          "name": "CommandPath"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1474,
+          "name": "DisplayName"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1482,
+          "name": "UseLine"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1501,
+          "name": "DebugFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1541,
+          "name": "Name"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1551,
+          "name": "HasAlias"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1562,
+          "name": "CalledAs"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1571,
+          "name": "hasNameOrAliasPrefix"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1586,
+          "name": "NameAndAliases"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1591,
+          "name": "HasExample"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1596,
+          "name": "Runnable"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1601,
+          "name": "HasSubCommands"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1607,
+          "name": "IsAvailableCommand"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1628,
+          "name": "IsAdditionalHelpTopicCommand"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1648,
+          "name": "HasHelpSubCommands"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1662,
+          "name": "HasAvailableSubCommands"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1677,
+          "name": "HasParent"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1682,
+          "name": "GlobalNormalizationFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1688,
+          "name": "Flags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1702,
+          "name": "LocalNonPersistentFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1716,
+          "name": "LocalFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1744,
+          "name": "InheritedFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1770,
+          "name": "NonInheritedFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1775,
+          "name": "PersistentFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1787,
+          "name": "ResetFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1801,
+          "name": "HasFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1806,
+          "name": "HasPersistentFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1811,
+          "name": "HasLocalFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1816,
+          "name": "HasInheritedFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1822,
+          "name": "HasAvailableFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1827,
+          "name": "HasAvailablePersistentFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1833,
+          "name": "HasAvailableLocalFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1839,
+          "name": "HasAvailableInheritedFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1844,
+          "name": "Flag"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1855,
+          "name": "persistentFlag"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1868,
+          "name": "ParseFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1892,
+          "name": "Parent"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1898,
+          "name": "mergePersistentFlags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1907,
+          "name": "updateParentsPflags"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1928,
+          "name": "commandNameMatches"
+        },
+        {
+          "file": "command.go",
+          "kind": "type",
+          "line": 1937,
+          "name": "tmplFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 1938,
+          "name": "tmpl",
+          "owner": "tmplFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "field",
+          "line": 1939,
+          "name": "fn",
+          "owner": "tmplFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 1974,
+          "name": "defaultUsageFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 2047,
+          "name": "defaultHelpFunc"
+        },
+        {
+          "file": "command.go",
+          "kind": "function",
+          "line": 2068,
+          "name": "defaultVersionFunc"
+        },
+        {
+          "file": "command_win.go",
+          "kind": "function",
+          "line": 30,
+          "name": "preExecHook"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 45,
+          "name": "ShellCompDirective"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 47,
+          "name": "flagCompError"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 48,
+          "name": "subCommand",
+          "owner": "flagCompError"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 49,
+          "name": "flagName",
+          "owner": "flagCompError"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 52,
+          "name": "Error"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 107,
+          "name": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 109,
+          "name": "DisableDefaultCmd",
+          "owner": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 112,
+          "name": "DisableNoDescFlag",
+          "owner": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 115,
+          "name": "DisableDescriptions",
+          "owner": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 117,
+          "name": "HiddenDefaultCmd",
+          "owner": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "field",
+          "line": 120,
+          "name": "DefaultShellCompDirective",
+          "owner": "CompletionOptions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 123,
+          "name": "SetDefaultShellCompDirective"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 136,
+          "name": "Completion"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 139,
+          "name": "CompletionFunc"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 142,
+          "name": "CompletionWithDesc"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 151,
+          "name": "NoFileCompletions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 160,
+          "name": "FixedCompletions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 170,
+          "name": "RegisterFlagCompletionFunc"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 186,
+          "name": "GetFlagCompletionFunc"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 200,
+          "name": "string"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 231,
+          "name": "initCompleteCmd"
+        },
+        {
+          "file": "completions.go",
+          "kind": "type",
+          "line": 311,
+          "name": "SliceValue"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 316,
+          "name": "getCompletions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 587,
+          "name": "helpOrVersionFlagPresent"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 599,
+          "name": "getFlagNameCompletions"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 632,
+          "name": "completeRequireFlags"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 657,
+          "name": "checkIfFlagCompletion"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 748,
+          "name": "InitDefaultCompletionCmd"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 932,
+          "name": "findFlag"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 955,
+          "name": "CompDebug"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 980,
+          "name": "CompDebugln"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 985,
+          "name": "CompError"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 991,
+          "name": "CompErrorln"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 1006,
+          "name": "configEnvVar"
+        },
+        {
+          "file": "completions.go",
+          "kind": "function",
+          "line": 1018,
+          "name": "getEnvConfig"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 38,
+          "name": "GenManTree"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 48,
+          "name": "GenManTreeFromOpts"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "type",
+          "line": 84,
+          "name": "GenManTreeOptions"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 85,
+          "name": "Header",
+          "owner": "GenManTreeOptions"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 86,
+          "name": "Path",
+          "owner": "GenManTreeOptions"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 87,
+          "name": "CommandSeparator",
+          "owner": "GenManTreeOptions"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "type",
+          "line": 94,
+          "name": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 95,
+          "name": "Title",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 96,
+          "name": "Section",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 97,
+          "name": "Date",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 98,
+          "name": "date",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 99,
+          "name": "Source",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "field",
+          "line": 100,
+          "name": "Manual",
+          "owner": "GenManHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 105,
+          "name": "GenMan"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 118,
+          "name": "fillHeader"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 143,
+          "name": "manPreamble"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 159,
+          "name": "manPrintFlags"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 187,
+          "name": "manPrintOptions"
+        },
+        {
+          "file": "doc/man_docs.go",
+          "kind": "function",
+          "line": 202,
+          "name": "genMan"
+        },
+        {
+          "file": "doc/md_docs.go",
+          "kind": "function",
+          "line": 32,
+          "name": "printOptions"
+        },
+        {
+          "file": "doc/md_docs.go",
+          "kind": "function",
+          "line": 52,
+          "name": "GenMarkdown"
+        },
+        {
+          "file": "doc/md_docs.go",
+          "kind": "function",
+          "line": 57,
+          "name": "GenMarkdownCustom"
+        },
+        {
+          "file": "doc/md_docs.go",
+          "kind": "function",
+          "line": 125,
+          "name": "GenMarkdownTree"
+        },
+        {
+          "file": "doc/md_docs.go",
+          "kind": "function",
+          "line": 133,
+          "name": "GenMarkdownTreeCustom"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 30,
+          "name": "printOptionsReST"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 52,
+          "name": "defaultLinkHandler"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 57,
+          "name": "GenReST"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 62,
+          "name": "GenReSTCustom"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 138,
+          "name": "GenReSTTree"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 145,
+          "name": "GenReSTTreeCustom"
+        },
+        {
+          "file": "doc/rest_docs.go",
+          "kind": "function",
+          "line": 173,
+          "name": "indentString"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "function",
+          "line": 26,
+          "name": "hasSeeAlso"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "function",
+          "line": 41,
+          "name": "forceMultiLine"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "type",
+          "line": 48,
+          "name": "byName"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "function",
+          "line": 50,
+          "name": "Len"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "function",
+          "line": 51,
+          "name": "Swap"
+        },
+        {
+          "file": "doc/util.go",
+          "kind": "function",
+          "line": 52,
+          "name": "Less"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "type",
+          "line": 30,
+          "name": "cmdOption"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 31,
+          "name": "Name",
+          "owner": "cmdOption"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 32,
+          "name": "Shorthand",
+          "owner": "cmdOption"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 33,
+          "name": "DefaultValue",
+          "owner": "cmdOption"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 34,
+          "name": "Usage",
+          "owner": "cmdOption"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "type",
+          "line": 37,
+          "name": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 38,
+          "name": "Name",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 39,
+          "name": "Synopsis",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 40,
+          "name": "Description",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 41,
+          "name": "Usage",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 42,
+          "name": "Options",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 43,
+          "name": "InheritedOptions",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 44,
+          "name": "Example",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "field",
+          "line": 45,
+          "name": "SeeAlso",
+          "owner": "cmdDoc"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "function",
+          "line": 53,
+          "name": "GenYamlTree"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "function",
+          "line": 60,
+          "name": "GenYamlTreeCustom"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "function",
+          "line": 88,
+          "name": "GenYaml"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "function",
+          "line": 93,
+          "name": "GenYamlCustom"
+        },
+        {
+          "file": "doc/yaml_docs.go",
+          "kind": "function",
+          "line": 149,
+          "name": "genFlagResult"
+        },
+        {
+          "file": "fish_completions.go",
+          "kind": "function",
+          "line": 25,
+          "name": "genFishComp"
+        },
+        {
+          "file": "fish_completions.go",
+          "kind": "function",
+          "line": 276,
+          "name": "GenFishCompletion"
+        },
+        {
+          "file": "fish_completions.go",
+          "kind": "function",
+          "line": 284,
+          "name": "GenFishCompletionFile"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 33,
+          "name": "MarkFlagsRequiredTogether"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 49,
+          "name": "MarkFlagsOneRequired"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 65,
+          "name": "MarkFlagsMutuallyExclusive"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 81,
+          "name": "ValidateFlagGroups"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 111,
+          "name": "hasAllFlags"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 121,
+          "name": "processFlagForGroupAnnotation"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 144,
+          "name": "validateRequiredFlagGroups"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 167,
+          "name": "validateOneRequiredFlagGroups"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 188,
+          "name": "validateExclusiveFlagGroups"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 209,
+          "name": "sortedKeys"
+        },
+        {
+          "file": "flag_groups.go",
+          "kind": "function",
+          "line": 225,
+          "name": "enforceFlagGroupsForCompletion"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 28,
+          "name": "genPowerShellComp"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 313,
+          "name": "genPowerShellCompletion"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 320,
+          "name": "genPowerShellCompletionFile"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 331,
+          "name": "GenPowerShellCompletionFile"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 337,
+          "name": "GenPowerShellCompletion"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 342,
+          "name": "GenPowerShellCompletionFileWithDesc"
+        },
+        {
+          "file": "powershell_completions.go",
+          "kind": "function",
+          "line": 348,
+          "name": "GenPowerShellCompletionWithDesc"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 24,
+          "name": "MarkFlagRequired"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 31,
+          "name": "MarkPersistentFlagRequired"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 38,
+          "name": "MarkFlagRequired"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 44,
+          "name": "MarkFlagFilename"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 54,
+          "name": "MarkFlagCustom"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 61,
+          "name": "MarkPersistentFlagFilename"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 67,
+          "name": "MarkFlagFilename"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 77,
+          "name": "MarkFlagCustom"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 83,
+          "name": "MarkFlagDirname"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 90,
+          "name": "MarkPersistentFlagDirname"
+        },
+        {
+          "file": "shell_completions.go",
+          "kind": "function",
+          "line": 96,
+          "name": "MarkFlagDirname"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 25,
+          "name": "GenZshCompletionFile"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 31,
+          "name": "GenZshCompletion"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 36,
+          "name": "GenZshCompletionFileNoDesc"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 42,
+          "name": "GenZshCompletionNoDesc"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 55,
+          "name": "MarkZshCompPositionalArgumentFile"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 66,
+          "name": "MarkZshCompPositionalArgumentWords"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 70,
+          "name": "genZshCompletionFile"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 80,
+          "name": "genZshCompletion"
+        },
+        {
+          "file": "zsh_completions.go",
+          "kind": "function",
+          "line": 87,
+          "name": "genZshComp"
+        }
+      ],
+      "files": [
+        "active_help.go",
+        "args.go",
+        "bash_completions.go",
+        "bash_completionsV2.go",
+        "cobra.go",
+        "command.go",
+        "command_notwin.go",
+        "command_win.go",
+        "completions.go",
+        "doc/man_docs.go",
+        "doc/md_docs.go",
+        "doc/rest_docs.go",
+        "doc/util.go",
+        "doc/yaml_docs.go",
+        "fish_completions.go",
+        "flag_groups.go",
+        "powershell_completions.go",
+        "shell_completions.go",
+        "zsh_completions.go"
+      ],
+      "provider": "Go standard go/parser AST",
+      "sourceSha256": {
+        "active_help.go": "92bde33086d33e413b9ac945ddb38f7487f9ce91067453a7ce97fd62fa59cdc5",
+        "args.go": "15b870d1e8a0a10341675ddee8e20bef92a21883257b6b3b11110944a573a2e7",
+        "bash_completions.go": "7370190d5344eec0325b2fd2dd7a0f39ca2acc5881f818adb5124b16ee7ac507",
+        "bash_completionsV2.go": "906f68743cdae6ddb3228ca42e4b56d2a51371d7f135f67e4476342abffc6215",
+        "cobra.go": "aae7502e789e42469bcb2fc110af87fd02451d3b509c5b0bed782ada17338c5f",
+        "command.go": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90",
+        "command_notwin.go": "505a8334864917e8439b3012e8e47d880643793bf5741bc048884a85037a8ac2",
+        "command_win.go": "a9f85ba76b54df4b2589546562b325c7b1225388d5b177214d4b193516556390",
+        "completions.go": "b28a4f6c509acde7367323e835cfb4f4939fe656dd3214320d76f53e91743c89",
+        "doc/man_docs.go": "7f72248e811ea9842d85030280e600e545fcdd419a010aefa3d395c9c2428709",
+        "doc/md_docs.go": "b6f51d89c0d9963df27b489066fd1617a58f805ec3ff7e0d3036088a13927daf",
+        "doc/rest_docs.go": "4ffa45d039448b87c77cbec3ab5c827cb2a77038e8cf6f8ec75046b9d7d4dd26",
+        "doc/util.go": "472bf86d75b3d9d73ba036391d7ad91a10bd76604d5333eebec659efbd3a9b6f",
+        "doc/yaml_docs.go": "44ff045c89a827987fc328e57697c4d89f5afa08e003fee3542fc88cacce85f9",
+        "fish_completions.go": "637e46a5a81a45a5e9d509aa8a834e023e9a13dccf30ac815957f8ce7ec74fe0",
+        "flag_groups.go": "3b0572e1fc2fc6e8ef62319b4294cdda86259fb0b1afebc18b03fa643e431251",
+        "powershell_completions.go": "6357a6d1adc9e798f21731cded574fc3e6e95240c92ee471541d61478b63351a",
+        "shell_completions.go": "38244d5514d8de4c7bd1e03890992a9ee73885af53aab4294d8bed2d76f8938d",
+        "zsh_completions.go": "a80998389020b259308582d539cb3ae0979f83b55e8ffa68b20c46b015feae24"
+      }
+    },
+    "flask": {
+      "declarations": [
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 74,
+          "name": "_make_timedelta"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 86,
+          "name": "remove_ctx"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 98,
+          "name": "add_ctx"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "class",
+          "line": 110,
+          "name": "Flask"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 87,
+          "name": "wrapper"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 99,
+          "name": "wrapper"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 255,
+          "name": "__init_subclass__"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 311,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 366,
+          "name": "get_send_file_max_age"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 393,
+          "name": "send_static_file"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 415,
+          "name": "open_resource"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 448,
+          "name": "open_instance_resource"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 470,
+          "name": "create_jinja_environment"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 510,
+          "name": "create_url_adapter"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 563,
+          "name": "raise_routing_exception"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 591,
+          "name": "update_template_context"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 621,
+          "name": "make_shell_context"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 633,
+          "name": "run"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 758,
+          "name": "test_client"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 816,
+          "name": "test_cli_runner"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 833,
+          "name": "handle_http_exception"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 868,
+          "name": "handle_user_exception"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 900,
+          "name": "handle_exception"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 953,
+          "name": "log_exception"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 969,
+          "name": "dispatch_request"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 995,
+          "name": "full_dispatch_request"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1024,
+          "name": "finalize_request"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1056,
+          "name": "make_default_options_response"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1068,
+          "name": "ensure_sync"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1082,
+          "name": "async_to_sync"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1105,
+          "name": "url_for"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1227,
+          "name": "make_response"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1369,
+          "name": "preprocess_request"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1397,
+          "name": "process_response"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1423,
+          "name": "do_teardown_request"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1456,
+          "name": "do_teardown_appcontext"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1484,
+          "name": "app_context"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1504,
+          "name": "request_context"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1520,
+          "name": "test_request_context"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1569,
+          "name": "wsgi_app"
+        },
+        {
+          "file": "src/flask/app.py",
+          "kind": "function",
+          "line": 1621,
+          "name": "__call__"
+        },
+        {
+          "file": "src/flask/blueprints.py",
+          "kind": "class",
+          "line": 18,
+          "name": "Blueprint"
+        },
+        {
+          "file": "src/flask/blueprints.py",
+          "kind": "function",
+          "line": 19,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/blueprints.py",
+          "kind": "function",
+          "line": 55,
+          "name": "get_send_file_max_age"
+        },
+        {
+          "file": "src/flask/blueprints.py",
+          "kind": "function",
+          "line": 82,
+          "name": "send_static_file"
+        },
+        {
+          "file": "src/flask/blueprints.py",
+          "kind": "function",
+          "line": 104,
+          "name": "open_resource"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 37,
+          "name": "NoAppException"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 41,
+          "name": "find_best_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 94,
+          "name": "_called_with_wrong_args"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 120,
+          "name": "find_app_by_string"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 200,
+          "name": "prepare_import"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 230,
+          "name": "locate_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 236,
+          "name": "locate_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 241,
+          "name": "locate_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 267,
+          "name": "get_version"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 293,
+          "name": "ScriptInfo"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 380,
+          "name": "with_appcontext"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 405,
+          "name": "AppGroup"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 440,
+          "name": "_set_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 468,
+          "name": "_set_debug"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 493,
+          "name": "_env_file_callback"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 531,
+          "name": "FlaskGroup"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 691,
+          "name": "_path_is_ancestor"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 698,
+          "name": "load_dotenv"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 766,
+          "name": "show_server_banner"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 780,
+          "name": "CertParamType"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 828,
+          "name": "_validate_key"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "class",
+          "line": 867,
+          "name": "SeparatedPathType"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 935,
+          "name": "run_command"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 1001,
+          "name": "shell_command"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 1061,
+          "name": "routes_command"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 1122,
+          "name": "main"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 305,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 333,
+          "name": "load_app"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 395,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 413,
+          "name": "command"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 429,
+          "name": "group"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 563,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 600,
+          "name": "_load_plugin_commands"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 609,
+          "name": "get_command"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 636,
+          "name": "list_commands"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 657,
+          "name": "make_context"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 678,
+          "name": "parse_args"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 788,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 791,
+          "name": "convert"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 873,
+          "name": "convert"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 422,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/cli.py",
+          "kind": "function",
+          "line": 963,
+          "name": "app"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "class",
+          "line": 20,
+          "name": "ConfigAttribute"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "class",
+          "line": 50,
+          "name": "Config"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 23,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 30,
+          "name": "__get__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 33,
+          "name": "__get__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 35,
+          "name": "__get__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 46,
+          "name": "__set__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 94,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 102,
+          "name": "from_envvar"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 126,
+          "name": "from_prefixed_env"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 187,
+          "name": "from_pyfile"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 218,
+          "name": "from_object"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 256,
+          "name": "from_file"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 304,
+          "name": "from_mapping"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 323,
+          "name": "get_namespace"
+        },
+        {
+          "file": "src/flask/config.py",
+          "kind": "function",
+          "line": 366,
+          "name": "__repr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "class",
+          "line": 30,
+          "name": "_AppCtxGlobals"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 118,
+          "name": "after_this_request"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 154,
+          "name": "copy_current_request_context"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 209,
+          "name": "has_request_context"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 235,
+          "name": "has_app_context"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "class",
+          "line": 260,
+          "name": "AppContext"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 528,
+          "name": "__getattr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 53,
+          "name": "__getattr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 59,
+          "name": "__setattr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 62,
+          "name": "__delattr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 68,
+          "name": "get"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 79,
+          "name": "pop"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 93,
+          "name": "setdefault"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 105,
+          "name": "__contains__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 108,
+          "name": "__iter__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 111,
+          "name": "__repr__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 201,
+          "name": "wrapper"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 300,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 340,
+          "name": "from_environ"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 351,
+          "name": "has_request"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 355,
+          "name": "copy"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 371,
+          "name": "request"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 381,
+          "name": "_get_session"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 396,
+          "name": "session"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 405,
+          "name": "match_request"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 416,
+          "name": "push"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 446,
+          "name": "pop"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 506,
+          "name": "__enter__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 510,
+          "name": "__exit__"
+        },
+        {
+          "file": "src/flask/ctx.py",
+          "kind": "function",
+          "line": 518,
+          "name": "__repr__"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "class",
+          "line": 17,
+          "name": "UnexpectedUnicodeError"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "class",
+          "line": 23,
+          "name": "DebugFilesKeyError"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "class",
+          "line": 50,
+          "name": "FormDataRoutingRedirect"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 81,
+          "name": "attach_enctype_error_multidict"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 107,
+          "name": "_dump_loader_info"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 124,
+          "name": "explain_template_loading_attempts"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 28,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 46,
+          "name": "__str__"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 57,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "class",
+          "line": 90,
+          "name": "newcls"
+        },
+        {
+          "file": "src/flask/debughelpers.py",
+          "kind": "function",
+          "line": 91,
+          "name": "__getitem__"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "function",
+          "line": 65,
+          "name": "__getattr__"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 17,
+          "name": "ProxyMixin"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 22,
+          "name": "FlaskProxy"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 24,
+          "name": "AppContextProxy"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 26,
+          "name": "_AppCtxGlobalsProxy"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 28,
+          "name": "RequestProxy"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "class",
+          "line": 30,
+          "name": "SessionMixinProxy"
+        },
+        {
+          "file": "src/flask/globals.py",
+          "kind": "function",
+          "line": 18,
+          "name": "_get_current_object"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 28,
+          "name": "get_debug_flag"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 36,
+          "name": "get_load_dotenv"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 52,
+          "name": "stream_with_context"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 58,
+          "name": "stream_with_context"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 63,
+          "name": "stream_with_context"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 151,
+          "name": "make_response"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 200,
+          "name": "url_for"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 254,
+          "name": "redirect"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 281,
+          "name": "abort"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 304,
+          "name": "get_template_attribute"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 326,
+          "name": "flash"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 360,
+          "name": "get_flashed_messages"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 402,
+          "name": "_prepare_send_file_kwargs"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 417,
+          "name": "send_file"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 543,
+          "name": "send_from_directory"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 587,
+          "name": "get_root_path"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 645,
+          "name": "_split_blueprint_path"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "class",
+          "line": 654,
+          "name": "_CollectErrors"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 126,
+          "name": "generator"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 659,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 662,
+          "name": "__enter__"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 665,
+          "name": "__exit__"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 676,
+          "name": "raise_any"
+        },
+        {
+          "file": "src/flask/helpers.py",
+          "kind": "function",
+          "line": 120,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/json/__init__.py",
+          "kind": "function",
+          "line": 13,
+          "name": "dumps"
+        },
+        {
+          "file": "src/flask/json/__init__.py",
+          "kind": "function",
+          "line": 47,
+          "name": "dump"
+        },
+        {
+          "file": "src/flask/json/__init__.py",
+          "kind": "function",
+          "line": 77,
+          "name": "loads"
+        },
+        {
+          "file": "src/flask/json/__init__.py",
+          "kind": "function",
+          "line": 108,
+          "name": "load"
+        },
+        {
+          "file": "src/flask/json/__init__.py",
+          "kind": "function",
+          "line": 138,
+          "name": "jsonify"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "class",
+          "line": 19,
+          "name": "JSONProvider"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 108,
+          "name": "_default"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "class",
+          "line": 124,
+          "name": "DefaultJSONProvider"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 38,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 41,
+          "name": "dumps"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 49,
+          "name": "dump"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 59,
+          "name": "loads"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 67,
+          "name": "load"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 75,
+          "name": "_prepare_response_obj"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 89,
+          "name": "response"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 166,
+          "name": "dumps"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 181,
+          "name": "loads"
+        },
+        {
+          "file": "src/flask/json/provider.py",
+          "kind": "function",
+          "line": 189,
+          "name": "response"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 60,
+          "name": "JSONTag"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 93,
+          "name": "TagDict"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 119,
+          "name": "PassDict"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 133,
+          "name": "TagTuple"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 147,
+          "name": "PassList"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 159,
+          "name": "TagBytes"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 173,
+          "name": "TagMarkup"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 191,
+          "name": "TagUUID"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 205,
+          "name": "TagDateTime"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "class",
+          "line": 219,
+          "name": "TaggedJSONSerializer"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 69,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 73,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 77,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 82,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 87,
+          "name": "tag"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 103,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 110,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 114,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 122,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 125,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 137,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 140,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 143,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 150,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 153,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 163,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 166,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 169,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 181,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 184,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 187,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 195,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 198,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 201,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 209,
+          "name": "check"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 212,
+          "name": "to_json"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 215,
+          "name": "to_python"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 249,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 256,
+          "name": "register"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 289,
+          "name": "tag"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 297,
+          "name": "untag"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 309,
+          "name": "_untag_scan"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 321,
+          "name": "dumps"
+        },
+        {
+          "file": "src/flask/json/tag.py",
+          "kind": "function",
+          "line": 325,
+          "name": "loads"
+        },
+        {
+          "file": "src/flask/logging.py",
+          "kind": "function",
+          "line": 16,
+          "name": "wsgi_errors_stream"
+        },
+        {
+          "file": "src/flask/logging.py",
+          "kind": "function",
+          "line": 31,
+          "name": "has_level_handler"
+        },
+        {
+          "file": "src/flask/logging.py",
+          "kind": "function",
+          "line": 58,
+          "name": "create_logger"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 52,
+          "name": "_make_timedelta"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "class",
+          "line": 59,
+          "name": "App"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 279,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 410,
+          "name": "_check_setup_finished"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 423,
+          "name": "name"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 440,
+          "name": "logger"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 467,
+          "name": "jinja_env"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 476,
+          "name": "create_jinja_environment"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 479,
+          "name": "make_config"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 495,
+          "name": "make_aborter"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 507,
+          "name": "auto_find_instance_path"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 520,
+          "name": "create_global_jinja_loader"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 533,
+          "name": "select_jinja_autoescape"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 550,
+          "name": "debug"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 563,
+          "name": "debug"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 570,
+          "name": "register_blueprint"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 597,
+          "name": "iter_blueprints"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 605,
+          "name": "add_url_rule"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 664,
+          "name": "template_filter"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 666,
+          "name": "template_filter"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 670,
+          "name": "template_filter"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 699,
+          "name": "add_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 714,
+          "name": "template_test"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 716,
+          "name": "template_test"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 720,
+          "name": "template_test"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 756,
+          "name": "add_template_test"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 773,
+          "name": "template_global"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 775,
+          "name": "template_global"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 779,
+          "name": "template_global"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 810,
+          "name": "add_template_global"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 827,
+          "name": "teardown_appcontext"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 858,
+          "name": "shell_context_processor"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 868,
+          "name": "_find_error_handler"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 893,
+          "name": "trap_http_exception"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 939,
+          "name": "redirect"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 960,
+          "name": "inject_url_defaults"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 981,
+          "name": "handle_url_build_error"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 692,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 749,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/app.py",
+          "kind": "function",
+          "line": 803,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "class",
+          "line": 34,
+          "name": "BlueprintSetupState"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "class",
+          "line": 119,
+          "name": "Blueprint"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 41,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 87,
+          "name": "add_url_rule"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 174,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 213,
+          "name": "_check_setup_finished"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 224,
+          "name": "record"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 233,
+          "name": "record_once"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 246,
+          "name": "make_setup_state"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 256,
+          "name": "register_blueprint"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 273,
+          "name": "register"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 379,
+          "name": "_merge_blueprint_funcs"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 413,
+          "name": "add_url_rule"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 444,
+          "name": "app_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 446,
+          "name": "app_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 450,
+          "name": "app_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 476,
+          "name": "add_app_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 498,
+          "name": "app_template_test"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 500,
+          "name": "app_template_test"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 504,
+          "name": "app_template_test"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 532,
+          "name": "add_app_template_test"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 556,
+          "name": "app_template_global"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 558,
+          "name": "app_template_global"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 562,
+          "name": "app_template_global"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 590,
+          "name": "add_app_template_global"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 614,
+          "name": "before_app_request"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 624,
+          "name": "after_app_request"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 634,
+          "name": "teardown_app_request"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 644,
+          "name": "app_context_processor"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 656,
+          "name": "app_errorhandler"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 673,
+          "name": "app_url_value_preprocessor"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 685,
+          "name": "app_url_defaults"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 240,
+          "name": "wrapper"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 380,
+          "name": "extend"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 469,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 492,
+          "name": "register_template_filter"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 525,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 550,
+          "name": "register_template_test"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 583,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 608,
+          "name": "register_template_global"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 663,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/blueprints.py",
+          "kind": "function",
+          "line": 664,
+          "name": "from_blueprint"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 42,
+          "name": "setupmethod"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "class",
+          "line": 52,
+          "name": "Scaffold"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 709,
+          "name": "_endpoint_from_view_func"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 717,
+          "name": "_find_package_path"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 762,
+          "name": "find_package"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 45,
+          "name": "wrapper_func"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 75,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 217,
+          "name": "__repr__"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 220,
+          "name": "_check_setup_finished"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 224,
+          "name": "static_folder"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 234,
+          "name": "static_folder"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 241,
+          "name": "has_static_folder"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 249,
+          "name": "static_url_path"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 265,
+          "name": "static_url_path"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 272,
+          "name": "jinja_loader"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 284,
+          "name": "_method_route"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 296,
+          "name": "get"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 304,
+          "name": "query"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 312,
+          "name": "post"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 320,
+          "name": "put"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 328,
+          "name": "delete"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 336,
+          "name": "patch"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 344,
+          "name": "route"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 376,
+          "name": "add_url_rule"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 444,
+          "name": "endpoint"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 468,
+          "name": "before_request"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 495,
+          "name": "after_request"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 516,
+          "name": "teardown_request"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 550,
+          "name": "context_processor"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 567,
+          "name": "url_value_preprocessor"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 592,
+          "name": "url_defaults"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 606,
+          "name": "errorhandler"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 650,
+          "name": "register_error_handler"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 665,
+          "name": "_get_exc_class_and_code"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 368,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 461,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sansio/scaffold.py",
+          "kind": "function",
+          "line": 643,
+          "name": "decorator"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "class",
+          "line": 24,
+          "name": "SessionMixin"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "class",
+          "line": 57,
+          "name": "SecureCookieSession"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "class",
+          "line": 83,
+          "name": "NullSession"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "class",
+          "line": 100,
+          "name": "SessionInterface"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 276,
+          "name": "_lazy_sha1"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "class",
+          "line": 284,
+          "name": "SecureCookieSessionInterface"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 28,
+          "name": "permanent"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 33,
+          "name": "permanent"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 73,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 89,
+          "name": "_fail"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 150,
+          "name": "make_null_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 162,
+          "name": "is_null_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 171,
+          "name": "get_cookie_name"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 175,
+          "name": "get_cookie_domain"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 187,
+          "name": "get_cookie_path"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 195,
+          "name": "get_cookie_httponly"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 202,
+          "name": "get_cookie_secure"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 208,
+          "name": "get_cookie_samesite"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 215,
+          "name": "get_cookie_partitioned"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 223,
+          "name": "get_expiration_time"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 233,
+          "name": "should_set_cookie"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 249,
+          "name": "open_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 263,
+          "name": "save_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 303,
+          "name": "get_signing_serializer"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 323,
+          "name": "open_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 337,
+          "name": "save_session"
+        },
+        {
+          "file": "src/flask/sessions.py",
+          "kind": "function",
+          "line": 77,
+          "name": "on_update"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 21,
+          "name": "_default_template_ctx_processor"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "class",
+          "line": 36,
+          "name": "Environment"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "class",
+          "line": 49,
+          "name": "DispatchingJinjaLoader"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 123,
+          "name": "_render"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 136,
+          "name": "render_template"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 151,
+          "name": "render_template_string"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 163,
+          "name": "_stream"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 181,
+          "name": "stream_template"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 200,
+          "name": "stream_template_string"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 42,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 54,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 57,
+          "name": "get_source"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 64,
+          "name": "_get_source_explained"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 88,
+          "name": "_get_source_fast"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 98,
+          "name": "_iter_loaders"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 108,
+          "name": "list_templates"
+        },
+        {
+          "file": "src/flask/templating.py",
+          "kind": "function",
+          "line": 172,
+          "name": "generate"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "class",
+          "line": 27,
+          "name": "EnvironBuilder"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 100,
+          "name": "_get_werkzeug_version"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "class",
+          "line": 109,
+          "name": "FlaskClient"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "class",
+          "line": 265,
+          "name": "FlaskCliRunner"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 49,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 88,
+          "name": "json_dumps"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 125,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 136,
+          "name": "session_transaction"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 185,
+          "name": "_copy_environ"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 193,
+          "name": "_request_from_builder_args"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 204,
+          "name": "open"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 249,
+          "name": "__enter__"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 255,
+          "name": "__exit__"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 271,
+          "name": "__init__"
+        },
+        {
+          "file": "src/flask/testing.py",
+          "kind": "function",
+          "line": 275,
+          "name": "invoke"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "class",
+          "line": 16,
+          "name": "View"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "class",
+          "line": 138,
+          "name": "MethodView"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 78,
+          "name": "dispatch_request"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 86,
+          "name": "as_view"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 165,
+          "name": "__init_subclass__"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 182,
+          "name": "dispatch_request"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 106,
+          "name": "view"
+        },
+        {
+          "file": "src/flask/views.py",
+          "kind": "function",
+          "line": 115,
+          "name": "view"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "class",
+          "line": 18,
+          "name": "Request"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "class",
+          "line": 222,
+          "name": "Response"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 60,
+          "name": "max_content_length"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 89,
+          "name": "max_content_length"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 93,
+          "name": "max_form_memory_size"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 116,
+          "name": "max_form_memory_size"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 120,
+          "name": "max_form_parts"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 143,
+          "name": "max_form_parts"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 147,
+          "name": "endpoint"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 162,
+          "name": "blueprint"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 181,
+          "name": "blueprints"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 197,
+          "name": "_load_form_data"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 212,
+          "name": "on_json_loading_failed"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "kind": "function",
+          "line": 247,
+          "name": "max_cookie_size"
+        }
+      ],
+      "files": [
+        "src/flask/__init__.py",
+        "src/flask/__main__.py",
+        "src/flask/app.py",
+        "src/flask/blueprints.py",
+        "src/flask/cli.py",
+        "src/flask/config.py",
+        "src/flask/ctx.py",
+        "src/flask/debughelpers.py",
+        "src/flask/globals.py",
+        "src/flask/helpers.py",
+        "src/flask/json/__init__.py",
+        "src/flask/json/provider.py",
+        "src/flask/json/tag.py",
+        "src/flask/logging.py",
+        "src/flask/sansio/app.py",
+        "src/flask/sansio/blueprints.py",
+        "src/flask/sansio/scaffold.py",
+        "src/flask/sessions.py",
+        "src/flask/signals.py",
+        "src/flask/templating.py",
+        "src/flask/testing.py",
+        "src/flask/typing.py",
+        "src/flask/views.py",
+        "src/flask/wrappers.py"
+      ],
+      "provider": "CPython stdlib ast",
+      "sourceSha256": {
+        "src/flask/__init__.py": "2daebda4dc29fed5cb36c912a6115a234e9a4b5f9c33fd795e4bfeffd0cc9386",
+        "src/flask/__main__.py": "6d8b7d7846a845059d7a3107143f11131f63c5511d669b44085b15ec5e3d2279",
+        "src/flask/app.py": "975de70f74626460f7afd2f16e3a513cbc2fe65cbd961f95c2f92eec4f7ecff8",
+        "src/flask/blueprints.py": "a79404da5635f0622d6ddaff44a46967c0e8d7b8343ef4062206644940e15f69",
+        "src/flask/cli.py": "eaec68e1cd30b00d184c347d86dfbe21755901b19d415c41fc53b124de08126d",
+        "src/flask/config.py": "3e2a85d033da9ba1d6d051f8087d61a574c17b7d0d4b38cf10ec2bcf56fa92dd",
+        "src/flask/ctx.py": "e21952d044159438765eb27848b0fe4c75f83faee8645181a09a1eccb1d5cab7",
+        "src/flask/debughelpers.py": "75c8258dc3487e1d0857dc5d3c7ca471fac1a254282570fa57e56d71aada037e",
+        "src/flask/globals.py": "1abe9a4e0a96c8bb28c232e2b08993fffdfb9bb694be2230755e54a46a40ca4d",
+        "src/flask/helpers.py": "7590b89bcae6c437b621a315854d8401bc38b5439ec95c9be7cc4c909f9e9221",
+        "src/flask/json/__init__.py": "b402bd0b89b87250f932bf4b8e2bec7af7130a8ebdc3ff5a0bba3865e9984173",
+        "src/flask/json/provider.py": "cefdd0dfdde6bb6f73e7b853aa789de432e2af52a8c920c1c2af17228235b72c",
+        "src/flask/json/tag.py": "0e168dc2e20e85db7647be28382f58e19f19a6bc4562245be5d50fe5bcb220dc",
+        "src/flask/logging.py": "f2c33758c4ee6e2d5c05bd9cfe53e45a937427c74c02aae029160b2e2d5d0952",
+        "src/flask/sansio/app.py": "410e21f53b5da3f5b73918733160dccfc22c17b0b48fe101dea56bad001c03f3",
+        "src/flask/sansio/blueprints.py": "da960c5792daf2f1cef8c14113d9c95c8ce389a9689abb395fe867f4054d0ba1",
+        "src/flask/sansio/scaffold.py": "d6578d2b5f06d227482e4110f8b750d04c8d94c9525c8857f9183f727ee2858b",
+        "src/flask/sessions.py": "7b2c11aa6cad4e66275ff102efcf980462684dce570ff951a61406e4b6cdd5dd",
+        "src/flask/signals.py": "57b94c530c3b0aa809d93854067d4f89ab59b506a73b2b7b399a6ed86648fb7e",
+        "src/flask/templating.py": "3ed7a044a96c911267e855b7359d9f159f06321f75fbe678a6656923d5e0989e",
+        "src/flask/testing.py": "629d481658aaec7076a55913eda38c270ec45d430b34b2f9d38b2eec2b0ad3da",
+        "src/flask/typing.py": "ac3b0f12bf2a89e10c6b8f04d142b6103f9f1495030b8ff2c559d9952e060a00",
+        "src/flask/views.py": "d0d5ceecd117533169c924cdbb01ea5bb0ee74b7b1c4b22855f73f0e4dea0ee7",
+        "src/flask/wrappers.py": "8d492fe2655e93622ae21c3177846faab20c6faf41bf43c49438162e6779391a"
+      }
+    }
+  },
+  "scope": "Complete syntactic declaration census of Flask src/flask Python and tracked non-test Cobra Go files. Definition start and terminal name are exact; fields also require direct containment by exact source owner. No call-binding precision or whole-graph accuracy claim."
+}

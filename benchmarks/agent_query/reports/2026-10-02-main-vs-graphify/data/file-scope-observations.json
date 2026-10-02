@@ -1,0 +1,35 @@
+{
+  "method": "Counts reported by trial-0 fresh extract stdout. These products use different discovery/classification policies; counts do not prove complete per-file coverage.",
+  "observations": [
+    {
+      "compassExtractedFiles": 37,
+      "compassIndexedFiles": 37,
+      "graphifySelectedCodeFiles": 37,
+      "repository": "cobra"
+    },
+    {
+      "compassExtractedFiles": 92,
+      "compassIndexedFiles": 92,
+      "graphifySelectedCodeFiles": 92,
+      "repository": "flask"
+    },
+    {
+      "compassExtractedFiles": 273,
+      "compassIndexedFiles": 273,
+      "graphifySelectedCodeFiles": 273,
+      "repository": "gson"
+    },
+    {
+      "compassExtractedFiles": 564,
+      "compassIndexedFiles": 564,
+      "graphifySelectedCodeFiles": 564,
+      "repository": "zod"
+    },
+    {
+      "compassExtractedFiles": 60,
+      "compassIndexedFiles": 60,
+      "graphifySelectedCodeFiles": 61,
+      "repository": "axum"
+    }
+  ]
+}

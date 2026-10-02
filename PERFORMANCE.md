@@ -8,6 +8,13 @@ The reproducible real-repository harness, operator commands, correctness gates,
 and optional explicit Graphify comparison are documented in
 [`benchmarks/performance/README.md`](benchmarks/performance/README.md).
 
+The [2026-10-02 real-repository comparison](benchmarks/agent_query/reports/2026-10-02-main-vs-graphify/REPORT.md)
+retains indexing, query, CPU and memory observations for Compass 0.4.1 main
+and Graphify 0.9.74 across five languages. It discloses the busy shared host,
+different extraction scopes, storage/clustering configurations and every
+failed observation. This diagnostic capture does not establish a controlled
+performance ranking or replace the qualification baseline below.
+
 ## Baseline policy
 
 A benchmark records:
