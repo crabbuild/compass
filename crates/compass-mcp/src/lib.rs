@@ -35,7 +35,7 @@ use compass_model::{Graph, GraphArtifact, GraphDocument, GraphError, NodeIndex};
 use compass_output::{
     AgentOperandRole, AgentOperation, AgentOrientation, AgentQueryContext,
     ORIENTATION_JSON_MAX_BYTES, build_code_query_view, build_discovery_query_view,
-    render_agent_query_text, render_agent_report_markdown, render_orientation_json,
+    render_agent_report_markdown, render_compact_agent_query_text, render_orientation_json,
     validate_orientation_graph_identity,
 };
 use compass_prs::{
@@ -1076,7 +1076,7 @@ fn invoke_typed_tool(
     let context = typed_agent_query_context(name, arguments, &response, &engine);
     let view = build_code_query_view(&response, context)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
-    let text = render_agent_query_text(&view)
+    let text = render_compact_agent_query_text(&view)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
     let semantic_result_digest = compass_query::code_query_response_digest(&response)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
@@ -1192,7 +1192,7 @@ fn invoke_discovery_tool(
     .with_operand(AgentOperandRole::Query, question.to_owned());
     let view = build_discovery_query_view(&response, context)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
-    let text = render_agent_query_text(&view)
+    let text = render_compact_agent_query_text(&view)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
     if let Some(question) = arguments.get("question").and_then(Value::as_str) {
         log_discovery_mcp_query(question, graph_path, &response, started.elapsed());

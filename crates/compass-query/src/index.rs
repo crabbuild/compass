@@ -266,10 +266,10 @@ pub fn open_with_engine(
     // a store reference is present: a corrupt or mismatched sidecar must fail
     // closed instead of silently querying a different realization.
     if selection == EngineSelection::Default && has_published_store(graph_path) {
-        return open_from_local_store(graph_path, program_path);
+        return open_from_local_store(graph_path, program_path, cache_root);
     }
     if selection == EngineSelection::Store {
-        return open_from_local_store(graph_path, program_path);
+        return open_from_local_store(graph_path, program_path, cache_root);
     }
     let graph_engine = open_graph_engine(graph_path, selection)?;
     open_from_graph_engine(graph_path, program_path, cache_root, graph_engine)
@@ -374,6 +374,8 @@ fn open_from_graph_engine(
                 diagnostic.message
             )
         });
+    let response_cache =
+        crate::response_cache::ResponseCache::open(cache_root, &graph_identity, program.as_ref());
     Ok(CodeQueryEngine {
         backend: CodeGraphBackend::Materialized {
             graph: Box::new(graph),
@@ -393,12 +395,14 @@ fn open_from_graph_engine(
         deadline: None,
         semantic_search: false,
         semantic_index: std::sync::Mutex::new(None),
+        response_cache,
     })
 }
 
 fn open_from_local_store(
     graph_path: &Path,
     program_path: Option<&Path>,
+    cache_root: &Path,
 ) -> Result<CodeQueryEngine, QueryError> {
     let snapshot = open_local_store_snapshot(graph_path)?;
     let graph_identity = snapshot.graph_identity.clone();
@@ -406,6 +410,8 @@ fn open_from_local_store(
     let partial_graph_message = snapshot.partial_graph_message.clone();
     let (program, _) = load_program(program_path)?;
     let index_path = snapshot.store_path.clone();
+    let response_cache =
+        crate::response_cache::ResponseCache::open(cache_root, &graph_identity, program.as_ref());
     Ok(CodeQueryEngine {
         backend: CodeGraphBackend::Store(Box::new(snapshot)),
         program,
@@ -421,6 +427,7 @@ fn open_from_local_store(
         deadline: None,
         semantic_search: false,
         semantic_index: std::sync::Mutex::new(None),
+        response_cache,
     })
 }
 

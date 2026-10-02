@@ -19,10 +19,13 @@ mod palette;
 mod report;
 mod review;
 mod svg;
+mod text_budget;
 mod tree;
 mod viewer_model;
 mod wiki;
 mod workbench;
+
+pub use text_budget::{BudgetedText, render_budgeted_text};
 
 pub use agent_query::{
     AGENT_BRIEF_VIEW_SCHEMA, AGENT_QUERY_VIEW_SCHEMA, AGENT_TEXT_PAGE_VERSION,
@@ -39,7 +42,9 @@ pub use agent_query::{
     DEFAULT_AGENT_TEXT_PAGE_TOKENS, build_code_query_brief, build_code_query_view,
     build_discovery_query_view, decode_agent_text_page_cursor,
     render_agent_query_continuation_header, render_agent_query_header_lines,
-    render_agent_query_text, render_code_query_text_page,
+    render_agent_query_text, render_code_query_evidence_page, render_code_query_text_page,
+    render_compact_agent_query_text, render_compact_code_query_text_page,
+    render_compact_query_header_lines,
 };
 pub use architecture_projection::{
     ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY,

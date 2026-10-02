@@ -21,6 +21,7 @@ mod program_join;
 mod ranking;
 mod recall;
 mod relevance;
+mod response_cache;
 mod score;
 mod semantic_search;
 mod source;

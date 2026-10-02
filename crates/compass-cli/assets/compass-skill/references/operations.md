@@ -53,3 +53,14 @@ equivalent. Write merged output to a new file first.
 For any unfamiliar recovery option, run `compass <command> --help`. Prefer a
 normal `compass update` or `compass extract` when the build can be reproduced
 cleanly.
+
+## Bounded answers
+
+Use `--budget N` to cap completed command output at N approximate tokens
+(UTF-8 bytes divided by four). Typed query text is compact by default; add
+`--verbose` or `--evidence` for audit detail. Preserve match and coverage caveats
+when summarizing an answer. Native pages continue with `--cursor`; other
+commands print `compass output ID --offset N --budget N` to read the saved
+output without repeating the command. Saved output is worktree-local and
+bounded to sixteen records. Streaming `watch`, `serve`, and JSONL sessions reject
+this presentation control; noninteractive `init --yes` supports it.

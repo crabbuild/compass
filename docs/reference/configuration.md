@@ -366,10 +366,10 @@ community, or subsystem. Use repeatable `--scope KIND:VALUE` for an explicit OR
 scope over `community`, `source`, `package`, or `node`.
 
 `--text-budget` controls approximate rendered tokens per discovery page
-(default 8,000). The default projection is concise; `--evidence` includes full
+(default 800). The default projection is concise; `--evidence` includes full
 node/edge provenance and semantic digests. Follow the opaque `next` cursor with
 the same semantic query and evidence tier; the presentation-only text budget may
-change. `--traverse`, `--budget`, and
+change. `--budget N` bounds completed output; `--traverse` and
 `--page` explicitly select the bounded legacy compatibility renderer.
 The default semantic neighborhood contains at most 64 nodes and 128 edges.
 `--max-nodes` and `--max-edges` may raise those bounds to the hard ceilings of
@@ -504,3 +504,8 @@ job metadata even if Compass's own history fingerprint already includes it.
 
 **Next step:** replace implicit defaults in one automation workflow with
 explicit non-secret options and record the selected profile/version.
+
+Completed-output budgets apply to finite commands via `--budget N` (32–65536),
+using four UTF-8 bytes per approximate token, including continuations. See
+[compact answers and budgets](commands.md#compact-answers-and-completed-output-budgets)
+for saved output, machine-output handling and streaming exceptions.

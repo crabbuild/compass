@@ -961,10 +961,6 @@ fn natural_discovery_rejects_invalid_duplicate_and_mixed_public_controls()
             "legacy traversal controls cannot be combined with discovery controls",
         ),
         (
-            vec!["--scope", "node:n:target", "--budget", "1000"],
-            "legacy traversal controls cannot be combined with discovery controls",
-        ),
-        (
             vec!["--format", "json", "--page", "2"],
             "legacy traversal controls cannot be combined with discovery controls",
         ),
@@ -1723,6 +1719,30 @@ fn configured_typescript_path_alias_agrees_across_search_callers_and_path()
 fn typed_text_paging_continues_the_same_result_with_a_cursor() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
+    // A compact one-hop answer now fits on one page. Use a real multi-entry
+    // answer to exercise continuation rather than spending budget on headers.
+    let mut document = GraphDocument::load(&graph)?;
+    let template = document.nodes[0].clone();
+    let edge_template = document.links[0].clone();
+    for index in 0..10 {
+        let mut caller = template.clone();
+        caller.id = format!("n:additional-caller-{index}");
+        caller.name = format!("AdditionalCaller{index}");
+        caller.qualified_name = format!("Fixture.AdditionalCaller{index}");
+        let mut edge = edge_template.clone();
+        edge.source = caller.id.clone();
+        edge.id = compass_model::identity::edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            None,
+        );
+        edge.key = edge.id.clone();
+        document.nodes.push(caller);
+        document.links.push(edge);
+    }
+    std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
     let graph_arg = graph.as_os_str().to_owned();
     let first = run(
         Frontend::Compass,
@@ -1762,7 +1782,10 @@ fn typed_text_paging_continues_the_same_result_with_a_cursor() -> Result<(), Box
         ],
     );
     assert_eq!(second.code, 0, "{}", second.stderr);
-    assert!(second.stdout.contains("range=2-"), "{}", second.stdout);
+    assert!(second.stdout.contains("range="), "{}", second.stdout);
+    assert_ne!(first.stdout, second.stdout);
+    assert!(first.stdout.len() + 1 <= 480);
+    assert!(second.stdout.len() + 1 <= 480);
 
     let rejected = run(
         Frontend::Compass,
@@ -2244,8 +2267,8 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(first.code, 0, "{command}: {}", first.stderr);
-        assert!(first.stdout.contains("Pagination: page=1/"));
-        assert!(first.stdout.contains("next=2"));
+        assert!(first.stdout.len() + 1 <= 240);
+        assert!(first.stdout.contains("compass output"));
 
         let second = run(
             Frontend::Compass,
@@ -2261,7 +2284,7 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(second.code, 0, "{command}: {}", second.stderr);
-        assert!(second.stdout.contains("Pagination: page=2/"));
+        assert!(second.stdout.len() + 1 <= 240);
         assert_ne!(first.stdout, second.stdout);
     }
 
@@ -2865,5 +2888,148 @@ fn concept_search_discloses_synonyms_and_keeps_exact_mode_strict() -> Result<(),
     let rejected = execute("search", "json", &["--exact", "--semantic-search"]);
     assert_ne!(rejected.code, 0);
     assert!(rejected.stderr.contains("cannot be combined with --exact"));
+    Ok(())
+}
+
+#[test]
+fn budget_is_shared_by_typed_discovery_and_report_commands() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    for arguments in [
+        vec!["callers", "Target"],
+        vec!["query", "who calls Target?"],
+        vec!["query", "Target", "--scope", "node:n:target"],
+        vec!["explain", "Target"],
+        vec!["path", "Caller", "Target"],
+        vec!["architecture"],
+        vec!["search", "AbsentQuantumSymbol"],
+    ] {
+        let output = support::compass_command()
+            .args(&arguments)
+            .args(["--graph", graph.to_str().ok_or("path")?, "--budget", "256"])
+            .current_dir(directory.path())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stdout.len() + output.stderr.len() <= 1024,
+            "{arguments:?}"
+        );
+    }
+    let output = support::compass_command()
+        .args(["--help", "--budget", "64"])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(output.status.success());
+    assert!(output.stdout.len() <= 256);
+    let text = String::from_utf8(output.stdout)?;
+    let command = text
+        .lines()
+        .last()
+        .and_then(|line| line.strip_prefix("More: compass "))
+        .ok_or("continuation")?;
+    let read = support::compass_command()
+        .args(command.split_whitespace())
+        .current_dir(directory.path())
+        .output()?;
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    assert!(read.stdout.len() <= 256);
+    assert_ne!(String::from_utf8(read.stdout)?, text);
+    Ok(())
+}
+
+#[test]
+fn compact_defaults_and_explicit_evidence_share_the_same_native_answer()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let base = [
+        OsString::from("callers"),
+        OsString::from("Target"),
+        OsString::from("--graph"),
+        graph.into_os_string(),
+    ];
+    let compact = run(Frontend::Compass, base.clone());
+    assert_eq!(compact.code, 0, "{}", compact.stderr);
+    assert!(compact.stdout.len() < 400, "{}", compact.stdout);
+    assert!(
+        compact
+            .stdout
+            .contains("Fixture.Caller --calls--> Fixture.Target")
+    );
+    assert!(!compact.stdout.contains("graphIdentity"));
+    for flag in ["--verbose", "--evidence"] {
+        let mut args = base.to_vec();
+        args.push(flag.into());
+        let full = run(Frontend::Compass, args);
+        assert_eq!(full.code, 0, "{}", full.stderr);
+        assert!(
+            full.stdout
+                .contains("Fixture.Caller --calls--> Fixture.Target")
+        );
+        assert!(full.stdout.contains("graphIdentity"));
+        assert!(full.stdout.contains("Node evidence:"));
+    }
+    Ok(())
+}
+
+#[test]
+fn budgeted_machine_answers_fail_intact_and_saved_records_are_readable()
+-> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(root.path())?;
+    let result = support::compass_command()
+        .args([
+            "callers",
+            "Target",
+            "--format",
+            "json",
+            "--budget",
+            "32",
+            "--graph",
+            graph.to_str().ok_or("path")?,
+        ])
+        .current_dir(root.path())
+        .output()?;
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    assert!(result.stderr.len() <= 128);
+    let error = String::from_utf8(result.stderr)?;
+    let id = error
+        .split("compass output ")
+        .nth(1)
+        .ok_or("saved ID")?
+        .trim();
+    let read = support::compass_command()
+        .args(["output", id, "--budget", "65536"])
+        .current_dir(root.path())
+        .output()?;
+    assert!(read.status.success());
+    let response: Value = serde_json::from_slice(&read.stdout)?;
+    assert_eq!(response["operation"], "callers");
+    std::fs::write(
+        root.path().join(format!(".compass/cache/output/{id}.json")),
+        b"{}",
+    )?;
+    let corrupt = support::compass_command()
+        .args(["output", id, "--budget", "32"])
+        .current_dir(root.path())
+        .output()?;
+    assert!(!corrupt.status.success());
+    assert!(corrupt.stderr.len() <= 128);
+    let interactive = support::compass_command()
+        .args(["init", "--budget", "32"])
+        .current_dir(root.path())
+        .output()?;
+    assert!(!interactive.status.success());
+    assert!(interactive.stderr.len() <= 128);
+    assert!(!root.path().join(".compass/project.json").exists());
     Ok(())
 }

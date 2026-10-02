@@ -400,3 +400,53 @@ fn jsonl_init_reports_each_indexed_file_against_the_total() -> Result<(), Box<dy
     );
     Ok(())
 }
+
+#[test]
+fn budgeted_noninteractive_init_publishes_once_and_pages_completed_output()
+-> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(
+        root.path().join("lib.rs"),
+        "pub fn native_budget_fixture() {}\n",
+    )?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "init",
+            ".",
+            "--yes",
+            "--inference-level",
+            "low",
+            "--budget",
+            "64",
+        ])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.len() + output.stderr.len() <= 256);
+    assert!(root.path().join(".compass/config.toml").is_file());
+    let graph = BuildGuard::resolve_artifact(&root.path().join("compass-out"), "graph.json")?;
+    let before = fs::read(&graph)?;
+    let text = String::from_utf8(output.stdout)?;
+    let continuation = text
+        .lines()
+        .last()
+        .and_then(|line| line.strip_prefix("More: compass "))
+        .ok_or("saved continuation")?;
+    let read = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(continuation.split_whitespace())
+        .current_dir(root.path())
+        .output()?;
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    assert!(read.stdout.len() <= 256);
+    assert_eq!(fs::read(&graph)?, before);
+    Ok(())
+}

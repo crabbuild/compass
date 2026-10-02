@@ -1120,3 +1120,143 @@ fn unresolved_call_inventory_never_becomes_a_zero_call_claim() -> Result<(), Box
     assert!(view.answer.headline.contains("coverage is unavailable"));
     Ok(())
 }
+
+#[test]
+fn compact_one_hop_and_no_match_answers_cost_only_the_facts() -> Result<(), Box<dyn Error>> {
+    let caller_anchor = anchor("caller.rs", 1);
+    let target_anchor = anchor("target.rs", 2);
+    let mut response = response(CodeQueryOperation::Callers);
+    response.nodes = vec![
+        node("a", "Caller", &caller_anchor),
+        node("b", "Target", &target_anchor),
+    ];
+    response.edges.push(QueryEdge {
+        id: "edge".to_owned(),
+        source: "a".to_owned(),
+        target: "b".to_owned(),
+        kind: EdgeKind::Calls,
+        relationship_site: Some(caller_anchor.clone()),
+        details: None,
+        evidence: vec![evidence(&caller_anchor)],
+    });
+    let context = context(AgentOperation::Callers)
+        .with_operand(compass_output::AgentOperandRole::Symbol, "Target");
+    let options = AgentTextPageOptions {
+        token_budget: 128,
+        cursor: None,
+    };
+    let compact =
+        compass_output::render_compact_code_query_text_page(&response, context.clone(), options)?;
+    assert!(compact.text.len() + 1 <= 400, "{}", compact.text);
+    assert!(
+        compact.text.contains("Caller --calls--> Fixture.Target"),
+        "{}",
+        compact.text
+    );
+    assert!(compact.text.contains("target.rs"));
+    assert!(compact.text.contains("caller.rs"));
+    assert!(compact.text.contains("coverage=unknown"));
+    assert!(compact.next_cursor.is_none());
+    response.nodes.clear();
+    response.edges.clear();
+    response.diagnostics.push(QueryDiagnostic {
+        code: QueryDiagnosticCode::NoMatch,
+        message: "No matching symbol".to_owned(),
+        node_id: None,
+        path: None,
+    });
+    let empty = compass_output::render_compact_code_query_text_page(&response, context, options)?;
+    assert!(empty.text.len() + 1 < 800);
+    assert!(empty.text.contains("No match"));
+    assert!(empty.next_cursor.is_none());
+    Ok(())
+}
+
+#[test]
+fn compact_unicode_pages_never_overflow_the_budget_or_skip_entries() -> Result<(), Box<dyn Error>> {
+    let mut response = response(CodeQueryOperation::Search);
+    for index in 0..30 {
+        let id = format!("n:{index:02}");
+        response.nodes.push(node(
+            &id,
+            &format!("東京🙂{index}"),
+            &anchor("src/東京.rs", index + 1),
+        ));
+        response.results.push(SearchHit {
+            node_id: id,
+            score: 1.0,
+            matched_fields: vec!["name".to_owned()],
+        });
+    }
+    let context = context(AgentOperation::Search)
+        .with_operand(compass_output::AgentOperandRole::Query, "東京");
+    let mut cursor = None;
+    let mut count = 0;
+    for _ in 0..30 {
+        let page = compass_output::render_compact_code_query_text_page(
+            &response,
+            context.clone(),
+            AgentTextPageOptions {
+                token_budget: 256,
+                cursor: cursor.as_deref(),
+            },
+        )?;
+        assert!(page.text.len() + 1 <= 1024);
+        count += page.entry_end - page.entry_start;
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(count, 30);
+    assert!(cursor.is_none());
+    assert!(
+        compass_output::render_compact_code_query_text_page(
+            &response,
+            context,
+            AgentTextPageOptions {
+                token_budget: 1,
+                cursor: None
+            }
+        )
+        .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn compact_exploration_retains_an_isolated_requested_symbol() -> Result<(), Box<dyn Error>> {
+    let location = anchor("map.rs", 1);
+    let mut response = response(CodeQueryOperation::Explore);
+    response.nodes = vec![
+        node("a", "Caller", &location),
+        node("b", "Target", &location),
+        node("c", "Isolated", &location),
+    ];
+    response.edges.push(QueryEdge {
+        id: "edge".to_owned(),
+        source: "a".to_owned(),
+        target: "b".to_owned(),
+        kind: EdgeKind::Calls,
+        relationship_site: Some(location.clone()),
+        details: None,
+        evidence: vec![evidence(&location)],
+    });
+    let context = context(AgentOperation::Explore)
+        .with_operand(compass_output::AgentOperandRole::Symbol, "Caller")
+        .with_operand(compass_output::AgentOperandRole::Symbol, "Isolated");
+    let page = compass_output::render_compact_code_query_text_page(
+        &response,
+        context.clone(),
+        AgentTextPageOptions {
+            token_budget: 2000,
+            cursor: None,
+        },
+    )?;
+    assert!(page.text.contains("Fixture.Isolated"), "{}", page.text);
+    assert!(page.text.contains("Caller --calls--> Fixture.Target"));
+    let view = build_code_query_view(&response, context)?;
+    let text = compass_output::render_compact_agent_query_text(&view)?;
+    assert!(text.contains("Fixture.Isolated"), "{text}");
+    Ok(())
+}

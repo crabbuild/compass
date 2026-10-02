@@ -36,6 +36,53 @@ pub fn run_init(
     stderr: &mut impl Write,
     input_is_terminal: bool,
 ) -> u8 {
+    let mut strings = arguments
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let controls = match crate::output_budget::take(&mut strings) {
+        Ok(controls) => controls,
+        Err(error) => {
+            let _ = writeln!(stderr, "error: {error}");
+            return 2;
+        }
+    };
+    if controls.budget.is_some() {
+        if !strings.iter().any(|arg| arg == "--yes") {
+            let _ = writeln!(
+                stderr,
+                "error: init --budget requires --yes; interactive prompts cannot be saved for later reading"
+            );
+            return 2;
+        }
+        let args = strings.into_iter().map(OsString::from).collect::<Vec<_>>();
+        let mut captured_out = crate::output_budget::Capture::default();
+        let mut captured_err = crate::output_budget::Capture::default();
+        let code = run_init(
+            &args,
+            input,
+            &mut captured_out,
+            &mut captured_err,
+            input_is_terminal,
+        );
+        let outcome = if captured_out.exceeded || captured_err.exceeded {
+            Outcome::failure("error: completed init output exceeds 4 MiB".to_owned())
+        } else {
+            Outcome {
+                code,
+                stdout: String::from_utf8_lossy(&captured_out.bytes).into_owned(),
+                stderr: String::from_utf8_lossy(&captured_err.bytes).into_owned(),
+                stdout_trailing_newline: false,
+                stderr_trailing_newline: false,
+                html_output: None,
+            }
+        };
+        let mut outcome = crate::output_budget::finish(outcome, &controls);
+        // Budgeted page strings do not already contain their final newline.
+        outcome.stdout_trailing_newline = !outcome.stdout.ends_with('\n');
+        outcome.stderr_trailing_newline = !outcome.stderr.ends_with('\n');
+        return write_outcome(&outcome, stdout, stderr);
+    }
     run_init_with_builder(
         arguments,
         input,

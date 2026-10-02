@@ -1665,3 +1665,29 @@ independently of the bounded path ledger.
 The resolver also preserves qualified external Rust receivers established by
 source factory return contracts, subject to the existing inference policy. An
 absent method on a source-local return type remains unresolved.
+
+## Compact query text and completed-output budgets
+
+Human-readable typed query defaults now omit audit fields and redundant ledgers.
+Use `--verbose` or `--evidence` for full paged status and record provenance.
+No-match/candidate pages are capped at 199 approximate tokens. Text is a display
+surface; raw `compass.query/1`, discovery, Agent View and MCP structured content
+retain their schemas and semantic records. MCP text uses the same compact
+presentation. Keep evidence mode unchanged when continuing a cursor; incompatible
+prefixes fail explicitly.
+
+`--budget N` is a completed-output ceiling of `4*N` UTF-8 bytes across streams,
+including newline/continuation. Supported range is 32–65536. It no longer selects
+legacy query traversal; `--traverse` or `--page` does. Native query pagers keep
+whole entries or report the budget required for one entry. Other completed
+answers use content-addressed `compass.saved-output/1` records and the additive
+`compass output ID --offset BYTE --budget N` command. This reader does not repeat
+command side effects. Oversized machine output fails rather than publish partial
+JSON/JSONL; streaming commands/events reject finite budgets before starting.
+
+Saved answers are disposable, work-directory-local and independently bounded.
+Response cache v1 is also disposable: checksum-checked typed complete records
+are bound to graph/Program IR, executable version, planner/ranker profiles,
+complete request and semantic mode. A changed response-cache meaning requires a
+new cache filename/version; missing/corrupt caches do not change native results.
+Neither cache rewrites published graphs or historical realizations.

@@ -54,6 +54,31 @@ fn main() -> ExitCode {
         std::env::var_os("NO_COLOR").as_deref(),
         std::env::var_os("TERM").as_deref(),
     );
+    let budgeted = arguments.iter().any(|arg| {
+        arg.to_str()
+            .is_some_and(|value| value == "--budget" || value.starts_with("--budget="))
+    });
+    if budgeted
+        && (events
+            || arguments.iter().any(|arg| arg == "--repl")
+            || arguments
+                .first()
+                .and_then(|arg| arg.to_str())
+                .is_some_and(|command| matches!(command, "watch" | "serve")))
+    {
+        eprintln!(
+            "error: --budget requires completed output; streaming events, watch, serve and REPL cannot be paged"
+        );
+        return ExitCode::from(2);
+    }
+    if budgeted && arguments.first().and_then(|arg| arg.to_str()) != Some("init") {
+        let outcome = compass_cli::run(compass_cli::Frontend::Compass, arguments);
+        return ExitCode::from(compass_cli::write_outcome(
+            &outcome,
+            &mut io::stdout(),
+            &mut io::stderr(),
+        ));
+    }
     if let Some(outcome) = compass_cli::compass_help_request(&arguments, style) {
         return ExitCode::from(compass_cli::write_outcome(
             &outcome,

@@ -15,7 +15,7 @@ const MAX_NATURAL_QUERY_BYTES: usize = 4_096;
 const AUTO_ROUTE_CONFIDENCE: u8 = 90;
 pub(crate) type NaturalSelections = Vec<(String, String)>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NaturalQueryRequest {
     pub question: String,
     pub include_heuristic: bool,
@@ -81,8 +81,15 @@ impl CodeQueryEngine {
         &self,
         request: NaturalQueryRequest,
     ) -> Result<CodeQueryResponse, QueryError> {
-        self.execute_natural_query(request)
-            .map(|(response, _, _)| response)
+        self.cached_response(
+            "natural",
+            &request,
+            || {
+                self.execute_natural_query(request.clone())
+                    .map(|(response, _, _)| response)
+            },
+            |response| !response.truncated && response.files.is_empty(),
+        )
     }
 
     pub fn query_natural_profiled(

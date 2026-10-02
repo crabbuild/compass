@@ -359,6 +359,7 @@ pub struct CodeQueryEngine {
     pub(crate) deadline: Option<Instant>,
     pub(crate) semantic_search: bool,
     pub(crate) semantic_index: Mutex<Option<crate::semantic_search::SemanticIndex>>,
+    pub(crate) response_cache: crate::response_cache::ResponseCache,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1650,7 +1651,12 @@ impl CodeQueryEngine {
 
     pub fn search(&self, request: SearchRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
-        self.search_instrumented(request, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "search",
+            &request,
+            || self.search_instrumented(request.clone(), &mut QueryInstrumentation::default()),
+            |response| !response.truncated,
+        )
     }
 
     /// Return every bounded exact ID/name candidate satisfying explicit filters.
@@ -2855,12 +2861,34 @@ impl CodeQueryEngine {
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
-        self.call_neighbors_instrumented(request, true, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "callers",
+            &request,
+            || {
+                self.call_neighbors_instrumented(
+                    request.clone(),
+                    true,
+                    &mut QueryInstrumentation::default(),
+                )
+            },
+            |response| !response.truncated,
+        )
     }
 
     pub fn callees(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
-        self.call_neighbors_instrumented(request, false, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "callees",
+            &request,
+            || {
+                self.call_neighbors_instrumented(
+                    request.clone(),
+                    false,
+                    &mut QueryInstrumentation::default(),
+                )
+            },
+            |response| !response.truncated,
+        )
     }
 
     pub(crate) fn call_neighbors_instrumented(
@@ -3095,7 +3123,12 @@ impl CodeQueryEngine {
 
     pub fn impact(&self, request: ImpactRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
-        self.impact_instrumented(request, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "impact",
+            &request,
+            || self.impact_instrumented(request.clone(), &mut QueryInstrumentation::default()),
+            |response| !response.truncated,
+        )
     }
 
     /// Restrict dependent traversal to an explicit relationship family. Direct
@@ -3115,7 +3148,18 @@ impl CodeQueryEngine {
         let mut kinds = relations.to_vec();
         kinds.sort_by_key(|kind| kind.as_str());
         kinds.dedup();
-        self.impact_instrumented_with_kinds(request, &kinds, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "impact-relations",
+            &(&request, &kinds),
+            || {
+                self.impact_instrumented_with_kinds(
+                    request.clone(),
+                    &kinds,
+                    &mut QueryInstrumentation::default(),
+                )
+            },
+            |response| !response.truncated,
+        )
     }
 
     /// Resolve inbound dependency relationships for the compatibility
@@ -3401,7 +3445,12 @@ impl CodeQueryEngine {
 
     pub fn node_trail(&self, request: NodeTrailRequest) -> Result<CodeQueryResponse, QueryError> {
         self.check_deadline()?;
-        self.node_trail_instrumented(request, &mut QueryInstrumentation::default())
+        self.cached_response(
+            "node_trail",
+            &request,
+            || self.node_trail_instrumented(request.clone(), &mut QueryInstrumentation::default()),
+            |response| !response.truncated,
+        )
     }
 
     pub(crate) fn node_trail_instrumented(

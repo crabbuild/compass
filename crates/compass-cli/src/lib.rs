@@ -18,6 +18,7 @@ mod install_commands;
 mod integration_commands;
 mod label_commands;
 mod models_commands;
+mod output_budget;
 mod program_commands;
 mod provider_commands;
 mod prs_commands;
@@ -78,9 +79,10 @@ use compass_output::{
     graph_artifact_identity, graph_community_view_model_document, graph_search_index,
     graph_view_model_bundle_document_with_hierarchy, graph_view_model_document, node_filenames,
     project_architecture, project_architecture_or_summary, render_agent_query_continuation_header,
-    render_agent_query_header_lines, render_agent_query_text, render_orientation_json,
-    validate_orientation_graph_identity, write_callflow_html, write_canvas, write_cypher,
-    write_graphml, write_svg, write_tree_html, write_workbench_html_with_source_navigation,
+    render_agent_query_header_lines, render_agent_query_text, render_compact_query_header_lines,
+    render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
+    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
+    write_workbench_html_with_source_navigation,
 };
 use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
@@ -429,6 +431,57 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
+    let controls = match output_budget::take(&mut args) {
+        Ok(controls) => controls,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    if args.first().is_some_and(|command| command == "output") {
+        return output_budget::command(&args[1..], controls.budget);
+    }
+    if let Some(budget) = controls.budget {
+        let command = args.first().map(String::as_str).unwrap_or_default();
+        let native = matches!(
+            command,
+            "ask" | "search" | "callers" | "callees" | "impact" | "explore" | "node"
+        ) || (command == "query"
+            && !args.iter().any(|arg| {
+                matches!(
+                    arg.split('=').next().unwrap_or_default(),
+                    "--traverse" | "--page" | "--cql" | "--repl" | "--stdin" | "--file"
+                )
+            }));
+        if !controls.machine
+            && (command == "explain"
+                || (command == "query"
+                    && !native
+                    && !args.iter().any(|arg| {
+                        matches!(
+                            arg.split('=').next().unwrap_or_default(),
+                            "--cql" | "--repl" | "--stdin" | "--file"
+                        )
+                    })))
+        {
+            args.extend(["--budget".to_owned(), budget.to_string()]);
+        }
+        let machine = controls.machine;
+        if native
+            && !machine
+            && !args
+                .iter()
+                .any(|arg| arg == "--text-budget" || arg.starts_with("--text-budget="))
+        {
+            args.extend(["--text-budget".to_owned(), budget.to_string()]);
+        }
+    }
+    let outcome = run_unbudgeted(frontend, args.into_iter().map(OsString::from));
+    output_budget::finish(outcome, &controls)
+}
+
+fn run_unbudgeted(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) -> Outcome {
+    let mut args = arguments
+        .into_iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
     let mut os_args = args.iter().map(OsString::from).collect::<Vec<_>>();
     let events = match ide_contract::take_jsonl_events(&mut os_args) {
         Ok(enabled) => {
@@ -459,6 +512,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         command.clone()
     };
     let outcome = match command.as_str() {
+        "output" => output_budget::command(&args, None),
         "history" => history_commands::command(frontend, &args),
         "agent-graph" => agent_graph_commands::command(&args),
         "call-graph" => call_graph_commands::command(frontend, &args),
@@ -5773,7 +5827,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 discovery_requested = true;
                 index += 1;
             }
-            "--evidence" => {
+            "--evidence" | "--verbose" => {
                 if !seen_discovery_options.insert("--evidence".to_owned()) {
                     return Outcome::failure("error: --evidence must not be repeated".to_owned());
                 }
@@ -6112,7 +6166,9 @@ fn command_discovery_query(
             Ok(view) => view,
             Err(error) => return Outcome::failure(format!("error: {error}")),
         };
-        let header = if cursor.is_some() {
+        let header = if !include_evidence {
+            render_compact_query_header_lines(&view)
+        } else if cursor.is_some() {
             render_agent_query_continuation_header(&view)
         } else {
             render_agent_query_header_lines(&view)
@@ -7287,7 +7343,7 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
     let help = format!(
-        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--evidence] [--format text|agent-json|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --evidence                        Include full provenance and typed detail in text\n  --format <text|agent-json|json>   Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 800]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text-only pagination/evidence controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
+        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--evidence] [--format text|agent-json|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --evidence                        Include full provenance and typed detail in text\n  --format <text|agent-json|json>   Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 800]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Bound completed output [default text page: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text-only pagination/evidence controls. Legacy --traverse and --page cannot be mixed with discovery controls. --budget applies to all finite commands."
     );
     let help = help
         .replace(
