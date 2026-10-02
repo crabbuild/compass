@@ -1,0 +1,194 @@
+{
+  "archiveId": "20261002-main-b7b7fa81",
+  "formatVersion": 1,
+  "kind": "archival-evaluation-evidence",
+  "normalization": "Machine-local paths replaced with documented placeholders; score, numeric measurement and source-anchor values unchanged.",
+  "originalInputSha256": {
+    "ask-registration.json": "796ec87dc2a244cd56b7a1a9dce27177f50a095c073e8854f1609250809afa07",
+    "builds.json": "e603bb6dc92be524cbb4aa7bf3e09a27b1de60968d82fe6e4dbb142669ef57e7",
+    "census-scorer-amendment.json": "2c11e84305c834408a2fb5d63efdbfb0158c0c94a1bb52425879afe78de3b489",
+    "census.py": "17beeed9c6932c94146462312cfcf24c1d27a637c4f23e4094e62444a5c96086",
+    "completion-verification.json": "0c214f772b3987e7656bf79f8a468b7268828c84802260b8b229ae9a1e42fee0",
+    "directional-query-audit.json": "00babde706e6398cb81489f0599d70ccf18263552d27629e9ce533f6699824f3",
+    "directional_audit.py": "cdb4d0785bbd9f9e5ab9ffae332e65e38dcb4acff07aa05c21b02524e1d5d5fb",
+    "evaluate.py": "e09529a5ccdbec34b87d1fe64207c5ad6eb6b3c78304c36dee5af4077dcd2aff",
+    "evidence-manifest.json": "f8d147cb21a0fe302484ff8614392fa0f6d83b6c43e526f79db784793a5ad6a7",
+    "file-scope-observations.json": "5ec041b8b722d669b149e738e73a1b7eb80e832b0559f047843549cda5634978",
+    "go_census.go": "71a015a695bd1ecb87bc92c48d6932d7fc877f007ce2735196db6737856aa873",
+    "graph-metrics.json": "54997ec1b5ab355d25af9418f9a3cfc8f847695295809448057de52a235f4910",
+    "graph-transition-audit.json": "d518fb9db53b04acc1a11675f889ee50ca94a429ca32494ae407e1169cd09b1d",
+    "graphify-leiden-identity.json": "2f2af5944183c58554e3be7bfad029e974b404798f626f2dfcce34dd5ddd278f",
+    "graphify-leiden-packages.txt": "84609dafe44cef200357db59bf9f728b904a6db3bc5c22d18b27f825595416ec",
+    "graphify-packages.txt": "0085275c24b5373d6c86d5a75fa5bdc381f10ed23b15e71632607efae71925c3",
+    "graphs.json": "103e911b649ccef356760541eb8ccb219dba5e2db0be959b78463bd176381071",
+    "leiden-registration.json": "007cb563a051a63ce23c7957ad16f05de187b78188e4b92d6ab2161452b7e588",
+    "memory-registration.json": "96cb7f56d8b552af7e1f9eba6fb66bba1e5bb6f05115d0a186ac6a57e7e7e927",
+    "queries.json": "6073b76c62896669d61b9167f132d12a8d91870e49923778464192bb72a4b2c8",
+    "registration-amendment.json": "4671912e33a367be920b85a427e66085da6e03105fa5cce3d992cd8f1ac14277",
+    "registration.json": "dacb8c9b4f8b42964ff06521e34c6faaa861592269e2ba16e088c599bc04c248",
+    "source-call-audit.json": "7883f379a296ec7afd6a8e7b99835c2dafe6206c7b4a59298532b172bcd581c0",
+    "source-call-oracle.json": "6ca39fa9bb5aabd90f6983f0456c95734dc11b2f0c131b5018352d2d3418c216",
+    "source-census-audit.json": "8a9203f20279b96296f8b99da3443e64f7bb0d8e9c3bd747e5a1e50783d8dd27",
+    "source-census-registration.json": "aa6fb90b3cfd02de8bef2fd1cf42f16b485cad3fd220e6738004d789d9c559d3",
+    "source-census.json": "0e1555e845b085681f3048558e256338d6be20504f5350876b67773406e6aefe",
+    "source_audit.py": "4397599684a69e133b65b25846f53c9f1b3c7f750a4e26edc3187c953f6870a3",
+    "summarize.py": "7c83ecb22f3f8efd066bc543f8a9b43cd5736f53b8927ab42a1f80e10047368b",
+    "summary.json": "127f8230d24204561a003197f597d76cb62c1b5be64e7df1c0f071a99884e1f8",
+    "supplement.py": "0d4dd7f466b2096cf6327770e8ac7551af37fa475260e9bb01e7ee6bac4b7c88",
+    "tool-identities.json": "d32ae04fcd88dc2a91beec7244d49a9d4ad1f498834675aee4852a4415f7b842",
+    "transitions.py": "f0fef0559231be6236cba9590374501108bdc4d33bfa3aaf128661aab0948bcd",
+    "verify_evidence.py": "9af80d5dd34f6487ee6c180e3ca239346efec9d78bb80bf1861257dab4b2851e"
+  },
+  "publishedFiles": {
+    "REPORT.md": {
+      "bytes": 25607,
+      "sha256": "19e423fa4f9089569b01097ed34c8f489f51f03cdce843069f7b2c68ae79011a"
+    },
+    "data/ask-registration.json": {
+      "bytes": 546,
+      "sha256": "9e81f4fbdc8672c2327ac279b688c87d1cc45ea0b3129b2429890d5adf4eb5ae"
+    },
+    "data/builds.jsonl": {
+      "bytes": 138896,
+      "sha256": "e023680ddd7380042633c8020b65a95f8a6dcd27a1edf0c762743c48e3a6aa59"
+    },
+    "data/captures.jsonl": {
+      "bytes": 607038,
+      "sha256": "6942969dae046c53153b57bea527a1bf4c018e3429535fab06f829352eeb033d"
+    },
+    "data/census-scorer-amendment.json": {
+      "bytes": 650,
+      "sha256": "d50c7c8c3274d3c10496f110f5922ebdff356aa1be04bfeb5dba54bedf3a5fe4"
+    },
+    "data/completion-verification.json": {
+      "bytes": 1264,
+      "sha256": "8b0aa1ca1008a2ff0f7689a07f9487f82a3d1221032cfbe197e05361a9a9dfd5"
+    },
+    "data/directional-query-audit.json": {
+      "bytes": 271318,
+      "sha256": "c2048061c6191f4b2a7ef981b36687855197c37f72fc0b5e5a5b20a2dadcb6b2"
+    },
+    "data/evidence-manifest.json": {
+      "bytes": 374152,
+      "sha256": "847f295162f2c80264d2155a10010ef034e5f34b46a005cabb6505c82aa643be"
+    },
+    "data/file-scope-observations.json": {
+      "bytes": 945,
+      "sha256": "86cef144439868f681b0263fe8e7c8e56a36b330d4844f61fe39cfeae4cf938d"
+    },
+    "data/graph-metrics.json": {
+      "bytes": 7268,
+      "sha256": "04ceea37eaa3caa6cacc3a0c5475b518bd27551bb44c99312117d4cb1dadeccd"
+    },
+    "data/graph-transition-audit.json": {
+      "bytes": 8849,
+      "sha256": "19e95e2f41b96e2b5b73b27a665c05da96b2a6fb546468ac5312d1e99742762b"
+    },
+    "data/graphify-leiden-identity.json": {
+      "bytes": 252,
+      "sha256": "39d66b98c7a341a99e8fa9eb238a04c5a5c16987d3e2816c9ca41683969cffa6"
+    },
+    "data/graphify-leiden-packages.txt": {
+      "bytes": 768,
+      "sha256": "84609dafe44cef200357db59bf9f728b904a6db3bc5c22d18b27f825595416ec"
+    },
+    "data/graphify-packages.txt": {
+      "bytes": 728,
+      "sha256": "0085275c24b5373d6c86d5a75fa5bdc381f10ed23b15e71632607efae71925c3"
+    },
+    "data/graphs.json": {
+      "bytes": 5151,
+      "sha256": "adb9da6fb8d5abcfaadbabdef6d3363faa58d76f8561d8dad7114f90e7cd3e50"
+    },
+    "data/leiden-registration.json": {
+      "bytes": 580,
+      "sha256": "feb176a41d5e6671225f987faa725a7272125a0a19220a208e33b8a0c2a27fe6"
+    },
+    "data/memory-registration.json": {
+      "bytes": 573,
+      "sha256": "03ef78ecdb7c0290913a501ed4fd4b77f820924614ebe555f6e77e72c7e28b4e"
+    },
+    "data/queries.jsonl": {
+      "bytes": 623828,
+      "sha256": "3d5e82c83aa76c542412397dca858bba041bb90b31ca18446893ca95e7dde4af"
+    },
+    "data/registration-amendment.json": {
+      "bytes": 723,
+      "sha256": "5efb87b6db7314bc0463c49489432683550d58e07f8fa2541f92dcefeb92559a"
+    },
+    "data/registration.json": {
+      "bytes": 3010,
+      "sha256": "5f59559ab90d65045b707769acebab9142465a59588aa6537d072a1e7e2ac383"
+    },
+    "data/source-call-audit.jsonl": {
+      "bytes": 47110,
+      "sha256": "2e08e4d3cbf02eb39af7b1e317c898f339533a9ec72aff6e11d8156140fec461"
+    },
+    "data/source-call-oracle.json": {
+      "bytes": 20061,
+      "sha256": "bdcb38adcbaec537db894b80b311adb866439dcaf109deb23af4c0b6720429c4"
+    },
+    "data/source-census-audit.jsonl": {
+      "bytes": 408698,
+      "sha256": "caaba9633068cc884ba122106a37b8eb9f28cebab2a6a7929abd88ef2ad85d22"
+    },
+    "data/source-census-registration.json": {
+      "bytes": 315,
+      "sha256": "e21e451d6d7eec96e222559bb2785162f1b39bdfe835c4be2d3ad2f53e718f8b"
+    },
+    "data/source-census.json": {
+      "bytes": 130365,
+      "sha256": "da6dc5cd3bdb914990f2db04c45ce015912814cfc0a1b9808463409b4c1b8f07"
+    },
+    "data/streams.jsonl": {
+      "bytes": 871455,
+      "sha256": "7b3a9412f0b0da1c485c795dd040d07d847b5e566e83685b6d723a5243d32343"
+    },
+    "data/summary.json": {
+      "bytes": 90611,
+      "sha256": "7884946bfd9f944251166d9757a64fb9f661834ac505284198d8cbc99e9b49b8"
+    },
+    "data/tool-identities.json": {
+      "bytes": 942,
+      "sha256": "fdbffd24a1bc88fdd095b66c8786c6879eb7127dabe053d7be224018e78599a6"
+    },
+    "method/census.py.txt": {
+      "bytes": 3864,
+      "sha256": "17beeed9c6932c94146462312cfcf24c1d27a637c4f23e4094e62444a5c96086"
+    },
+    "method/directional_audit.py.txt": {
+      "bytes": 5901,
+      "sha256": "cdb4d0785bbd9f9e5ab9ffae332e65e38dcb4acff07aa05c21b02524e1d5d5fb"
+    },
+    "method/evaluate.py.txt": {
+      "bytes": 10815,
+      "sha256": "a05081fe806b1c7e191c9f15d172183615cef9387f568a81fe69e84304697cdb"
+    },
+    "method/go_census.go.txt": {
+      "bytes": 1237,
+      "sha256": "71a015a695bd1ecb87bc92c48d6932d7fc877f007ce2735196db6737856aa873"
+    },
+    "method/source_audit.py.txt": {
+      "bytes": 6780,
+      "sha256": "4397599684a69e133b65b25846f53c9f1b3c7f750a4e26edc3187c953f6870a3"
+    },
+    "method/summarize.py.txt": {
+      "bytes": 29472,
+      "sha256": "7c83ecb22f3f8efd066bc543f8a9b43cd5736f53b8927ab42a1f80e10047368b"
+    },
+    "method/supplement.py.txt": {
+      "bytes": 3503,
+      "sha256": "0d4dd7f466b2096cf6327770e8ac7551af37fa475260e9bb01e7ee6bac4b7c88"
+    },
+    "method/transitions.py.txt": {
+      "bytes": 1940,
+      "sha256": "f0fef0559231be6236cba9590374501108bdc4d33bfa3aaf128661aab0948bcd"
+    },
+    "method/verify_evidence.py.txt": {
+      "bytes": 3768,
+      "sha256": "9af80d5dd34f6487ee6c180e3ca239346efec9d78bb80bf1861257dab4b2851e"
+    }
+  },
+  "rawStreamFiles": 2412,
+  "uniqueNormalizedStreams": 389
+}

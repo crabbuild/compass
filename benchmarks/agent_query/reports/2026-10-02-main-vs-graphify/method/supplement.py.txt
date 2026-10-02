@@ -1,0 +1,43 @@
+"""Repeat the fixed profile with Graphify's native Leiden backend."""
+import json,os,subprocess
+from pathlib import Path
+from datetime import datetime,timezone
+from evaluate import ROOT,REPO,SOURCES,SUITES,measure,graph,freeze_graph,sha
+from benchmarks.agent_query import runner
+
+def register():
+    data={'registeredBeforeSupplementMeasurements':True,'registeredAt':datetime.now(timezone.utc).isoformat(),
+          'variant':'graphify-leiden','package':'graphifyy 0.9.74 with graspologic-native 1.3.1 on the same Python 3.12.13',
+          'protocol':'Same fixed corpora, code-only clustered profile, three fresh and three unchanged builds. Retain base-install arm, do not pool different backend timings. All existing query and source oracles stay fixed.',
+          'limitation':'This arm follows the base-install builds and is not interleaved with Compass; background contention can change.'}
+    p=ROOT/'leiden-registration.json';assert not p.exists();p.write_text(json.dumps(data,indent=2)+'\n')
+    env=ROOT/'graphify-leiden-venv'
+    (ROOT/'graphify-leiden-packages.txt').write_text(subprocess.check_output(['uv','pip','freeze','--python',str(env/'bin/python')],text=True))
+    assert subprocess.run([str(env/'bin/python'),'-c','import networkx as nx; from graphify.cluster import _native_leiden; g=nx.Graph(); g.add_edge("a","b"); assert _native_leiden(g,1.0) is not None'],capture_output=True,text=True,timeout=30).returncode==0
+
+def run():
+    os.environ['GRAPHIFY_NO_AUTO_REFRESH']='1'
+    for key in list(os.environ):
+        if any(s in key for s in ('API_KEY','ACCESS_TOKEN','AUTH_TOKEN')) or key in ('COMPASS_BACKEND','GRAPHIFY_BACKEND','PYTHONHASHSEED'):del os.environ[key]
+    rows=json.loads((ROOT/'builds.json').read_text());graphs=json.loads((ROOT/'graphs.json').read_text());metrics=json.loads((ROOT/'graph-metrics.json').read_text())
+    binary=ROOT/'graphify-leiden-venv/bin/graphify'
+    (ROOT/'graphify-leiden-identity.json').write_text(json.dumps(runner._tool_identity('graphify',binary),indent=2)+'\n')
+    for r in SUITES['structured'].repositories:
+        for trial in range(3):
+            out=ROOT/'builds'/r.name/'graphify-leiden'/f'trial-{trial}';out.mkdir(parents=True,exist_ok=False)
+            cmd=[binary,'extract',SOURCES[r.name],'--code-only','--out',out]
+            for mode in ('cold','unchanged'):
+                row=measure(cmd,SOURCES[r.name],f'{r.name}-graphify-leiden-{trial}-{mode}')
+                row.update(repository=r.name,tool='graphify-leiden',trial=trial,mode=mode,store='json')
+                if row['return_code']==0 and not row['timed_out']:row.update(freeze_graph(graph(out,'graphify'),f'{r.name}-graphify-leiden-{trial}-{mode}'))
+                rows.append(row);(ROOT/'builds.json').write_text(json.dumps(rows,indent=2)+'\n')
+                print('BUILD',r.name,'graphify-leiden',trial,mode,round(row['wall_seconds'],3),row['return_code'],flush=True)
+            if trial==0:
+                g=graph(out,'graphify');graphs.append(dict(repository=r.name,tool='graphify-leiden',graph=str(g),sha256=sha(g)))
+                m=runner.graph_metrics(r,'graphify',g);m.update(repository=r.name,language=r.language,tool='graphify-leiden');metrics.append(m)
+        runner._verify_source(r,SOURCES[r.name])
+    (ROOT/'graphs.json').write_text(json.dumps(graphs,indent=2)+'\n');(ROOT/'graph-metrics.json').write_text(json.dumps(metrics,indent=2)+'\n')
+
+if __name__=='__main__':
+    import sys
+    {'register':register,'run':run}[sys.argv[1]]()

@@ -1,0 +1,8 @@
+{
+  "limitation": "This arm follows the base-install builds and is not interleaved with Compass; background contention can change.",
+  "package": "graphifyy 0.9.74 with graspologic-native 1.3.1 on the same Python 3.12.13",
+  "protocol": "Same fixed corpora, code-only clustered profile, three fresh and three unchanged builds. Retain base-install arm, do not pool different backend timings. All existing query and source oracles stay fixed.",
+  "registeredAt": "2026-10-02T18:02:30.932084+00:00",
+  "registeredBeforeSupplementMeasurements": true,
+  "variant": "graphify-leiden"
+}

@@ -1,0 +1,22 @@
+"""Inspect retained fresh/unchanged artifacts without interpreting hash differences as accuracy."""
+import collections,json
+from pathlib import Path
+from evaluate import ROOT
+
+def main():
+    builds=json.loads((ROOT/'builds.json').read_text());rows=[]
+    for repo in ['cobra','flask','gson','zod','axum']:
+        for tool in ['graphify','graphify-leiden']:
+            selected=[b for b in builds if b['repository']==repo and b['tool']==tool and b['trial']==0]
+            cold,warm=[json.loads(Path(next(b['graph'] for b in selected if b['mode']==mode)).read_text()) for mode in ['cold','unchanged']]
+            cn={n['id']:n for n in cold['nodes']};wn={n['id']:n for n in warm['nodes']}
+            fields=collections.Counter()
+            for key in cn.keys()&wn.keys():
+                for field in cn[key].keys()|wn[key].keys():
+                    if cn[key].get(field)!=wn[key].get(field):fields[field]+=1
+            ce={json.dumps(e,sort_keys=True) for e in cold.get('links',cold.get('edges',[]))};we={json.dumps(e,sort_keys=True) for e in warm.get('links',warm.get('edges',[]))}
+            rows.append(dict(repository=repo,tool=tool,trial=0,nodesRemoved=len(cn.keys()-wn.keys()),nodesAdded=len(wn.keys()-cn.keys()),removedNodeRecords=[cn[k] for k in sorted(cn.keys()-wn.keys())],changedNodeFields=dict(fields),edgesRemoved=len(ce-we),edgesAdded=len(we-ce),removedEdgeRecords=[json.loads(s) for s in sorted(ce-we)],changedRootFields=[k for k in cold.keys()|warm.keys() if k not in ['nodes','links','edges'] and cold.get(k)!=warm.get(k)]))
+    (ROOT/'graph-transition-audit.json').write_text(json.dumps({'method':'Trial-0 fresh versus unchanged exact serialized records, all five repositories and both Graphify clustering backends. Other trials retain raw graph digests; this is not whole-graph correctness adjudication.','observations':rows},indent=2)+'\n')
+    print(json.dumps(rows,indent=2))
+
+if __name__=='__main__':main()

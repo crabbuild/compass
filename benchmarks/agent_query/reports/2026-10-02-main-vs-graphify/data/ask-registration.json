@@ -1,0 +1,7 @@
+{
+  "protocol": "Ten existing source-reviewed caller/callee tasks, identical question text and 2000-token budget; Compass ask versus Graphify query. Three repetitions, all four variants. These reuse source facts from the structured panel; do not count them as independent source labels.",
+  "registeredAt": "2026-10-02T18:10:13.794695+00:00",
+  "registeredBeforeAnyQueryExecution": true,
+  "suite": "${COMPASS_CHECKOUT}/benchmarks/agent_query/suite_ask.toml",
+  "suiteSha256": "ea1306f24b1f612f78f5d4e579df21d07ac8537dc49bbb403be1eddce71110e4"
+}

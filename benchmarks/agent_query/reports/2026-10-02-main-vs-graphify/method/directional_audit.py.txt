@@ -1,0 +1,67 @@
+"""Post-capture source check; preserves the registered text scores unchanged."""
+import hashlib,json,re
+from datetime import datetime,timezone
+from pathlib import Path
+from evaluate import ROOT
+from source_audit import identity
+from benchmarks.agent_query.heldout_three_language_edge_review import edge_site
+
+SELECT={
+ 'cobra2-callers-find':('cobra','callers',[('ExecuteC','Find',1123)]),
+ 'cobra2-callees-executec':('cobra','callees',[('ExecuteC','Traverse',1121),('ExecuteC','Find',1123),('ExecuteC','execute',1148)]),
+ 'flask2-callers-fulldispatch':('flask','callers',[('wsgi_app','full_dispatch_request',1600)]),
+ 'flask2-callees-fulldispatch':('flask','callees',[('full_dispatch_request','preprocess_request',1017),('full_dispatch_request','dispatch_request',1019),('full_dispatch_request','finalize_request',1022)]),
+ 'gson2-callers-newjsonwriter':('gson','callers',[('toJson','newJsonWriter',642),('toJson','newJsonWriter',724)]),
+ 'gson2-callees-newjsonwriter':('gson','callees',[('newJsonWriter','setFormattingStyle',802),('newJsonWriter','setHtmlSafe',803),('newJsonWriter','setStrictness',804),('newJsonWriter','setSerializeNulls',805)]),
+ 'zod2-callers-detectversion':('zod','callers',[('fromJSONSchema','detectVersion',931)]),
+ 'zod2-callees-convertschema':('zod','callees',[('convertSchema','convertBaseSchema',814)]),
+ 'axum2-callers-validate-path':('axum','callers',[('route','validate_path',71),('route_endpoint','validate_path',125)]),
+ 'axum2-callees-validate-path':('axum','callees',[('validate_path','validate_v07_paths',30)]),
+}
+
+def terminal(label):return label.split('(',1)[0].replace('::','.').rsplit('.',1)[-1]
+
+def displayed(lines,variant,kind,fact):
+    matches=[]
+    for line in lines:
+        if variant.startswith('compass'):
+            m=re.match(r'^- (.*?) --calls--> (.*?) · (.+?):L(\d+)',line)
+            hit=m and terminal(m[1])==fact['source']['symbol'] and terminal(m[2])==fact['target']['symbol'] and (m[3],int(m[4]))==(fact['site']['file'],fact['site']['line'])
+        else:
+            pattern=r'^- (.*?) \[calls\] (.+?):L(\d+)' if kind=='callers' else r'^\s+--> (.*?) \[calls\] \[[^]]+\] (.+?):L(\d+)'
+            m=re.match(pattern,line)
+            hit=m and terminal(m[1])==fact['source' if kind=='callers' else 'target']['symbol'] and (m[2],int(m[3]))==(fact['site']['file'],fact['site']['line'])
+        if hit:matches.append(line)
+    return matches
+
+def main():
+    oracle=json.loads((ROOT/'source-call-oracle.json').read_text())
+    observations=json.loads((ROOT/'queries.json').read_text())
+    entries=json.loads((ROOT/'graphs.json').read_text())
+    graphs={(e['repository'],e['tool']):json.loads(Path(e['graph']).read_text()) for e in entries}
+    rows=[]
+    for obs in observations:
+        if obs['panel']!='structured' or obs['question'] not in SELECT:continue
+        repo,kind,required=SELECT[obs['question']];variant=obs['variant']
+        directory=ROOT/'queries'/'structured'/repo/variant/f"trial-{obs['trial']}"
+        paths=sorted(directory.glob(obs['question']+'.*.stdout'))
+        assert paths and all(p.stat().st_size<=16*1024*1024 for p in paths)
+        lines='\n'.join(p.read_text() for p in paths).splitlines();checks=[]
+        graph=graphs[(repo,variant)];tool='compass' if variant.startswith('compass') else 'graphify'
+        for src,tgt,site in required:
+            facts=[f for f in oracle['positive'] if f['repository']==repo and f['source']['symbol']==src and f['target']['symbol']==tgt and f['site']['line']==site]
+            assert len(facts)==1
+            fact=facts[0];sn=[n for n in graph['nodes'] if identity(n,tool,fact['source'])];tn=[n for n in graph['nodes'] if identity(n,tool,fact['target'])]
+            edges=[] if len(sn)!=1 or len(tn)!=1 else [e for e in graph.get('links',graph.get('edges',[])) if e['source']==sn[0]['id'] and e['target']==tn[0]['id'] and (e.get('kind') or e.get('relation'))=='calls' and edge_site(e,tool)==(fact['site']['file'],fact['site']['line'])]
+            matched=displayed(lines,variant,kind,fact)
+            checks.append(dict(source=fact['source'],target=fact['target'],site=fact['site'],displayedCorrectDirectionAndSite=bool(matched),graphExactIdentityAndOccurrence=len(edges)==1,matchedLines=matched,passed=bool(matched) and len(edges)==1))
+        rows.append(dict(question=obs['question'],repository=repo,variant=variant,trial=obs['trial'],originalTextPass=obs['passed'],passed=all(c['passed'] for c in checks),requirements=checks,stdoutSha256={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}))
+    assert len(rows)==120
+    result={'auditedAt':datetime.now(timezone.utc).isoformat(),'method':'Post-capture audit after observing a text-score false pass. Ten caller/callee tasks, 19 task requirements, 18 distinct facts selected from the before-build source oracle. Requires displayed calls in the requested direction at the reviewed site and graph support from unique exact source declarations. Does not adjudicate all extra output or estimate whole-answer precision. Original text scores unchanged. Gson caller check requires both reviewed overloads, a stricter requirement than the original name-only question.','sourceOracleSha256':hashlib.sha256((ROOT/'source-call-oracle.json').read_bytes()).hexdigest(),'scores':{},'observations':rows}
+    for variant in ['compass','compass-sqlite','graphify','graphify-leiden']:
+        grouped=[[a for a in rows if a['variant']==variant and a['question']==q] for q in SELECT]
+        result['scores'][variant]={'passedAllTrials':sum(all(a['passed'] for a in group) for group in grouped),'questions':len(grouped),'failedQuestions':[group[0]['question'] for group in grouped if not all(a['passed'] for a in group)]}
+    (ROOT/'directional-query-audit.json').write_text(json.dumps(result,indent=2)+'\n')
+    print(json.dumps(result['scores'],indent=2))
+
+if __name__=='__main__':main()

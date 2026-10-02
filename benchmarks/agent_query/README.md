@@ -9,6 +9,14 @@ question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
 source or design-quality judgments.
 
+The [2026-10-02 comparison](reports/2026-10-02-main-vs-graphify/REPORT.md)
+records Compass main `b7b7fa81` (0.4.1) against Graphify 0.9.74 on these five
+language panels, with JSON/SQLite and base/native-Leiden configurations kept
+separate. It retains 120 builds, 1,020 query workflows, source oracles, raw
+transcripts and path-normalized method snapshots. These selected development
+inputs and shared-host timings are diagnostic evidence; text recall and the
+post-capture directional audit have distinct scoring requirements.
+
 Five suites share the harness:
 
 | Suite | Questions | Shape |

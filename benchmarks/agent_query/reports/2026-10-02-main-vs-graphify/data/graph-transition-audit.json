@@ -1,0 +1,331 @@
+{
+  "method": "Trial-0 fresh versus unchanged exact serialized records, all five repositories and both Graphify clustering backends. Other trials retain raw graph digests; this is not whole-graph correctness adjudication.",
+  "observations": [
+    {
+      "changedNodeFields": {
+        "_origin": 24
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "cobra",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 24
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "cobra",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 66
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "flask",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 66
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "flask",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 237
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "gson",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 237
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "gson",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 39,
+        "community": 4787
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 5,
+      "nodesAdded": 0,
+      "nodesRemoved": 4,
+      "removedEdgeRecords": [
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "configs_rollup_config",
+          "source_file": ".configs/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_bench_benchutil",
+          "source_file": "packages/bench/benchUtil.ts",
+          "target": "zod4"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_docs_next_config",
+          "source_file": "packages/docs/next.config.mjs",
+          "target": "next"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_treeshake_rollup_config",
+          "source_file": "packages/treeshake/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_zod_src_v4_classic_tests_error_test",
+          "source_file": "packages/zod/src/v4/classic/tests/error.test.ts",
+          "target": "v4"
+        }
+      ],
+      "removedNodeRecords": [
+        {
+          "_origin": "ast",
+          "community": 175,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "next",
+          "label": "next",
+          "norm_label": "next",
+          "source_file": "next"
+        },
+        {
+          "_origin": "ast",
+          "community": 74,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "rollup",
+          "label": "rollup",
+          "norm_label": "rollup",
+          "source_file": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "community": 115,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "v4",
+          "label": "zod/v4",
+          "norm_label": "zod/v4",
+          "source_file": "zod/v4"
+        },
+        {
+          "_origin": "ast",
+          "community": 36,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "zod4",
+          "label": "zod4",
+          "norm_label": "zod4",
+          "source_file": "zod4"
+        }
+      ],
+      "repository": "zod",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 39,
+        "community": 4287
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 5,
+      "nodesAdded": 0,
+      "nodesRemoved": 4,
+      "removedEdgeRecords": [
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "configs_rollup_config",
+          "source_file": ".configs/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_bench_benchutil",
+          "source_file": "packages/bench/benchUtil.ts",
+          "target": "zod4"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_docs_next_config",
+          "source_file": "packages/docs/next.config.mjs",
+          "target": "next"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_treeshake_rollup_config",
+          "source_file": "packages/treeshake/rollup.config.js",
+          "target": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "confidence": "EXTRACTED",
+          "confidence_score": 1.0,
+          "relation": "dynamic_import",
+          "source": "packages_zod_src_v4_classic_tests_error_test",
+          "source_file": "packages/zod/src/v4/classic/tests/error.test.ts",
+          "target": "v4"
+        }
+      ],
+      "removedNodeRecords": [
+        {
+          "_origin": "ast",
+          "community": 52,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "next",
+          "label": "next",
+          "norm_label": "next",
+          "source_file": "next"
+        },
+        {
+          "_origin": "ast",
+          "community": 76,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "rollup",
+          "label": "rollup",
+          "norm_label": "rollup",
+          "source_file": "rollup"
+        },
+        {
+          "_origin": "ast",
+          "community": 114,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "v4",
+          "label": "zod/v4",
+          "norm_label": "zod/v4",
+          "source_file": "zod/v4"
+        },
+        {
+          "_origin": "ast",
+          "community": 46,
+          "confidence": "EXTRACTED",
+          "file_type": "code",
+          "id": "zod4",
+          "label": "zod4",
+          "norm_label": "zod4",
+          "source_file": "zod4"
+        }
+      ],
+      "repository": "zod",
+      "tool": "graphify-leiden",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 108
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "axum",
+      "tool": "graphify",
+      "trial": 0
+    },
+    {
+      "changedNodeFields": {
+        "_origin": 108
+      },
+      "changedRootFields": [],
+      "edgesAdded": 0,
+      "edgesRemoved": 0,
+      "nodesAdded": 0,
+      "nodesRemoved": 0,
+      "removedEdgeRecords": [],
+      "removedNodeRecords": [],
+      "repository": "axum",
+      "tool": "graphify-leiden",
+      "trial": 0
+    }
+  ]
+}

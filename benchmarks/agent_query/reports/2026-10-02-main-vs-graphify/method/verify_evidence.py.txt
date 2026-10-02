@@ -1,0 +1,45 @@
+"""Recheck retained observations and publish hashes without rerunning benchmarks."""
+import hashlib,json,subprocess
+from datetime import datetime,timezone
+from pathlib import Path
+from evaluate import ROOT,REPO,SUITES,SOURCES,runner
+
+def digest(path):
+    h=hashlib.sha256()
+    with path.open('rb') as stream:
+        while chunk:=stream.read(1024*1024):h.update(chunk)
+    return h.hexdigest()
+
+def package_digest(environment):
+    files=sorted((ROOT/environment/'lib/python3.12/site-packages/graphify').rglob('*.py'))
+    return hashlib.sha256(''.join(str(p.relative_to(files[0].parents[1]))+':'+digest(p)+'\n' for p in files).encode()).hexdigest()
+
+def main():
+    read=lambda name:json.loads((ROOT/name).read_text())
+    builds=read('builds.json');queries=read('queries.json');graphs=read('graphs.json');identities=read('tool-identities.json')
+    assert len(builds)==120 and len(queries)==1020 and len(graphs)==20
+    assert len({(a['repository'],a['tool'],a['store'],a['trial'],a['mode']) for a in builds})==120
+    assert len({(a['panel'],a['question'],a['variant'],a['trial']) for a in queries})==1020
+    for row in builds:assert digest(Path(row['graph']))==row['graphSha256']
+    graph_digests={}
+    for entry in graphs:
+        assert digest(Path(entry['graph']))==entry['sha256']
+        graph_digests[(entry['repository'],entry['tool'])]=entry['sha256']
+    for row in queries:assert row['graphSha256']==graph_digests[(row['repository'],row['variant'])]
+    for repo in SUITES['structured'].repositories:runner._verify_source(repo,SOURCES[repo.name])
+    for repo,files in read('source-call-oracle.json')['sourceSha256'].items():
+        for file,sha in files.items():assert digest(SOURCES[repo]/file)==sha
+    for tool in ['compass','graphify']:assert digest(Path(identities[tool]['binary']))==identities[tool]['binarySha256']
+    for environment in ['graphify-venv','graphify-leiden-venv']:assert package_digest(environment)==identities['graphifyPackageSourceSha256']
+    assert digest(REPO/'benchmarks/agent_query/runner.py')==identities['runnerSha256']
+    assert digest(REPO/'benchmarks/performance/compass/measure_child.py')==identities['measurementSha256']
+    head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True,timeout=30).strip()
+    assert head==identities['compassSource']
+    data=dict(verifiedAt=datetime.now(timezone.utc).isoformat(),compassHead=head,buildObservations=120,queryObservations=1020,verifiedFrozenGraphs=120,queryTimeouts=sum(a['timedOut'] for a in queries),sourceVerification='All five pinned clean corpus HEADs, suite source digests and before-build call-oracle source digests passed.',scriptsSha256={p.name:digest(p) for p in sorted(ROOT.glob('*.py'))},verification='Graph digests, query graph identities, binary identities, both Graphify package source trees and benchmark helper identities unchanged.')
+    (ROOT/'completion-verification.json').write_text(json.dumps(data,indent=2)+'\n')
+    paths=sorted([p for p in ROOT.iterdir() if p.is_file() and p.suffix in ['.json','.py','.go','.md','.txt'] and p.name!='evidence-manifest.json']+[p for directory in ['logs','queries'] for p in (ROOT/directory).rglob('*') if p.is_file()])
+    manifest={'method':'SHA-256 of report, task scripts, root-level evidence and raw logs/query streams. Each frozen graph digest is recorded and checked separately in builds.json. Tool environments and build caches are excluded.','files':{str(p.relative_to(ROOT)):digest(p) for p in paths}}
+    (ROOT/'evidence-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    print('Verified 120 frozen graphs, 20 query graphs, 1,020 graph-pinned query observations, source and tool identities; hashed',len(paths),'evidence files.')
+
+if __name__=='__main__':main()

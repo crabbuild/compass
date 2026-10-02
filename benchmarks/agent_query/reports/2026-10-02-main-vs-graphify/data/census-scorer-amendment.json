@@ -1,0 +1,6 @@
+{
+  "afterInitialGraphCaptureBeforeCensusScoring": true,
+  "at": "2026-10-02T18:12:32.505321+00:00",
+  "censusScriptSha256": "17beeed9c6932c94146462312cfcf24c1d27a637c4f23e4094e62444a5c96086",
+  "reason": "Graphify clustered AST nodes omit kind/type in their published schema, including normal function nodes. The scorer must not reject a field solely for an absent optional kind. Require the same exact source file, identifier line, name, unique declaration, and direct containment by the exact source type. Allow absent kind or field/property/attribute; reject contradictory explicit kinds. Source files and expected declarations are unchanged."
+}

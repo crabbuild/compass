@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-02T17:44:20.176716+00:00",
+  "limitation": "Other user workloads are active, including virtual machines. Do not stop them. Retain per-sample host load, alternating tool order, CPU time and wall-time ranges. This shared host run is diagnostic timing, not a controlled production performance ranking.",
+  "load": [
+    22.978515625,
+    28.1298828125,
+    29.13623046875
+  ],
+  "memoryMethod": "Fresh helper process uses RUSAGE_CHILDREN.ru_maxrss. This is reported child peak RSS, not summed concurrent process-tree RSS; Graphify parallel worker totals are not measured.",
+  "recordedBeforeMeasurements": true,
+  "sourceOracleSha256": "6ca39fa9bb5aabd90f6983f0456c95734dc11b2f0c131b5018352d2d3418c216"
+}
