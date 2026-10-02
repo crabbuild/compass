@@ -53,13 +53,6 @@
       "url": "https://github.com/tokio-rs/axum.git",
       "commit": "af1345b53a259b0990be1ff853f9b56c05040ef7",
       "language": "Rust",
-      "compassBuildExit": 0,
-      "compassBuildMs": 18958,
-      "compassBuildReport": [
-        "Written to: /Volumes/Workspace/CrabData/compass-evaluations/natural-query-answers-20260930/artifacts/axum/compass/compass-out",
-        "Program analysis: 0 syntax analyzed, 0 syntax reused, 0 artifacts loaded, 0 artifacts reused, 0 artifact documents analyzed, 0 artifact documents reused, 0 modules, 0 summaries, 0 conflicts",
-        "Compass extract completed in 18.93s wall time."
-      ],
       "compassGraphSha256": "71b436edc18e63e314799c97564a8a4faf8cf54632d5c0fc186816a33fdec8d6",
       "graphifyGraphSha256": "6ed791a771190e98ba2905e08480a9fa6ed733f46d56212ae3a4c90018d79b52"
     }
