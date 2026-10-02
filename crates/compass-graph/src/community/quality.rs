@@ -680,7 +680,7 @@ fn combination_two(count: usize) -> f64 {
     count.saturating_mul(count.saturating_sub(1)) as f64 / 2.0
 }
 
-fn connected_component_count(graph: &WeightedGraph, members: &BTreeSet<usize>) -> usize {
+pub(super) fn connected_component_count(graph: &WeightedGraph, members: &BTreeSet<usize>) -> usize {
     let mut remaining = members.clone();
     let mut components = 0usize;
     while let Some(start) = remaining.pop_first() {

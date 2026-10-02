@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use compass_model::code_graph::GraphDocument;
 
 use super::leiden::{CommunityDetectorError, leiden_anchored};
+use super::quality::connected_component_count;
 use crate::cluster::{Communities, IncrementalClusterLimits, WeightedGraph};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,6 +151,21 @@ pub(crate) fn prepare_anchored_topology(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let mut previous_members = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for (position, id) in graph.ids.iter().enumerate() {
+        if let Some(community) = previous.get(id) {
+            previous_members
+                .entry(*community)
+                .or_default()
+                .insert(position);
+        }
+    }
+    let mut touched = previous_members
+        .iter()
+        .filter_map(|(community, members)| {
+            (connected_component_count(graph, members) > 1).then_some(*community)
+        })
+        .collect::<BTreeSet<_>>();
     let mut affected = graph
         .ids
         .iter()
@@ -162,13 +178,14 @@ pub(crate) fn prepare_anchored_topology(
             (!previous.contains_key(id) || changed).then_some(position)
         })
         .collect::<BTreeSet<_>>();
-    if affected.is_empty() {
+    touched.extend(
+        affected
+            .iter()
+            .filter_map(|position| previous.get(&graph.ids[*position]).copied()),
+    );
+    if affected.is_empty() && touched.is_empty() {
         return IncrementalPreparation::Unchanged(communities_from_previous(graph, previous));
     }
-    let touched = affected
-        .iter()
-        .filter_map(|position| previous.get(&graph.ids[*position]).copied())
-        .collect::<BTreeSet<_>>();
     for (position, id) in graph.ids.iter().enumerate() {
         if previous
             .get(id)

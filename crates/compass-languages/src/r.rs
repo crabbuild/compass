@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 
 use crate::facts::source_range;
 use crate::{Extraction, RawCall, file_stem, make_id};
+use sha2::{Digest, Sha256};
 
 const NON_CALLS: &[&str] = &[
     "function", "if", "for", "while", "repeat", "switch", "return",
@@ -22,6 +23,7 @@ struct Function {
     end: usize,
     id: String,
     name: String,
+    qualified_name: String,
     parent: Option<String>,
 }
 
@@ -59,13 +61,18 @@ impl<'a> State<'a> {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
-        self.add_node(&self.file_id.clone(), label, 1);
+        self.add_node(&self.file_id.clone(), label, label, 1);
         self.add_imports();
 
         let functions = self.functions();
         for function in &functions {
             let at = self.line_at(function.start);
-            self.add_node(&function.id, &format!("{}()", function.name), at);
+            self.add_node(
+                &function.id,
+                &format!("{}()", function.name),
+                &function.qualified_name,
+                at,
+            );
             let container = function
                 .parent
                 .as_deref()
@@ -168,12 +175,22 @@ impl<'a> State<'a> {
                 .filter(|function| function.start < start && end <= function.end)
                 .min_by_key(|function| function.end - function.start)
                 .map(|function| function.id.clone());
-            let id = make_id(&[parent.as_deref().unwrap_or(&self.stem), &name]);
+            let qualified_name = parent
+                .as_deref()
+                .and_then(|parent_id| functions.iter().find(|function| function.id == parent_id))
+                .map_or_else(
+                    || format!("{name}()"),
+                    |parent| format!("{}::{name}()", parent.qualified_name),
+                );
+            let identity = format!("{}::{qualified_name}", self.stem);
+            let digest = format!("{:x}", Sha256::digest(identity.as_bytes()));
+            let id = make_id(&[&self.stem, &qualified_name, &digest]);
             functions.push(Function {
                 start,
                 end,
                 id,
                 name,
+                qualified_name,
                 parent,
             });
         }
@@ -242,12 +259,16 @@ impl<'a> State<'a> {
         }
     }
 
-    fn add_node(&mut self, id: &str, label: &str, at: usize) {
+    fn add_node(&mut self, id: &str, label: &str, qualified_name: &str, at: usize) {
         if !self.seen.insert(id.to_owned()) {
             return;
         }
         let mut attributes = Map::new();
         attributes.insert("label".into(), Value::String(label.to_owned()));
+        attributes.insert(
+            "qualified_name".into(),
+            Value::String(qualified_name.to_owned()),
+        );
         attributes.insert("file_type".into(), Value::String("code".into()));
         attributes.insert(
             "source_file".into(),

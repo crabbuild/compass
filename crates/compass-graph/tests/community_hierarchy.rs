@@ -1014,6 +1014,101 @@ fn an_edit_sequence_reports_appeared_and_disappeared_groups() -> TestResult {
 }
 
 #[test]
+fn reconciliation_does_not_reuse_a_retained_id_for_reappearing_membership() -> TestResult {
+    let budget = HierarchyBudget {
+        max_levels: 1,
+        ..HierarchyBudget::default()
+    };
+    let single = |size| {
+        Communities::from([(
+            0usize,
+            (0..size)
+                .map(|index| format!("cluster0_symbol{index}"))
+                .collect::<Vec<_>>(),
+        )])
+    };
+    let mut previous_communities = single(2);
+    let mut previous = hierarchy_of(
+        &clustered_document(1, 2, false),
+        &previous_communities,
+        1.0,
+        budget,
+    )?;
+    let original_id = previous.levels[0].groups[0].id.clone();
+    for size in [4, 8] {
+        let next_communities = single(size);
+        let mut next = hierarchy_of(
+            &clustered_document(1, size, false),
+            &next_communities,
+            1.0,
+            budget,
+        )?;
+        reconcile_hierarchy(
+            &previous,
+            &previous_communities,
+            &mut next,
+            &next_communities,
+            &ReconcilePolicy::default(),
+        )?;
+        assert_eq!(next.levels[0].groups[0].id, original_id);
+        previous = next;
+        previous_communities = next_communities;
+    }
+
+    let mut initial_members = single(2);
+    let split = Communities::from([
+        (
+            0usize,
+            initial_members
+                .remove(&0)
+                .ok_or("missing initial members")?,
+        ),
+        (
+            1usize,
+            (2..8)
+                .map(|index| format!("cluster0_symbol{index}"))
+                .collect::<Vec<_>>(),
+        ),
+    ]);
+    let document = clustered_document(1, 8, false);
+    let mut next = hierarchy_of(&document, &split, 1.0, budget)?;
+    let report = reconcile_hierarchy(
+        &previous,
+        &previous_communities,
+        &mut next,
+        &split,
+        &ReconcilePolicy::default(),
+    )?;
+    next.validate()?;
+    assert_eq!(report.stable, 1);
+    assert_eq!(next.levels[0].groups[1].id, original_id);
+    assert_ne!(next.levels[0].groups[0].id, original_id);
+    let final_ids = next.levels[0]
+        .groups
+        .iter()
+        .map(|group| group.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        report
+            .events
+            .iter()
+            .flat_map(|event| &event.next_ids)
+            .all(|id| { final_ids.contains(id.as_str()) })
+    );
+
+    let mut repeated = hierarchy_of(&document, &split, 1.0, budget)?;
+    reconcile_hierarchy(
+        &previous,
+        &previous_communities,
+        &mut repeated,
+        &split,
+        &ReconcilePolicy::default(),
+    )?;
+    assert_eq!(serde_json::to_vec(&next)?, serde_json::to_vec(&repeated)?);
+    Ok(())
+}
+
+#[test]
 fn limits_fail_with_a_typed_error_instead_of_truncating() -> TestResult {
     let document = clustered_document(4, 3, true);
     let result = partition(&document)?;

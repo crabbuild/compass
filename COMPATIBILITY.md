@@ -74,6 +74,42 @@ and AST cache semantics are unchanged. Content reads use the configured graph
 byte cap; this correctness correction makes no latency or memory improvement
 claim.
 
+## Extractor identity and community reconciliation corrections
+
+The AST extraction cache identity advances from 15 to 16, and graph publication
+semantics advance from compass.graph.publication/1 to /2. Existing current
+builds invalidate their cached extraction/publication state and rebuild
+coherently. The compass.graph/1 schema and universal evidence schema do not
+change; published historical realizations remain immutable.
+
+An empty Bash script publishes its file inventory without a synthetic
+zero-range entrypoint. R function identities now include lexical owners for
+nested functions, and exact case and punctuation remain part of the function
+name. Top-level R qualified names keep their existing spelling. Markdown table
+row identities append a digest of the full, exact identity key to the readable
+qualified-name prefix; row and cell IDs remain stable across line shifts and
+non-identity edits. Existing Markdown table-row and cell IDs change once on
+rebuild.
+
+HTML table and row nodes use source-occurrence identity, so equal visible text
+does not merge different elements. Local HTML references originate at their
+<a> or <link> node and point to the uniquely resolved target. A link to its
+own fragment remains part of the link count but does not publish a self-loop.
+Existing HTML table and row IDs change once on rebuild.
+
+Incremental community clustering rechecks whether each prior community remains
+connected in the current topology, even when its source files are unchanged.
+Disconnected prior communities join the bounded affected region and are
+reclustered; the existing affected-region limit can still select the full
+detector fallback.
+
+Hierarchy reconciliation uses hierarchy-signature/v2. If a fresh group ID
+collides with an inherited ID, it receives the first available deterministic
+digest ID within a bounded retry count, and reconciliation events name the
+final IDs. Known hierarchy-signature/v1 artifacts remain readable. The
+hierarchy schema stays at /1, and existing historical sidecars are not
+rewritten.
+
 ## Go struct field declarations
 
 The universal Go producer now publishes one `field` declaration per explicitly

@@ -54,6 +54,9 @@ impl<'source, 'tree> BashState<'source, 'tree> {
             .and_then(|name| name.to_str())
             .unwrap_or_default();
         self.add_node(&self.file_id.clone(), label, 1, "file");
+        if self.source.is_empty() {
+            return self.extraction;
+        }
         self.add_node(
             &self.entry_id.clone(),
             &format!("{label} script"),

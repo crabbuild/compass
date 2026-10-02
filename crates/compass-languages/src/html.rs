@@ -108,6 +108,7 @@ pub(crate) fn extract_source(
         unresolved_links: Vec::new(),
         external_links: Vec::new(),
         diagnostics: Vec::new(),
+        self_link_count: 0,
         next_index: 1,
         hidden_depth: 0,
         base_href: None,
@@ -147,6 +148,7 @@ struct State<'source, 'path> {
     unresolved_links: Vec<Value>,
     external_links: Vec<Value>,
     diagnostics: Vec<String>,
+    self_link_count: usize,
     next_index: usize,
     hidden_depth: usize,
     base_href: Option<String>,
@@ -304,9 +306,9 @@ impl State<'_, '_> {
             self.title = bounded_string(&label);
         }
         if tag == "a" {
-            self.add_pending_link(&attributes, node, "anchor", parent);
+            self.add_pending_link(&attributes, node, "anchor", &id);
         } else if tag == "link" {
-            self.add_pending_link(&attributes, node, "link", parent);
+            self.add_pending_link(&attributes, node, "link", &id);
         }
         self.collect_metadata(&tag, &attributes);
         if tag == "br" {
@@ -376,7 +378,7 @@ impl State<'_, '_> {
         attributes: &Map<String, Value>,
         node: Node<'_>,
         kind: &'static str,
-        parent: Option<&str>,
+        owner_id: &str,
     ) {
         let Some(raw) = attributes
             .get("href")
@@ -389,10 +391,9 @@ impl State<'_, '_> {
             self.add_diagnostic("HTML link limit exceeded");
             return;
         }
-        let owner_id = self.containing_owner(parent);
         self.pending_links.push(PendingLink {
             raw: raw.to_owned(),
-            owner_id,
+            owner_id: owner_id.to_owned(),
             site: self.link_site(node.start_byte(), node.end_byte()),
             kind,
             rel: attributes
@@ -400,42 +401,6 @@ impl State<'_, '_> {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         });
-    }
-
-    fn containing_owner(&self, parent: Option<&str>) -> String {
-        let mut candidate = parent.map(str::to_owned);
-        let mut visited = HashSet::new();
-        while let Some(id) = candidate {
-            if !visited.insert(id.clone()) {
-                break;
-            }
-            if id == self.file_id {
-                return id;
-            }
-            if self
-                .extraction
-                .nodes
-                .iter()
-                .find(|node| node.id == id)
-                .and_then(|node| node.attributes.get("document_kind"))
-                .and_then(Value::as_str)
-                .is_some_and(is_html_block_kind)
-            {
-                return id;
-            }
-            candidate = self
-                .extraction
-                .edges
-                .iter()
-                .rev()
-                .find(|edge| {
-                    edge.target == id
-                        && edge.attributes.get("relation").and_then(Value::as_str)
-                            == Some("contains")
-                })
-                .map(|edge| edge.source.clone());
-        }
-        self.file_id.clone()
     }
 
     fn collect_metadata(&mut self, tag: &str, attributes: &Map<String, Value>) {
@@ -513,6 +478,7 @@ impl State<'_, '_> {
                     .count()
                     .saturating_add(self.external_links.len())
                     .saturating_add(self.unresolved_links.len())
+                    .saturating_add(self.self_link_count)
             ),
         );
         if !self.diagnostics.is_empty() {
@@ -600,7 +566,11 @@ impl State<'_, '_> {
                     let key = fragment.to_ascii_lowercase();
                     match self.anchor_targets.get(&key) {
                         Some(candidates) if candidates.len() == 1 => {
-                            self.add_link_edge(&link, candidates[0].clone(), Some(fragment));
+                            if candidates[0] == link.owner_id {
+                                self.self_link_count = self.self_link_count.saturating_add(1);
+                            } else {
+                                self.add_link_edge(&link, candidates[0].clone(), Some(fragment));
+                            }
                         }
                         Some(_) => self.add_unresolved(&link, "ambiguous_fragment", fragment),
                         None => self.add_unresolved(&link, "missing_fragment", fragment),
@@ -1146,22 +1116,6 @@ fn html_kind(tag: &str) -> &'static str {
         "base" => "base_url",
         _ => "element",
     }
-}
-
-fn is_html_block_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "heading"
-            | "paragraph"
-            | "landmark"
-            | "list"
-            | "list_item"
-            | "blockquote"
-            | "preformatted"
-            | "table"
-            | "table_row"
-            | "table_cell"
-    )
 }
 
 fn heading_level(tag: &str) -> Option<usize> {

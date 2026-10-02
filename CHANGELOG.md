@@ -12,6 +12,14 @@
   limits, profiles and semantic mode, with bounded disposable storage and
   corruption fallback. Reuse one pinned engine across CLI page widening.
 
+- Fix six verified graph edge cases: unchanged communities are reclustered
+  after topology splits; hierarchy reconciliation keeps IDs unique; Markdown
+  and R identities preserve distinct rows, names and lexical scopes; empty
+  shell files publish without a zero-range entrypoint; and HTML table/link
+  occurrences retain their distinct identities and edge sources. Invalidate
+  old extraction and graph-publication caches while keeping known hierarchy
+  signature-v1 artifacts readable.
+
 ## 0.4.1 - 2026-10-01
 
 - Match engineering business vocabulary through bounded synonyms and witnessed
