@@ -15,4 +15,6 @@ apps/web/tsconfig.tsbuildinfo
 /.worktrees/
 __pycache__/
 *.pyc
+# Disposable query/output caches can be created from any working directory.
+**/.compass/cache/
 .DS_Store
