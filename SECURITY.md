@@ -162,7 +162,10 @@ artifact, canonicalize its absolute root, and invoke Git with separate arguments
 They do not infer the root from the caller's current directory. Each invocation
 has a 500 ms deadline and bounded captured output (admitted up to 1 MiB).
 Lazy object fetching, filesystem monitors, external diff programs, text
-conversions and rename heuristics are disabled. Git versions without the
+conversions and rename heuristics are disabled. Configured clean/process
+conversion filters and indexed submodules cause unknown freshness before
+working-file checks, avoiding filter execution and child repository processes.
+Git versions without the
 no-lazy-fetch option report unknown freshness. These are read-only local observations; no checkout,
 hook, network fetch or graph rewrite is performed. Failed checks remain unknown.
 The marked root can be outside the current project; its path appears in the

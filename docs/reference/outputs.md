@@ -1481,7 +1481,9 @@ paths. `uncommittedFiles` counts status entries. Files outside an index scope ca
 be counted: these are repository-state observations, not proof every indexed
 symbol is stale. The statuses are `current`, `revision_changed`,
 `working_tree_changes` and `unknown`. Missing commits, roots, Git, timeout or
-output limits yield `unknown`, never `current`. Warnings show the recorded root's
+output limits yield `unknown`, never `current`. Configured Git conversion filters
+and submodules also yield `unknown`; their working state cannot be checked
+without crossing optional process boundaries. Warnings show the recorded root's
 update command, including the selected output container. Rebuilds publish a new
 generation; select the output container’s public `graph.json` alias afterward
 when the original request selected an immutable snapshot path. Freshness is checked again for each request, including cached

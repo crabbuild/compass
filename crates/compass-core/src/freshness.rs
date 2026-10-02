@@ -7,6 +7,13 @@ use compass_files::read_bytes_bounded;
 use compass_prs::{ProcessRunner, SystemRunner};
 use serde::Serialize;
 
+const FILTER_CONFIG_ARGUMENTS: &[&str] = &[
+    "config",
+    "--name-only",
+    "--get-regexp",
+    r"^filter\..*\.(clean|process)$",
+];
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphFreshness {
@@ -166,6 +173,10 @@ fn graph_freshness_with_runner(
         let output = runner
             .run("git", &arguments, Duration::from_millis(500))
             .map_err(|_| "bounded Git freshness check unavailable")?;
+        // Exit 1 means this exact config lookup found no matching keys.
+        if output.code == 1 && args == FILTER_CONFIG_ARGUMENTS && output.stdout.is_empty() {
+            return Ok(String::new());
+        }
         if output.code != 0 {
             return Err(
                 "Git cannot verify the graph's recorded revision in this source root".into(),
@@ -187,6 +198,18 @@ fn graph_freshness_with_runner(
             return Err("Git returned an invalid HEAD revision".into());
         }
         result.head_commit = Some(head.to_owned());
+        // Diff/status may invoke clean/process filters or child Git commands
+        // in submodules. Do not inspect working bytes across those boundaries.
+        if !git(FILTER_CONFIG_ARGUMENTS)?.is_empty() {
+            return Err("Git conversion filters prevent an offline working-tree check".into());
+        }
+        let modes = git(&["ls-files", "--format=%(objectmode)", "-z"])?;
+        if !modes.is_empty() && !modes.ends_with('\0') {
+            return Err("Git returned malformed index modes".into());
+        }
+        if modes.split_terminator('\0').any(|mode| mode == "160000") {
+            return Err("submodule state is outside the bounded freshness check".into());
+        }
         let diff = git(&[
             "diff",
             "--no-ext-diff",
@@ -254,10 +277,13 @@ fn shell_quote(text: &str) -> String {
 mod tests {
     use super::*;
     use compass_prs::{ProcessOutput, PrsError};
+    #[derive(Default)]
     struct Fake {
         head: String,
         status: &'static str,
         fail: bool,
+        filters: bool,
+        submodules: bool,
     }
     impl ProcessRunner for Fake {
         fn run(
@@ -277,6 +303,18 @@ mod tests {
             }
             let stdout = if args.iter().any(|arg| arg == "rev-parse") {
                 self.head.clone()
+            } else if args.iter().any(|arg| arg == "config") {
+                if self.filters {
+                    "filter.spy.clean\n".into()
+                } else {
+                    String::new()
+                }
+            } else if args.iter().any(|arg| arg == "ls-files") {
+                if self.submodules {
+                    "160000\0".into()
+                } else {
+                    "100644\0".into()
+                }
             } else if args.iter().any(|arg| arg == "status") {
                 self.status.into()
             } else if self.status.is_empty() {
@@ -285,7 +323,13 @@ mod tests {
                 "app/a.py\0".into()
             };
             Ok(ProcessOutput {
-                code: i32::from(self.fail),
+                code: if self.fail {
+                    7
+                } else if args.iter().any(|arg| arg == "config") && !self.filters {
+                    1
+                } else {
+                    0
+                },
                 stdout,
                 stderr: String::new(),
             })
@@ -303,6 +347,7 @@ mod tests {
             head: commit.clone(),
             status: "",
             fail: false,
+            ..Fake::default()
         };
         let invalid =
             graph_freshness_with_runner(&graph, Some(&commit), &fake).ok_or("freshness")?;
@@ -352,6 +397,7 @@ mod tests {
             head: "b".repeat(40),
             status: " M app/a.py\0?? new.py\0",
             fail: false,
+            ..Fake::default()
         };
         assert!(graph_freshness_with_runner(&graph, Some(&commit), &fake).is_none());
         std::fs::write(
@@ -373,6 +419,26 @@ mod tests {
             graph_freshness_with_runner(&graph, Some(&commit), &fake).ok_or("freshness")?;
         assert_eq!(current.status, FreshnessStatus::Current);
         assert!(current.warning().is_none());
+        fake.filters = true;
+        let filtered =
+            graph_freshness_with_runner(&graph, Some(&commit), &fake).ok_or("freshness")?;
+        assert_eq!(filtered.status, FreshnessStatus::Unknown);
+        assert!(
+            filtered
+                .reason
+                .is_some_and(|reason| reason.contains("conversion filters"))
+        );
+        fake.filters = false;
+        fake.submodules = true;
+        let submodules =
+            graph_freshness_with_runner(&graph, Some(&commit), &fake).ok_or("freshness")?;
+        assert_eq!(submodules.status, FreshnessStatus::Unknown);
+        assert!(
+            submodules
+                .reason
+                .is_some_and(|reason| reason.contains("submodule"))
+        );
+        fake.submodules = false;
         fake.fail = true;
         let unknown =
             graph_freshness_with_runner(&graph, Some(&commit), &fake).ok_or("freshness")?;

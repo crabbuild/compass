@@ -15,6 +15,8 @@ fn token_count(text: &str) -> usize {
 fn execute(root: &Path, args: &[&str]) -> Result<Output, Box<dyn Error>> {
     Ok(support::compass_command()
         .current_dir(root)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", root.join(".unused-global-config"))
         .args(args)
         .output()?)
 }
@@ -185,6 +187,8 @@ fn hotspot_counts_keep_optional_evidence_and_global_contacts_explicit() -> Resul
 
 fn git(root: &Path, args: &[&str]) -> Result<String, Box<dyn Error>> {
     let output = Command::new("git")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", root.join(".unused-global-config"))
         .args(["-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false"])
         .arg("-c")
         .arg(format!(
@@ -282,6 +286,21 @@ fn freshness_follows_the_recorded_root_and_is_rechecked_on_cached_queries()
             .saturating_add(token_count(&String::from_utf8(capped.stderr)?))
             <= 200
     );
+    git(
+        root,
+        &[
+            "config",
+            "filter.spy.clean",
+            "echo invoked > freshness-filter-ran",
+        ],
+    )?;
+    fs::write(root.join(".gitattributes"), "src/lib.rs filter=spy\n")?;
+    fs::write(root.join("src/lib.rs"), "filtered change")?;
+    let filtered = execute(elsewhere.path(), &args)?;
+    assert!(filtered.status.success());
+    assert!(String::from_utf8_lossy(&filtered.stderr).contains("conversion filters"));
+    assert!(!root.join("freshness-filter-ran").exists());
+    let _: Value = serde_json::from_slice(&filtered.stdout)?;
     fs::remove_file(root.join("source-root.txt"))?;
     assert!(
         !String::from_utf8_lossy(&execute(elsewhere.path(), &args)?.stderr).contains("Graph built")
