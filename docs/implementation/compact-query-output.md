@@ -33,3 +33,11 @@ they do not independently establish precision or population-wide accuracy.
 
 Exact-only lookup and source-bearing exploration remain native indexed queries;
 the response cache does not promise acceleration for those paths.
+
+The [recorded optimized replay](../../benchmarks/agent_query/compact_query_output_review.json)
+keeps every native oracle verdict: 49/50 standard questions at 363.76 mean
+estimated tokens versus the comparator's 549.74, and 24/25 natural questions at
+547.44 versus 757.44. The [performance reference](../../PERFORMANCE.md#compact-query-text-and-complete-response-caching)
+records both remaining failures, slightly larger natural answers, cold-run
+regressions and the partial Gson graph that intentionally remains uncached.
+All repeated raw JSON answers match across both optimized binaries.
