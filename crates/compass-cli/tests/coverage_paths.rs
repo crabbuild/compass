@@ -640,6 +640,7 @@ fn completed_read_query_diagnostic_merge_tree_and_export_commands_run_end_to_end
         vec![
             "query".to_owned(),
             "attention".to_owned(),
+            "--traverse".to_owned(),
             "--budget=100".to_owned(),
             format!("--graph={graph}"),
         ],
@@ -814,6 +815,7 @@ fn split_value_read_export_and_cluster_forms_complete_against_a_real_graph()
         vec![
             "query".to_owned(),
             "attention".to_owned(),
+            "--traverse".to_owned(),
             "--budget".to_owned(),
             "80".to_owned(),
             "--graph".to_owned(),

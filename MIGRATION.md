@@ -5,6 +5,22 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Compact output and budgets
+
+Typed query text is compact by default. Select `--verbose` or `--evidence` to
+recover audit status and per-record provenance. JSON contracts are unchanged.
+Keep that mode fixed between cursor pages; restart the query when switching.
+
+`query --budget N` now bounds output instead of selecting legacy traversal.
+Add `--traverse` or `--page` if the old relevance renderer is required.
+Budgets accept 32–65536 approximate tokens and include continuation instructions.
+Follow `compass output ID --offset BYTE --budget N` from the same directory for
+commands that save their completed output. Saved answers can be evicted; the
+reader never repeats an action. Oversized machine output fails intact; omit the
+budget or read the saved record with a large enough budget. Streaming events,
+watch, REPL and serve reject this finite-output control; budgeted init needs `--yes`.
+No graph rebuild is required for compact text or disposable response caching.
+
 ## Graph rebuilds and query resolution
 
 To enable full bounded document/prose recall, rebuild with

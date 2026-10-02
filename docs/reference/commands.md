@@ -329,7 +329,7 @@ relationship context, and DFS compose within that contract. `--result-envelope`
 requires `--format json` and opt-in wraps the unchanged discovery result in
 `compass.query.discovery-result/1` with a query-owned `semanticResultDigest`.
 Without this flag, the existing JSON shape remains unchanged. `--traverse`,
-`--budget`, or `--page` explicitly select legacy relevance traversal and cannot
+or `--page` explicitly select legacy relevance traversal and cannot
 be mixed with discovery controls. CompassQL routing is unchanged.
 The default focused neighborhood is 64 nodes and 128 edges. Use
 `--max-nodes 500 --max-edges 1000` when a query intentionally needs the full
@@ -346,15 +346,15 @@ semantic digest. `--evidence` selects the full audit projection. Exact-looking
 operands that do not resolve emit `NO EXACT MATCH`; bounded fuzzy and lexical
 candidates can still follow as suggestions but are not represented as exact.
 
-`--text-budget` bounds the discovery text projection and defaults to 8,000
+`--text-budget` bounds the discovery text projection and defaults to 800
 approximate tokens. Its opaque cursor binds
 the contract version, normalized request/options, selected graph generation and
 digest, semantic-response digest, evidence tier, and next stable section/item.
 Fetch the next page with `--cursor TOKEN` and otherwise unchanged semantic inputs. The
 presentation-only `--text-budget` may change between pages. Pages contain whole
 deterministic entries; changed inputs fail instead of silently continuing a
-different result. JSON rejects text pagination controls. Legacy `--budget` and
-numeric `--page` retain their existing meaning only with legacy traversal.
+different result. JSON rejects text pagination controls. `--budget N` bounds completed output
+on all finite commands; use `--traverse` or numeric `--page` for legacy traversal.
 
 Query seeds prefer source-backed declarations over unresolved external-symbol
 placeholders with the same callable label. Source-less placeholder nodes retain
@@ -523,7 +523,7 @@ it prints.
 `compass.query/1` response and is the right choice when an audit consumer needs
 every evidence record. The natural `query` command accepts the same
 `agent-json` format for discovery; its text header is answer-first while the
-existing discovery entry ledger and v2 cursor semantics are unchanged.
+existing discovery entry ledger and v3 cursor semantics are unchanged.
 
 Text output is paged. `--text-budget <N>` sets the approximate token budget of
 one page (default 2000) and the closing `Pagination:` line carries a
@@ -601,6 +601,46 @@ owner-targeted edge and emit an `incomplete_coverage` precision warning.
 Such an edge proves a module-level dependency, not a direct symbol call;
 impact paths include the containment hop instead of silently jumping from
 the selected symbol to the importer.
+
+### Compact answers and completed-output budgets
+
+Typed query text defaults to a compact answer: one confidence/coverage line,
+source locations and relationships. Empty sections and duplicate inventories are
+omitted. No-match and unresolved candidate pages are capped below 200 approximate
+tokens. `--verbose` or `--evidence` adds status, identities and per-record
+provenance to the paged text ledger. Raw JSON and Agent View JSON keep their typed
+contracts. MCP human-readable content is compact; its full `structuredContent`
+continues to carry raw records and the Agent View.
+
+Every finite command accepts `--budget N` (32–65536). The ceiling is `4*N` UTF-8
+bytes across stdout and stderr, including the final newline and continuation.
+This is the repository's approximate token metric, not a model-token guarantee.
+Typed query pages preserve whole entries; a budget too small for one entry fails
+with the required larger budget. Keep the same evidence mode when following
+`--cursor`.
+
+Commands without a native cursor save an immutable completed answer locally and
+print its continuation:
+
+```text
+compass output ID --offset BYTE --budget N
+```
+
+Run that exact command from the same working directory. Reading saved output
+never repeats the original action. Records under `.compass/cache/output` are
+bounded to 4 MiB each, with retention of 16 answers; rerun the original command
+if its answer has been evicted. Combined stdout/stderr uses an explicit `STDERR:`
+separator. Machine output that exceeds a budget fails without emitting partial
+JSON/JSONL and points to the saved complete output. Use a sufficiently large
+budget to read it as one record, or omit the budget on the original command.
+Streaming JSONL events, watch, REPL and MCP serve reject completed-output budgets
+before starting. Interactive `init` requires `--yes` with a budget.
+
+Complete, excerpt-free native search, natural query, discovery, usage, impact
+and node-path responses use a disposable local response cache. Graph identity,
+Program IR, query profiles, request limits and semantic mode bind each entry.
+The graph is verified before cache lookup. Partial answers and source excerpts
+are recomputed, and cache failures fall back to native execution.
 
 ### `architecture`
 
@@ -1396,3 +1436,6 @@ the exact command boundary your automation uses.
 **Next step:** run `compass <command> --help` for the command you will automate,
 then pin its input, structured output, and exit expectations in an integration
 test.
+
+Exact-only lookup and source-bearing exploration remain native indexed queries;
+the response cache does not promise acceleration for those paths.

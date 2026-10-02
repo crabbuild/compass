@@ -15,7 +15,7 @@ use crate::text_cursor::{
 pub const DISCOVERY_TEXT_PAGE_VERSION: &str = "compass.query.discovery-text-page/3";
 pub const DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET: usize = 800;
 const MAX_CURSOR_BYTES: usize = 4_096;
-const MIN_TEXT_BUDGET: usize = 256;
+const MIN_TEXT_BUDGET: usize = 32;
 const MAX_TEXT_BUDGET: usize = 65_536;
 const MAX_RENDERED_SCALAR_CHARS: usize = 512;
 const MAX_RENDERED_LIST_CHARS: usize = 2_048;
@@ -262,11 +262,8 @@ fn render_discovery_text_page_internal(
         || default_fixed_lines(response, options.include_evidence, &semantic_result_digest),
         ToOwned::to_owned,
     );
-    let max_chars = options.token_budget.saturating_mul(4);
-    let fixed_chars = fixed
-        .iter()
-        .map(|line| line.chars().count() + 1)
-        .sum::<usize>();
+    let max_chars = options.token_budget.saturating_mul(4).saturating_sub(1);
+    let fixed_chars = fixed.iter().map(|line| line.len() + 1).sum::<usize>();
     let mut end = start;
     let mut entries_chars = 0_usize;
     let mut truncated_entry: Option<String> = None;
@@ -283,11 +280,8 @@ fn render_discovery_text_page_internal(
             candidate_cursor.as_deref(),
             options.include_evidence,
         );
-        let candidate_entry_chars = entry.text.chars().count().saturating_add(1);
-        let footer_chars = footer
-            .iter()
-            .map(|line| line.chars().count() + 1)
-            .sum::<usize>();
+        let candidate_entry_chars = entry.text.len().saturating_add(1);
+        let footer_chars = footer.iter().map(|line| line.len() + 1).sum::<usize>();
         if fixed_chars
             .saturating_add(entries_chars)
             .saturating_add(candidate_entry_chars)
@@ -330,12 +324,8 @@ fn render_discovery_text_page_internal(
         options.include_evidence,
     );
     if entries.is_empty()
-        && fixed_chars.saturating_add(
-            page_footer
-                .iter()
-                .map(|line| line.chars().count() + 1)
-                .sum::<usize>(),
-        ) > max_chars
+        && fixed_chars.saturating_add(page_footer.iter().map(|line| line.len() + 1).sum::<usize>())
+            > max_chars
     {
         return Err(DiscoveryTextPageError::PageMetadataTooLarge);
     }
@@ -364,9 +354,13 @@ fn truncated_entry_text(text: &str, remaining_chars: usize) -> Option<String> {
     let budget = remaining_chars.saturating_sub(1);
     let marker = [ENTRY_TRUNCATION_MARKER, SHORT_ENTRY_TRUNCATION_MARKER]
         .into_iter()
-        .find(|marker| budget > marker.chars().count() + 1)?;
-    let keep = budget - marker.chars().count();
-    let mut rendered = text.chars().take(keep).collect::<String>();
+        .find(|marker| budget > marker.len() + 1)?;
+    let keep = budget - marker.len();
+    let mut end = keep.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut rendered = text[..end].to_owned();
     rendered.push_str(marker);
     Some(rendered)
 }
@@ -1216,7 +1210,7 @@ mod tests {
             DiscoveryTextPageOptions {
                 // The minimum budget must fit visibly capped compact
                 // diagnostics rather than failing on oversized source text.
-                token_budget: MIN_TEXT_BUDGET,
+                token_budget: 256,
                 cursor: None,
                 request_digest: &"a".repeat(64),
                 graph_identity: "generation-1",
@@ -1228,7 +1222,7 @@ mod tests {
             page.text.contains('…'),
             "oversized scalar must be visibly capped"
         );
-        assert!(page.text.chars().count() <= MIN_TEXT_BUDGET * 4);
+        assert!(page.text.chars().count() <= 256 * 4);
         assert!(page.entry_end > page.entry_start);
         // Compact diagnostics fit on one page after their scalar cap; the
         // evidence renderer still exercises oversized-entry pagination below.
@@ -1249,7 +1243,7 @@ mod tests {
             DiscoveryTextPageOptions {
                 // Two entries cannot share one page at this budget, so the
                 // first page always ends with a continuation cursor.
-                token_budget: MIN_TEXT_BUDGET,
+                token_budget: 256,
                 cursor: None,
                 request_digest: &"a".repeat(64),
                 graph_identity: "generation-1",

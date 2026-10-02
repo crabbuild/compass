@@ -1,6 +1,6 @@
 //! Deterministic, bounded projections for coding-agent query consumers.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use compass_model::code_graph::NodeRole;
@@ -1022,6 +1022,130 @@ fn validate_endpoint(endpoint: &AgentEndpoint) -> Result<(), OutputError> {
     Ok(())
 }
 
+/// Confidence and coverage remain visible even when audit detail is hidden.
+pub fn render_compact_query_header_lines(
+    view: &AgentQueryView,
+) -> Result<Vec<String>, OutputError> {
+    view.validate()?;
+    let mut lines = vec![format!(
+        "RESULT {} · match={} · evidence={} · coverage={}{}",
+        result_state_name(view.status.result_state),
+        match_state_name(view.status.match_state),
+        evidence_state_name(view.status.evidence_state),
+        coverage_state_name(view.status.coverage),
+        if view.status.source_execution == AgentExecution::Partial {
+            "; partial"
+        } else {
+            ""
+        },
+    )];
+    lines.push("ANSWER".to_owned());
+    if view.status.result_state != AgentResultState::Answered
+        || view.status.match_state != AgentMatch::Exact
+        || matches!(
+            view.request.operation,
+            AgentOperation::Callees | AgentOperation::Impact
+        )
+    {
+        if view.status.result_state == AgentResultState::NoMatch && view.primary_results.is_empty()
+        {
+            lines.push("No match found.".to_owned());
+        } else {
+            lines.push(escape_scalar(&view.answer.headline));
+        }
+    }
+    let mut seen = BTreeSet::new();
+    for caveat in &view.caveats {
+        // These states are already explicit above. Other caveats can change
+        // the meaning of a result and must survive the compact projection.
+        if matches!(
+            caveat.code.as_str(),
+            "coverage_unknown" | "evidence_hidden" | "projection_truncation"
+        ) {
+            continue;
+        }
+        if caveat.code == "ambiguous_match" && caveat.node_id.is_none() {
+            continue;
+        }
+        if caveat.code == "no_match"
+            && view.status.result_state == AgentResultState::NoMatch
+            && view.request.operation != AgentOperation::NodeTrail
+        {
+            continue;
+        }
+        let line = format!(
+            "{}: {}",
+            escape_scalar(&caveat.code),
+            escape_scalar(&caveat_statement(caveat))
+        );
+        if seen.insert(line.clone()) {
+            lines.push(line);
+        }
+    }
+    Ok(lines)
+}
+
+fn compact_entries(
+    entries: &mut Vec<(TextPageSection, String)>,
+    response: &CodeQueryResponse,
+    view: &AgentQueryView,
+) {
+    let has_paths = !response.paths.is_empty();
+    let has_edges = !response.edges.is_empty();
+    let mut primary_count = 0;
+    entries.retain(|(section, _)| match section {
+        TextPageSection::PrimaryResults => {
+            primary_count += 1;
+            view.request.operation == AgentOperation::Search
+                || view.request.operation == AgentOperation::Impact
+                || view.request.operation == AgentOperation::NodeTrail
+                || view.request.operation == AgentOperation::Explore
+                || !has_edges
+                || primary_count == 1
+                || view.status.result_state == AgentResultState::NeedsResolution
+        }
+        TextPageSection::Paths => view.request.operation == AgentOperation::NodeTrail,
+        TextPageSection::Relationships => {
+            view.request.operation != AgentOperation::Impact
+                && !(view.request.operation == AgentOperation::NodeTrail && has_paths)
+        }
+        TextPageSection::Source => true,
+        TextPageSection::Evidence => false,
+    });
+}
+
+fn compact_page_body(
+    header: &[String],
+    entries: &[(TextPageSection, String)],
+    start: usize,
+    end: usize,
+    next_cursor: Option<&str>,
+    truncated: bool,
+) -> String {
+    let mut lines = header.to_vec();
+    lines.extend(entries[start..end].iter().map(|(_, text)| text.clone()));
+    if let Some(cursor) = next_cursor {
+        lines.push(format!(
+            "Pagination: range={}-{} of {}; continue with --cursor; next={cursor}",
+            start + 1,
+            end,
+            entries.len()
+        ));
+    }
+    if next_cursor.is_none() && start > 0 {
+        lines.push(format!(
+            "Pagination: range={}-{} of {} next=none",
+            start + 1,
+            end,
+            entries.len()
+        ));
+    }
+    if truncated {
+        lines.push("Query bound reached; repeat with larger --max-nodes/--max-edges.".to_owned());
+    }
+    lines.join("\n")
+}
+
 pub fn render_agent_query_header_lines(view: &AgentQueryView) -> Result<Vec<String>, OutputError> {
     view.validate()?;
     let mut lines = render_result_lines(view);
@@ -1096,6 +1220,58 @@ pub fn render_agent_query_text(view: &AgentQueryView) -> Result<String, OutputEr
     }
     lines.push("Full provenance is available in the raw JSON/evidence view.".to_owned());
     let text = lines.join("\n");
+    if text.len() > AGENT_VIEW_TEXT_MAX_BYTES {
+        return Err(OutputError::AgentQueryTextBudgetExceeded {
+            rendered_bytes: text.len(),
+            limit: AGENT_VIEW_TEXT_MAX_BYTES,
+        });
+    }
+    Ok(text)
+}
+
+/// Compact human-readable sibling of the unchanged structured MCP result.
+pub fn render_compact_agent_query_text(view: &AgentQueryView) -> Result<String, OutputError> {
+    let mut lines = render_compact_query_header_lines(view)?;
+    let duplicates = duplicated_entity_labels(&view.primary_results);
+    for (index, entity) in view.primary_results.iter().enumerate() {
+        if index == 0
+            || view.relationships.is_empty()
+            || matches!(
+                view.request.operation,
+                AgentOperation::Search
+                    | AgentOperation::Impact
+                    | AgentOperation::NodeTrail
+                    | AgentOperation::Explore
+            )
+        {
+            lines.push(render_entity(
+                entity,
+                entity_needs_identity(entity, view.status.match_state, &duplicates),
+            ));
+        }
+    }
+    lines.extend(view.paths.iter().map(render_path));
+    if view.request.operation != AgentOperation::NodeTrail || view.paths.is_empty() {
+        lines.extend(view.relationships.iter().map(render_relationship));
+    }
+    if view.projection_truncated {
+        lines.push(format!(
+            "{} records omitted from text; full records: structuredContent.result.",
+            view.omissions.total
+        ));
+    }
+    let mut text = lines.join("\n");
+    if matches!(
+        view.status.result_state,
+        AgentResultState::NoMatch
+            | AgentResultState::NeedsResolution
+            | AgentResultState::Candidates
+    ) {
+        text = crate::render_budgeted_text(&text, 0, 199, |_| {
+            "More: structuredContent.result and agentView.".to_owned()
+        })?
+        .text;
+    }
     if text.len() > AGENT_VIEW_TEXT_MAX_BYTES {
         return Err(OutputError::AgentQueryTextBudgetExceeded {
             rendered_bytes: text.len(),
@@ -1255,7 +1431,6 @@ pub const AGENT_TEXT_PAGE_VERSION: &str = "compass.query.agent-text-page/1";
 /// Default page budget, in approximate tokens, for paged agent text output.
 pub const DEFAULT_AGENT_TEXT_PAGE_TOKENS: usize = 2_000;
 
-const AGENT_TEXT_PAGE_FOOTER_RESERVE_CHARS: usize = 384;
 const AGENT_TEXT_PAGE_MAX_CURSOR_BYTES: usize = 4_096;
 
 /// Continuation state for one paged agent text response.
@@ -1388,6 +1563,7 @@ enum TextPageSection {
     Paths,
     Relationships,
     Source,
+    Evidence,
 }
 
 impl TextPageSection {
@@ -1397,6 +1573,7 @@ impl TextPageSection {
             Self::Paths => "PATHS",
             Self::Relationships => "RELATIONSHIPS",
             Self::Source => "SOURCE",
+            Self::Evidence => "EVIDENCE",
         }
     }
 
@@ -1413,6 +1590,7 @@ impl TextPageSection {
             Self::Relationships => AGENT_VIEW_MAX_RELATIONSHIPS,
             // Source blocks are already bounded per anchor and by the budget.
             Self::Source => usize::MAX,
+            Self::Evidence => AGENT_VIEW_MAX_RELATIONSHIPS,
         }
     }
 }
@@ -1435,13 +1613,41 @@ pub fn decode_agent_text_page_cursor(value: &str) -> Result<AgentTextPageCursor,
 ///
 /// The ledger is derived from the authoritative query response rather than the
 /// capped agent view, so paging can reach records that the view's own bounds
-/// omit. The page keeps at least one entry so a pathological budget cannot
-/// return an empty page, and a continuation cursor only becomes valid when the
-/// next response reproduces the same reviewed prefix.
+/// omit. A budget unable to fit one entry and its continuation fails explicitly.
+/// A continuation cursor only becomes valid when the next response reproduces
+/// the same reviewed prefix.
 pub fn render_code_query_text_page(
     response: &CodeQueryResponse,
     context: AgentQueryContext,
     options: AgentTextPageOptions<'_>,
+) -> Result<AgentTextPage, OutputError> {
+    render_code_query_page(response, context, options, false, false)
+}
+
+/// Answer-sized text projection; audit projections and raw records are unchanged.
+pub fn render_compact_code_query_text_page(
+    response: &CodeQueryResponse,
+    context: AgentQueryContext,
+    options: AgentTextPageOptions<'_>,
+) -> Result<AgentTextPage, OutputError> {
+    render_code_query_page(response, context, options, true, false)
+}
+
+/// Full status and per-record provenance, explicitly requested by the caller.
+pub fn render_code_query_evidence_page(
+    response: &CodeQueryResponse,
+    context: AgentQueryContext,
+    options: AgentTextPageOptions<'_>,
+) -> Result<AgentTextPage, OutputError> {
+    render_code_query_page(response, context, options, false, true)
+}
+
+fn render_code_query_page(
+    response: &CodeQueryResponse,
+    context: AgentQueryContext,
+    options: AgentTextPageOptions<'_>,
+    compact: bool,
+    evidence: bool,
 ) -> Result<AgentTextPage, OutputError> {
     if options.token_budget == 0 {
         return Err(OutputError::InvalidAgentTextPage(
@@ -1450,12 +1656,34 @@ pub fn render_code_query_text_page(
     }
     let view = build_code_query_view(response, context)?;
     view.validate()?;
-    let entries = text_page_entries(
+    let mut entries = text_page_entries(
         response,
         view.request.operation,
         &view.request.operands,
         view.status.match_state,
     );
+    if compact {
+        compact_entries(&mut entries, response, &view);
+    } else if evidence {
+        for node in &response.nodes {
+            entries.push((
+                TextPageSection::Evidence,
+                format!("Node evidence: {}", serde_json::to_string(node)?),
+            ));
+        }
+        for edge in &response.edges {
+            entries.push((
+                TextPageSection::Evidence,
+                format!("Edge evidence: {}", serde_json::to_string(edge)?),
+            ));
+        }
+        for diagnostic in &response.diagnostics {
+            entries.push((
+                TextPageSection::Evidence,
+                format!("Diagnostic: {}", serde_json::to_string(diagnostic)?),
+            ));
+        }
+    }
     let (page, start) = match options.cursor {
         None => (1_u32, 0_usize),
         Some(cursor) => {
@@ -1491,11 +1719,33 @@ pub fn render_code_query_text_page(
             (envelope.page, envelope.prefix_count)
         }
     };
-    let max_chars = options.token_budget.saturating_mul(4);
-    let header = render_agent_query_header_lines(&view)?;
+    let budget = if compact
+        && matches!(
+            view.status.result_state,
+            AgentResultState::NoMatch
+                | AgentResultState::NeedsResolution
+                | AgentResultState::Candidates
+        ) {
+        options.token_budget.min(199)
+    } else {
+        options.token_budget
+    };
+    let max_chars = budget.saturating_mul(4).saturating_sub(1);
+    let mut header = if compact {
+        render_compact_query_header_lines(&view)?
+    } else {
+        render_agent_query_header_lines(&view)?
+    };
+    if evidence {
+        header.push(format!("Status: {}", serde_json::to_string(&view.status)?));
+        header.push(format!(
+            "Identity: {}",
+            serde_json::to_string(&view.identity)?
+        ));
+    }
     let header_chars = rendered_chars(&header);
     let mut end = start;
-    let mut used = header_chars.saturating_add(AGENT_TEXT_PAGE_FOOTER_RESERVE_CHARS);
+    let mut used = header_chars;
     let mut rendered_per_section: BTreeMap<TextPageSection, usize> = BTreeMap::new();
     while end < entries.len() {
         let (section, text) = &entries[end];
@@ -1537,7 +1787,19 @@ pub fn render_code_query_text_page(
             page,
             next_cursor.as_deref(),
         );
-        if text.chars().count() <= max_chars || end <= start.saturating_add(1) {
+        let text = if compact {
+            compact_page_body(
+                &header,
+                &entries,
+                start,
+                end,
+                next_cursor.as_deref(),
+                response.truncated,
+            )
+        } else {
+            text
+        };
+        if text.len() <= max_chars {
             return Ok(AgentTextPage {
                 text,
                 next_cursor,
@@ -1546,6 +1808,12 @@ pub fn render_code_query_text_page(
                 entry_end: end,
                 entry_total: entries.len(),
             });
+        }
+        if end <= start.saturating_add(1) {
+            let required = text.len().saturating_add(4) / 4;
+            return Err(OutputError::InvalidAgentTextPage(format!(
+                "one answer entry requires --text-budget {required}; increase the budget"
+            )));
         }
         end = end.saturating_sub(1);
     }
@@ -1584,18 +1852,8 @@ fn render_agent_text_page_body(
         entries.len(),
         next_cursor.unwrap_or("none")
     ));
-    if view.omissions.total > 0 || response.truncated {
-        lines.push(if response.truncated {
-            format!(
-                "Bound: {} record(s) beyond this page; next= continues, --max-nodes/--max-edges widens the query bound.",
-                view.omissions.total
-            )
-        } else {
-            format!(
-                "Bound: {} record(s) beyond this page; next= continues.",
-                view.omissions.total
-            )
-        });
+    if response.truncated {
+        lines.push("Query bound reached; repeat with larger --max-nodes/--max-edges.".to_owned());
     }
     lines.join("\n")
 }
@@ -2828,7 +3086,7 @@ fn answer_for_code(
             }
             AgentResultState::Candidates => format!(
                 "Found {} candidate matches for \"{requested}\".",
-                primary_results.len()
+                response.results.len().max(primary_results.len())
             ),
             _ if match_state == AgentMatch::Exact => {
                 format!("Found an exact match for \"{requested}\".")

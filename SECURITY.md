@@ -137,3 +137,22 @@ of source-backed prose per document/rationale resource, so exported artifacts
 include those excerpts as well as existing names and provenance. Apply the same
 repository disclosure policy to these graph artifacts. Corpus size/deadline
 failures remain explicit and do not publish a partially built semantic index.
+
+## Local query and saved-output caches
+
+Completed-output budgets can save source excerpts, report content and diagnostics
+under the working directory's `.compass/cache/output`. Treat these records and
+query-response cache databases as repository-derived sensitive data. They are
+local only and must not be committed or attached to public issues. New saved
+output directories use owner-only permissions on Unix; existing directory access
+policy remains the owner's responsibility. Redirected directories and record
+symlinks are rejected. Publication uses the existing atomic create primitive.
+Readers enforce schema, digest, regular-file, byte-size and UTF-8 offset checks;
+retention scans are bounded. A content digest detects corruption and does not
+authenticate the original output or graph semantics.
+
+The response cache has 32 entries, a 1 MiB payload limit and a 64 MiB SQLite page
+ceiling. Lookup requires the verified graph identity and Program IR/profile/
+request/mode identity, validates payload length, checksum and typed schema, and
+checks deadlines. Source excerpts and partial responses are excluded. Cache
+errors use native execution. Neither cache adds network or credential access.

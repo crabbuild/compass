@@ -665,7 +665,12 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
     assert_eq!(structured["result"]["schema"], "compass.query/1");
     let agent_view: compass_output::AgentQueryView =
         serde_json::from_value(structured["agentView"].clone())?;
-    assert_eq!(text, compass_output::render_agent_query_text(&agent_view)?);
+    assert_eq!(
+        text,
+        compass_output::render_compact_agent_query_text(&agent_view)?
+    );
+    assert!(text.len() < 400, "{text}");
+    assert!(!text.contains("NEXT ACTIONS"));
     assert!(
         client
             .call_tool(CallToolRequestParams::new("search_symbols"))

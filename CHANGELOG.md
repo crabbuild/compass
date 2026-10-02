@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Default typed query and MCP text to compact, source-located answers. Keep
+  uncertainty visible and expose full paged audit detail with `--verbose` or
+  `--evidence`; raw machine contracts are unchanged.
+- Enforce UTF-8 output budgets with exact continuations across finite commands.
+  Add immutable saved-output reading via `compass output`; reject partial
+  machine output and budgets on unbounded streams.
+- Cache complete native query responses by verified graph, Program IR, request
+  limits, profiles and semantic mode, with bounded disposable storage and
+  corruption fallback. Reuse one pinned engine across CLI page widening.
+
 ## 0.4.1 - 2026-10-01
 
 - Match engineering business vocabulary through bounded synonyms and witnessed

@@ -1498,3 +1498,59 @@ unrelated host work and ordinary OS caches remained uncontrolled. Three runs
 per binary on one known repository do not establish general performance or an
 approved release baseline. All six graphs still omit one node and 45 edges;
 normal release qualification remains required.
+
+## Compact query text and complete-response caching
+
+The October 2, 2026 replay uses unchanged `suite_natural.toml` and `suite_v2.toml`
+oracles over the same pinned Cobra, Flask, Gson, Zod and Axum source trees and
+frozen graphs. Both native binaries use the normal optimized workspace release
+profile and Rust 1.97.1. The installed comparator remains Graphify 0.9.67; its
+natural-suite observations are the archived paired run, and the standard suite
+was replayed against the same archived graph inputs.
+
+| Fixed panel | Native before | Native after | Comparator | Mean native before tokens | Mean native after tokens | Mean comparator tokens |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 25 natural questions | 24/25 | 24/25 | 17/25 | 544.52 | 547.44 | 757.44 |
+| 50 standard questions | 49/50 | 49/50 | 44/50 | 419.10 | 363.76 | 549.74 |
+
+Every native row retains its previous oracle verdict. Standard-suite mean cost
+falls 13.2%; the natural mean grows slightly because compact answers retain
+uncertainty warnings. Both native means remain below the comparator on these
+panels. The known `Find` omission in the natural Cobra question and
+`route_endpoint` omission in the standard Axum impact question remain failures.
+Tokens are the existing harness's `ceil(stdout UTF-8 bytes / 4)` estimate over
+its complete workflow. Comparator installation warnings are recorded separately
+on stderr. These source-reviewed text-recall panels do not independently measure
+precision or establish population-wide superiority. MCP text is compact but its
+unchanged full structured content still contributes to clients consuming both.
+
+A separately registered cache panel executes the first callers question in each
+standard-suite repository as raw JSON: three alternating trials per binary,
+each with a fresh task-owned cache directory and six command invocations. Warm
+cost is the median of invocations 2–6, summarized across the three trials.
+All 180 raw JSON outputs are byte-identical across both binaries and repetitions
+for each repository. Source excerpts and truncated execution responses remain
+uncached.
+
+| Repository | Before cold median ms | Before warm median ms | After cold median ms | After warm median ms | Cache eligible |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Cobra | 85 | 85 | 73 | 34 | Yes |
+| Flask | 348 | 220 | 386 | 34 | Yes |
+| Gson | 488 | 292 | 438 | 259 | No: partial graph |
+| Zod | 967 | 994 | 897 | 34 | Yes |
+| Axum | 401 | 284 | 648 | 30 | Yes |
+
+The initial panel stopped when Gson's frozen partial publication made its small
+response truncated. The recorded amendment kept all questions, inputs, limits,
+trials and repetitions, and recorded eligibility instead of requiring every
+input to be complete. Gson remains in the table and its cache has no response
+entry. Cold Flask and Axum observations regress; cache reuse is not a claim that
+every command or first invocation gets faster. Ordinary OS caches and unrelated
+host load remain uncontrolled, including an 8.135-second cold Zod observation.
+The earlier debug replay had timeouts and is excluded from optimized timing and
+final verdicts.
+
+[`compact_query_output_review.json`](benchmarks/agent_query/compact_query_output_review.json)
+contains source and artifact pins, suite and binary hashes, the registration and
+amendment, every oracle observation and every cold/warm timing. These focused
+query measurements do not replace release-wide performance qualification.
