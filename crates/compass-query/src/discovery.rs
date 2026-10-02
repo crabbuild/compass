@@ -2946,6 +2946,7 @@ mod tests {
                 .unwrap_or_else(|_| std::process::abort());
         }
         CodeQueryEngine {
+            source_commit: None,
             backend: CodeGraphBackend::Materialized {
                 graph: Box::new(graph),
                 adjacency: Box::new(adjacency),

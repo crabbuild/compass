@@ -14,6 +14,7 @@ pub type EdgeIndex = usize;
 /// Query-oriented directed graph preserving document insertion order.
 #[derive(Clone, Debug)]
 pub struct Graph {
+    source_commit: Option<String>,
     directed: bool,
     multigraph: bool,
     nodes: Arc<Vec<NodeRecord>>,
@@ -108,6 +109,13 @@ impl Graph {
         document: GraphDocument,
         build_query_index: bool,
     ) -> Result<Self, GraphError> {
+        let source_commit = document
+            .graph
+            .get("build")
+            .and_then(|build| build.get("sourceCommit"))
+            .or_else(|| document.graph.get("built_at_commit"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let GraphDocument {
             directed,
             multigraph,
@@ -154,6 +162,7 @@ impl Graph {
             Arc::new(edges),
             Arc::new(ids),
             build_query_index,
+            source_commit,
         )?;
         Ok(graph)
     }
@@ -165,6 +174,7 @@ impl Graph {
         edges: Arc<Vec<EdgeRecord>>,
         ids: Arc<HashMap<String, NodeIndex>>,
         build_query_index: bool,
+        source_commit: Option<String>,
     ) -> Result<Self, GraphError> {
         let mut outgoing = vec![Vec::new(); nodes.len()];
         let mut incoming = vec![Vec::new(); nodes.len()];
@@ -189,6 +199,7 @@ impl Graph {
             QueryIndex::empty()
         };
         Ok(Self {
+            source_commit,
             directed,
             multigraph,
             nodes,
@@ -199,6 +210,11 @@ impl Graph {
             query_index: Arc::new(query_index),
             query_index_enabled: build_query_index,
         })
+    }
+
+    #[must_use]
+    pub fn source_commit(&self) -> Option<&str> {
+        self.source_commit.as_deref()
     }
 
     #[must_use]
@@ -358,6 +374,7 @@ impl Graph {
             Arc::new(edges),
             Arc::clone(&self.ids),
             self.query_index_enabled,
+            self.source_commit.clone(),
         ) {
             Ok(graph) => graph,
             Err(_) => self.clone(),
@@ -418,6 +435,28 @@ pub(crate) fn absolute_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pinned_build_commit_survives_graph_projections() -> Result<(), Box<dyn std::error::Error>> {
+        let commit = "a".repeat(40);
+        let document: GraphDocument = serde_json::from_value(serde_json::json!({
+            "graph":{"build":{"sourceCommit":commit}},
+            "nodes":[{"id":"a"},{"id":"b"}],
+            "links":[{"source":"a","target":"b","context":"call"}]
+        }))?;
+        for graph in [
+            Graph::from_document(document.clone())?,
+            Graph::from_traversal_document(document)?,
+        ] {
+            assert_eq!(graph.source_commit(), Some(commit.as_str()));
+            assert_eq!(graph.clone().source_commit(), Some(commit.as_str()));
+            assert_eq!(
+                graph.with_edge_contexts(&["other".into()]).source_commit(),
+                Some(commit.as_str())
+            );
+        }
+        Ok(())
+    }
+
     use super::*;
 
     #[test]

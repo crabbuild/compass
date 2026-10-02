@@ -15,6 +15,7 @@ mod html;
 mod json;
 mod lenses;
 mod obsidian;
+mod overview;
 mod palette;
 mod report;
 mod review;
@@ -25,6 +26,7 @@ mod viewer_model;
 mod wiki;
 mod workbench;
 
+pub use overview::render_hotspots_text;
 pub use text_budget::{BudgetedText, render_budgeted_text};
 
 pub use agent_query::{

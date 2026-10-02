@@ -385,8 +385,23 @@ impl CompassMcp {
     }
 
     fn read_result(&self, uri: &str) -> Result<String, InvocationError> {
+        self.read_result_with_freshness(uri).map(|(text, _)| text)
+    }
+
+    fn read_result_with_freshness(
+        &self,
+        uri: &str,
+    ) -> Result<(String, Option<compass_core::GraphFreshness>), InvocationError> {
         let context = self.store.load(None).map_err(InvocationError::Internal)?;
-        let text = read_resource_text(uri, &context)?;
+        let mut text = read_resource_text(uri, &context)?;
+        let freshness = compass_core::graph_freshness(&context.path, context.graph.source_commit());
+        if !matches!(uri, "compass://orientation" | "compass://graph-insights")
+            && let Some(warning) = freshness
+                .as_ref()
+                .and_then(compass_core::GraphFreshness::warning)
+        {
+            text = format!("{warning}\n{text}");
+        }
         if text.len() > MAX_MCP_RESOURCE_BYTES {
             return Err(InvocationError::TransportLimit {
                 required_bytes: text.len(),
@@ -394,7 +409,7 @@ impl CompassMcp {
                 omitted_bytes: text.len().saturating_sub(MAX_MCP_RESOURCE_BYTES),
             });
         }
-        Ok(text)
+        Ok((text, freshness))
     }
 }
 
@@ -454,8 +469,8 @@ impl ServerHandler for CompassMcp {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
-        let text = self
-            .read_result(&request.uri)
+        let (text, freshness) = self
+            .read_result_with_freshness(&request.uri)
             .map_err(InvocationError::protocol_error)?;
         let mime = match request.uri.as_str() {
             "compass://report" => "text/markdown",
@@ -464,7 +479,7 @@ impl ServerHandler for CompassMcp {
             _ => "text/plain",
         };
         let required_bytes = text.len();
-        let transport = Meta(Map::from_iter([(
+        let mut transport = Meta(Map::from_iter([(
             "transportTruncation".to_owned(),
             json!({
                 "schema": MCP_TRANSPORT_TRUNCATION_SCHEMA,
@@ -474,6 +489,13 @@ impl ServerHandler for CompassMcp {
                 "omittedBytes": 0,
             }),
         )]));
+        if let Some(freshness) = freshness {
+            transport.0.insert(
+                "freshness".into(),
+                serde_json::to_value(freshness)
+                    .map_err(|error| ErrorData::internal_error(error.to_string(), None))?,
+            );
+        }
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(text, request.uri)
                 .with_mime_type(mime)
@@ -485,6 +507,90 @@ impl ServerHandler for CompassMcp {
 struct ToolInvocation {
     text: String,
     structured_content: Option<Value>,
+}
+
+fn decorate_freshness(
+    mut result: ToolInvocation,
+    path: &Path,
+    commit: Option<&str>,
+) -> Result<ToolInvocation, InvocationError> {
+    if let Some(freshness) = compass_core::graph_freshness(path, commit) {
+        if let Some(warning) = freshness.warning() {
+            result.text = format!("{warning}\n{}", result.text);
+        }
+        let value = serde_json::to_value(freshness)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        if result.structured_content.is_none() {
+            result.structured_content = Some(transport_envelope(json!({"text":result.text}))?);
+        }
+        let structured = result
+            .structured_content
+            .as_mut()
+            .ok_or_else(|| InvocationError::Internal("missing tool envelope".into()))?;
+        if let Some(object) = structured.as_object_mut() {
+            object.insert("freshness".into(), value);
+        }
+        result.structured_content = Some(validate_transport_envelope(
+            result
+                .structured_content
+                .take()
+                .ok_or_else(|| InvocationError::Internal("missing tool envelope".into()))?,
+        )?);
+    }
+    if result.text.len() > MAX_MCP_STRUCTURED_RESPONSE_BYTES {
+        return Err(InvocationError::TransportLimit {
+            required_bytes: result.text.len(),
+            limit_bytes: MAX_MCP_STRUCTURED_RESPONSE_BYTES,
+            omitted_bytes: result.text.len() - MAX_MCP_STRUCTURED_RESPONSE_BYTES,
+        });
+    }
+    Ok(result)
+}
+
+fn overview_scope(arguments: &Map<String, Value>) -> Result<compass_query::OverviewScope, String> {
+    let filters = match arguments.get("scope") {
+        None => Vec::new(),
+        Some(Value::String(value)) => vec![value.clone()],
+        _ => return Err("scope must be a relative path or module:NAME".into()),
+    };
+    compass_query::OverviewScope::new(filters).map_err(|error| error.to_string())
+}
+
+fn invoke_hotspots(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
+    reject_unknown_arguments(
+        arguments,
+        &["scope", "limit", "include_inferred", "include_documents"],
+        "get_hotspots",
+    )?;
+    let scope = overview_scope(arguments).map_err(InvocationError::InvalidParams)?;
+    let boolean = |key| {
+        arguments.get(key).map_or(Ok(false), |value| {
+            value
+                .as_bool()
+                .ok_or_else(|| InvocationError::InvalidParams(format!("{key} must be a boolean")))
+        })
+    };
+    let layers = compass_query::ConnectionLayers {
+        inferred: boolean("include_inferred")?,
+        documents: boolean("include_documents")?,
+    };
+    let limit = arguments
+        .get("limit")
+        .map_or(Some(10), Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| InvocationError::InvalidParams("limit must be between 1 and 100".into()))?;
+    let report = compass_query::hotspots(context.document(), &scope, layers, limit)
+        .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+    Ok(ToolInvocation {
+        text: compass_output::render_hotspots_text(&report),
+        structured_content: Some(transport_envelope(
+            serde_json::to_value(report)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        )?),
+    })
 }
 
 impl CompassMcp {
@@ -585,18 +691,42 @@ impl CompassMcp {
             return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
         }
         if name == "get_neighbors" {
-            return invoke_neighbor_tool(arguments, &context);
+            return decorate_freshness(
+                invoke_neighbor_tool(arguments, &context)?,
+                &context.path,
+                context.graph.source_commit(),
+            );
         }
         if name == "god_nodes" {
-            return invoke_hub_tool(arguments, &context);
+            return decorate_freshness(
+                invoke_hub_tool(arguments, &context)?,
+                &context.path,
+                context.graph.source_commit(),
+            );
+        }
+        if name == "get_hotspots" {
+            return decorate_freshness(
+                invoke_hotspots(arguments, &context)?,
+                &context.path,
+                context.graph.source_commit(),
+            );
         }
         if name == "shortest_path" {
-            return invoke_path_tool(arguments, &context);
+            return decorate_freshness(
+                invoke_path_tool(arguments, &context)?,
+                &context.path,
+                context.graph.source_commit(),
+            );
         }
-        Ok(ToolInvocation {
-            text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
-            structured_content: None,
-        })
+        decorate_freshness(
+            ToolInvocation {
+                text: invoke_tool(name, arguments, &context)
+                    .map_err(InvocationError::InvalidParams)?,
+                structured_content: None,
+            },
+            &context.path,
+            context.graph.source_commit(),
+        )
     }
 
     fn invoke_agent_graph(
@@ -1082,15 +1212,19 @@ fn invoke_typed_tool(
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
     let view =
         serde_json::to_value(view).map_err(|error| InvocationError::Internal(error.to_string()))?;
-    Ok(ToolInvocation {
-        text,
-        structured_content: Some(transport_envelope_with_view(
-            serde_json::to_value(response)
-                .map_err(|error| InvocationError::Internal(error.to_string()))?,
-            Some(&semantic_result_digest),
-            Some(view),
-        )?),
-    })
+    decorate_freshness(
+        ToolInvocation {
+            text,
+            structured_content: Some(transport_envelope_with_view(
+                serde_json::to_value(response)
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?,
+                Some(&semantic_result_digest),
+                Some(view),
+            )?),
+        },
+        engine.graph_path(),
+        engine.source_commit(),
+    )
 }
 
 fn typed_agent_query_context(
@@ -1201,15 +1335,19 @@ fn invoke_discovery_tool(
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
     let view =
         serde_json::to_value(view).map_err(|error| InvocationError::Internal(error.to_string()))?;
-    Ok(ToolInvocation {
-        text,
-        structured_content: Some(transport_envelope_with_view(
-            serde_json::to_value(response)
-                .map_err(|error| InvocationError::Internal(error.to_string()))?,
-            Some(&semantic_result_digest),
-            Some(view),
-        )?),
-    })
+    decorate_freshness(
+        ToolInvocation {
+            text,
+            structured_content: Some(transport_envelope_with_view(
+                serde_json::to_value(response)
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?,
+                Some(&semantic_result_digest),
+                Some(view),
+            )?),
+        },
+        engine.graph_path(),
+        engine.source_commit(),
+    )
 }
 
 fn cached_typed_engine(
@@ -1307,6 +1445,10 @@ fn transport_envelope_with_view(
     if let Some(view) = agent_view {
         envelope["agentView"] = view;
     }
+    validate_transport_envelope(envelope)
+}
+
+fn validate_transport_envelope(mut envelope: Value) -> Result<Value, InvocationError> {
     for _ in 0..8 {
         let required_bytes = serde_json::to_vec(&envelope)
             .map_err(|error| InvocationError::Internal(error.to_string()))?
@@ -1399,8 +1541,13 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "get_community",
-            "Get all nodes in a community by community ID.",
-            json!({"type":"object","properties":{"community_id":{"type":"integer","description":"Community ID (0-indexed by size)"}},"required":["community_id"]}),
+            "Get a source-scoped bounded community window with omission counts.",
+            json!({"type":"object","properties":{"scope":{"type":"string","minLength":1,"maxLength":4096,"description":"Relative path or module:NAME"},"limit":{"type":"integer","minimum":1,"maximum":1000000},"community_id":{"type":"integer","description":"Community ID (0-indexed by size)"}},"required":["community_id"]}),
+        ),
+        tool(
+            "get_hotspots",
+            "Rank source symbols by distinct connections and incoming dependents. Inferred and document contacts are optional labelled layers; scope filters symbols but retains their outside contacts.",
+            json!({"type":"object","additionalProperties":false,"properties":{"scope":{"type":"string","minLength":1,"maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":10},"include_inferred":{"type":"boolean","default":false},"include_documents":{"type":"boolean","default":false}}}),
         ),
         tool(
             "god_nodes",
@@ -1891,14 +2038,22 @@ fn invoke_task_context(
         if result.truncated { " (truncated)" } else { "" }
     );
     let digest = result.result_digest.clone();
-    Ok(ToolInvocation {
-        text,
-        structured_content: Some(transport_envelope_with_digest(
-            serde_json::to_value(result)
-                .map_err(|error| InvocationError::Internal(error.to_string()))?,
-            Some(&digest),
-        )?),
-    })
+    let engine = cached_typed_engine(store, graph_path, graph_context)?;
+    let engine = engine
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    decorate_freshness(
+        ToolInvocation {
+            text,
+            structured_content: Some(transport_envelope_with_digest(
+                serde_json::to_value(result)
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?,
+                Some(&digest),
+            )?),
+        },
+        graph_path,
+        engine.source_commit(),
+    )
 }
 
 fn task_context_invocation_error(error: compass_core::TaskContextError) -> InvocationError {
@@ -2358,16 +2513,28 @@ fn tool_get_community(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    let scope = overview_scope(arguments)?;
+    if context.graph.node_count() > compass_query::MAX_OVERVIEW_NODES {
+        return Err(
+            "community exceeds its graph work limit; run compass ensure PATH for a smaller graph"
+                .into(),
+        );
+    }
+    let limit = arguments.get("limit").map_or(Some(compass_query::MAX_OVERVIEW_NODES as u64), Value::as_u64).filter(|value| (1..=compass_query::MAX_OVERVIEW_NODES as u64).contains(value)).ok_or("limit must be between 1 and 1000000; call get_community with a positive limit and scope")? as usize;
     let raw = integer_argument(arguments, "community_id", -1);
     let Ok(community) = usize::try_from(raw) else {
-        return Ok(format!("Community {raw} not found."));
+        return Ok(format!(
+            "Community {raw} not found. Call graph_stats to inspect the graph, or run compass community to list IDs."
+        ));
     };
     let Some(nodes) = context
         .communities
         .get(&community)
         .filter(|nodes| !nodes.is_empty())
     else {
-        return Ok(format!("Community {community} not found."));
+        return Ok(format!(
+            "Community {community} not found. Run compass community to list IDs, or compass cluster-only to publish community membership."
+        ));
     };
     let name = context.graph.node(nodes[0]).string("community_name");
     let base = format!("Community {community}");
@@ -2377,14 +2544,39 @@ fn tool_get_community(
     } else {
         format!("{base} — {clean}")
     };
-    let mut lines = vec![format!("{header} ({} nodes):", nodes.len())];
-    for index in nodes {
-        let node = context.graph.node(*index);
+    let mut selected = nodes
+        .iter()
+        .filter(|index| scope.matches(context.graph.node(**index)))
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|index| context.graph.node(**index).id.as_str());
+    let mut lines = vec![format!("{header} ({} nodes):", selected.len())];
+    if !scope.filters.is_empty() {
         lines.push(format!(
+            "Scope {}: {} of {} community members matched.",
+            scope.filters.join(", "),
+            selected.len(),
+            nodes.len()
+        ));
+    }
+    if selected.len() > limit {
+        lines.push(format!(
+            "{} members omitted; call get_community with a larger limit or narrow scope.",
+            selected.len() - limit
+        ));
+    }
+    let mut response_bytes = lines.iter().map(String::len).sum::<usize>();
+    for index in selected.into_iter().take(limit) {
+        let node = context.graph.node(*index);
+        let row = format!(
             "  {} [{}]",
             sanitize_label(node.label()),
             sanitize_label(&node.string("source_file"))
-        ));
+        );
+        response_bytes = response_bytes.saturating_add(row.len() + 1);
+        if response_bytes > MAX_MCP_STRUCTURED_RESPONSE_BYTES {
+            return Err("community response exceeds 16 MiB; call get_community with limit=100 and a narrower scope".into());
+        }
+        lines.push(row);
     }
     Ok(lines.join("\n"))
 }
@@ -3045,6 +3237,95 @@ fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scoped_hotspots_and_communities_share_labelled_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,"nodes":[
+                    {"id":"a","label":"Service","kind":"class","source_file":"app/a.py","qualified_name":"app.Service","community":0},
+                    {"id":"b","label":"Client","kind":"function","source_file":"other/b.py","community":0},
+                    {"id":"d","kind":"document_section","source_file":"README.md"}],
+                "links":[{"source":"b","target":"a","relation":"uses","confidence":"INFERRED"},
+                    {"source":"d","target":"a","relation":"mentions"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        let mut args = json!({"scope":"module:app","include_inferred":true})
+            .as_object()
+            .ok_or("args")?
+            .clone();
+        let result = server
+            .invoke_result("get_hotspots", &mut args)
+            .map_err(|error| error.to_string())?;
+        let content = result.structured_content.ok_or("content")?;
+        assert_eq!(content["result"]["schema"], "compass.hotspots/1");
+        assert_eq!(content["result"]["mostConnected"][0]["id"], "a");
+        assert_eq!(content["result"]["mostConnected"][0]["connections"], 1);
+        assert_eq!(
+            content["result"]["mostConnected"][0]["layers"]["inferred"],
+            1
+        );
+        assert!(result.text.contains("inferred:1"));
+        let community = server.invoke(
+            "get_community",
+            json!({"community_id":0,"scope":"app"})
+                .as_object()
+                .ok_or("args")?
+                .clone(),
+        );
+        assert!(community.contains("1 of 2 community members matched"));
+        assert!(community.contains("Service"));
+        assert!(!community.contains("Client"));
+        for invalid in [
+            json!({"limit":0}),
+            json!({"include_inferred":"yes"}),
+            json!({"scope":"../outside"}),
+            json!({"unknown":true}),
+        ] {
+            assert!(matches!(
+                server.invoke_result(
+                    "get_hotspots",
+                    &mut invalid.as_object().ok_or("args")?.clone()
+                ),
+                Err(InvocationError::InvalidParams(_))
+            ));
+        }
+        fs::write(
+            temp.path().join("source-root.txt"),
+            temp.path().to_string_lossy().as_bytes(),
+        )?;
+        // The graph has no source commit: never call this current or borrow the caller's repository.
+        let unknown = server
+            .invoke_result("get_hotspots", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        assert!(unknown.text.contains("Graph freshness unknown"));
+        assert_eq!(
+            unknown.structured_content.ok_or("content")?["freshness"]["status"],
+            "unknown"
+        );
+        let envelope = server
+            .invoke_result("get_hotspots", &mut Map::new())
+            .map_err(|error| error.to_string())?
+            .structured_content
+            .ok_or("content")?;
+        assert_eq!(
+            envelope["transportTruncation"]["requiredBytes"].as_u64(),
+            Some(serde_json::to_vec(&envelope)?.len() as u64)
+        );
+        let (_, freshness) = server
+            .read_result_with_freshness("compass://stats")
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            freshness.ok_or("freshness")?.status,
+            compass_core::FreshnessStatus::Unknown
+        );
+        Ok(())
+    }
+
     use super::*;
 
     #[test]
@@ -3686,7 +3967,7 @@ mod tests {
         sample(&graph)?;
         let server = CompassMcp::new(graph);
         let tools = CompassMcp::tools();
-        assert_eq!(tools.len(), 18);
+        assert_eq!(tools.len(), 19);
         for (name, required) in [
             ("task_context", json!(["intent", "target"])),
             ("pr_readiness", json!(["base", "head"])),

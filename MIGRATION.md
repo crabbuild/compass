@@ -5,6 +5,16 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Scoped views and freshness
+
+No rebuild is required for new scoped views or hotspot ranking. Explicitly
+scoped architecture JSON has a new wrapper; read the original projection from
+`result`. Unscoped JSON retains its existing shape. Strict MCP envelope decoders
+must allow optional `freshness`; resource transport metadata can also contain it.
+CLI JSON remains on stdout, with advisory warnings on stderr. Older traversal
+caches rebuild automatically. Program signatures require `compass update --program`;
+use `--program PATH` when selecting an already published artifact.
+
 ## Compact output and budgets
 
 Typed query text is compact by default. Select `--verbose` or `--evidence` to

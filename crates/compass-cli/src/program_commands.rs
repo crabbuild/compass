@@ -21,14 +21,41 @@ pub(super) fn command(_frontend: Frontend, args: &[String]) -> Outcome {
     if matches!(subcommand, "-h" | "--help" | "help") {
         return Outcome::success(help());
     }
+    if !matches!(
+        subcommand,
+        "summary"
+            | "coverage"
+            | "functions"
+            | "show"
+            | "callers"
+            | "explain-call"
+            | "call-graph"
+            | "query"
+    ) {
+        return usage_error(&format!(
+            "unknown program command '{subcommand}'; run compass help program"
+        ));
+    }
     let (options, remaining) = match parse_common(&args[1..], subcommand != "query") {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),
     };
     let analysis = match load_program(&options.program) {
         Ok(analysis) => analysis,
-        Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 3),
+        Err(error) => {
+            return Outcome::failure_with_code(
+                format!(
+                    "error: Program IR unavailable: {error}.\nRun compass update --program to build function signatures and program evidence. For an existing artifact, use --program PATH."
+                ),
+                3,
+            );
+        }
     };
+    if let Ok(path) = compass_files::BuildGuard::resolve_requested_artifact(&options.program) {
+        // Program IR has no build commit in its current schema. Report unknown
+        // freshness under its own recorded root rather than borrowing a revision.
+        crate::freshness::record_program(&path);
+    }
     match subcommand {
         "summary" => render(summary(&analysis), options.format),
         "coverage" => coverage(&analysis, &remaining, options.format),
@@ -125,7 +152,7 @@ pub(crate) fn load_program(path: &Path) -> Result<AnalysisBundle, String> {
             "Program IR exceeds the {MAX_PROGRAM_BYTES}-byte safety limit"
         ));
     }
-    let bytes = fs::read(&resolved)
+    let bytes = compass_files::read_bytes_bounded(&resolved, MAX_PROGRAM_BYTES)
         .map_err(|error| format!("could not read {}: {error}", resolved.display()))?;
     let analysis: AnalysisBundle = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid Program IR JSON at {}: {error}", resolved.display()))?;
@@ -346,7 +373,14 @@ fn show(analysis: &AnalysisBundle, args: &[String], format: Format) -> Outcome {
     }
     let function = match resolve_function(analysis, &args[0]) {
         Ok(function) => function,
-        Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 4),
+        Err(error) => {
+            return Outcome::failure_with_code(
+                format!(
+                    "error: {error}. Run compass program functions to list recorded function IDs."
+                ),
+                4,
+            );
+        }
     };
     let Some(module) = analysis.program.modules.iter().find(|module| {
         module
@@ -859,10 +893,12 @@ fn resolve_function<'a>(
     candidates.sort_by(|left, right| left.symbol_id.cmp(&right.symbol_id));
     candidates.dedup_by(|left, right| left.symbol_id == right.symbol_id);
     match candidates.as_slice() {
-        [] => Err(format!("no Program IR function matches '{query}'")),
+        [] => Err(format!(
+            "no Program IR function matches '{query}'; run compass program functions to list recorded function IDs"
+        )),
         [function] => Ok(function),
         functions => Err(format!(
-            "function selector '{query}' is ambiguous: {}",
+            "function selector '{query}' is ambiguous: {}; retry compass program show ID with an exact function ID",
             functions
                 .iter()
                 .take(8)

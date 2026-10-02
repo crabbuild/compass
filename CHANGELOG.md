@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add source-scoped architecture and community views, compact hotspot rankings,
+  and optional labelled inferred/document connection layers.
+- Warn about old graph revisions and working-tree changes under the recorded
+  source root, including cached answers. Keep machine stdout intact and expose
+  versioned freshness metadata in MCP envelopes.
+- Return recovery commands for missing graph/Program artifacts and function
+  selectors, and reject unknown Program commands before loading artifacts.
+
 - Default typed query and MCP text to compact, source-located answers. Keep
   uncertainty visible and expose full paged audit detail with `--verbose` or
   `--evidence`; raw machine contracts are unchanged.

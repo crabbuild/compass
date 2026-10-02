@@ -64,3 +64,11 @@ commands print `compass output ID --offset N --budget N` to read the saved
 output without repeating the command. Saved output is worktree-local and
 bounded to sixteen records. Streaming `watch`, `serve`, and JSONL sessions reject
 this presentation control; noninteractive `init --yes` supports it.
+
+### hotspots
+
+`compass hotspots --scope app/services --include-inferred --include-documents` ranks published symbol connectivity and incoming dependents. Optional evidence layers stay labelled.
+
+### community
+
+`compass community [ID] --scope app/services` lists a scoped community window. Use `--format json` for typed results.

@@ -5,6 +5,7 @@ mod build_state;
 mod cluster_existing;
 mod diagnostics;
 mod document_processing;
+mod freshness;
 mod history;
 mod merge;
 mod pipeline;
@@ -31,6 +32,7 @@ pub use diagnostics::{
 pub use document_processing::{
     CoreDocumentProcessingOptions, PreparedDocument, PreparedDocumentSet, prepare_document_set,
 };
+pub use freshness::{FreshnessStatus, GraphFreshness, graph_freshness};
 pub use history::{
     CompleteGraphBuilder, MaterializeError, MaterializeObserver, MaterializeRequest,
     MaterializeStage, history_provider_manifest, materialize_history,

@@ -36,6 +36,6 @@ fn traversal_projection_preserves_weakest_confidence_and_deferred_state()
     let graph = GraphDocument::load_for_traversal(&path)?;
     assert_eq!(graph.links[0].string("confidence"), "INFERRED");
     assert_eq!(graph.links[2].boolean("deferred"), Some(true));
-    assert_eq!(&fs::read(cache)?[..8], b"TRAILT07");
+    assert_eq!(&fs::read(cache)?[..8], b"TRAILT08");
     Ok(())
 }

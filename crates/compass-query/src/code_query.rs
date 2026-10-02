@@ -354,6 +354,7 @@ pub struct CodeQueryEngine {
     pub(crate) engine_kind: QueryEngineKind,
     pub(crate) graph_identity: String,
     pub(crate) build_generation_identity: String,
+    pub(crate) source_commit: Option<String>,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
     pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
     pub(crate) deadline: Option<Instant>,
@@ -3593,6 +3594,12 @@ impl CodeQueryEngine {
     #[must_use]
     pub fn build_generation_identity(&self) -> &str {
         &self.build_generation_identity
+    }
+
+    /// Source revision of this pinned graph, independent of response caching.
+    #[must_use]
+    pub fn source_commit(&self) -> Option<&str> {
+        self.source_commit.as_deref()
     }
 
     pub(crate) fn owner_qualified_candidates(

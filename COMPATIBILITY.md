@@ -55,7 +55,7 @@ results for the known nested-anchor limitation in that stable release.
 Graph query, impact and traversal caches now bind to the SHA-256 of the bounded
 JSON bytes read, including when file size and modification time are unchanged.
 Their disposable header versions advance to `TRAILG02`, `TRAILA03` and
-`TRAILT07`. Typed content caches use `.content-v2.cache` and `CGRPHV02`; their
+`TRAILT08`. Typed content caches use `.content-v2.cache` and `CGRPHV02`; their
 cache key, schema admission and decoded document come from one byte snapshot.
 Older cache formats are ignored and rebuilt from the graph.
 
@@ -645,7 +645,7 @@ typed responses report truncation and an ambiguity diagnostic. Graph schemas,
 stored identities, and extraction are unchanged. Existing graphs can receive
 this lookup correction without re-extraction.
 
-Traversal cache format `TRAILT07` retains deferred relationship flags and the
+Traversal cache format `TRAILT08` retains deferred relationship flags and the
 weakest confidence across all evidence (introduced in `TRAILT06`), including
 explicit compatibility confidence. Missing or unknown confidence values in an
 evidence item cannot establish an exact fact. Older disposable traversal
@@ -1727,3 +1727,16 @@ are bound to graph/Program IR, executable version, planner/ranker profiles,
 complete request and semantic mode. A changed response-cache meaning requires a
 new cache filename/version; missing/corrupt caches do not change native results.
 Neither cache rewrites published graphs or historical realizations.
+
+## Scoped usability and freshness
+
+Unscoped architecture output and existing MCP community membership defaults are
+unchanged. Opt-in scoped architecture output uses the new
+`compass.architecture.scoped-view/1` wrapper. New community/hotspot commands and
+`get_hotspots` have explicit schemas described in `docs/reference/outputs.md`.
+MCP consumers with closed outer envelopes must admit optional `freshness`.
+CLI machine stdout remains unchanged; warnings use stderr and are budgeted.
+Graph, Program IR and immutable historical schemas are unchanged. Disposable
+traversal cache header `TRAILT08` retains the pinned build commit; older caches
+are ignored and rebuilt. Missing Program IR exits with code 3 and recovery
+commands; unknown Program subcommands exit with code 2 before artifact access.
