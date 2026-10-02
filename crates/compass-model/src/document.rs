@@ -821,7 +821,19 @@ impl GraphDocument {
         Self {
             directed: self.directed,
             multigraph: self.multigraph,
-            graph: Map::new(),
+            graph: self
+                .graph
+                .get("build")
+                .and_then(|build| build.get("sourceCommit"))
+                .or_else(|| self.graph.get("built_at_commit"))
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    matches!(value.len(), 40 | 64)
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+                .map_or_else(Map::new, |commit| {
+                    Map::from_iter([("build".into(), serde_json::json!({"sourceCommit":commit}))])
+                }),
             nodes,
             links,
             extras: BTreeMap::new(),
@@ -830,7 +842,7 @@ impl GraphDocument {
 }
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG02";
-const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA03";
+const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA04";
 const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT08";
 const QUERY_CACHE_HEADER_LEN: usize = 48;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1810,7 +1822,7 @@ fn insert_optional_value(attributes: &mut Map<String, Value>, key: &str, value: 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn traversal_cache_retains_only_the_pinned_build_revision()
+    fn query_projection_caches_retain_only_the_pinned_build_revision()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
         let path = temp.path().join("graph.json");
@@ -1823,9 +1835,13 @@ mod tests {
             }))?,
         )?;
         for _ in 0..2 {
-            let document = GraphDocument::load_for_traversal(&path)?;
-            assert_eq!(document.graph["build"]["sourceCommit"], commit);
-            assert!(!document.graph.contains_key("files"));
+            for document in [
+                GraphDocument::load_for_traversal(&path)?,
+                GraphDocument::load_for_affected(&path)?,
+            ] {
+                assert_eq!(document.graph["build"]["sourceCommit"], commit);
+                assert!(!document.graph.contains_key("files"));
+            }
         }
         Ok(())
     }

@@ -54,7 +54,7 @@ results for the known nested-anchor limitation in that stable release.
 
 Graph query, impact and traversal caches now bind to the SHA-256 of the bounded
 JSON bytes read, including when file size and modification time are unchanged.
-Their disposable header versions advance to `TRAILG02`, `TRAILA03` and
+Their disposable header versions advance to `TRAILG02`, `TRAILA04` and
 `TRAILT08`. Typed content caches use `.content-v2.cache` and `CGRPHV02`; their
 cache key, schema admission and decoded document come from one byte snapshot.
 Older cache formats are ignored and rebuilt from the graph.
@@ -1737,6 +1737,6 @@ unchanged. Opt-in scoped architecture output uses the new
 MCP consumers with closed outer envelopes must admit optional `freshness`.
 CLI machine stdout remains unchanged; warnings use stderr and are budgeted.
 Graph, Program IR and immutable historical schemas are unchanged. Disposable
-traversal cache header `TRAILT08` retains the pinned build commit; older caches
-are ignored and rebuilt. Missing Program IR exits with code 3 and recovery
+impact/traversal cache headers `TRAILA04` and `TRAILT08` retain the pinned build
+commit; older caches are ignored and rebuilt. Missing Program IR exits with code 3 and recovery
 commands; unknown Program subcommands exit with code 2 before artifact access.

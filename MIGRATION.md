@@ -12,7 +12,8 @@ scoped architecture JSON has a new wrapper; read the original projection from
 `result`. Unscoped JSON retains its existing shape. Strict MCP envelope decoders
 must allow optional `freshness`; resource transport metadata can also contain it.
 CLI JSON remains on stdout, with advisory warnings on stderr. Older traversal
-caches rebuild automatically. Program signatures require `compass update --program`;
+and impact caches rebuild automatically. Program signatures require
+`compass update --program`;
 use `--program PATH` when selecting an already published artifact.
 
 ## Compact output and budgets
