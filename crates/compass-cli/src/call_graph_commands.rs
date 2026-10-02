@@ -22,7 +22,7 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
         Err(error) => {
             return Outcome::failure_with_code(
                 format!(
-                    "error: could not resolve graph {}: {error}",
+                    "error: could not resolve graph {}: {error}; run compass ensure or select an existing graph with --graph PATH",
                     options.graph.display()
                 ),
                 3,
@@ -34,17 +34,25 @@ pub(crate) fn command(frontend: Frontend, args: &[String]) -> Outcome {
         Err(error) => {
             return Outcome::failure_with_code(
                 format!(
-                    "error: could not load graph {}: {error}",
+                    "error: could not load graph {}: {error}; run compass ensure or select an existing graph with --graph PATH",
                     options.graph.display()
                 ),
                 3,
             );
         }
     };
+    crate::freshness::record(&resolved_graph, crate::graph_source_commit(&graph));
     let analysis = match options.program {
         Some(path) => match crate::program_commands::load_program(&path) {
             Ok(analysis) => Some(analysis),
-            Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 3),
+            Err(error) => {
+                return Outcome::failure_with_code(
+                    format!(
+                        "error: {error}; run compass update --program, or select an existing artifact with --program PATH"
+                    ),
+                    3,
+                );
+            }
         },
         None => None,
     };

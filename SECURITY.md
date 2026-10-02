@@ -156,3 +156,19 @@ ceiling. Lookup requires the verified graph identity and Program IR/profile/
 request/mode identity, validates payload length, checksum and typed schema, and
 checks deadlines. Source excerpts and partial responses are excluded. Cache
 errors use native execution. Neither cache adds network or credential access.
+
+Graph freshness checks read the bounded `source-root.txt` marker beside a selected
+artifact, canonicalize its absolute root, and invoke Git with separate arguments.
+They do not infer the root from the caller's current directory. Each invocation
+has a 500 ms deadline and bounded captured output (admitted up to 1 MiB).
+Lazy object fetching, filesystem monitors, external diff programs, text
+conversions and rename heuristics are disabled. Configured clean/process
+conversion filters and indexed submodules cause unknown freshness before
+working-file checks, avoiding filter execution and child repository processes.
+Git versions without the
+no-lazy-fetch option report unknown freshness. These are read-only local observations; no checkout,
+hook, network fetch or graph rewrite is performed. Failed checks remain unknown.
+The marked root can be outside the current project; its path appears in the
+advisory recovery command and MCP freshness metadata. Shell quoting is display
+only. Source-root markers are local build metadata, not a trust assertion that
+arbitrary imported graph bytes describe that checkout.

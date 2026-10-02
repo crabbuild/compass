@@ -108,6 +108,8 @@ const GROUPS: &[Group] = &[
             "affected",
             "benchmark",
             "output",
+            "hotspots",
+            "community",
         ],
     },
     Group {
@@ -149,6 +151,18 @@ const GROUPS: &[Group] = &[
 ];
 
 const PAGES: &[Page] = &[
+    page!(
+        "hotspots",
+        "Rank connected symbols and incoming dependents",
+        ["compass hotspots [OPTIONS]"],
+        "Options:\n  --scope <PATH|module:NAME>  Repeatable source scope\n  --limit <N>                 Rows per ranking, 1-100 [default: 10]\n  --include-inferred          Include labelled inferred contacts\n  --include-documents         Include labelled document contacts\n  --graph <PATH>              Selected graph\n  --format <text|json>        Output format\n\nExamples:\n  compass hotspots --scope app/services\n  compass hotspots --include-inferred --include-documents --format json"
+    ),
+    page!(
+        "community",
+        "List scoped communities or inspect one community",
+        ["compass community [ID] [OPTIONS]"],
+        "Options:\n  --scope <PATH|module:NAME>  Repeatable source scope\n  --limit <N>                 Community/member window, 1-100 [default: 20]\n  --graph <PATH>              Selected graph\n  --format <text|json>        Output format\n\nExamples:\n  compass community --scope app/services\n  compass community 7 --scope module:app.services --format json"
+    ),
     page!(
         "output",
         "Read the rest of an immutable saved command output",
@@ -444,7 +458,7 @@ const PAGES: &[Page] = &[
         "architecture",
         "Summarize the bounded architecture projection for agent inspection",
         ["compass architecture [OPTIONS]"],
-        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --format <text|agent-json|json> Output format [default: text]\n\nExamples:\n  compass architecture\n  compass architecture --format agent-json\n  compass architecture --graph compass-out/graph.json --format json\n\nNotes:\n  Detailed JSON is capped at 5,000 nodes and 20,000 relationships. Above either cap, Compass returns exact totals, bounded kind counts, and samples from the 12 largest communities (3 nodes each), ordered deterministically by community size, community ID, and node ID. Oversized sample fields are bounded or counted as omitted in the versioned summary."
+        "Options:\n  --scope <PATH|module:NAME>  Repeatable path/module filter (OR)\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --format <text|agent-json|json> Output format [default: text]\n\nExamples:\n  compass architecture\n  compass architecture --format agent-json\n  compass architecture --graph compass-out/graph.json --format json\n\nNotes:\n  Detailed JSON is capped at 5,000 nodes and 20,000 relationships. Above either cap, Compass returns exact totals, bounded kind counts, and samples from the 12 largest communities (3 nodes each), ordered deterministically by community size, community ID, and node ID. Oversized sample fields are bounded or counted as omitted in the versioned summary."
     ),
     page!(
         "affected",
@@ -1341,7 +1355,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 55);
+        assert_eq!(roots.len(), 57);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

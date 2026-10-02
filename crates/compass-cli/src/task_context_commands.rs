@@ -129,6 +129,7 @@ fn execute(args: &[String]) -> Result<TaskContext, String> {
         (None, None) => {
             let engine = open_with_engine(&graph, program.as_deref(), &cache, engine_selection)
                 .map_err(|error| error.to_string())?;
+            super::freshness::record(engine.graph_path(), engine.source_commit());
             build_task_context(&engine, &request, &memory).map_err(|error| error.to_string())
         }
         (Some(overlay), Some(revision)) => {

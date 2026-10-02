@@ -648,6 +648,7 @@ are recomputed, and cache failures fall back to native execution.
 compass architecture
   [--graph PATH]
   [--labels PATH]
+  [--scope PATH|module:NAME]
   [--format text|json|agent-json]
 ```
 
@@ -672,6 +673,27 @@ labels, kinds, paths, and community labels are limited to 512 characters and
 escape control and bidirectional-text characters; `boundedFields` records
 which sample fields were changed, and `omittedSampleNodes` counts selected IDs
 that could not be included.
+
+Use repeatable `--scope app/services/lookup_tables` or `--scope module:app.services`
+to select one area. Scope counts disclose omitted nodes and boundary links.
+Scoped machine output wraps the projection in `compass.architecture.scoped-view/1`.
+
+### `community` and `hotspots`
+
+```bash
+compass community --scope app/services --limit 20
+compass community 0 --scope module:app.services --format json
+compass hotspots --scope app/services --limit 10
+compass hotspots --include-inferred --include-documents --format json
+```
+
+Community views list bounded membership and explicit omissions. Hotspots rank
+most connected and most depended-on source symbols. Optional inferred and
+document layers stay labelled; ambiguous targets stay excluded. Scoped hotspot
+symbols retain their outside contacts. Text is compact and source-located; JSON
+retains exact IDs, contact counts, record counts and layer policy. Both commands
+accept `--graph PATH`, `--format text|json`, `--limit 1..100` and `--budget N`.
+See [output contracts](outputs.md#scoped-overviews-and-hotspots) for count semantics.
 
 ### `path`
 

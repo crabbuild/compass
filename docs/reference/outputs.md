@@ -1433,3 +1433,60 @@ Excerpts use the graph's recorded callable spans. An annotation or decorator
 outside those spans, such as Python's `@property`, may be absent even when a
 member is fully returned. Use the declaration excerpt when that surrounding
 context is needed; member mode does not guarantee more evidence for every fact.
+
+### Scoped overviews and hotspots
+
+`architecture --scope PATH|module:NAME` uses a source path prefix on component
+boundaries or a qualified module prefix. Up to 16 repeatable scopes form a union.
+The view retains only relationships between selected nodes. Text discloses
+selected totals, omitted records and boundary records. Scoped JSON and agent
+JSON wrap the existing projection in `compass.architecture.scoped-view/1` with
+`selection` and `result`; unscoped schemas retain their meaning. Empty scope
+matches produce an explicit empty selection. Absolute paths and parent traversal
+are rejected. Graph work is capped at one million nodes and two million edges.
+
+`community [ID]` uses the same scope and emits `compass.communities/1`. Its
+`--limit` (1–100, default 20) caps both communities and members per community,
+with separate omission counts. IDs and membership are ordered deterministically.
+MCP `get_community` adds optional `scope` and `limit` (1–1000000); omitting limit
+preserves the existing full-membership behavior within the transport bound.
+
+`hotspots` and MCP `get_hotspots` return `compass.hotspots/1`. They rank source
+symbols by distinct `(direction, neighbor)` contacts and by distinct incoming
+non-containment dependents, breaking ties by stable node ID. A scope selects
+candidate symbols; their contacts outside it remain counted. Self-loops do not
+count, and parallel call occurrences do not inflate contacts. Each row retains
+`relationshipRecords` separately. Undirected graphs have no dependent ranking.
+The default structural layer excludes inferred and document contacts. Enable
+`--include-inferred` / `include_inferred` and `--include-documents` /
+`include_documents` to include them. An inferred document contact requires both
+flags and retains both labels. Per-layer contacts can overlap; the total
+still deduplicates them. Ambiguous and unresolved targets never become contacts.
+Counts cover published evidence, not unseen runtime dependencies. Limits are
+1–100 rows per ranking, default 10; labels over 4096 bytes fail explicitly.
+
+### Advisory graph freshness
+
+CLI graph answers emit freshness warnings on stderr, preserving JSON stdout.
+The finite output budget includes these warnings. MCP tool envelopes add an
+optional `freshness` object with schema `compass.graph-freshness/1`; resource
+transport metadata carries the same object. Human-readable resources also show
+the warning. JSON resource bodies preserve their existing schema.
+
+Checks use the source root recorded beside the selected artifact, never the
+caller's working directory. The pinned graph build commit is compared to HEAD,
+tracked working bytes and staged/untracked files. `changedFiles` counts distinct
+repository paths different from the build or present in status; renames are two
+paths. `uncommittedFiles` counts status entries. Files outside an index scope can
+be counted: these are repository-state observations, not proof every indexed
+symbol is stale. The statuses are `current`, `revision_changed`,
+`working_tree_changes` and `unknown`. Missing commits, roots, Git, timeout or
+output limits yield `unknown`, never `current`. Configured Git conversion filters
+and submodules also yield `unknown`; their working state cannot be checked
+without crossing optional process boundaries. Warnings show the recorded root's
+update command, including the selected output container. Rebuilds publish a new
+generation; select the output container’s public `graph.json` alias afterward
+when the original request selected an immutable snapshot path. Freshness is checked again for each request, including cached
+answers. Standalone and historical artifacts without a source-root marker have
+no advisory check. Program IR currently has no build commit; its own marked
+artifact reports unknown freshness rather than borrowing a graph's revision.

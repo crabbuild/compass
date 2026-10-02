@@ -275,8 +275,7 @@ fn execute(
             compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
                 .map_err(|error| error.to_string())?
         };
-        open_with_engine(&graph, program.as_deref(), &cache, engine)
-            .map_err(|error| error.to_string())?
+        open_with_engine(&graph, program.as_deref(), &cache, engine).map_err(query_error)?
     }
     .with_deadline(deadline)
     .with_semantic_search(args.iter().any(|arg| arg == "--semantic-search"));
@@ -413,6 +412,7 @@ fn execute(
         }
         _ => unreachable!(),
     };
+    super::freshness::record(engine.graph_path(), engine.source_commit());
     let mut context = AgentQueryContext::new(
         response.operation.into(),
         engine.graph_identity().to_owned(),
@@ -467,6 +467,10 @@ fn timeout(args: &[String]) -> Result<Duration, String> {
 fn query_error(error: QueryError) -> String {
     if error.kind() == QueryErrorKind::Timeout {
         format!("{error}; raise --timeout-ms or lower --max-nodes/--max-edges")
+    } else if error.kind() == QueryErrorKind::UnsupportedSchema {
+        format!(
+            "{error}; run compass update to build artifacts with this version, or use --graph PATH for a supported graph"
+        )
     } else {
         error.to_string()
     }

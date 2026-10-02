@@ -821,7 +821,19 @@ impl GraphDocument {
         Self {
             directed: self.directed,
             multigraph: self.multigraph,
-            graph: Map::new(),
+            graph: self
+                .graph
+                .get("build")
+                .and_then(|build| build.get("sourceCommit"))
+                .or_else(|| self.graph.get("built_at_commit"))
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    matches!(value.len(), 40 | 64)
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+                .map_or_else(Map::new, |commit| {
+                    Map::from_iter([("build".into(), serde_json::json!({"sourceCommit":commit}))])
+                }),
             nodes,
             links,
             extras: BTreeMap::new(),
@@ -830,8 +842,8 @@ impl GraphDocument {
 }
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG02";
-const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA03";
-const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT07";
+const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA04";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT08";
 const QUERY_CACHE_HEADER_LEN: usize = 48;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -842,6 +854,8 @@ static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Deserialize)]
 struct TraversalRawGraphDocument {
     #[serde(default)]
+    graph: Option<TraversalFreshnessMetadata>,
+    #[serde(default)]
     directed: bool,
     #[serde(default = "networkx_default_multigraph")]
     multigraph: bool,
@@ -849,6 +863,28 @@ struct TraversalRawGraphDocument {
     nodes: Vec<TraversalRawNode>,
     links: Option<Vec<TraversalRawEdge>>,
     edges: Option<Vec<TraversalRawEdge>>,
+}
+
+#[derive(Default, Deserialize)]
+struct TraversalFreshnessMetadata {
+    #[serde(default)]
+    build: Option<Value>,
+    #[serde(default)]
+    built_at_commit: Option<Value>,
+}
+
+impl TraversalFreshnessMetadata {
+    fn source_commit(&self) -> Option<String> {
+        self.build
+            .as_ref()
+            .and_then(|build| build.get("sourceCommit"))
+            .or(self.built_at_commit.as_ref())
+            .and_then(Value::as_str)
+            .filter(|value| {
+                matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+            .map(str::to_owned)
+    }
 }
 
 #[derive(Default)]
@@ -1159,7 +1195,13 @@ impl<'de> Deserialize<'de> for TraversalEvidenceItem {
 /// lookup for every retained attribute while leaving the published JSON graph
 /// authoritative.
 #[derive(Deserialize, Serialize)]
-struct TraversalCacheDocument(bool, bool, Vec<TraversalCacheNode>, Vec<TraversalCacheEdge>);
+struct TraversalCacheDocument(
+    bool,
+    bool,
+    Vec<TraversalCacheNode>,
+    Vec<TraversalCacheEdge>,
+    Option<String>,
+);
 
 #[derive(Deserialize, Serialize)]
 struct TraversalCacheNode(
@@ -1193,6 +1235,10 @@ struct TraversalCacheEdge(
 
 impl TraversalRawGraphDocument {
     fn into_cache(self) -> TraversalCacheDocument {
+        let source_commit = self
+            .graph
+            .as_ref()
+            .and_then(TraversalFreshnessMetadata::source_commit);
         let links = self.links.or(self.edges).unwrap_or_default();
         TraversalCacheDocument(
             self.directed,
@@ -1205,6 +1251,7 @@ impl TraversalRawGraphDocument {
                 .into_iter()
                 .map(TraversalRawEdge::into_cache)
                 .collect(),
+            source_commit,
         )
     }
 }
@@ -1370,7 +1417,7 @@ fn source_anchor_field(anchor: Option<&Value>, field: &str) -> Option<String> {
 
 impl TraversalCacheDocument {
     fn into_document(self) -> GraphDocument {
-        let Self(directed, multigraph, nodes, links) = self;
+        let Self(directed, multigraph, nodes, links, source_commit) = self;
         let nodes = nodes
             .into_iter()
             .map(|node| {
@@ -1437,7 +1484,9 @@ impl TraversalCacheDocument {
         GraphDocument {
             directed,
             multigraph,
-            graph: Map::new(),
+            graph: source_commit.map_or_else(Map::new, |commit| {
+                Map::from_iter([("build".into(), serde_json::json!({"sourceCommit":commit}))])
+            }),
             nodes,
             links,
             extras: BTreeMap::new(),
@@ -1772,6 +1821,31 @@ fn insert_optional_value(attributes: &mut Map<String, Value>, key: &str, value: 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn query_projection_caches_retain_only_the_pinned_build_revision()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        let commit = "a".repeat(40);
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "graph":{"build":{"sourceCommit":commit},"files":[{"large":"discard"}]},
+                "nodes":[{"id":"a"}],"links":[]
+            }))?,
+        )?;
+        for _ in 0..2 {
+            for document in [
+                GraphDocument::load_for_traversal(&path)?,
+                GraphDocument::load_for_affected(&path)?,
+            ] {
+                assert_eq!(document.graph["build"]["sourceCommit"], commit);
+                assert!(!document.graph.contains_key("files"));
+            }
+        }
+        Ok(())
+    }
+
     use std::fs;
 
     use super::{

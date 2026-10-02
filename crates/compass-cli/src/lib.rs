@@ -6,6 +6,7 @@ mod capability_commands;
 mod code_query_commands;
 mod dedup_commands;
 mod document_commands;
+mod freshness;
 mod help;
 mod history_batch;
 mod history_build;
@@ -19,6 +20,7 @@ mod integration_commands;
 mod label_commands;
 mod models_commands;
 mod output_budget;
+mod overview_commands;
 mod program_commands;
 mod provider_commands;
 mod prs_commands;
@@ -427,6 +429,7 @@ fn write_output<W: Write + ?Sized>(
 
 #[must_use]
 pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) -> Outcome {
+    let freshness = freshness::Scope::begin();
     let mut args = arguments
         .into_iter()
         .map(|argument| argument.to_string_lossy().into_owned())
@@ -474,7 +477,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         }
     }
     let outcome = run_unbudgeted(frontend, args.into_iter().map(OsString::from));
-    output_budget::finish(outcome, &controls)
+    output_budget::finish(freshness.finish(outcome), &controls)
 }
 
 fn run_unbudgeted(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) -> Outcome {
@@ -534,6 +537,8 @@ fn run_unbudgeted(frontend: Frontend, arguments: impl IntoIterator<Item = OsStri
         "path" => command_path(frontend, &args),
         "explain" => command_explain(frontend, &args),
         "architecture" => command_architecture(frontend, &args),
+        "community" => overview_commands::command("community", &args),
+        "hotspots" => overview_commands::command("hotspots", &args),
         "affected" => command_affected(&args),
         "export" => command_export(frontend, &args),
         "benchmark" => command_benchmark(&args),
@@ -4113,7 +4118,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     {
         return Outcome::failure("error: --node-limit must be a positive integer".to_owned());
     }
-    let mut inputs = match ExportInputs::load(&graph_path) {
+    let mut inputs = match load_export_inputs(&graph_path) {
         Ok(inputs) => inputs,
         Err(GraphError::NotFound(_)) => {
             return Outcome::failure(format!(
@@ -6221,6 +6226,7 @@ fn discovery_query(
                 .join("cache");
             let engine =
                 open_code_query(&graph, None, &cache).map_err(|error| error.to_string())?;
+            freshness::record(engine.graph_path(), engine.source_commit());
             let graph_identity = engine.build_generation_identity().to_owned();
             let graph_digest = engine.graph_identity().to_owned();
             let engine = engine
@@ -6255,6 +6261,7 @@ fn discovery_query(
                 &cache,
             )
             .map_err(|error| error.to_string())?;
+            freshness::record(engine.graph_path(), engine.source_commit());
             let graph_identity = engine.build_generation_identity().to_owned();
             let graph_digest = engine.graph_identity().to_owned();
             let engine = engine
@@ -6344,7 +6351,7 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
         .iter()
         .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
     {
-        return Outcome::success("Usage: compass architecture [--graph PATH] [--labels PATH] [--format text|json|agent-json]".to_owned());
+        return Outcome::success("Usage: compass architecture [--graph PATH] [--labels PATH] [--scope PATH|module:NAME] [--format text|json|agent-json]".to_owned());
     }
     let (format, args) = match parse_shared_output_format(args, "architecture") {
         Ok(parsed) => parsed,
@@ -6352,6 +6359,7 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
     };
     let mut graph_path = default_graph_path();
     let mut labels_path = None;
+    let mut scopes = Vec::new();
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -6364,6 +6372,19 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
             }
             value if value.starts_with("--graph=") => {
                 graph_path = PathBuf::from(&value[8..]);
+                index += 1;
+            }
+            "--scope" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure(
+                        "error: --scope requires a relative path or module:NAME".to_owned(),
+                    );
+                };
+                scopes.push(value.clone());
+                index += 2;
+            }
+            value if value.starts_with("--scope=") => {
+                scopes.push(value[8..].to_owned());
                 index += 1;
             }
             "--labels" => {
@@ -6388,11 +6409,15 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
             }
         }
     }
+    let scopes = match compass_query::OverviewScope::new(scopes) {
+        Ok(scope) => scope.filters,
+        Err(error) => return Outcome::failure_with_code(format!("error: {error}"), 2),
+    };
     let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,
         Err(error) => return Outcome::failure(format!("error: could not resolve graph: {error}")),
     };
-    let mut inputs = match ExportInputs::load(&graph_path) {
+    let mut inputs = match load_export_inputs(&graph_path) {
         Ok(inputs) => inputs,
         Err(GraphError::NotFound(_)) => {
             return Outcome::failure(format!(
@@ -6408,6 +6433,14 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
             Err(error) => return Outcome::failure(error),
         }
     }
+    let selection = if scopes.is_empty() {
+        None
+    } else {
+        match overview_commands::apply_scope(&mut inputs, scopes) {
+            Ok(selection) => Some(selection),
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        }
+    };
     let title = export_project_title(&inputs, &graph_path);
     let overlay = match load_architecture_overlay(None, &graph_path) {
         Ok(overlay) => overlay,
@@ -6433,11 +6466,15 @@ fn command_architecture(_frontend: Frontend, args: &[String]) -> Outcome {
             ));
         }
     };
-    match projection {
+    let output = match projection {
         ArchitectureProjectionOutput::Detailed(model) => render_architecture_output(format, &model),
         ArchitectureProjectionOutput::Summary(summary) => {
             render_architecture_summary_output(format, &summary)
         }
+    };
+    match selection {
+        Some(selection) => overview_commands::scoped_output(output, &selection, format),
+        None => output,
     }
 }
 
@@ -7117,6 +7154,7 @@ fn command_affected_typed(
             Ok(engine) => engine,
             Err(error) => return Some(Outcome::failure(format!("error: {error}"))),
         };
+    freshness::record(engine.graph_path(), engine.source_commit());
     let relation_kinds = relations
         .iter()
         .filter_map(|relation| affected_relation_kind(relation))
@@ -7302,7 +7340,11 @@ pub(crate) fn load_selection_full(
                 compass_files::BuildGuard::resolve_requested_artifact(path).map_err(|error| {
                     Outcome::failure(format!("error: could not resolve graph: {error}"))
                 })?;
-            LoadedGraph::load_full_directed(&path).map_err(graph_load_outcome)
+            LoadedGraph::load_full_directed(&path)
+                .inspect(|loaded| {
+                    freshness::record(&path, loaded.graph.source_commit());
+                })
+                .map_err(graph_load_outcome)
         }
         GraphSelection::Commit(revision) => {
             history_commands::load_graph_at(frontend, revision, true)
@@ -7322,6 +7364,7 @@ pub(crate) fn load_indexed_selection(
                     Outcome::failure(format!("error: could not resolve graph: {error}"))
                 })?;
             let graph = compass_model::Graph::load_directed(&path).map_err(graph_load_outcome)?;
+            freshness::record(&path, graph.source_commit());
             Ok(LoadedGraph {
                 graph,
                 overlay: HashMap::new(),
@@ -7386,24 +7429,36 @@ fn load(path: &Path, force_directed: bool) -> Result<LoadedGraph, Outcome> {
     } else {
         LoadedGraph::load(&path)
     };
-    result.map_err(graph_load_outcome)
+    result
+        .inspect(|loaded| {
+            freshness::record(&path, loaded.graph.source_commit());
+        })
+        .map_err(graph_load_outcome)
 }
 
 fn load_affected(path: &Path) -> Result<LoadedGraph, Outcome> {
     let path = compass_files::BuildGuard::resolve_requested_artifact(path)
         .map_err(|error| Outcome::failure(format!("error: could not resolve graph: {error}")))?;
-    LoadedGraph::load_for_affected(&path).map_err(graph_load_outcome)
+    LoadedGraph::load_for_affected(&path)
+        .inspect(|loaded| {
+            freshness::record(&path, loaded.graph.source_commit());
+        })
+        .map_err(graph_load_outcome)
 }
 
 fn graph_load_outcome(error: GraphError) -> Outcome {
     match error {
-        GraphError::NotFound(path) => {
-            Outcome::failure(format!("error: graph file not found: {}", path.display()))
-        }
-        GraphError::InvalidExtension(_) => {
-            Outcome::failure("error: graph file must be a .json file".to_owned())
-        }
-        other => Outcome::failure(format!("error: could not load graph: {other}")),
+        GraphError::NotFound(path) => Outcome::failure(format!(
+            "error: graph file not found: {}. Run compass ensure to publish a graph, or select an existing graph with --graph PATH.",
+            path.display()
+        )),
+        GraphError::InvalidExtension(_) => Outcome::failure(
+            "error: graph file must be a .json file; select an existing graph with --graph PATH"
+                .to_owned(),
+        ),
+        other => Outcome::failure(format!(
+            "error: could not load graph: {other}. Run compass ensure to publish a fresh graph, or select a supported existing graph with --graph PATH."
+        )),
     }
 }
 
@@ -8095,4 +8150,10 @@ mod mcp_option_tests {
         assert_eq!(model.as_deref(), Some("gpt-test"));
         assert!(extract_help().contains("COMPASS_BACKEND/COMPASS_MODEL"));
     }
+}
+
+fn load_export_inputs(path: &Path) -> Result<ExportInputs, GraphError> {
+    let inputs = ExportInputs::load(path)?;
+    freshness::record(path, graph_source_commit(&inputs.document));
+    Ok(inputs)
 }
