@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-10-02
+
 - Add source-scoped architecture and community views, compact hotspot rankings,
   and optional labelled inferred/document connection layers.
 - Warn about old graph revisions and working-tree changes under the recorded
