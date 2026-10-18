@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from benchmarks.agent_query.broad_query_capture import command, launch, ENV_PATH_KEYS
-from benchmarks.agent_query.broad_query_execution_v2 import validate_execution
+from benchmarks.agent_query.broad_query_execution_v2 import validate_execution, parse_rss_v2, MAX_RSS_BYTES
 from benchmarks.agent_query.broad_query_lineage_v2 import BoundObservation, SCHEMAS
 from benchmarks.agent_query.broad_query_review import ARMS, TOOLS, QUERY_EXIT_SCHEMA
 
@@ -37,6 +37,35 @@ class Fixture:
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_bounded_rss_range_decimal_length_and_line_partition(self):
+        for style in ("darwin-l", "gnu-v"):
+            def line(value):
+                return (str(value) + " maximum resident set size\r\n" if style == "darwin-l" else
+                    "Maximum resident set size (kbytes): " + str(value) + "\r\n").encode()
+            scale = 1 if style == "darwin-l" else 1024
+            upper = MAX_RSS_BYTES // scale
+            for value in (1, upper):
+                with self.subTest(style=style, valid=value):
+                    self.assertEqual(parse_rss_v2(line(value), style), value * scale)
+            for raw in (line(0), line(upper + 1), line("9" * 5000), b"missing\n",
+                    line(1) + b"   " + line(2), line(1) + line(1), line("-1"), line("1x")):
+                with self.subTest(style=style, bytes=len(raw)):
+                    self.assertIsNone(parse_rss_v2(raw, style))
+
+    def test_malformed_rss_stays_unavailable_and_substituted_peak_is_integrity_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for style in ("darwin-l", "gnu-v"):
+                fixture = Fixture(directory, style=style)
+                raw = (("9" * 5000 + " maximum resident set size\n") if style == "darwin-l" else
+                    "Maximum resident set size (kbytes): " + "9" * 5000 + "\n").encode()
+                fixture.observation = replace(fixture.observation, stderr=raw)
+                fixture.observation.capture["stderr_bytes"] = len(raw)
+                fixture.observation.captured["peakRssBytes"] = None
+                self.assertIsNone(fixture.check()["cost"]["peakRssBytes"])
+                fixture.observation.captured["peakRssBytes"] = 2048
+                with self.assertRaisesRegex(ValueError, "differs from original measurement"):
+                    fixture.check()
+
     def test_both_tools_and_arms_keep_one_command_and_original_costs(self):
         with tempfile.TemporaryDirectory() as directory:
             for tool in TOOLS:

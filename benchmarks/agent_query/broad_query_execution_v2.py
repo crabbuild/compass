@@ -5,11 +5,37 @@ actors. This layer checks their exact command against the original capture;
 it does not authenticate a subprocess or establish source/answer quality.
 """
 from pathlib import Path
+import re
 
 from benchmarks.agent_query import broad_query_capture as capture
 from benchmarks.agent_query import broad_query_review as old
 from benchmarks.agent_query.broad_query_lineage_v2 import require_schema
 from benchmarks.agent_query.broad_query_protocol import MAX_RAW_BYTES
+
+MAX_RSS_BYTES = 10**12
+
+
+def parse_rss_v2(stderr, style):
+    """Bound untrusted measurement parsing; unavailable content stays None.
+
+    Horizontal whitespace cannot consume the next measurement line. Check
+    decimal length before extracting/converting it, then apply the byte range
+    after GNU KiB scaling. Legacy capture.rss is deliberately unchanged.
+    """
+    if type(stderr) is not bytes or len(stderr) > MAX_RAW_BYTES:
+        raise ValueError("RSS parsing requires original bounded stderr bytes")
+    old._choice(style, ("darwin-l", "gnu-v"), "RSS instrumentation")
+    pattern = (r"^[ \t]*([0-9]+)[ \t]+maximum resident set size[ \t]*\r?$" if style == "darwin-l" else
+        r"^[ \t]*Maximum resident set size \(kbytes\):[ \t]*([0-9]+)[ \t]*\r?$")
+    matches = re.finditer(pattern, stderr.decode("utf-8", errors="replace"), re.M)
+    match = next(matches, None)
+    if match is None or next(matches, None) is not None:
+        return None
+    scale = 1 if style == "darwin-l" else 1024
+    if match.end(1) - match.start(1) > len(str(MAX_RSS_BYTES // scale)):
+        return None
+    measured = int(match.group(1)) * scale
+    return measured if 1 <= measured <= MAX_RSS_BYTES else None
 
 
 def validate_execution(observation, task, plan, graph_entry, root):
@@ -71,7 +97,7 @@ def validate_execution(observation, task, plan, graph_entry, root):
     limited = old._boolean(recorded.get("output_limited"), "capture output limit")
     outcome = old.query_outcome(tool, recorded.get("exit_code"), observation.stdout,
         timed_out=timed_out, limited=limited)
-    peak = capture.rss(observation.stderr, style)
+    peak = parse_rss_v2(observation.stderr, style)
     if peak is not None:
         old._integer(peak, "measured RSS bytes", 1)
     reported_peak = observation.captured.get("peakRssBytes")

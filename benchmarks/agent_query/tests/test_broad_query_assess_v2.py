@@ -148,6 +148,53 @@ class Fixture:
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_capture_input_custody_rejects_malformed_digest_object_and_late_retained_drift(self):
+        for change in ("shape", "digest", "object", "late"):
+            with self.subTest(change=change):
+                fixture = Fixture(self)
+                original = fixture.outer / "original-invocation.json"
+                value = copy.deepcopy(fixture.spec)
+                if change == "object": value["plan"]["timeoutSeconds"] += 1
+                data = capture.encoded(value)
+                original.write_bytes(data)
+                invocation = dict(original=dict(path=str(original), sha256=old.sha(data)),
+                    artifact=fixture.bundle.put("retained-invocation.json", data))
+                if change == "shape": invocation["unexpected"] = True
+                if change == "digest": invocation["artifact"] = fixture.bundle.put("wrong-invocation.json", b"{}")
+                fixture.run["captureInputInvocation"] = invocation
+                fixture.publish_run()
+                if change == "late":
+                    finish = old._finish_assessment
+                    reached = []
+                    def mutate_after_assessment(*args, **kwargs):
+                        report = finish(*args, **kwargs)
+                        reached.append(True)
+                        (fixture.bundle.root / invocation["artifact"]["path"]).write_bytes(b"changed")
+                        return report
+                    with patch.object(old, "_finish_assessment", side_effect=mutate_after_assessment):
+                        with self.assertRaises(ValueError): fixture.assess()
+                    self.assertEqual(reached, [True])
+                else:
+                    with self.assertRaisesRegex(ValueError, "capture-input invocation"):
+                        fixture.assess()
+
+    def test_truncated_default_prefix_keeps_all_rows_and_blocks_formal_precision(self):
+        fixture = Fixture(self)
+        row = fixture.observations[0]
+        capture = fixture.bundle.root / row["captures"][0]["path"]
+        record = old._json(capture.read_bytes())
+        record["output_limited"] = True
+        row["captures"] = [fixture.put("truncated-native-capture", record)]
+        fixture.publish_run()
+        report = fixture.assess()
+        self.assertEqual(len(report["rows"]), 4)
+        self.assertEqual(len(report["costs"]), 4)
+        self.assertIsNone(report["comparisons"]["claimPrecisionEmptyZero"]["estimate"])
+        truncated = next(row for row in report["rows"] if row["nativeOutputTruncated"])
+        self.assertIsNone(truncated["printedAssertionCount"])
+        self.assertEqual(truncated["precisionView"]["knownSupported"], 1)
+        self.assertFalse(report["eligibleForSuperiorityClaim"])
+
     def test_release_evidence_presence_and_digest_must_match_the_pre_output_freeze(self):
         for change in ("late", "missing", "digest"):
             with self.subTest(change=change):

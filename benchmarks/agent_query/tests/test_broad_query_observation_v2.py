@@ -221,6 +221,26 @@ class ObservationTests(unittest.TestCase):
             self.assertEqual(result["row"]["claimPrecision"], 1)
             self.assertEqual(result["cost"]["workflowWallMs"], 5)
 
+    def test_capture_truncation_cannot_promote_reviewed_prefix_to_full_precision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(directory)
+            fixture.observation.capture["output_limited"] = True
+            result = fixture.score()
+            row = result["row"]
+            self.assertFalse(row["success"])
+            self.assertTrue(row["executionFailed"])
+            self.assertTrue(row["nativeOutputTruncated"])
+            self.assertIsNone(row["claimPrecision"])
+            self.assertIsNone(row["precisionWithEmptyZero"])
+            self.assertIsNone(row["printedAssertionCount"])
+            self.assertIsNone(row["falseEmpty"])
+            self.assertFalse(row["semanticCoverageComplete"])
+            self.assertEqual(row["precisionView"]["knownSupported"], 1)
+            self.assertEqual(row["precisionView"]["judgedOnlyPrecision"], 1)
+            self.assertFalse(row["precisionView"]["formalPrecisionAvailable"])
+            self.assertEqual(result["cost"]["workflowBytes"], len(fixture.observation.stdout))
+            self.assertEqual(result["cost"]["workflowWallMs"], 5)
+
     def test_unverified_graph_source_or_missing_shared_bundle_counter_reject(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(directory)

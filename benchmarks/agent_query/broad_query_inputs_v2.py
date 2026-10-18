@@ -86,6 +86,16 @@ def verify_native_inputs(manifest, registration, run, artifacts):
     """
     originals = FrozenInputs()
     spec = require_schema(artifacts.document(_reference(run.get("captureInput"))), "capture-input")
+    invocation = run.get("captureInputInvocation")
+    if invocation is not None:
+        if type(invocation) is not dict or invocation.keys() != {"original", "artifact"}:
+            raise ValueError("capture-input invocation requires original and artifact references")
+        data = originals.read(invocation["original"])
+        reference = _reference(invocation["artifact"])
+        if (reference["sha256"] != invocation["original"]["sha256"]
+                or capture.encoded(old._json(data)) != capture.encoded(spec)):
+            raise ValueError("capture-input invocation differs from retained validated input")
+        artifacts.read(reference, len(data))
     if not spec.keys() <= {"schema", "registration", "plan", "sourceRoots", "exposureEvidence", "calibrationEvidence"}:
         raise ValueError("unsupported original capture input fields")
     if spec.get("plan") != registration["capturePlan"]:

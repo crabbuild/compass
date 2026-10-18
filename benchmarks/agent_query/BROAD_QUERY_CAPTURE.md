@@ -1,9 +1,9 @@
 # Frozen native query capture
 
-Protocol2 normalization, printed-coverage and assessment components are being
+Protocol2 normalization, printed-coverage, collection and assessment components are being
 integrated under `broad_query_protocol.py`, `broad_query_coverage.py`,
 `broad_query_normalize_v2.py` and `broad_query_score_v2.py`. They are internal
-components, not a capture or assessment entry point. The public collector,
+components, not public capture or assessment entry points. The public collector,
 file-backed auditor and panel binder below still accept only protocol1. They
 reject protocol2 and mixed versions. Do not collect a new comparison through
 these components until the complete actor, lineage, publication and panel
@@ -49,8 +49,12 @@ It does not enable public protocol2 dispatch.
 
 `broad_query_execution_v2.py` checks each retained command against the frozen
 question, tool, graph, arm, isolated environment and measurement wrapper. It
-recomputes byte costs and peak RSS from the original streams. Missing or
-ambiguous RSS stays unavailable. Native failures, exact declared no-match
+recomputes byte costs and peak RSS from the original streams. The v2 shared
+RSS parser checks decimal length before integer conversion and applies the
+positive range up to 10^12 bytes after GNU KiB scaling. Missing, duplicate,
+zero, malformed and out-of-range measurements stay unavailable. Its line
+whitespace cannot consume another measurement line. Legacy v1 RSS parsing is
+unchanged. Native failures, exact declared no-match
 outcomes and byte-budget overruns retain their original costs without clipping.
 `broad_query_observation_v2.py` connects that check to initial/reviewed coverage
 and task scoring using one observation budget and the shared bundle counters.
@@ -61,6 +65,10 @@ labels. A nonrejected initial partition is checked even when the reviewed
 normalization is rejected. Initial and reviewed failures remain separate:
 reviewed material can supply diagnostics, but cannot erase an original parser
 or limit rejection or promote that observation to success/formal precision.
+Native capture truncation likewise leaves full precision, assertion count and
+false-empty status unknown, even if an independent reviewer labels every
+retained-prefix assertion. Known prefix judgments stay diagnostic; byte/time
+costs and the failed observation remain present.
 These layers require the full assessor to supply verified graph/source inputs
 and do not authenticate execution, reviewer attestations or qualification.
 
@@ -103,6 +111,41 @@ dropped, imputed to zero or replaced with its diagnostic partial fraction.
 The existing source review, exposure, task balance, prospective power,
 independent graph qualification and subgroup gates remain required. This
 internal assessor still does not enable public collection, scoring or panels2.
+
+`broad_query_collect_v2.collect_file_v2` internally connects collection to that
+assessor. It preflights the frozen source review, complete actor inventory,
+executables/dependencies, graph/build evidence, isolated environment and command
+matrix before querying.
+Truthfully exposed development calibration retains the existing explicit
+exception to author output-blindness only after calibration history, source
+definition and independent output-blind reviewer checks. It stays permanently
+ineligible for superiority; non-calibration author blindness remains required.
+It executes every task/tool/arm once in canonical order,
+with no retries or free follow-ups. Raw outputs and costs remain present for
+native failures, exact declared no-match outcomes, parser/line/JSON rejections,
+missing RSS and byte-budget overflow. Initial normalizations and each separate
+judgment document remain explicitly pending independent review. The provisional
+report must retain the whole matrix and cannot establish superiority.
+
+The collector retains the original invocation file's exact bytes in
+`captureInputInvocation: {original, artifact}`, separately from the canonical
+validated `captureInput` snapshot. Both the collector and assessor bind that
+file to the validated object and recheck its original path and retained copy.
+The internal object-only `collect_v2` helper is diagnostic: missing invocation
+file custody is an explicit qualification failure.
+
+Every retained file, including raw streams and provisional reports, counts
+toward the shared artifact/byte bounds and is rechecked before completion. A
+subprocess reserves capacity for both maximum-sized bounded streams plus one
+maximum-sized JSON sidecar before launch (currently 96 MiB); this conservative
+reservation may reject a near-capacity run before executing it. Actual retained
+bytes, rather than the reservation, are charged to final storage. Source
+HEAD/cleanliness and original/retained actors and inputs are checked before
+queries, after collection and after provisional assessment. Mandatory integrity,
+report or publication failures leave the directory without `COMPLETE.json`.
+That marker confirms coherent pending-review capture only. This remains an
+internal integration: public capture/score/check/panels2 dispatch is disabled,
+and no new comparative experiment is authorized by these helper functions.
 
 The staged components retain all printed occurrences in globally bounded
 batches, exact byte-line coverage and typed source assertions. Initial

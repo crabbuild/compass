@@ -59,6 +59,8 @@ def assess_v2(manifest, root):
         state = old._prepare_assessment(manifest, registration, run, artifacts, started,
             actors=run["protocolBinding"]["actorSha256"])
         tasks, failures = state["tasks"], state["failures"]
+        if run.get("captureInputInvocation") is None:
+            failures.append("capture-input invocation file was not retained; object snapshots are diagnostic only")
         graphs = {(entry["repository"], entry["tool"]): entry for entry in state["graph_records"]}
         work = BundleWork()
         scored, costs, reviewers, row_work = {}, [], set(), []

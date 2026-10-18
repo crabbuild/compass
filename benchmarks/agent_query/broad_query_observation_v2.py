@@ -113,7 +113,18 @@ def score_bound_observation(observation, task, plan, graph_entry, root, graph, s
             precisionView=view, claimPrecision=None, precisionWithEmptyZero=None,
             falseEmpty=None, printedAssertionCount=None, evaluationRejected=True)
         row.setdefault("evaluationFailure", observation.initial["normalizationFailure"])
+    truncated = observation.capture["output_limited"]
+    if truncated:
+        # Independent review can judge the retained prefix, but cannot recover
+        # assertions discarded by the native capture cap. Preserve those known
+        # counts only as diagnostics; full-output precision remains unknown.
+        view = precision_view(row["supportedClaims"], row["unsupportedClaims"], row["unjudgedClaims"],
+            semantic_complete=False, judgment_complete=row["judgmentComplete"])
+        row.update(success=False, normalizationComplete=False, semanticCoverageComplete=False,
+            precisionView=view, claimPrecision=None, precisionWithEmptyZero=None,
+            falseEmpty=None, printedAssertionCount=None)
     row.update(executionFailed=execution["executionFailed"], nativeOutcome=execution["nativeOutcome"],
+        nativeOutputTruncated=truncated,
         initialNormalizationRejected=initial_rejected, reviewedNormalizationRejected=reviewed_rejected,
         initialNormalizationFailure=observation.initial.get("normalizationFailure"),
         reviewedNormalizationFailure=reviewed.get("normalizationFailure"))
