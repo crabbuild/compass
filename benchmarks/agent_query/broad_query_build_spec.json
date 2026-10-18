@@ -1,0 +1,145 @@
+{
+  "schema": "compass.broad-query-native-build-spec/1",
+  "status": "development_template_exposed_sources",
+  "scope": "These original8 sources and extra16 controls are exposed development inputs. Preserve their mandatory regression outcomes; this template does not define fresh confirmation data or establish graph/query superiority.",
+  "qualificationEligible": false,
+  "sourceRegistrationSha256": "9c5859dcb23b7aa29fdc0aa5e4610b48217da59c737ad81de746beb19f807d5c",
+  "graphQualificationRepositories": [
+    "itsdangerous",
+    "marshmallow",
+    "httprouter",
+    "go-cache",
+    "log",
+    "humantime",
+    "p-queue",
+    "superjson"
+  ],
+  "sources": [
+    {
+      "id": "itsdangerous",
+      "url": "https://github.com/pallets/itsdangerous",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd",
+      "inventorySha256": "bba10a0daa9dce04d9ec598bb12fbeb4fa4f52878cd00c391035fd6065fc8d89"
+    },
+    {
+      "id": "marshmallow",
+      "url": "https://github.com/marshmallow-code/marshmallow",
+      "commit": "d08471b17880c62b789971ada638707a11d3f8d4",
+      "inventorySha256": "65fea45e4d8294b46df43bfa8458594fc9442443cd70ed9c856876e3415286e0"
+    },
+    {
+      "id": "httprouter",
+      "url": "https://github.com/julienschmidt/httprouter",
+      "commit": "484018016424d215c0b87c42f4c9b57d980fbd00",
+      "inventorySha256": "42a8e0fe1f185eccb4716816bf374797988d59ad1b84959ec6ac5a775681491f"
+    },
+    {
+      "id": "go-cache",
+      "url": "https://github.com/patrickmn/go-cache",
+      "commit": "46f407853014144407b6c2ec7ccc76bf67958d93",
+      "inventorySha256": "7d69478248c3d2f5235a9ebfe26dd436b09bd5a815252918327584420456d67e"
+    },
+    {
+      "id": "log",
+      "url": "https://github.com/rust-lang/log",
+      "commit": "27e3cf7a021dab43430a70cb2909c06ca8141f79",
+      "inventorySha256": "94b38f58a9cb84133faf2cb801e59279c25c15a0758fd05dd18ef2e639b2fc36"
+    },
+    {
+      "id": "humantime",
+      "url": "https://github.com/tailhook/humantime",
+      "commit": "997ff566cc731e3ece5c792c8b83dd78e459f202",
+      "inventorySha256": "788d6afd828157348743ed7b49328d5a3e74fe4de3bfac8cb14279472e0d62b8"
+    },
+    {
+      "id": "p-queue",
+      "url": "https://github.com/sindresorhus/p-queue",
+      "commit": "7f272ab5ff2254c0dc2537b7977e88ede1cd55e8",
+      "inventorySha256": "6bcc5040630c9bd7731e8595461e9ad6c8ba56c8230b97a55ed8621200ec3b99"
+    },
+    {
+      "id": "superjson",
+      "url": "https://github.com/flightcontrolhq/superjson",
+      "commit": "aaa65e36e8e31da740265a56b27c965ca1c7b754",
+      "inventorySha256": "4870c799d1a94c9b29898bccd2feecdbdd674d88e5cf17098b543fd1e7e7664c"
+    }
+  ],
+  "requiresBeforeExecution": [
+    "Root finishes native development/tests and selects the release-matching candidate binary",
+    "Verify exact binary SHA and version, installed Graphify0.9.92 package/interpreter/dependency hashes; recheck the official latest release at a new experiment freeze",
+    "Freeze merged source-reviewed task/cohort/power/settings manifest; no captures before independent review",
+    "Check all source roots clean and source inventory hashes unchanged; resolve templates as argv values, never shell interpolation"
+  ],
+  "limits": {
+    "timeoutSecondsPerBuild": 600,
+    "maxCapturedBytesPerStream": 16777216,
+    "maxWorkers": 1,
+    "outputLimitOutcome": "failure, never an empty successful graph"
+  },
+  "childEnvironment": {
+    "inherit": false,
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{isolatedHome}",
+    "XDG_CONFIG_HOME": "{isolatedHome}/config",
+    "XDG_DATA_HOME": "{isolatedHome}/data",
+    "XDG_CACHE_HOME": "{isolatedHome}/cache",
+    "XDG_STATE_HOME": "{isolatedHome}/state",
+    "APPDATA": "{isolatedHome}/appdata",
+    "LOCALAPPDATA": "{isolatedHome}/localappdata",
+    "TMPDIR": "{isolatedTmp}",
+    "GRAPHIFY_NO_AUTO_REFRESH": "1",
+    "GRAPHIFY_QUERY_LOG_DISABLE": "1"
+  },
+  "builds": {
+    "compass": {
+      "argv": [
+        "{compassBinary}",
+        "extract",
+        "{sourceRoot}",
+        "--code-only",
+        "--no-viz",
+        "--store",
+        "json",
+        "--max-workers",
+        "1",
+        "--out",
+        "{freshCompassOutput}"
+      ],
+      "graph": "{freshCompassOutput}/compass-out/snapshots/{publishedCurrentSnapshot}/graph.json",
+      "profile": "Native code-only typed JSON publication; optional provider/ProgramIR/network flags absent. JSON storage is declared for source graph auditing.",
+      "publishedSnapshotPointer": "{freshCompassOutput}/compass-out/current-snapshot",
+      "pointerValidation": "Read bounded current-snapshot; require one contained snapshot-* basename and coherent immutable graph/sidecars. Use existing runner._compass_graph validation; re-read publication identity before queries."
+    },
+    "graphify": {
+      "argv": [
+        "{graphifyPython}",
+        "-I",
+        "-B",
+        "-X",
+        "utf8",
+        "-m",
+        "graphify",
+        "extract",
+        "{sourceRoot}",
+        "--code-only",
+        "--max-workers",
+        "1",
+        "--out",
+        "{freshGraphifyOutput}"
+      ],
+      "graph": "{freshGraphifyOutput}/graphify-out/graph.json",
+      "release": "v0.9.92",
+      "sourceCommit": "86c57be8204673c2a1b9849a3292a7dd3ab373d8",
+      "profile": "Native local AST/code-only; optional semantic/provider/model-backed extraction excluded and labeled separately."
+    }
+  },
+  "scopePolicy": "Registered tracked-source scope includes tests/examples. Record actual discovered file omissions at ledgerstage1; do not silently remove their tasks or mutate inputs. No-cluster/no-gitignore flags are not implicitly added; clustering/discovery retain declared native behavior.",
+  "outputsRequired": [
+    "Bounded raw stdout/stderr plus argv/child nonsecret environment, exit/timeout/output-limit/walltime records",
+    "Graph and sidecar hashes and metadata; verify coherent publication before use",
+    "Source git status/commit/inventory before and after",
+    "Observe graph identity/multiplicity/provenance from source audits, not from another graph as oracle"
+  ],
+  "publication": "Fresh external per-repository output directories; fail if prior build artifacts exist. Generated graphs/caches must stay outside all source trees.",
+  "qualification": "No successful build or3200fact count is asserted. Source-sample feasibility and \u22652000accepted current graph judgments with required precision/Wilson bounds remain separate; insufficient small-corpus evidence stays unqualified."
+}

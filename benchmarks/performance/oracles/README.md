@@ -1,4 +1,6 @@
-# TypeScript/JavaScript qualification oracles
+# Independent qualification oracles
+
+## TypeScript and JavaScript
 
 These Node-side tools are independent qualification inputs. They are not
 Compass runtime dependencies, are not invoked by normal Cargo tests, and must
@@ -6,7 +8,11 @@ not be copied into the product boundary.
 
 The pinned provider is TypeScript 5.9.3. Both tools emit deterministic JSON,
 exact UTF-8 byte ranges, source/config digests, bounded diagnostics, and an
-explicit parsed/rejected-file count. The source oracle also supports a
+explicit parsed/rejected-file count. Source paths, project references and
+rejected-file lists use UTF-8 byte ordering, matching the Python consumer even
+for mixed-case and supplementary Unicode filenames. Record the producer script
+SHA when reusing oracle evidence; corrected ordering can change inventory
+digests without changing typed source facts. The source oracle also supports a
 record-oriented JSONL stream (`--jsonl`) with a header, project/file coverage,
 diagnostic/construct records, and a checked footer; the audit pipeline consumes
 that stream so a truncated or incomplete denominator fails closed. The source oracle discovers bounded
@@ -117,3 +123,63 @@ concentration, per-corpus/relation/capability strata, critical semantic
 violations, and the Plan 013 production or leadership gates. Diagnostic mode
 is useful before labels are complete but can never become eligible for a public
 quality claim.
+
+## Go source candidates
+
+`go-source-oracle.go` is an optional, standard-library-only qualification
+helper. Its `compass.go-source-oracle/1` payload is consumed by provider
+`go_stdlib_ast_types_v1` in the performance audit. Normal product execution,
+Cargo tests, and ordinary Python fixture tests do not require Go. Build the
+helper explicitly into an external directory; never run corpus tooling:
+
+```bash
+COMPASS_GO_ORACLE_BUILD_DIR=/Volumes/Workspace/crabbuild-target/compass-YOUR-WORKTREE-go-oracle
+mkdir -p "$COMPASS_GO_ORACLE_BUILD_DIR"
+GOCACHE="$COMPASS_GO_ORACLE_BUILD_DIR/cache" GOTOOLCHAIN=local GO111MODULE=off \
+GOPROXY=off GOSUMDB=off GOWORK=off \
+go build -o "$COMPASS_GO_ORACLE_BUILD_DIR/go-source-oracle" \
+  benchmarks/performance/oracles/go-source-oracle.go
+
+COMPASS_GO_SOURCE_ORACLE="$COMPASS_GO_ORACLE_BUILD_DIR/go-source-oracle" \
+python3 -m unittest benchmarks.performance.tests.test_go_oracle
+```
+
+Use an `.exe` suffix on Windows. Replace `YOUR-WORKTREE` with this checkout's
+name and follow the repository's mounted-volume policy. Set `COMPASS_GO_SOURCE_ORACLE`
+to the absolute executable path when running the existing audit harness.
+Missing runtime configuration fails explicitly instead of producing an empty
+successful inventory. The helper never downloads packages, reads `go.mod` or
+`go.work`, executes repository code, invokes build scripts, or runs `go list`.
+
+The Python adapter supplies the complete selected file list, hashes and byte
+sizes. The helper parses all selected source, including tests and conditional
+files; it does not silently substitute a compiler project subset. Strict
+payload validation checks the full file ledger, source digest, UTF-8 callee,
+invocation and declaration ranges, local target references, status/count
+ledgers, unknown fields and duplicate occurrences. Files rejected by the parser
+remain explicit coverage failures. Source, records, diagnostics, subprocess
+output and duration are bounded; limit failures publish no partial inventory.
+
+Go's default compiler importer can invoke `go list -export`, so this helper
+deliberately denies external imports during `go/types` checking. Any package
+type error or rejected sibling source file suppresses every claimed concrete
+target in that package. The typed payload distinguishes `local_concrete`,
+`external`, `interface_dispatch`, `function_value`, `builtin`, `type_conversion`
+and `unresolved_call_or_conversion`. Interface and function-value dispatch do
+not acquire invented concrete targets. Proven conversions are excluded from
+the flattened call pool; unresolved forms remain candidates for review.
+Diagnostics contain fixed codes and locations rather than source literals.
+
+The adapter feeds **unjudged source candidates** into the existing audit;
+binding metadata never becomes an accepted graph judgment automatically. Pin
+and retain the Go toolchain, helper executable/source, adapter and inventory
+hashes before collecting audit evidence. Missing external type data and
+all-source build-constraint conflicts remain visible in the type-status and
+diagnostic ledgers. Manual source/graph adjudication, source coverage, target
+diversity, precision/recall and the unchanged 2,000-total/400-per-corpus floors
+still apply. Parsing 400 expressions does not establish 400 accepted facts.
+
+Rust remains unsupported by the production audit provider registry. A separate
+`syn` syntax census can estimate prospective review work; its unexpanded
+macros, conditional items, constructor/call distinctions and trait dispatch
+cannot certify complete semantic recall or satisfy promotion gates.

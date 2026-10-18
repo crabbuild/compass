@@ -1,0 +1,42 @@
+{
+  "itsdangerous": {
+    "language": "python",
+    "slug": "pallets/itsdangerous",
+    "commit": "672971d66a2ef9f85151e53283113f33d642dabd"
+  },
+  "marshmallow": {
+    "language": "python",
+    "slug": "marshmallow-code/marshmallow",
+    "commit": "d08471b17880c62b789971ada638707a11d3f8d4"
+  },
+  "httprouter": {
+    "language": "go",
+    "slug": "julienschmidt/httprouter",
+    "commit": "484018016424d215c0b87c42f4c9b57d980fbd00"
+  },
+  "go-cache": {
+    "language": "go",
+    "slug": "patrickmn/go-cache",
+    "commit": "46f407853014144407b6c2ec7ccc76bf67958d93"
+  },
+  "log": {
+    "language": "rust",
+    "slug": "rust-lang/log",
+    "commit": "27e3cf7a021dab43430a70cb2909c06ca8141f79"
+  },
+  "humantime": {
+    "language": "rust",
+    "slug": "tailhook/humantime",
+    "commit": "997ff566cc731e3ece5c792c8b83dd78e459f202"
+  },
+  "p-queue": {
+    "language": "typescript",
+    "slug": "sindresorhus/p-queue",
+    "commit": "7f272ab5ff2254c0dc2537b7977e88ede1cd55e8"
+  },
+  "superjson": {
+    "language": "typescript",
+    "slug": "flightcontrolhq/superjson",
+    "commit": "aaa65e36e8e31da740265a56b27c965ca1c7b754"
+  }
+}

@@ -14,6 +14,7 @@ from benchmarks.performance.compass.correctness import (
     index_graph,
 )
 from benchmarks.performance.compass.occurrences import (
+    _bounded_node_oracle,
     _typescript_payload_from_jsonl,
     _typescript_inventory_from_payload,
     independent_source_constructs,
@@ -425,6 +426,31 @@ class CorrectnessTests(unittest.TestCase):
             source_bytes[call["callStartByte"] : call["callEndByte"]],
             "run(café)".encode(),
         )
+
+    def test_typescript_source_oracle_jsonl_orders_mixed_case_and_unicode_paths(self) -> None:
+        sources = {
+            "alpha.ts": "export function first() { return 1; }\n",
+            "Beta.ts": "export const second = () => 2;\n",
+            "\ue000.ts": "export const privateUse = 3;\n",
+            "\U00010000.ts": "export const astral = 4;\n",
+            "bad-\ue000.ts": "export function {\n",
+            "bad-\U00010000.ts": "export const = ;\n",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, source in sources.items():
+                (root / name).write_text(source, encoding="utf-8")
+            first = _bounded_node_oracle(root)
+            self.assertEqual(first, _bounded_node_oracle(root))
+            records = [json.loads(line) for line in first.splitlines()]
+            files = [record["file"] for record in records if record["recordType"] == "file"]
+            self.assertEqual(sorted(sources, key=lambda name: name.encode("utf-8")), files)
+            payload = _typescript_payload_from_jsonl(first)
+            inventory = _typescript_inventory_from_payload(payload, root)
+            self.assertEqual(6, inventory.scanned_files)
+            self.assertEqual(4, inventory.parsed_files)
+            self.assertEqual(("bad-\ue000.ts", "bad-\U00010000.ts"), inventory.rejected_files)
+            self.assertEqual(4, len(payload["declarations"]))
 
     def test_typescript_source_oracle_jsonl_exposes_typed_relationship_records(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

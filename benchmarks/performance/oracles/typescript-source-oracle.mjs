@@ -63,6 +63,10 @@ function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+function compareUtf8(left, right) {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
 function parseArguments(argv) {
   if (
     (argv.length !== 2 && argv.length !== 3) ||
@@ -127,7 +131,7 @@ function collectFiles(root) {
     } catch (error) {
       fail(`cannot read source directory ${relativePath(root, directory)}: ${error.message}`);
     }
-    entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+    entries.sort((left, right) => compareUtf8(left.name, right.name));
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (!EXCLUDED_DIRECTORIES.has(entry.name)) {
@@ -149,9 +153,9 @@ function collectFiles(root) {
       }
     }
   }
-  files.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
-  configs.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
-  rejected.sort();
+  files.sort((left, right) => compareUtf8(relativePath(root, left), relativePath(root, right)));
+  configs.sort((left, right) => compareUtf8(relativePath(root, left), relativePath(root, right)));
+  rejected.sort(compareUtf8);
   return { files, configs, rejected };
 }
 
@@ -286,7 +290,7 @@ function parseProjects(root, discoveredConfigs, diagnostics) {
     if (baseConfiguration) continue;
     const fileNames = [...new Set(parsed.fileNames.map((fileName) => path.resolve(fileName)))]
       .filter((fileName) => insideRoot(root, fileName) && !isExcludedPath(root, fileName) && isSourceFile(fileName))
-      .sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
+      .sort((left, right) => compareUtf8(relativePath(root, left), relativePath(root, right)));
     projectFileReferences += fileNames.length;
     if (projectFileReferences > MAX_PROJECT_FILE_REFERENCES) {
       fail(`project file references exceed ${MAX_PROJECT_FILE_REFERENCES}`);
@@ -316,7 +320,7 @@ function parseProjects(root, discoveredConfigs, diagnostics) {
       if (queued.size > MAX_CONFIGS) fail(`project configuration count exceeds ${MAX_CONFIGS}`);
     }
   }
-  projects.sort((left, right) => relativePath(root, left.configFile).localeCompare(relativePath(root, right.configFile), "en"));
+  projects.sort((left, right) => compareUtf8(relativePath(root, left.configFile), relativePath(root, right.configFile)));
   return projects;
 }
 
@@ -1110,7 +1114,7 @@ function main() {
     ? [...new Set(projects.flatMap((project) => project.fileNames))]
         .filter((fileName) => discovered.has(fileName))
     : discoveredFiles;
-  selected.sort((left, right) => relativePath(root, left).localeCompare(relativePath(root, right), "en"));
+  selected.sort((left, right) => compareUtf8(relativePath(root, left), relativePath(root, right)));
   if (selected.length > MAX_FILES) fail(`source file count exceeds ${MAX_FILES}`);
   const selectedSet = new Set(selected);
   const rejected = new Set(
@@ -1278,7 +1282,7 @@ function main() {
     },
     scannedFiles: selected.length,
     parsedFiles,
-    rejectedFiles: [...rejected].sort(),
+    rejectedFiles: [...rejected].sort(compareUtf8),
     projects: projects.map((project) => ({
       configFile: relativePath(root, project.configFile),
       fileCount: project.fileNames.filter((fileName) => selectedSet.has(fileName)).length,
@@ -1287,7 +1291,7 @@ function main() {
         .map((fileName) => relativePath(root, fileName)),
       references: project.references
         .map((reference) => relativePath(root, reference))
-        .sort(),
+        .sort(compareUtf8),
       configDigest: project.configDigest,
     })),
     diagnostics: diagnostics

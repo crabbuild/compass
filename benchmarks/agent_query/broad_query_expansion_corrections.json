@@ -1,0 +1,55 @@
+{
+  "schema": "compass.broad-query-source-expansion-corrections/1",
+  "recordedAt": "2026-10-16T16:37:59.023400+00:00",
+  "outputExposure": "none",
+  "originalPanel": {
+    "artifact": "broad_query_registration_reviewed.json",
+    "sha256": "9c5859dcb23b7aa29fdc0aa5e4610b48217da59c737ad81de746beb19f807d5c",
+    "tasksRetained": 160
+  },
+  "revisions": [
+    {
+      "batch": "broad-supplement",
+      "before": "d8452e1bfcdc32554752f8e6250690b39ab355e1e56e26f305eafa568bf063fc",
+      "after": "3aed9c9776fafc891727ef673272a98baaa322b148962a2d20923a4a9985526e",
+      "reason": "Narrow humantime supported-unit error wording to nonempty unknown units; the empty-unit branch has a different diagnostic."
+    },
+    {
+      "batch": "go-controls",
+      "before": "cab20536cc952fffd6df2061c806b4bdf61f39eb5a8927e7b36eebaa7d7e7103",
+      "after": "d4ca565ea0a08f6dc6ab164d321fc84fcdae9ad736eeb9ff09c31b6dfc349d92",
+      "reason": "Replace deprecated JWT alias and repeated scalar-validator family with substantive independent source bodies; keep60 distinct endpoint declarations."
+    },
+    {
+      "batch": "rust-controls",
+      "before": "2a246ce8ba44cbc48fe3b23184df83fc71b434f89b24cc9b77f075b3c56b1495",
+      "after": "bacbcb4ab7e42fa3e031992d88374445ecd286cdd910ef68a253a014f38b2788",
+      "reason": "Disambiguate env_logger same-name builder method from free parse_write_style; correct callee identity from101 to156."
+    },
+    {
+      "batch": "typescript-controls",
+      "before": "5f89e7b73cd2a5c19d0776abf9423057b9588b5f71d9e05cf3f18c4694e18398",
+      "after": "f62465138bb75eaaa64ff9e437e3e77ebfbe6a5270977d1baeb88fee761bd8f2",
+      "reason": "Keep only weakMapMemoize direct factory initialization call235. Nested callback calls belong to different lexical callers and are excluded, regardless of answer occurrence requirements."
+    },
+    {
+      "batch": "power-design",
+      "before": "ce7af67fe806b3f8fc223afa9f98e7fb01fafca4a0695c28608d33c64d35d486",
+      "after": "552074714db9d8cf62d534ec10b74cbf38cea055e6bb1dad4264e84b42803b9c",
+      "reason": "Withdraw unsupported cross-tool equality premise. Unchanged Compass functions do not imply equality with Graphify;192 controls remain underpowered at adverse probability.005/no definite wins."
+    }
+  ],
+  "excludedTimestampDrafts": [
+    {
+      "artifact": "go-controls-v2-candidate.json",
+      "sha256": "a12db6a85574e100d210f36ac582a4b8c596bf0a6ce679cc5389c6c7c37e1962",
+      "reason": "Accidentally supplied future16:30 freeze while actual clock was16:24:57. Retained externally; authoritative corrected-time candidate is go-controls-v2-source-candidate.json."
+    },
+    {
+      "artifact": "rust-controls-candidate.json",
+      "sha256": "9c1d3f8fc9ea583957260d9fde1e20d0a0c0d3b2ac9e30c6602c0d4caac11a37",
+      "reason": "Stale source-authoring start timestamp supplied to first draft. Retained externally; actual-time source candidate and reviewedv2 supersede it."
+    }
+  ],
+  "semantics": "All revisions are source-only and precede any heldout product graph/query capture. No source label was selected using product results. Source line witnesses are not a complete occurrence/multiplicity graph oracle."
+}
