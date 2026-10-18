@@ -27,7 +27,7 @@ class ProtocolActorIntegrityTests(unittest.TestCase):
             descriptor, frozen = actors.freeze_protocol(root)
             self.assertEqual((descriptor, frozen), actors.freeze_protocol(root))
             self.assertEqual(list(frozen), sorted(frozen))
-            self.assertEqual(len(descriptor["files"]), 5)
+            self.assertEqual(len(descriptor["files"]), len(set(actors.ROLES.values())) + 1)
             helper.write_text("pass # changed\n")
             changed, tuple2 = actors.freeze_protocol(root)
             self.assertNotEqual(frozen["protocol"], tuple2["protocol"])

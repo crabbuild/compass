@@ -96,10 +96,23 @@ def verify_native_inputs(manifest, registration, run, artifacts):
                 or capture.encoded(old._json(data)) != capture.encoded(spec)):
             raise ValueError("capture-input invocation differs from retained validated input")
         artifacts.read(reference, len(data))
-    if not spec.keys() <= {"schema", "registration", "plan", "sourceRoots", "exposureEvidence", "calibrationEvidence"}:
+    if not spec.keys() <= {"schema", "registration", "plan", "sourceRoots", "exposureEvidence", "calibrationEvidence", "panels"}:
         raise ValueError("unsupported original capture input fields")
     if spec.get("plan") != registration["capturePlan"]:
         raise ValueError("original capture plan differs from source registration")
+    from benchmarks.agent_query.broad_query_panels_v2 import read_panels, ROLES
+    actors = registration["capturePlan"]["actorSha256"]
+    original_panels = read_panels(registration, spec.get("panels"), originals.read, actors, external=True)
+    retained_panels = read_panels(registration, run.get("panels"), artifacts.read, actors)
+    if (original_panels is None) != (retained_panels is None):
+        raise ValueError("original/retained panel presence differs")
+    if original_panels is not None:
+        if (original_panels["definition"] != retained_panels["definition"]
+                or original_panels["registrations"] != retained_panels["registrations"]):
+            raise ValueError("original/retained panel definitions differ")
+        for role in ROLES:
+            old.verify_calibration_evidence(retained_panels["registrations"][role],
+                manifest.get("calibrationEvidence", {}), artifacts.read)
     reference = spec.get("registration")
     originals.read(reference)
     if reference["sha256"] != manifest["registration"]["sha256"]:

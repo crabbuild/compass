@@ -1,4 +1,4 @@
-"""Internal bounded protocol2 collection; public dispatch remains disabled.
+"""Bounded protocol2 collection for the explicit developer entry point.
 
 Only explicit preinstalled tools/prebuilt graphs are queried. Synthetic tests
 inject a runner; no collector invocation establishes independent source truth,
@@ -14,7 +14,7 @@ from benchmarks.agent_query import runner as process
 from benchmarks.agent_query.broad_query_actors_v2 import (
     ROLES, freeze_protocol, retain_protocol, verify_original_protocol,
 )
-from benchmarks.agent_query.broad_query_assess_v2 import assess_file_v2
+from benchmarks.agent_query.broad_query_report_v2 import score_file_v2
 from benchmarks.agent_query.broad_query_execution_v2 import parse_rss_v2
 from benchmarks.agent_query.broad_query_inputs_v2 import (
     BoundedArtifacts, FrozenInputs, MAX_BYTES, MAX_FILES, MAX_DEP_BYTES, MAX_DEP_FILES,
@@ -23,6 +23,7 @@ from benchmarks.agent_query.broad_query_lineage_v2 import SCHEMAS, require_schem
 from benchmarks.agent_query.broad_query_normalize_v2 import normalize_v2
 from benchmarks.agent_query.broad_query_observation_v2 import _pending_judgment
 from benchmarks.agent_query.broad_query_protocol import BundleWork, pack_claim_batches
+from benchmarks.agent_query.broad_query_panels_v2 import read_panels, retain_panels
 
 
 class CaptureBundle(capture.Bundle):
@@ -116,7 +117,7 @@ class CaptureBundle(capture.Bundle):
 
 def _preflight(spec, destination, input_reference=None):
     require_schema(spec, "capture-input")
-    if not spec.keys() <= {"schema", "registration", "plan", "sourceRoots", "exposureEvidence", "calibrationEvidence"}:
+    if not spec.keys() <= {"schema", "registration", "plan", "sourceRoots", "exposureEvidence", "calibrationEvidence", "panels"}:
         raise ValueError("unsupported capture-input fields")
     originals = FrozenInputs()
     if input_reference is not None:
@@ -141,6 +142,10 @@ def _preflight(spec, destination, input_reference=None):
         if failures:
             raise ValueError("exposure lineage rejected: " + "; ".join(failures))
     old.verify_calibration_evidence(registration, spec.get("calibrationEvidence", {}), originals.read)
+    panels = read_panels(registration, spec.get("panels"), originals.read, actors, external=True)
+    if panels is not None:
+        for source in panels["registrations"].values():
+            old.verify_calibration_evidence(source, spec.get("calibrationEvidence", {}), originals.read)
     if (old._review_failures(registration.get("independentReview"), "source registration")
             or old.calibration_review_failures(registration)
             or ("developmentCalibration" not in registration
@@ -164,10 +169,12 @@ def _preflight(spec, destination, input_reference=None):
     protected = [code_root, *(Path(path) for path in roots.values())]
     if any(target.is_relative_to(path) or path.is_relative_to(target) for path in protected):
         raise ValueError("capture destination must be external to product/source checkouts")
-    tools = old._array(plan.get("tools"), "frozen tools", 2, 2)
+    tools = [old._object(tool, "frozen tool")
+        for tool in old._array(plan.get("tools"), "frozen tools", 2, 2)]
     if {old._choice(tool.get("id"), old.TOOLS, "tool") for tool in tools} != set(old.TOOLS):
         raise ValueError("complete unique native tool matrix required")
-    arms = old._array(plan.get("arms"), "frozen arms", 2, 2)
+    arms = [old._object(arm, "frozen arm")
+        for arm in old._array(plan.get("arms"), "frozen arms", 2, 2)]
     if {arm.get("id") for arm in arms} != set(old.ARMS):
         raise ValueError("complete unique arm matrix required")
     default = next(arm for arm in arms if arm["id"] == "default")
@@ -183,18 +190,19 @@ def _preflight(spec, destination, input_reference=None):
     if view == "ranked" and normalized.get("configuredComparison") is not True:
         raise ValueError("ranked arm requires configuredComparison=true")
     old._integer(plan.get("timeoutSeconds"), "query timeout", 1, 300)
-    style = old._choice(plan.get("measurement", {}).get("style"), ("darwin-l", "gnu-v"), "RSS style")
+    measurement = old._object(plan.get("measurement"), "frozen RSS measurement")
+    style = old._choice(measurement.get("style"), ("darwin-l", "gnu-v"), "RSS style")
     system = platform.system()
     if system not in ("Darwin", "Linux") or style != ("darwin-l" if system == "Darwin" else "gnu-v"):
         raise ValueError("native capture requires matching Darwin/Linux RSS measurement")
-    originals.read(plan["measurement"]["executable"], old.MAX_GRAPH_BYTES)
+    originals.read(measurement.get("executable"), old.MAX_GRAPH_BYTES)
     originals.read(plan.get("environmentExecutable"), old.MAX_GRAPH_BYTES)
     capture.child_environment(plan, target)
     dependencies, dependency_bytes = {}, 0
     for tool in tools:
         old.query_exit_contract(tool)
         originals.read(tool.get("executable"), old.MAX_GRAPH_BYTES)
-        environment = old._json(originals.read(tool.get("environment")))
+        environment = old._object(old._json(originals.read(tool.get("environment"))), "tool environment")
         for dependency in old._array(environment.get("files"), "dependency files", MAX_DEP_FILES, 1):
             path = old._text(old._object(dependency, "dependency").get("path"), "dependency path")
             if path not in dependencies and len(dependencies) >= MAX_DEP_FILES:
@@ -208,15 +216,17 @@ def _preflight(spec, destination, input_reference=None):
             raise ValueError("native offline tools must be explicitly attested")
         for name in ("version", "commit"):
             old._text(tool.get(name), "tool " + name, 128)
+        settings = old._object(tool.get("settings"), "tool settings")
         for name in ("scopePolicy", "inferenceProfile", "clustering", "queryInterface"):
-            old._text(tool.get("settings", {}).get(name), "tool setting " + name)
+            old._text(settings.get(name), "tool setting " + name)
         if tool["id"] == "graphify" or "releaseVerification" in tool:
-            release = old._json(originals.read(tool.get("releaseVerification")))
+            release = old._object(old._json(originals.read(tool.get("releaseVerification"))), "release verification")
             if ((release.get("version"), release.get("commit")) != (tool["version"], tool["commit"])
                     or old._timestamp(release.get("checkedAt")) > old._timestamp(started)
                     or release.get("source") != "https://github.com/Graphify-Labs/graphify/releases"):
                 raise ValueError("release verification differs from source-frozen tool identity")
-    graphs = old._array(plan.get("graphs"), "frozen graphs", 64, 2)
+    graphs = [old._object(graph, "frozen graph")
+        for graph in old._array(plan.get("graphs"), "frozen graphs", 64, 2)]
     expected = {(repo["id"], tool) for repo in registration["repositories"] for tool in old.TOOLS}
     if len(graphs) != len(expected) or {(g.get("repository"), g.get("tool")) for g in graphs} != expected:
         raise ValueError("complete unique graph matrix required")
@@ -237,7 +247,7 @@ def _preflight(spec, destination, input_reference=None):
         if not old.verify_build_capture(build, originals.read):
             raise ValueError("successful bounded raw graph build capture required")
         repo = next(repo for repo in registration["repositories"] if repo["id"] == entry["repository"])
-        inventory = old._json(originals.read(entry.get("sourceInventory")))
+        inventory = old._object(old._json(originals.read(entry.get("sourceInventory"))), "source inventory")
         if (inventory.get("files") != repo["files"] or entry.get("sourceCommit") != repo["commit"]
                 or entry.get("sourceCleanBeforeAndAfter") is not True):
             raise ValueError("graph inventory/pin/cleanliness differs from source freeze")
@@ -258,7 +268,7 @@ def collect_v2(spec, destination, *, runner=process.run_bounded, _input_referenc
     """Capture once, retain the entire matrix, assess pending review, then seal.
 
     This internal API is not authorization for a real comparison. The public
-    collector still rejects version2. COMPLETE means coherent capture only;
+    version1 collector still rejects version2. COMPLETE means coherent capture only;
     pending suggestions cannot pass independent output review or superiority.
     """
     spec = old._json(capture.encoded(spec))  # snapshot caller-owned mutable data
@@ -271,6 +281,7 @@ def collect_v2(spec, destination, *, runner=process.run_bounded, _input_referenc
         artifact=bundle.copy("capture-input-invocation.json", _input_reference))
         if _input_reference is not None else None)
     protocol = retain_protocol(bundle, code_root, descriptor, actors)
+    panels = retain_panels(bundle, spec.get("panels"))
     modules = {item["module"]: item["artifact"] for item in protocol["files"]}
     histories = {name: {digest: bundle.copy(f"provenance/{name}/{digest}", reference)
         for digest, reference in sorted(spec.get(name, {}).items())}
@@ -369,7 +380,7 @@ def collect_v2(spec, destination, *, runner=process.run_bounded, _input_referenc
     verify_original_protocol(code_root, descriptor, actors)
     run = bundle.put("run.json", dict(schema=SCHEMAS["capture"], registrationSha256=registration_ref["sha256"],
         startedAt=started, completedAt=datetime.now(timezone.utc).isoformat(), protocolBinding=protocol,
-        captureInput=input_ref, captureInputInvocation=invocation,
+        captureInput=input_ref, captureInputInvocation=invocation, panels=panels,
         assessor=modules[ROLES["assessor"]], tools=tools, graphs=graphs, arms=plan["arms"],
         observations=observations, childEnvironment=environment,
         measurementExecutable=bundle.copy("provenance/measurement-executable", plan["measurement"]["executable"], old.MAX_GRAPH_BYTES),
@@ -389,10 +400,13 @@ def collect_v2(spec, destination, *, runner=process.run_bounded, _input_referenc
     manifest = dict(schema=SCHEMAS["review-input"], registration=registration_ref, run=run, reviews=review_ref,
         normalizedSelections=selections, sourceRoots=roots, graphQualification=[], **histories)
     bundle.put("review-input.json", manifest)
-    report = assess_file_v2(bundle.root / "review-input.json")
+    def publish_report(path, data):
+        return bundle.put(path.relative_to(bundle.root).as_posix(), data)
+    stored = score_file_v2(bundle.root / "review-input.json", bundle.root / "report-provisional.json",
+        _publish=publish_report)
+    report = stored["assessment"]
     if report.get("eligibleForSuperiorityClaim") is not False:
         raise ValueError("pending output review cannot establish qualification")
-    bundle.put("report-provisional.json", report)
     source_state("publication")
     bundle.recheck()
     verify_original_protocol(code_root, descriptor, actors)
@@ -407,7 +421,7 @@ def collect_file_v2(path, destination, *, runner=process.run_bounded):
 
     The same file is tracked by the original-input reader before/after queries,
     assessment and final publication. The assessor also verifies its retained
-    copy. Public version2 dispatch remains disabled.
+    copy. The explicit version2 developer entry invokes this file-backed path.
     """
     path = Path(path).absolute()
     data = old.read_bounded(path, old.MAX_JSON_BYTES)

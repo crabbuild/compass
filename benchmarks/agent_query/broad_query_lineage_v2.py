@@ -2,7 +2,7 @@
 
 This validates artifact and partition bindings only. It does not authenticate
 reviewers, judge assertions, run queries or compute qualification statistics.
-Public version2 capture/assessment remains disabled until full integration.
+The explicit version2 entry supplies source/cost/qualification integration.
 """
 from dataclasses import dataclass
 

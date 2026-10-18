@@ -1,4 +1,4 @@
-"""Protocol2 foundation preview, not integrated into collection/assessment.
+"""Protocol2 bounds and printed-assertion contracts for collection/assessment.
 
 Structural checks and byte bindings are not semantic/source completeness or
 independent review. Version1 behavior is owned by its unchanged legacy path.

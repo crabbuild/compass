@@ -1,4 +1,4 @@
-"""Internal file-backed protocol2 assessment; public dispatch stays disabled.
+"""File-backed protocol2 assessment for the explicit developer entry point.
 
 No graph query, provider or network is run. Bounded Git metadata checks verify
 current source pins/cleanliness. Supplied review attestations remain explicit
@@ -6,6 +6,7 @@ inputs, not authenticated human/source judgments.
 """
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from contextlib import contextmanager
 
 from benchmarks.agent_query import broad_query_review as old
 from benchmarks.agent_query.broad_query_inputs_v2 import BoundedArtifacts, verify_native_inputs
@@ -13,6 +14,7 @@ from benchmarks.agent_query.broad_query_lineage_v2 import load_review_lineage
 from benchmarks.agent_query.broad_query_observation_v2 import score_bound_observation
 from benchmarks.agent_query.broad_query_oracle import SourceReader
 from benchmarks.agent_query.broad_query_protocol import BundleWork
+from benchmarks.agent_query.broad_query_panels_v2 import read_panels, finish_panels
 
 
 def _source_state(registration, roots, artifacts, spool):
@@ -26,7 +28,8 @@ def _source_state(registration, roots, artifacts, spool):
             raise ValueError("source checkout is not clean")
 
 
-def assess_v2(manifest, root):
+@contextmanager
+def _assessment_session(manifest, root):
     """Assess the full frozen matrix and recheck every input before returning.
 
     All row payloads use one reader and are discarded after scoring. Every
@@ -55,34 +58,40 @@ def assess_v2(manifest, root):
             raise ValueError("temporary audit captures must be outside source checkouts")
         _source_state(registration, roots, artifacts, spool)
         originals = verify_native_inputs(manifest, registration, run, artifacts)
+        panels = read_panels(registration, run.get("panels"), artifacts.read, run["protocolBinding"]["actorSha256"])
         started = old._timestamp(run["startedAt"])
         state = old._prepare_assessment(manifest, registration, run, artifacts, started,
             actors=run["protocolBinding"]["actorSha256"])
         tasks, failures = state["tasks"], state["failures"]
         if run.get("captureInputInvocation") is None:
             failures.append("capture-input invocation file was not retained; object snapshots are diagnostic only")
+        if panels is None:
+            failures.append("source-frozen original/lookup comparison panels are missing")
         graphs = {(entry["repository"], entry["tool"]): entry for entry in state["graph_records"]}
         work = BundleWork()
-        scored, costs, reviewers, row_work = {}, [], set(), []
+        scored, costs, reviewers, row_work, row_failures, reviewer_by_key = {}, [], set(), [], {}, {}
         for observation in lineage.iter_observations():
             key = observation.key
             task = tasks[key[0]]
             review = observation.judgment.get("independentReview")
-            failures += old._review_failures(review, f"{key}: output normalization/facts")
-            reviewers.add(str(review.get("reviewerType")) if type(review) is dict else "None")
+            local_failures = old._review_failures(review, f"{key}: output normalization/facts")
+            reviewer_by_key[key] = str(review.get("reviewerType")) if type(review) is dict else "None"
+            reviewers.add(reviewer_by_key[key])
             graph_key = task["repository"], key[1]
             result = score_bound_observation(observation, task, registration["capturePlan"],
                 graphs[graph_key], artifacts.root, state["graph_indexes"][graph_key],
                 state["sources"][task["repository"]], work)
             row = result["row"]
             if not row["normalizationComplete"] or not row["semanticCoverageComplete"]:
-                failures.append(f"{key}: output normalization/semantic coverage incomplete")
+                local_failures.append(f"{key}: output normalization/semantic coverage incomplete")
             if not row["judgmentComplete"]:
-                failures.append(f"{key}: unjudged output or post-output source-oracle correction")
+                local_failures.append(f"{key}: unjudged output or post-output source-oracle correction")
             if row["evaluationRejected"]:
-                failures.append(f"{key}: evaluation rejected: {row['evaluationFailure']['code']}")
+                local_failures.append(f"{key}: evaluation rejected: {row['evaluationFailure']['code']}")
             if not result["measurementComplete"]:
-                failures.append(f"{key}: peak RSS measurement unavailable")
+                local_failures.append(f"{key}: peak RSS measurement unavailable")
+            row_failures[key] = local_failures
+            failures.extend(local_failures)
             scored[key] = row
             costs.append(result["cost"])
             row_work.append(dict(task=key[0], tool=key[1], arm=key[2], **result["work"]))
@@ -92,13 +101,40 @@ def assess_v2(manifest, root):
             raise ValueError("assessment did not retain the full frozen matrix")
         report = old._finish_assessment(manifest, registration, artifacts, started, state,
             scored, costs, sorted(reviewers), protocol2=True)
-        _source_state(registration, roots, artifacts, spool)
-        originals.recheck()
-        lineage.recheck()
-    report.update(protocol="compass.broad-query-review/2", actorSha256=run["protocolBinding"]["actorSha256"],
-        printedWork=dict(completedHashBytes=work.hash_bytes, completedLineLinks=work.line_links, rows=row_work),
-        sourceStateVerified=True)
-    return report
+        # Panel source/tool/graph verification is sequential. Release the union
+        # indexes before creating another panel's indexes; scored rows remain.
+        state["graph_indexes"].clear()
+        state["sources"].clear()
+        if panels is not None:
+            combined = finish_panels(panels, manifest, registration, run, artifacts, started,
+                scored, costs, row_failures, reviewer_by_key, report)
+            report["panelAssessment"] = combined
+            report["eligibleForSuperiorityClaim"] = combined["eligibleForSuperiorityClaim"]
+            report["failures"] = combined["failures"]
+        report.update(protocol="compass.broad-query-review/2", actorSha256=run["protocolBinding"]["actorSha256"],
+            printedWork=dict(completedHashBytes=work.hash_bytes, completedLineLinks=work.line_links, rows=row_work),
+            sourceStateVerified=True, artifacts=dict(sorted(artifacts.seen.items())))
+        guarded = False
+
+        def recheck():
+            nonlocal guarded
+            _source_state(registration, roots, artifacts, spool)
+            old._verify_sources(registration, roots)
+            originals.recheck()
+            lineage.recheck()
+            guarded = True
+
+        # A publisher may encode first, invoke recheck immediately before its
+        # exclusive write, then leave the session without a second late check.
+        # Plain assessment receives its final check before returning a result.
+        yield report, recheck
+        if not guarded:
+            recheck()
+
+
+def assess_v2(manifest, root):
+    with _assessment_session(manifest, root) as (report, _):
+        return report
 
 
 def assess_file_v2(path):

@@ -4,6 +4,14 @@
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
+Plan029 broad-question capture and qualification use the explicit
+`python3 -m benchmarks.agent_query.broad_query_v2` entry point. Its source-frozen
+original/lookup/union panels, exact printed-assertion review, immutable lineage,
+cost accounting and report checking are documented in
+[`BROAD_QUERY_CAPTURE.md`](BROAD_QUERY_CAPTURE.md). Diagnostic/self-test success
+does not establish comparative superiority. The older broad-query commands and
+the suites below retain their original protocols.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting

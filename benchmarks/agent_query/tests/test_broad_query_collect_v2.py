@@ -102,7 +102,7 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(observation.judgment["independentReview"]["status"], "pending")
             self.assertEqual(observation.capture["stdout_bytes"], len(observation.stdout))
         lineage.recheck()
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertEqual(len(report["rows"]), 8)
         self.assertEqual(len(report["costs"]), 8)
         self.assertFalse(report["eligibleForSuperiorityClaim"])
@@ -130,7 +130,7 @@ class CollectorTests(unittest.TestCase):
                     self.assertEqual(answer["normalizationFailure"]["code"], code)
                     self.assertIsNone(answer["printedAssertionCount"])
                     self.assertEqual(answer["ranked"], [])
-                report = old._json(Path(result["report"]).read_bytes())
+                report = old._json(Path(result["report"]).read_bytes())["assessment"]
                 self.assertEqual(len(report["costs"]), 4)
                 self.assertTrue(all(row["evaluationRejected"] for row in report["rows"]))
                 self.assertTrue(all(row["claimPrecision"] is None for row in report["rows"]))
@@ -140,7 +140,7 @@ class CollectorTests(unittest.TestCase):
                 side_effect=ProtocolLimit("JSON_BYTE_LIMIT", "encoded_json_bytes", old.MAX_JSON_BYTES,
                     old.MAX_JSON_BYTES, old.MAX_JSON_BYTES + 1)):
             result = self.collect()
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertEqual(len(report["costs"]), 4)
         self.assertTrue(all(row["evaluationFailure"]["code"] == "JSON_BYTE_LIMIT" for row in report["rows"]))
 
@@ -150,7 +150,7 @@ class CollectorTests(unittest.TestCase):
                 self.mode = mode
                 self.destination = self.root / ("execution-" + mode)
                 result = self.collect()
-                report = old._json(Path(result["report"]).read_bytes())
+                report = old._json(Path(result["report"]).read_bytes())["assessment"]
                 self.assertEqual(len(report["rows"]), 4)
                 self.assertEqual(len(report["costs"]), 4)
                 selected = [row for row in report["costs"] if mode != "overflow" or row["arm"] == "normalized"]
@@ -206,7 +206,7 @@ class CollectorTests(unittest.TestCase):
             if argv[0] != "git": path.with_suffix(".stderr").write_bytes(b"no measurement\n")
         self.after = remove_rss
         result = self.collect()
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertEqual(len(report["costs"]), 4)
         self.assertTrue(all(row["peakRssBytes"] is None for row in report["costs"]))
         self.assertTrue(any("RSS" in failure for failure in report["failures"]))
@@ -220,7 +220,7 @@ class CollectorTests(unittest.TestCase):
                 self.refreeze()
                 with patch("benchmarks.agent_query.broad_query_collect_v2.platform.system", return_value=system):
                     result = self.collect()
-                report = old._json(Path(result["report"]).read_bytes())
+                report = old._json(Path(result["report"]).read_bytes())["assessment"]
                 self.assertEqual(len(report["costs"]), 4)
                 self.assertTrue(all(row["peakRssBytes"] is None for row in report["costs"]))
                 manifest = old._json((self.destination / "review-input.json").read_bytes())
@@ -246,7 +246,7 @@ class CollectorTests(unittest.TestCase):
         self.assertFalse(self.registration["sourceReview"]["blindToOutputs"])
         result = self.collect()
         self.assertEqual(len(self.queries), 4)
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertEqual(len(report["costs"]), 4)
         self.assertFalse(report["eligibleForSuperiorityClaim"])
         self.assertTrue(any("permanently ineligible" in failure for failure in report["failures"]))
@@ -279,7 +279,7 @@ class CollectorTests(unittest.TestCase):
                     self.assertEqual(self.queries, [])
                     self.after = None
                 else:
-                    with patch("benchmarks.agent_query.broad_query_collect_v2.assess_file_v2",
+                    with patch("benchmarks.agent_query.broad_query_collect_v2.score_file_v2",
                             side_effect=ValueError("synthetic mandatory report failure")):
                         with self.assertRaisesRegex(ValueError, "mandatory report"): self.collect()
                 self.assertFalse((self.destination / "COMPLETE.json").exists())
@@ -347,7 +347,7 @@ class CollectorTests(unittest.TestCase):
             normalized = self.document(row["normalized"])
             self.assertFalse(normalized["semanticCoverageComplete"])
             self.assertEqual(normalized["disposition"], "abstain")
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertFalse(report["eligibleForSuperiorityClaim"])
         self.assertTrue(all(row["falseEmpty"] is None for row in report["rows"]))
 
@@ -365,7 +365,7 @@ class CollectorTests(unittest.TestCase):
         invocation = run["captureInputInvocation"]
         self.assertEqual(invocation["original"]["path"], str(path))
         self.assertEqual((self.destination / invocation["artifact"]["path"]).read_bytes(), data)
-        report = old._json(Path(result["report"]).read_bytes())
+        report = old._json(Path(result["report"]).read_bytes())["assessment"]
         self.assertFalse(any("invocation file" in failure for failure in report["failures"]))
         self.destination = self.root / "input-drift"
         def drift_input(argv, capture_path):

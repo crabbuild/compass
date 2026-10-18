@@ -1,18 +1,34 @@
 # Frozen native query capture
 
-Protocol2 normalization, printed-coverage, collection and assessment components are being
-integrated under `broad_query_protocol.py`, `broad_query_coverage.py`,
-`broad_query_normalize_v2.py` and `broad_query_score_v2.py`. They are internal
-components, not public capture or assessment entry points. The public collector,
-file-backed auditor and panel binder below still accept only protocol1. They
-reject protocol2 and mixed versions. Do not collect a new comparison through
-these components until the complete actor, lineage, publication and panel
-integration has been reviewed.
+The explicit version2 developer entry point is
+`python3 -m benchmarks.agent_query.broad_query_v2`. It connects collection,
+normalization, printed-coverage/source scoring, immutable panel assessment,
+report publication and recomputation. The older `broad_query_capture`,
+`broad_query_review` and `broad_query_panels` commands remain protocol1-only;
+neither path converts or silently mixes versions. A new comparison still needs
+independent source/oracle acceptance, exposure review, prospective power and
+the latest comparator verification before its pre-output freeze. Software
+self-tests and source integrity do not supply those judgments.
+
+```bash
+python3 -m benchmarks.agent_query.broad_query_v2 --self-test
+python3 -m benchmarks.agent_query.broad_query_v2 --capture /external/capture-input.json --output /external/new-capture
+python3 -m benchmarks.agent_query.broad_query_v2 --score /external/new-capture/review-input.json --output /external/new-capture/report-reviewed.json
+python3 -m benchmarks.agent_query.broad_query_v2 --check /external/new-capture/report-reviewed.json
+```
+
+Capture/diagnostic scoring exits0 after coherent publication. Check exits0 only
+when every union/original/lookup qualification gate passes,1 for a recomputed
+ineligible report and2 for invalid/stale/mixed evidence. Reports must be new
+siblings of their input; paths are never overwritten. CLI status includes a
+bounded failure preview and total failure count; the complete ledger is in the
+report. Native Compass runtime, commands and graph formats are unchanged.
 
 `broad_query_actors_v2.py` freezes all non-test Python sources under
 `benchmarks/agent_query` and `benchmarks/performance/compass`, including imported
 helpers and graph auditors. Its protocol descriptor binds the complete ordered
-inventory and the capture, normalizer, assessor and panel roles. Added, removed
+inventory and the actual version2 capture-entry, normalizer, assessor, panel and
+reporter roles. Added, removed
 or changed source files require a new pre-output freeze. Source discovery is
 bounded by 16,384 entries, 512 directories and 512 Python files; retained code
 is bounded by 64 MiB. Original and retained bytes are rechecked using the shared
@@ -45,7 +61,7 @@ failure, partial traversal or final integrity failure prevents publication.
 Rejected rows retain raw bytes and unknown assertion counts, with no ranked or
 coverage prefix. This component checks lineage and partitions; source truth,
 native costs, reviewer independence and qualification need the full assessor.
-It does not enable public protocol2 dispatch.
+The lineage loader itself supplies no qualification or command dispatch.
 
 `broad_query_execution_v2.py` checks each retained command against the frozen
 question, tool, graph, arm, isolated environment and measurement wrapper. It
@@ -110,7 +126,7 @@ in the default arm, makes formal precision comparison unavailable; no row is
 dropped, imputed to zero or replaced with its diagnostic partial fraction.
 The existing source review, exposure, task balance, prospective power,
 independent graph qualification and subgroup gates remain required. This
-internal assessor still does not enable public collection, scoring or panels2.
+assessor is invoked by the explicit version2 entry; the version1 path stays separate.
 
 `broad_query_collect_v2.collect_file_v2` internally connects collection to that
 assessor. It preflights the frozen source review, complete actor inventory,
@@ -144,8 +160,45 @@ HEAD/cleanliness and original/retained actors and inputs are checked before
 queries, after collection and after provisional assessment. Mandatory integrity,
 report or publication failures leave the directory without `COMPLETE.json`.
 That marker confirms coherent pending-review capture only. This remains an
-internal integration: public capture/score/check/panels2 dispatch is disabled,
-and no new comparative experiment is authorized by these helper functions.
+integration supplies coherent capture only; helper functions do not authorize
+an experiment or establish independent source/answer qualification.
+
+`broad_query_panels_v2` computes original, lookup and union comparisons over
+one immutable union capture. The union source registration freezes
+`comparisonPanels: {schema: "compass.broad-query-panels-binding/2",
+definitionSha256: ...}`. Capture-input2 additionally declares `panels` with a
+definition reference and exactly `original`/`lookup` registration references.
+Original references are absolute; the run retains contained copies. The
+definition has schema `compass.broad-query-panels/2`, `frozenAt`, the complete
+`actorSha256`, `registrations` mapping those two roles to SHA256 digests, and
+`lookupPairs` with original/lookup task IDs. Digest-only role bindings avoid a
+circular union-registration hash. Both panel registrations precede the
+definition, which precedes the union source freeze and actual collection.
+
+All original broad tasks remain unchanged. Only named exact controls gain
+canonical declaration lookup variants; source identities, clusters and shared
+tasks must match exactly. The union contains the complete task union, with
+the same sources, capture plan, cost arms, graph scope and policy. Each panel
+keeps its own source-frozen cohorts/power and all existing qualification gates.
+Combined eligibility requires original, lookup and union to pass. Missing
+source-frozen panels makes version2 assessment ineligible. No run, initial
+normalization, reviewed selection or raw stream is projected or rewritten.
+Observations are scored once; shared query/build costs are charged once in the
+union summary. Metadata/graph verification is sequential across panels, with
+graph/source indexes released between them.
+
+`broad_query_report_v2` internally publishes and recomputes the version2 report
+wrapper. Its exact fields are `schema: "compass.broad-query-review/2"`, absolute
+`inputPath`, `inputSha256`, complete `actorSha256`, and `assessment`. The
+collector's provisional report uses this wrapper too. New reports are siblings
+of their review input in the external artifact root. Encoding is bounded
+incrementally, then original/retained source, input and actor guards run before
+exclusive publication. Rechecking recomputes the complete matrix and panel
+assessments; stored metrics, numeric types, eligibility, actors and original
+input/report bytes cannot be substituted. Pending or underpowered reports
+remain diagnostic. Public version2 dispatch uses only the explicit entry above.
+Historical
+protocol1 runs/reports retain their original schemas and arithmetic.
 
 The staged components retain all printed occurrences in globally bounded
 batches, exact byte-line coverage and typed source assertions. Initial

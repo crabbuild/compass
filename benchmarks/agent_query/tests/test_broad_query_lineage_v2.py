@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from benchmarks.agent_query.broad_query_actors_v2 import freeze_protocol, retain_protocol
+from benchmarks.agent_query.broad_query_actors_v2 import freeze_protocol, retain_protocol, ROLES
 from benchmarks.agent_query.broad_query_capture import Bundle
 from benchmarks.agent_query.broad_query_lineage_v2 import load_review_lineage, SCHEMAS
 from benchmarks.agent_query.broad_query_normalize_v2 import normalize_v2
@@ -241,7 +241,7 @@ class ReviewLineageTests(unittest.TestCase):
                 fixture=Fixture(directory);context=fixture.load()
                 if target == "raw":
                     ref=fixture.loaded[0].capture["stdout"];path=fixture.bundle.root/ref["path"]
-                elif target == "original_actor": path=fixture.root/"benchmarks/agent_query/broad_query_review.py"
+                elif target == "original_actor": path=fixture.root/ROLES["assessor"]
                 else: path=fixture.bundle.root/fixture.run["protocolBinding"]["files"][0]["artifact"]["path"]
                 path.write_bytes(path.read_bytes()+b"\n")
                 with self.assertRaises(ValueError): context.recheck()

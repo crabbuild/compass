@@ -165,6 +165,24 @@ an empty answer does not imply complete indexing.
 
 ## Developer comparison-panel binding
 
+The explicit `python3 -m benchmarks.agent_query.broad_query_v2` developer command
+supports capture-input/plan/run/normalization/judgment/review protocol2. Its
+`--capture`, `--score` and `--check` paths do not silently fall back to version1.
+The older developer commands retain their version1 implementations. New actor
+freezes bind the actual version2 entry, normalizer, file-backed assessor, panel
+and reporter, plus all owned evaluator source files. No historical artifact is
+converted or regraded; use its frozen verifier or collect a new experiment.
+
+Version2 panels bind a definition digest in the union source registration and
+both source registration digests in `compass.broad-query-panels/2`. Original,
+lookup and union statistics reuse one immutable capture/normalization lineage;
+shared native query/build costs count once. All three panels must pass their
+existing qualification gates. Missing panels, unknown full precision, source
+review, power or graph qualification leave the report ineligible. Report2 binds
+the actual review-input bytes and complete actors; checking recomputes the full
+assessment. Reports are no-clobber siblings of their input in the external
+evidence root. Native commands, graph/storage formats and ranking are unchanged.
+
 Developer graph entries may freeze an optional `sourceQueryArtifact` reference
 for Compass's fixed `source-query.json` sibling. Collection retains graph and
 sidecar together in a separate directory per repository, checks the native

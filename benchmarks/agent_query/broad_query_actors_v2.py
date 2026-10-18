@@ -14,10 +14,11 @@ from benchmarks.agent_query.broad_query_review import (
 SCHEMA = "compass.broad-query-protocol-source/2"
 BINDING_SCHEMA = "compass.broad-query-protocol-binding/2"
 ROOTS = ("benchmarks/agent_query", "benchmarks/performance/compass")
-ROLES = dict(capture="benchmarks/agent_query/broad_query_capture.py",
+ROLES = dict(capture="benchmarks/agent_query/broad_query_v2.py",
     normalizer="benchmarks/agent_query/broad_query_normalize_v2.py",
-    assessor="benchmarks/agent_query/broad_query_review.py",
-    panel="benchmarks/agent_query/broad_query_panels.py")
+    assessor="benchmarks/agent_query/broad_query_assess_v2.py",
+    panel="benchmarks/agent_query/broad_query_panels_v2.py",
+    reporter="benchmarks/agent_query/broad_query_report_v2.py")
 MAX_FILES = 512
 MAX_BYTES = MAX_JSON_BYTES
 MAX_TREE_ENTRIES = 16384

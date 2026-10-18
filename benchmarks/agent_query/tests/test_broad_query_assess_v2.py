@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from benchmarks.agent_query import broad_query_capture as capture
 from benchmarks.agent_query import broad_query_review as old
-from benchmarks.agent_query.broad_query_actors_v2 import freeze_protocol, retain_protocol
+from benchmarks.agent_query.broad_query_actors_v2 import freeze_protocol, retain_protocol, ROLES
 from benchmarks.agent_query.broad_query_assess_v2 import assess_file_v2
 from benchmarks.agent_query.broad_query_lineage_v2 import SCHEMAS
 from benchmarks.agent_query.tests import test_broad_query_capture as capture_tests
@@ -44,8 +44,8 @@ class Fixture:
         self.registration = self.bundle.copy("registration.json", self.spec["registration"])
         protocol = retain_protocol(self.bundle, code_root, descriptor, actors)
         modules = {item["module"]: item["artifact"] for item in protocol["files"]}
-        normalizer = modules["benchmarks/agent_query/broad_query_normalize_v2.py"]
-        assessor = modules["benchmarks/agent_query/broad_query_review.py"]
+        normalizer = modules[ROLES["normalizer"]]
+        assessor = modules[ROLES["assessor"]]
         tools, graphs = [], []
         for tool in self.plan["tools"]:
             name = tool["id"]
