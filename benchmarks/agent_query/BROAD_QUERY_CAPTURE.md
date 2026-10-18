@@ -20,6 +20,50 @@ bounded artifact reader and existing no-clobber bundle. Runtime callers must use
 their own code root, never a root supplied by captured metadata. These integrity
 components do not authenticate the execution or an independent source review.
 
+`broad_query_lineage_v2.py` stages finite, immutable review selections. It binds
+every original task/tool/arm to exactly one `initialNormalizedRef` and one
+`reviewedNormalizedRef`, plus the original run, raw stdout, source registration
+and frozen actor digests. The initial reference must equal the original run's
+reference, including its path. Initial normalization precedes run publication
+and therefore never contains a circular run digest. A reviewed normalization
+may correct suggestion IDs, owners and grouping without rewriting that run.
+Transitive amendments, missing or reordered rows and mixed versions are rejected.
+
+The protocol2 `judgments` index has exactly `schema`, `runSha256` and
+`observations`. Each ordered observation has exactly `task`, `tool`, `arm` and
+`judgmentRef`. That reference selects a separate bounded judgments2 document
+containing the same task/tool/arm, `runSha256`,
+`reviewedNormalizedSha256` and the full reviewed claim/occurrence labels.
+The existing 64 MiB JSON limit applies to each document; the shared 2 GiB and
+65,536-artifact bundle limits still apply to the entire experiment. Embedding
+all row labels in the global index is rejected.
+
+The loader reads raw streams, normalizations and judgments one observation at a
+time. Consumers must exhaust its single traversal, discard each large body
+after scoring, and call its final `recheck()` before publication. A late row
+failure, partial traversal or final integrity failure prevents publication.
+Rejected rows retain raw bytes and unknown assertion counts, with no ranked or
+coverage prefix. This component checks lineage and partitions; source truth,
+native costs, reviewer independence and qualification need the full assessor.
+It does not enable public protocol2 dispatch.
+
+`broad_query_execution_v2.py` checks each retained command against the frozen
+question, tool, graph, arm, isolated environment and measurement wrapper. It
+recomputes byte costs and peak RSS from the original streams. Missing or
+ambiguous RSS stays unavailable. Native failures, exact declared no-match
+outcomes and byte-budget overruns retain their original costs without clipping.
+`broad_query_observation_v2.py` connects that check to initial/reviewed coverage
+and task scoring using one observation budget and the shared bundle counters.
+Row limits and typed assertion collisions keep an explicit failure with unknown
+full precision, while source or artifact integrity failures abort assessment.
+Initial aggregate occurrence bounds are checked before allocating pending
+labels. A nonrejected initial partition is checked even when the reviewed
+normalization is rejected. Initial and reviewed failures remain separate:
+reviewed material can supply diagnostics, but cannot erase an original parser
+or limit rejection or promote that observation to success/formal precision.
+These layers require the full assessor to supply verified graph/source inputs
+and do not authenticate execution, reviewer attestations or qualification.
+
 The staged components retain all printed occurrences in globally bounded
 batches, exact byte-line coverage and typed source assertions. Initial
 normalization always remains pending independent review. Rejection emits zero
