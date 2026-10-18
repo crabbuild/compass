@@ -1,5 +1,27 @@
 # Compass compatibility
 
+## Broad query topic roles
+
+`query-ranker/21-typed-topic-roles` distinguishes finite decision-predicate
+spellings from independent topic evidence during broad lexical admission. It
+adds no operation equivalence or synonyms. Ambiguous block/permit noun wording
+can retain a recalled exact callable through its typed profile6 parameter site,
+or an exact AST Class/Struct through its own declaration name. Both remain Low
+inspection leads with source anchors and no implementation/compound preference.
+A declaration pointer does not establish behavior or implicitly recover methods.
+Explicit identities retain their structural contracts.
+
+Binding terms use the same literal camel/underscore subword projection and
+canonical morphology as ordinary identifier fields; raw query occurrence order
+and multiplicity remain visible in the ambiguity explanation. Defaults, type
+annotations, nested parameters, arbitrary callable names, paths and prose cannot
+supply a typed binding. Positive retained partial sites remain usable with an
+incomplete-evidence diagnostic; missing or legacy roles cannot prove absence.
+Only role-sensitive questions receive binding availability warnings. Roles add
+no DF/posting field or graph facts, and queries read no current source.
+The ranker epoch refreshes disposable response caches automatically.
+
+
 ## Parameter-binding source evidence
 
 Current source evidence uses `source-query/6-parameter-bindings`. Each exact
@@ -59,7 +81,9 @@ Immutable profiles 1–4 keep their original identifier/comment-only retrieval a
 document-frequency meaning. Older readers reject profile 5 explicitly. Run
 `compass update <root>` with the new binary for current code vocabulary; no
 historical realization is rewritten. AST cache26 refreshes disposable per-file
-profile metadata, and `query-ranker/18-channel-completeness` refreshes responses.
+profile metadata. Channel-completeness behavior introduced by
+`query-ranker/18-channel-completeness` remains supported by the current ranker
+described above.
 Code-only clipping remains visible without suppressing preferences supported by
 complete identifier/comment fields. Code-dependent matches retain their Low
 band and cannot supply those preferences.
@@ -69,7 +93,8 @@ matched-field label. No current source is read at query time.
 
 Retrieval covers retained windows; a literal-only body may have no window.
 The developer collector/assessor now accepts profiles 1–6. Freeze new actor
-hashes and collect a new run for profile5; historical captures remain unchanged.
+hashes and collect a new run for the current source profile; historical captures
+remain unchanged.
 
 ## Graph coverage diagnostic projections
 
@@ -160,9 +185,11 @@ requires new reports and the corresponding pre-output protocol freeze.
 ## Nested callable inspection context
 
 Nested inspection was introduced by `source-query/4-nested-callable-context`;
-current evidence also supports profile5. Ranked JSON uses `compass.query.ranked-view/4`. Readers retain source profiles 1–4 and
-ranked views 1–3 with their original meanings; older readers reject the new
-versions. AST cache24 refreshes disposable native scope metadata automatically.
+current evidence also supports profiles5 and6. Ranked JSON uses
+`compass.query.ranked-view/4`. Readers retain source profiles1–5 and ranked
+views1–3 with their original meanings; older readers reject new versions.
+AST cache24 introduced the native scope metadata; current cache26 refreshes
+disposable metadata automatically.
 
 An already retrieved callable can expose `nested_callable_code` quotations from
 an anonymous callable with explicit native AST ancestry. Each quotation carries
@@ -270,8 +297,9 @@ postings; older snapshots remain readable with an explicit incomplete-recall
 warning. Run `compass update` on a current checkout to publish those postings.
 Historical realizations are never rewritten. Graph identities, relationship
 kinds/direction/multiplicity and exact-symbol command meanings are unchanged.
-The active query ranker profile is `query-ranker/17-owned-code-lexemes`; existing response
-cache identities include that profile and do not reuse old ranked results.
+Owned-code lexical retrieval introduced `query-ranker/17-owned-code-lexemes`.
+The current ranker is described above; response cache identities include its
+profile and do not reuse results from older rankers.
 
 Broad retrieval can give an inspection preference to hyphenated query compounds
 whose two to four normalized words occur contiguously in a callable's own name
@@ -547,9 +575,9 @@ It never establishes a negative behavior from lexical matches. Unquoted
 `before`, `after`, `during`, and `until` likewise remain unverified temporal
 conditions, with Low candidates and an explicit diagnostic. These connectives
 do not count as lexical subject evidence; quoted and qualified identifiers
-keep their literal terms. These retrieval
-semantics use `query-ranker/17-owned-code-lexemes`; prior profile constants remain
-available and disposable response cache identities change automatically.
+keep their literal terms. These retrieval semantics remain supported by the
+current ranker described above. Prior profile constants remain available and
+disposable response cache identities change automatically.
 Name identity, structural evidence, graph coverage and candidate recall bounds
 remain separate. `responseTruncated` retains discovery's aggregate bound,
 including candidate/source-field/context limits; it does not assert that a

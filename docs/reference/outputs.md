@@ -1742,3 +1742,31 @@ to complete cached/fresh extraction when mixed prior/current facts might cross
 shared text or site limits, preserving deterministic quota allocation. The
 eligibility bound includes zero-owner evidence files; it does not infer the
 unpublished lexical contents from a published owner list.
+
+
+## Broad query noun and predicate evidence
+
+Broad lexical retrieval treats finite reject/accept/deny/allow/block/permit/refuse
+forms as possible predicates rather than independent topics for another action.
+A word occurrence does not prove the requested operation. Ordinary independent
+topic evidence still supports partial Low inspection leads.
+
+For ambiguous block/permit noun wording, typed profile6 parameter bindings can
+provide a literal topic witness. Matching uses ordinary camelCase/underscore
+subwords and existing canonical morphology, with a whole binding source anchor.
+Repeated raw query words retain their order in ambiguity explanations. A default
+expression or type annotation cannot supply the witness, nor can a nested or
+sibling parameter. No new postings, DF terms or graph relationships are created.
+
+Exact native Class/Struct own names can also provide a Low lexical declaration
+pointer, distinguished from a parameter-binding witness. This initial rule does
+not inherit noun evidence into methods. Explicitly named structural routes keep
+their existing semantics. Exception-dependent leads receive no implementation or
+compound preference and do not establish the requested predicate or behavior.
+
+Role-sensitive queries report unavailable evidence for missing/legacy metadata,
+and partial/unsupported evidence for affected recalled callables. Retained
+positive sites are usable; missing sites do not prove absence. This bounded
+metadata adds no recall postings, so omitted bindings absent from ordinary fields
+cannot be exhaustively recovered. Other questions avoid irrelevant role warnings.
+`query-ranker/21-typed-topic-roles` invalidates disposable response caches.

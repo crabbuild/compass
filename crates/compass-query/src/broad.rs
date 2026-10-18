@@ -48,6 +48,85 @@ fn is_retrieval_action(term: &str) -> bool {
         || matches!(term, "encode" | "serialize")
 }
 
+// Admission roles are deliberately separate from ranking action equivalence.
+// A decision verb cannot corroborate the topic of another action, but this
+// classification adds no synonym, operation root, or inspection preference.
+fn is_decision_predicate(term: &str) -> bool {
+    static FORMS: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+    FORMS
+        .get_or_init(|| {
+            [
+                "reject",
+                "rejects",
+                "rejected",
+                "rejecting",
+                "accept",
+                "accepts",
+                "accepted",
+                "accepting",
+                "deny",
+                "denies",
+                "denied",
+                "denying",
+                "allow",
+                "allows",
+                "allowed",
+                "allowing",
+                "block",
+                "blocks",
+                "blocked",
+                "blocking",
+                "permit",
+                "permits",
+                "permitted",
+                "permitting",
+                "refuse",
+                "refuses",
+                "refused",
+                "refusing",
+            ]
+            .into_iter()
+            .map(|word| compass_model::canonical_code_token(word.to_owned()))
+            .collect()
+        })
+        .contains(term)
+}
+
+fn is_independent_topic(
+    term: &str,
+    predicates: &BTreeSet<String>,
+    exceptions: &BTreeSet<String>,
+) -> bool {
+    // These qualifiers already cannot corroborate literal/compound topics.
+    // Apply that boundary to ordinary and implementation topics too, so a
+    // load-only phrase cannot use only as independent evidence for load.
+    exceptions.contains(term)
+        || (!predicates.contains(term) && !matches!(term, "all" | "only" | "new" | "made"))
+}
+
+fn possible_noun_spelling(word: &str) -> bool {
+    matches!(word, "block" | "blocks" | "permit" | "permits")
+}
+
+fn declared_topic(node: &NodeRecord, term: &str) -> bool {
+    relationships::exact_ast(node)
+        && [&node.name, &node.qualified_name].into_iter().any(|name| {
+            normalize_symbol(name)
+                .replace("::", ".")
+                .split('.')
+                .any(|part| part == term)
+        })
+}
+
+// Only the actual name of an exact native nominal declaration may supply this
+// noun pointer. A qualified namespace, callable, path, alias or prose cannot.
+// This does not inherit the noun into methods or establish requested behavior.
+fn nominal_topic(node: &NodeRecord, term: &str) -> bool {
+    matches!(node.kind, NodeKind::Class | NodeKind::Struct)
+        && relationships::exact_ast(node)
+        && compass_model::canonical_code_token(normalize_symbol(&node.name)) == term
+}
+
 fn test_context(node: &NodeRecord) -> bool {
     if node.roles.contains(&NodeRole::Test)
         || node.roles.contains(&NodeRole::Fixture)
@@ -256,6 +335,8 @@ struct Retrieval {
     temporal_qualification: BTreeSet<String>,
     legacy: bool,
     relationship_legacy: bool,
+    parameter_roles_unavailable: bool,
+    parameter_roles_partial: bool,
     ranks: BTreeMap<String, usize>,
     recall_time: Duration,
     ranking_time: Duration,
@@ -644,6 +725,35 @@ impl CodeQueryEngine {
                 }
             }
         }
+        // Preserve all query groups and literal spellings. Only the admission
+        // checks for independent topic evidence use this larger role set.
+        let mut topic_predicates = action_terms.clone();
+        topic_predicates.extend(
+            original_terms
+                .iter()
+                .filter(|term| is_decision_predicate(term))
+                .cloned(),
+        );
+        // Preserve raw occurrences: blocks/blocked may collapse to one group,
+        // but a noun witness cannot establish the separate requested predicate.
+        let decision_spellings = compass_model::identifier_tokens(&request.query)
+            .into_iter()
+            .filter(|raw| is_decision_predicate(&compass_model::canonical_code_token(raw.clone())))
+            .collect::<Vec<_>>();
+        let possible_nouns = decision_spellings
+            .iter()
+            .filter(|raw| possible_noun_spelling(raw))
+            .cloned()
+            .map(compass_model::canonical_code_token)
+            .collect::<BTreeSet<_>>();
+        // A distinct decision spelling still requests a separate predicate:
+        // blocks/rejected and permits/allowed must not disappear into a vacuous
+        // facet listing simply because neither is an existing ranking action.
+        let separate_predicate = decision_spellings
+            .iter()
+            .any(|raw| !possible_noun_spelling(raw));
+        let noun_subject_requested =
+            !possible_nouns.is_empty() && (!action_terms.is_empty() || separate_predicate);
         let mut groups = Vec::new();
         let mut vocabulary_fallbacks = BTreeMap::<String, (Vec<String>, Vec<String>)>::new();
         let mut literal_supported_terms = BTreeSet::new();
@@ -1150,6 +1260,12 @@ impl CodeQueryEngine {
             literal_supported_terms.len()
         };
         let mut target_details = None;
+        let mut parameter_roles_unavailable = noun_subject_requested
+            && self
+                .source_query
+                .as_ref()
+                .is_none_or(|index| !index.supports_parameter_bindings());
+        let mut parameter_roles_partial = false;
         let mut ranked = Vec::new();
         for node in nodes.into_values() {
             check()?;
@@ -1328,9 +1444,57 @@ impl CodeQueryEngine {
                 }
             }
             let vocabulary_needed = !exact_id && !exact_name && !vocabulary_matches.is_empty();
+            // Read only typed sites on the already validated exact owner.
+            // Legacy generic identifiers/signatures cannot prove a binding.
+            // This lookup adds no posting, document-frequency term or score.
+            if noun_subject_requested && !exact_id && !exact_name && node.kind.is_callable() {
+                match source_owner.and_then(|owner| owner.parameter_bindings.as_ref()) {
+                    Some(bindings)
+                        if bindings.status
+                            == compass_model::source_query::ParameterBindingStatus::Complete => {}
+                    Some(_) => parameter_roles_partial = true,
+                    None => parameter_roles_unavailable = true,
+                }
+            }
+            let mut noun_sources = BTreeMap::new();
+            if let Some(bindings) = source_owner.and_then(|owner| owner.parameter_bindings.as_ref())
+            {
+                for site in &bindings.sites {
+                    for word in identifier_search_terms(&site.text) {
+                        let term = compass_model::canonical_code_token(word);
+                        if possible_nouns.contains(&term) {
+                            noun_sources
+                                .entry(term)
+                                .or_insert_with(|| site.source.clone());
+                        }
+                    }
+                }
+            }
+            let noun_topics = noun_sources.keys().cloned().collect::<BTreeSet<_>>();
+            body_sources.extend(noun_sources.into_values());
+            let nominal_topics = possible_nouns
+                .iter()
+                .filter(|term| nominal_topic(&node, term))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if !nominal_topics.is_empty() {
+                body_sources.extend(node.source.iter().cloned());
+            }
+            let mut topic_exceptions = noun_topics.clone();
+            topic_exceptions.extend(nominal_topics.iter().cloned());
+            topic_exceptions.extend(
+                named_contexts
+                    .iter()
+                    .filter(|term| {
+                        (topic_predicates.contains(*term)
+                            || matches!(term.as_str(), "all" | "only" | "new" | "made"))
+                            && declared_topic(&node, term)
+                    })
+                    .cloned(),
+            );
+            let role_uncertain = !exact_id && !exact_name && !topic_exceptions.is_empty();
             let literal_topic = groups.iter().any(|(term, variants, _, _)| {
-                !action_terms.contains(term)
-                    && !matches!(term.as_str(), "all" | "only" | "new" | "made")
+                is_independent_topic(term, &topic_predicates, &topic_exceptions)
                     && matching(
                         &document,
                         vocabulary_fallbacks
@@ -1431,24 +1595,24 @@ impl CodeQueryEngine {
                             && fields.iter().any(|field| {
                                 matches!(*field, "body_identifier" | "code_reference")
                             })));
-                implementation_subject |= !action_terms.contains(term)
-                    && fields.iter().any(|field| {
-                        matches!(
-                            *field,
-                            "name"
-                                | "signature"
-                                | "declaring_type"
-                                | "owned_document"
-                                | "body_identifier"
-                                | "body_comment"
-                                | "code_reference"
-                                | "owned_identifier"
-                        )
-                    });
+                implementation_subject |=
+                    is_independent_topic(term, &topic_predicates, &topic_exceptions)
+                        && fields.iter().any(|field| {
+                            matches!(
+                                *field,
+                                "name"
+                                    | "signature"
+                                    | "declaring_type"
+                                    | "owned_document"
+                                    | "body_identifier"
+                                    | "body_comment"
+                                    | "code_reference"
+                                    | "owned_identifier"
+                            )
+                        });
                 compound_subject |= !compound_matches.phrases.is_empty()
-                    && !action_terms.contains(term)
+                    && is_independent_topic(term, &topic_predicates, &topic_exceptions)
                     && !compounds.contains_component_group(term)
-                    && !matches!(term.as_str(), "all" | "only" | "new" | "made")
                     && fields.iter().any(|field| {
                         matches!(
                             *field,
@@ -1462,7 +1626,7 @@ impl CodeQueryEngine {
                                 | "owned_identifier"
                         )
                     });
-                subject_matched |= !action_terms.contains(term)
+                subject_matched |= is_independent_topic(term, &topic_predicates, &topic_exceptions)
                     && fields
                         .iter()
                         .any(|field| !matches!(*field, "kind" | "language"));
@@ -1492,19 +1656,23 @@ impl CodeQueryEngine {
             // asks for any other subject, a facet cannot stand in for it.
             // Keep unfamiliar wording tentative only when this candidate has
             // real subject evidence outside those two descriptive fields.
-            let facet_only_subjects = groups
-                .iter()
-                .filter(|(term, _, _, _)| !action_terms.contains(term))
-                .all(|(_, variants, _, _)| {
-                    matching(&document, variants)
-                        .iter()
-                        .any(|field| matches!(*field, "kind" | "language"))
-                });
-            if !subject_matched
-                && !facet_only_subjects
+            let facet_only_subjects = !noun_subject_requested
                 && groups
                     .iter()
-                    .any(|(term, _, _, _)| !action_terms.contains(term))
+                    .filter(|(term, _, _, _)| {
+                        is_independent_topic(term, &topic_predicates, &topic_exceptions)
+                    })
+                    .all(|(_, variants, _, _)| {
+                        matching(&document, variants)
+                            .iter()
+                            .any(|field| matches!(*field, "kind" | "language"))
+                    });
+            if !subject_matched
+                && !facet_only_subjects
+                && (noun_subject_requested
+                    || groups.iter().any(|(term, _, _, _)| {
+                        is_independent_topic(term, &topic_predicates, &topic_exceptions)
+                    }))
                 && !exact_id
                 && !exact_name
                 && semantic_score == 0.0
@@ -1573,6 +1741,7 @@ impl CodeQueryEngine {
                 && implementation_subject
                 && !vocabulary_needed
                 && !code_needed
+                && !role_uncertain
                 // A lexical preference cannot establish the relationship
                 // between multiple actions (e.g. stopping new task starts).
                 && action_terms.len() == 1
@@ -1585,6 +1754,7 @@ impl CodeQueryEngine {
                 && compound_subject
                 && !vocabulary_needed
                 && !code_needed
+                && !role_uncertain
                 && node.kind.is_callable()
                 && !negative_qualification
                 && temporal_qualification.is_empty()
@@ -1635,6 +1805,7 @@ impl CodeQueryEngine {
                     .map(|identifier| format!("explicit identity `{identifier}`")),
             );
             let relevance = if vocabulary_needed
+                || role_uncertain
                 || (preferred_compound && !exact_id && !exact_name)
                 || negative_qualification
                 || !temporal_qualification.is_empty()
@@ -1657,6 +1828,30 @@ impl CodeQueryEngine {
                 RelevanceBand::Low
             };
             let mut reasons = Vec::new();
+            if role_uncertain {
+                if !noun_topics.is_empty() {
+                    reasons.push("A possible predicate also has a typed AST-owned parameter binding. Retained as a Low topic inspection lead; this does not establish the requested predicate or behavior".to_owned());
+                }
+                if !nominal_topics.is_empty() {
+                    reasons.push("A possible predicate also names an exact AST-owned class or struct declaration. Retained as a Low lexical type/declaration pointer; this does not establish the requested predicate or behavior, or recover its methods".to_owned());
+                }
+                if topic_exceptions
+                    .iter()
+                    .any(|term| !noun_topics.contains(term) && !nominal_topics.contains(term))
+                {
+                    reasons.push("A possible predicate/qualifier also has a source-backed explicitly named declaration. Retained as a Low topic inspection lead; this does not establish the requested predicate, qualifier, or behavior".to_owned());
+                }
+                if !noun_topics.is_empty() {
+                    let raw = decision_spellings
+                        .iter()
+                        .filter(|raw| {
+                            noun_topics
+                                .contains(&compass_model::canonical_code_token((*raw).clone()))
+                        })
+                        .collect::<Vec<_>>();
+                    reasons.push(format!("Ambiguous noun/predicate spelling: {} ({} raw query occurrences; showing at most 8). A parameter-binding match does not verify any separate predicate occurrence", raw.iter().take(8).map(|word| word.as_str()).collect::<Vec<_>>().join(", "), raw.len()));
+                }
+            }
             if vocabulary_needed {
                 reasons.push(format!("Vocabulary fallback for ordinary words or code abbreviations: {}. These are inspection alternatives; equivalence and behavior remain unverified", vocabulary_matches.iter().map(|(term, alias)| format!("{term} -> {alias}")).collect::<Vec<_>>().join(", ")));
             }
@@ -1889,6 +2084,8 @@ impl CodeQueryEngine {
             temporal_qualification,
             legacy,
             relationship_legacy: relationships.legacy,
+            parameter_roles_unavailable,
+            parameter_roles_partial,
             ranks,
             recall_time,
             ranking_time: ranking_started.elapsed(),
@@ -1990,6 +2187,12 @@ impl CodeQueryEngine {
         }
         if retrieval.relationship_legacy {
             push(QueryDiagnosticCode::IncompleteCoverage, "This immutable index predates broad relationship postings; method recall through relationships is limited to direct calls. Run compass update on the current checkout; historical snapshots remain unchanged".to_owned());
+        }
+        if retrieval.parameter_roles_unavailable {
+            push(QueryDiagnosticCode::IncompleteCoverage, "Typed parameter-binding evidence is unavailable for some query candidates. Ambiguous noun/verb inspection may miss valid leads. Run compass update on the current checkout for supported bindings or inspect source for unsupported syntax; historical snapshots remain unchanged".to_owned());
+        }
+        if retrieval.parameter_roles_partial {
+            push(QueryDiagnosticCode::IncompleteCoverage, "Some recalled callables have partial or unsupported parameter-binding evidence. Retained binding sites remain inspection witnesses; missing sites do not prove absence. Inspect source for omitted or unsupported bindings".to_owned());
         }
         if retrieval.negative_qualification {
             push(QueryDiagnosticCode::IncompleteCoverage, "Negative qualification is not established by lexical retrieval. Inspect the candidate source or use a structural query to verify the requested condition".to_owned());

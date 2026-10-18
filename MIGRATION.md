@@ -12,8 +12,12 @@ Historical realizations are not rewritten.
 Direct-owner code vocabulary remains searchable, with code-dependent matches
 kept Low and source-cited. Parameter metadata adds no retrieval weight or graph
 facts. Parameter-only omissions do not alter original lexical completeness.
-`query-ranker/18-channel-completeness` retains its response behavior; the source
-artifact digest already separates responses for changed evidence.
+`query-ranker/21-typed-topic-roles` refreshes disposable response caches for
+broad noun/predicate admission. Run update for typed bindings when a role-sensitive
+question reports missing evidence; historical snapshots retain their limited
+meaning. Broad block/permit matches through typed parameters or exact class/struct
+names remain Low inspection pointers. Nominal pointers do not inherit into
+methods or establish behavior. Exact identities retain their contracts.
 
 The operation-vocabulary rollout introduced ordinary method translations.
 Ordinary read/lookup/getter and setter wording can inspect conventional get/set

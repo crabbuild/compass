@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Require independent topic evidence for broad decision-predicate questions.
+  Retain ambiguous block/permit nouns through exact native parameter sites or
+  actual class/struct declaration names, with whole source anchors and Low
+  relevance. Disclose partial/legacy role evidence only for affected questions.
+  Preserve literal topic recall, exact identity, graph facts and existing
+  operation equivalence; ranker21 refreshes disposable response caches.
+
+
 - Retain separately bounded native parameter-binding source sites with explicit
   complete, partial or unsupported coverage. Preserve exact callable ownership,
   existing lexical priority and profiles1–5 semantics. Source-query profile6

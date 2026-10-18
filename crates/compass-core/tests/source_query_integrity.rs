@@ -709,7 +709,8 @@ fn immutable_legacy_projection_is_readable_without_rewriting_on_both_backends()
 }
 
 #[test]
-fn parameter_binding_publication_keeps_v5_queries_and_exact_owners() -> Result<(), Box<dyn Error>> {
+fn parameter_binding_publication_preserves_unrelated_v5_queries_and_exact_owners()
+-> Result<(), Box<dyn Error>> {
     use compass_model::source_query::{
         ParameterBindingStatus, SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V5,
     };
@@ -824,7 +825,7 @@ fn parameter_binding_publication_keeps_v5_queries_and_exact_owners() -> Result<(
                 mode,
             )?;
             let mut query = request();
-            query.question = "Where are block values decoded?".to_owned();
+            query.question = "Where is probe implemented?".to_owned();
             let answer = engine.discover_ranked(query)?;
             assert!(!answer.candidates.is_empty());
             if let Some(expected_candidates) = &expected_candidates {
