@@ -573,6 +573,7 @@ fn role_coverage_is_query_specific_and_legacy_identifiers_do_not_infer_bindings(
 -> Result<(), Box<dyn Error>> {
     use compass_model::source_query::{
         ParameterBindingOmission as R, ParameterBindingStatus as S, SOURCE_QUERY_PROFILE_V5,
+        SOURCE_QUERY_PROFILE_V6,
     };
     let d = tempfile::tempdir()?;
     let root = d.path().join("repo");
@@ -618,6 +619,9 @@ fn role_coverage_is_query_specific_and_legacy_identifiers_do_not_infer_bindings(
             .status = S::Unsupported;
     }
     unsupported.validate()?;
+    let mut v6 = artifact.clone();
+    v6.profile = SOURCE_QUERY_PROFILE_V6.to_owned();
+    v6.validate()?;
     let mut legacy = artifact;
     legacy.profile = SOURCE_QUERY_PROFILE_V5.to_owned();
     for owner in &mut legacy.owners {
@@ -629,6 +633,7 @@ fn role_coverage_is_query_specific_and_legacy_identifiers_do_not_infer_bindings(
         (Some(serde_json::to_vec(&partial)?), false, true, true),
         (Some(serde_json::to_vec(&missing)?), false, true, false),
         (Some(serde_json::to_vec(&unsupported)?), false, true, false),
+        (Some(serde_json::to_vec(&v6)?), false, false, true),
         (Some(serde_json::to_vec(&legacy)?), true, false, false),
         (None, true, false, false),
         (Some(original), false, false, true),

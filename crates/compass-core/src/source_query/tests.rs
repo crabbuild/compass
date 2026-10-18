@@ -286,6 +286,14 @@ fn role_aggregate_omissions_preserve_lexical_quota_and_disable_lossy_reuse() -> 
             .remove(&ParameterBindingOmission::AggregateLimit);
         bindings.omitted_sites = 192;
     }
+    assert!(
+        result.owners.iter().all(|o| o.omitted_code_windows == 0
+            && o.omitted_nested_contexts == 0
+            && o.nested_contexts
+                .iter()
+                .all(|c| c.omitted_code_windows == 0)),
+        "local-role reuse control requires independently complete code evidence"
+    );
     result.validate()?;
     fs::write(output.join(SOURCE_QUERY_FILE), serde_json::to_vec(&result)?)?;
     assert!(
@@ -389,6 +397,14 @@ fn first_shared_site_exhaustion_and_deletion_match_clean_cached_publication() ->
     let options = native_options(&root, &d.path().join("native"));
     let first = build_local_graph(&options)?;
     let prior = read_artifact(&first.output_dir)?;
+    assert!(
+        prior.owners.iter().all(|o| o.omitted_code_windows == 0
+            && o.omitted_nested_contexts == 0
+            && o.nested_contexts
+                .iter()
+                .all(|c| c.omitted_code_windows == 0)),
+        "shared-role transition must start with independently complete code evidence"
+    );
     assert!(reusable(&first.output_dir).is_some());
     assert_eq!(
         prior
@@ -548,21 +564,25 @@ fn first_shared_text_exhaustion_falls_back_before_mixed_publication() -> TestRes
     let clean = build_local_graph(&native_options(&root, &d.path().join("clean-deleted")))?;
     same_artifact(recovered, read_artifact(&clean.output_dir)?)?;
 
-    // Include zero-owner files in the conservative text bound, with exact
-    // equality and +1 controls. This proves eligibility, not source recall.
+    // Zero-owner files still consume their conservative code allowance.
     let mut empty = SourceQueryArtifact::empty("a".repeat(64));
-    empty.files = prior.files[..16].to_vec();
+    empty.files = prior.files[..4].to_vec();
     empty.validate()?;
     assert!(can_reuse_with_inputs(&empty, &Inputs::default()));
-    empty.files.push(prior.files[16].clone());
+    empty.files.push(prior.files[4].clone());
     empty.validate()?;
     assert!(!can_reuse_with_inputs(&empty, &Inputs::default()));
     empty.files.pop();
-    let mut one_byte =
-        [engine.extract_source(Path::new("fresh.py"), b"def f():\n    #\n    pass\n")?];
-    let one_byte = collect(&mut one_byte)?;
-    assert_eq!(one_byte.files["fresh.py"].projection.retained_bytes, 1);
-    assert!(!can_reuse_with_inputs(&empty, &one_byte));
+    let mut one_window =
+        [engine.extract_source(Path::new("fresh.py"), b"def f():\n    pass\n    'x'\n")?];
+    let one_window = collect(&mut one_window)?;
+    assert_eq!(
+        one_window.files["fresh.py"].projection.scopes[0]
+            .code_windows
+            .len(),
+        1
+    );
+    assert!(!can_reuse_with_inputs(&empty, &one_window));
     let mut oversized = prior;
     oversized.owners[0].comments[0].text = "x".repeat(SOURCE_QUERY_MAX_FILE_TEXT_BYTES + 1);
     assert!(!can_reuse_with_inputs(&oversized, &Inputs::default()));
@@ -619,7 +639,7 @@ fn cached_text_counters_are_verified_before_collection_pruning() -> TestResult {
 fn cached_fallback_keeps_newline_edit_inventory_coherent() -> TestResult {
     use compass_files::{Cache, CacheKind, CacheOptions};
     for storage in [GraphStorage::Json, GraphStorage::Sqlite] {
-        for sibling_count in [4, 19] {
+        for sibling_count in [3, 4, 19] {
             for preexisting_content in [false, true] {
                 let d = tempfile::tempdir()?;
                 let root = d.path().join("repo");
@@ -646,7 +666,7 @@ fn cached_fallback_keeps_newline_edit_inventory_coherent() -> TestResult {
                 let mut engine = Engine::default();
                 let fresh =
                     collect(&mut [engine.extract_source(Path::new("sample.rs"), &changed)?])?;
-                assert_eq!(can_reuse_with_inputs(&prior, &fresh), sibling_count <= 16);
+                assert_eq!(can_reuse_with_inputs(&prior, &fresh), sibling_count <= 3);
                 if preexisting_content {
                     fs::write(&edited, &changed)?;
                     let mut warm_options = options.clone();
@@ -679,7 +699,7 @@ fn cached_fallback_keeps_newline_edit_inventory_coherent() -> TestResult {
                 assert_eq!(incremental.files_extracted, 1);
                 // On rejection, only B is a normal-stage miss: A was read and
                 // cached by the early stage. With accepted reuse B is untouched.
-                assert_eq!(sibling_cache.exists(), sibling_count > 16);
+                assert_eq!(sibling_cache.exists(), sibling_count > 3);
                 let graph = GraphDocument::load(&incremental.output_dir.join("graph.json"))?;
                 let file = graph
                     .graph
@@ -775,4 +795,182 @@ fn inventory_mismatch_diagnostic_bounds_and_escapes_path_context() {
     let rendered = inventory_mismatch("folder/café/🧭.py", 47, 46).to_string();
     assert!(rendered.contains("\"folder/café/🧭.py\": extracted"));
     assert!(!rendered.contains("..."));
+}
+
+#[test]
+fn reuse_bounds_all_raw_code_scopes_and_fails_before_replacing_artifacts() -> TestResult {
+    let mut engine = Engine::default();
+    let literal = format!("'{}'", "x".repeat(510));
+    let source = (0..512)
+        .map(|i| format!("def opaque{i}():\n    pass\n    {literal}\n"))
+        .collect::<String>();
+    let extracted = engine.extract_source(Path::new("full.py"), source.as_bytes())?;
+    let raw_file: SourceQueryExtraction = serde_json::from_value(
+        extracted
+            .extensions
+            .get(raw::EXTRACTION_EXTENSION)
+            .ok_or("missing full evidence")?
+            .clone(),
+    )?;
+    assert_eq!(raw_file.projection.retained_code_bytes, 256 * 1024);
+    assert_eq!(
+        raw_file
+            .projection
+            .scopes
+            .iter()
+            .map(|s| s.code_windows.len())
+            .sum::<usize>(),
+        512
+    );
+    let empty = SourceQueryArtifact::empty("a".repeat(64));
+    let mut fresh = Inputs::default();
+    for i in 0..32 {
+        let mut file = raw_file.clone();
+        file.source_file = format!("bulk{i:02}.py");
+        validate_accounting(&file)?;
+        fresh.files.insert(file.source_file.clone(), file);
+    }
+    assert!(
+        can_reuse_with_inputs(&empty, &fresh),
+        "exact 8 MiB must fit"
+    );
+    let minimal = engine.extract_source(Path::new("extra.py"), b"def f():\n    pass\n    'x'\n")?;
+    let mut extra: SourceQueryExtraction = serde_json::from_value(
+        minimal
+            .extensions
+            .get(raw::EXTRACTION_EXTENSION)
+            .ok_or("missing minimal evidence")?
+            .clone(),
+    )?;
+    let scope = extra
+        .projection
+        .scopes
+        .first_mut()
+        .ok_or("missing raw scope")?;
+    // Predicate accounting only: a one-byte raw site is intentionally synthetic.
+    // No source anchor/AST claim is made by this counter boundary control.
+    scope.code_windows[0].text = "x".to_owned();
+    extra.projection.retained_code_bytes = 1;
+    validate_accounting(&extra)?;
+    fresh.files.insert(extra.source_file.clone(), extra.clone());
+    assert!(
+        !can_reuse_with_inputs(&empty, &fresh),
+        "8 MiB +1 must fall back"
+    );
+    fresh.files.remove("extra.py");
+    fresh
+        .files
+        .get_mut("bulk00.py")
+        .ok_or("missing bulk file")?
+        .projection
+        .scopes[0]
+        .omitted_code_windows = 1;
+    assert!(
+        !can_reuse_with_inputs(&empty, &fresh),
+        "fresh omissions cannot be recovered from owners"
+    );
+
+    let (d, graph, mut inputs) = fixture(&[
+        ("kept.py", "def kept():\n    pass\n    'alpha'\n"),
+        ("changed.py", "def changed():\n    pass\n    'bravo'\n"),
+    ])?;
+    let output = d.path().join("proof");
+    let mut prior = write(&output, &graph, &inputs, None)?;
+    inputs.files.remove("kept.py");
+    let before = fs::read(output.join(SOURCE_QUERY_FILE))?;
+    prior
+        .owners
+        .iter_mut()
+        .find(|o| o.source.file == "kept.py")
+        .ok_or("missing retained owner")?
+        .omitted_code_windows = 1;
+    assert!(!can_reuse_with_inputs(&prior, &inputs));
+    let digest = prior.graph_digest.clone();
+    assert!(publish(&output, &graph, &digest, &inputs, Some(prior)).is_err());
+    assert_eq!(fs::read(output.join(SOURCE_QUERY_FILE))?, before);
+
+    // Raw inputs include anonymous/unpublished scopes; neither graph owner
+    // count nor published retained windows may hide their aggregate cost.
+    let mut raw_only = collect(&mut [minimal])?;
+    raw_only
+        .files
+        .get_mut("extra.py")
+        .ok_or("missing minimal file")?
+        .projection
+        .scopes = vec![extra.projection.scopes[0].clone(); 512];
+    let f = raw_only
+        .files
+        .get_mut("extra.py")
+        .ok_or("missing raw-only file")?;
+    for scope in &mut f.projection.scopes {
+        scope.code_windows = vec![scope.code_windows[0].clone(); 16];
+        scope.name = None;
+    }
+    f.projection.retained_code_bytes = 512 * 16;
+    validate_accounting(f)?;
+    let mut site_boundary = Inputs::default();
+    for i in 0..4 {
+        let mut f = f.clone();
+        f.source_file = format!("anonymous{i}.py");
+        site_boundary.files.insert(f.source_file.clone(), f);
+    }
+    assert!(
+        can_reuse_with_inputs(&empty, &site_boundary),
+        "exact 32768 raw windows must fit"
+    );
+    site_boundary.files.insert("extra.py".to_owned(), extra);
+    assert!(
+        !can_reuse_with_inputs(&empty, &site_boundary),
+        "32768 +1 raw windows must fall back"
+    );
+    Ok(())
+}
+
+#[test]
+fn fresh_only_lexical_text_boundary_is_independent_of_code_allowance() -> TestResult {
+    let mut engine = Engine::default();
+    let comment = format!("#{}", "x".repeat(4095));
+    let source = (0..32)
+        .map(|i| {
+            format!(
+                "def opaque{i}():\n{}    pass\n",
+                format!("    {comment}\n").repeat(8)
+            )
+        })
+        .collect::<String>();
+    let extraction = engine.extract_source(Path::new("full.py"), source.as_bytes())?;
+    let raw_file: SourceQueryExtraction = serde_json::from_value(
+        extraction
+            .extensions
+            .get(raw::EXTRACTION_EXTENSION)
+            .ok_or("missing lexical evidence")?
+            .clone(),
+    )?;
+    assert_eq!(
+        raw_file.projection.retained_bytes,
+        SOURCE_QUERY_MAX_FILE_TEXT_BYTES
+    );
+    assert_eq!(raw_file.projection.retained_code_bytes, 0);
+    validate_accounting(&raw_file)?;
+    let mut fresh = Inputs::default();
+    for i in 0..16 {
+        let mut file = raw_file.clone();
+        file.source_file = format!("lexical{i}.py");
+        fresh.files.insert(file.source_file.clone(), file);
+    }
+    let empty = SourceQueryArtifact::empty("a".repeat(64));
+    assert!(
+        can_reuse_with_inputs(&empty, &fresh),
+        "exact 16 MiB generic text must fit"
+    );
+    let mut extra = collect(&mut [
+        engine.extract_source(Path::new("extra.py"), b"def f():\n    #\n    pass\n")?
+    ])?;
+    assert_eq!(extra.files["extra.py"].projection.retained_bytes, 1);
+    fresh.files.append(&mut extra.files);
+    assert!(
+        !can_reuse_with_inputs(&empty, &fresh),
+        "16 MiB +1 must fall back"
+    );
+    Ok(())
 }

@@ -66,6 +66,7 @@ fn immutable_v1_projection_stays_readable_and_unknown_profiles_fail()
     use compass_model::source_query::{
         SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V1, SOURCE_QUERY_PROFILE_V2,
         SOURCE_QUERY_PROFILE_V3, SOURCE_QUERY_PROFILE_V4, SOURCE_QUERY_PROFILE_V5,
+        SOURCE_QUERY_PROFILE_V6,
     };
     for profile in [
         SOURCE_QUERY_PROFILE_V1,
@@ -73,11 +74,12 @@ fn immutable_v1_projection_stays_readable_and_unknown_profiles_fail()
         SOURCE_QUERY_PROFILE_V3,
         SOURCE_QUERY_PROFILE_V4,
         SOURCE_QUERY_PROFILE_V5,
+        SOURCE_QUERY_PROFILE_V6,
         SOURCE_QUERY_PROFILE,
     ] {
         let mut value = artifact();
         value.profile = profile.to_owned();
-        if profile != SOURCE_QUERY_PROFILE {
+        if !compass_model::source_query::source_query_uses_parameter_bindings(profile) {
             value
                 .owners
                 .iter_mut()
@@ -703,16 +705,24 @@ fn current_per_file_text_boundary_preserves_historical_v5_limits()
             .sum::<usize>(),
         SOURCE_QUERY_MAX_FILE_TEXT_BYTES
     );
-    value.validate()?;
+    for profile in [SOURCE_QUERY_PROFILE_V6, SOURCE_QUERY_PROFILE] {
+        value.profile = profile.to_owned();
+        value.validate()?;
+        let mut over = value.clone();
+        over.owners[3]
+            .identifiers
+            .push(make_site(640 * 256, 1, "a"));
+        let error = over.validate().err().ok_or("per-file +1 was accepted")?;
+        assert!(
+            error
+                .to_string()
+                .contains("per-file lexical and parameter limit"),
+            "{profile}: {error}"
+        );
+    }
     value.owners[3]
         .identifiers
         .push(make_site(640 * 256, 1, "a"));
-    let error = value.validate().err().ok_or("per-file +1 was accepted")?;
-    assert!(
-        error
-            .to_string()
-            .contains("per-file lexical and parameter limit")
-    );
     value.profile = SOURCE_QUERY_PROFILE_V5.to_owned();
     for owner in &mut value.owners {
         owner.parameter_bindings = None;
@@ -727,5 +737,223 @@ fn current_per_file_text_boundary_preserves_historical_v5_limits()
         }
     }
     value.validate()?;
+    Ok(())
+}
+
+#[test]
+fn historical_profile_capabilities_are_explicit_through_v7()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::source_query::*;
+    for (profile, windows, nested, lexemes, bindings) in [
+        (SOURCE_QUERY_PROFILE_V1, false, false, false, false),
+        (SOURCE_QUERY_PROFILE_V2, false, false, false, false),
+        (SOURCE_QUERY_PROFILE_V3, true, false, false, false),
+        (SOURCE_QUERY_PROFILE_V4, true, true, false, false),
+        (SOURCE_QUERY_PROFILE_V5, true, true, true, false),
+        (SOURCE_QUERY_PROFILE_V6, true, true, true, true),
+        (SOURCE_QUERY_PROFILE, true, true, true, true),
+    ] {
+        assert!(is_supported_source_query_profile(profile));
+        assert_eq!(source_query_uses_code_windows(profile), windows);
+        assert_eq!(source_query_uses_nested_context(profile), nested);
+        assert_eq!(source_query_uses_code_lexemes(profile), lexemes);
+        assert_eq!(source_query_uses_parameter_bindings(profile), bindings);
+        let mut value = artifact();
+        value.profile = profile.to_owned();
+        if !bindings {
+            for owner in &mut value.owners {
+                owner.parameter_bindings = None;
+            }
+        }
+        value.validate()?;
+    }
+    for profile in [
+        "source-query/8-future",
+        "source-query/6-other",
+        "source-query/7",
+    ] {
+        assert!(!is_supported_source_query_profile(profile));
+        assert!(!source_query_uses_parameter_bindings(profile));
+        assert!(!source_query_uses_code_lexemes(profile));
+    }
+    Ok(())
+}
+
+#[test]
+fn frozen_historical_payloads_keep_document_frequencies_and_role_capabilities()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sha2::{Digest, Sha256};
+    let cases: &[(&[u8], &str, bool, bool)] = &[
+        (
+            include_bytes!("fixtures/source-query-history/v1.json"),
+            "84f136651ddd656a3fcbe7b2fc56a3640c8003c2a6353d8f2e36a29ed0a614c7",
+            false,
+            false,
+        ),
+        (
+            include_bytes!("fixtures/source-query-history/v2.json"),
+            "1de85d82867a76dcb6f2459cf6a710ffe3d0b8d04d48f1b73f3506f698a72f68",
+            false,
+            false,
+        ),
+        (
+            include_bytes!("fixtures/source-query-history/v3.json"),
+            "47326c119910ddd7c19aff25dc6ecfdee16c9ad4c254f4ae5aec42d80ac91fd2",
+            false,
+            false,
+        ),
+        (
+            include_bytes!("fixtures/source-query-history/v4.json"),
+            "31dcae9d7fb61d2d38f06b72851773d8143c7b34e502381d8b692c94a66189be",
+            false,
+            false,
+        ),
+        (
+            include_bytes!("fixtures/source-query-history/v5.json"),
+            "6e96b1003b69ac525823d712958c5a3e0532afd6f376232d278b0d978f056c2b",
+            true,
+            false,
+        ),
+        (
+            include_bytes!("fixtures/source-query-history/v6.json"),
+            "dcc4a2db18c5d5408d6e583169fcf3bbb564c6295f70f753a3c9b22941380b8d",
+            true,
+            true,
+        ),
+    ];
+    for (bytes, expected_sha, code_lexical, has_bindings) in cases {
+        assert_eq!(format!("{:x}", Sha256::digest(bytes)), *expected_sha);
+        let value: SourceQueryArtifact = serde_json::from_slice(bytes)?;
+        value.validate()?;
+        let mut expected =
+            std::collections::BTreeMap::from([("alpha".to_owned(), 1), ("note".to_owned(), 1)]);
+        if *code_lexical {
+            expected.insert("omega".to_owned(), 1);
+        }
+        assert_eq!(value.additional_document_frequencies, expected);
+        assert_eq!(value.owners[0].parameter_bindings.is_some(), *has_bindings);
+        let document = value.owners[0].document_for_profile(&value.profile)?;
+        assert_eq!(document.terms(), expected.keys().cloned().collect());
+        assert!(!document.truncated);
+        assert!(!document.terms().contains("block") && !document.terms().contains("inner"));
+        let d = tempfile::tempdir()?;
+        let path = d.path().join("historical.json");
+        std::fs::write(&path, bytes)?;
+        let reopened: SourceQueryArtifact = serde_json::from_reader(std::fs::File::open(&path)?)?;
+        reopened.validate()?;
+        assert_eq!(value, reopened);
+        let round_trip: SourceQueryArtifact =
+            serde_json::from_slice(&serde_json::to_vec(&reopened)?)?;
+        assert_eq!(round_trip, value);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(std::fs::read(&path)?)),
+            *expected_sha
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn named_v6_and_current_code_aggregate_boundaries_reject_the_first_excess()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::source_query::{SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V6};
+    // Separate byte and site exhaustion, below all other owner/file/site caps.
+    for (owners_per_file, width) in [(8, 512), (16, 1)] {
+        let mut value = artifact();
+        let template = value.owners[0].clone();
+        let file_template = value.files[0].clone();
+        value.owners.clear();
+        value.files.clear();
+        let stride = 16 * (width + 1) + 8;
+        for file_index in 0..128 {
+            let name = format!("file{file_index:04}.rs");
+            let mut file = file_template.clone();
+            file.file = name.clone();
+            file.byte_size = (owners_per_file * stride) as u64;
+            value.files.push(file);
+            for owner_index in 0..owners_per_file {
+                let start = owner_index * stride;
+                let mut owner = template.clone();
+                owner.node_id = format!("owner{file_index:04}-{owner_index:04}");
+                owner.source = SourceAnchor {
+                    file: name.clone(),
+                    start_byte: start as u64,
+                    end_byte: (start + stride) as u64,
+                    start_line: 1,
+                    end_line: 1,
+                    start_column: start as u32,
+                    end_column: (start + stride) as u32,
+                };
+                owner.identifiers[0].source = SourceAnchor {
+                    end_byte: (start + 5) as u64,
+                    end_column: (start + 5) as u32,
+                    ..owner.source.clone()
+                };
+                owner.code_windows = (0..16)
+                    .map(|at| {
+                        let start = start + 8 + at * (width + 1);
+                        SourceQuerySite {
+                            text: "q".repeat(width),
+                            source: SourceAnchor {
+                                file: name.clone(),
+                                start_byte: start as u64,
+                                end_byte: (start + width) as u64,
+                                start_line: 1,
+                                end_line: 1,
+                                start_column: start as u32,
+                                end_column: (start + width) as u32,
+                            },
+                        }
+                    })
+                    .collect();
+                value.owners.push(owner);
+            }
+        }
+        value.additional_document_frequencies.clear();
+        for owner in &value.owners {
+            for term in owner.document().terms() {
+                *value
+                    .additional_document_frequencies
+                    .entry(term)
+                    .or_default() += 1;
+            }
+        }
+        assert_eq!(
+            value
+                .owners
+                .iter()
+                .flat_map(|o| &o.code_windows)
+                .map(|w| w.text.len())
+                .sum::<usize>(),
+            if width == 512 {
+                8 * 1024 * 1024
+            } else {
+                32_768
+            }
+        );
+        for profile in [SOURCE_QUERY_PROFILE_V6, SOURCE_QUERY_PROFILE] {
+            value.profile = profile.to_owned();
+            value.validate()?;
+            let mut over = value.clone();
+            let mut extra = template.clone();
+            extra.node_id = "zz-overflow".to_owned();
+            extra.source = value.owners[0].source.clone();
+            extra.identifiers = value.owners[0].identifiers.clone();
+            let mut window = value.owners[0].code_windows[0].clone();
+            window.text = "q".to_owned();
+            window.source.end_byte = window.source.start_byte + 1;
+            window.source.end_column = window.source.start_column + 1;
+            extra.code_windows = vec![window];
+            over.owners.push(extra);
+            let error = over
+                .validate()
+                .err()
+                .ok_or("first excess code context accepted")?;
+            assert!(
+                error.to_string().contains("aggregate code window limit"),
+                "{profile}: {error}"
+            );
+        }
+    }
     Ok(())
 }

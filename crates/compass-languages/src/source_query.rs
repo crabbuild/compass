@@ -10,7 +10,7 @@ pub use parameters::{ParameterBindingOmission, ParameterBindingStatus, Parameter
 /// Reserved per-file extraction metadata. This is query evidence, not semantic facts.
 pub const EXTRACTION_EXTENSION: &str = "_compass_source_query_evidence";
 pub const EXTRACTION_SCHEMA: &str = "compass.source-query.extraction/1";
-pub const PROJECTION_PROFILE: &str = "source-query/6-parameter-bindings";
+pub const PROJECTION_PROFILE: &str = "source-query/7-literal-seeded-code";
 
 /// Byte columns and zero-based rows, matching Tree-sitter's source positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +271,22 @@ fn site(node: Node<'_>, source: &[u8], maximum: usize) -> Option<Site> {
         text,
     })
 }
+// Explicit pinned syntax kinds, never interpreted/decoded runtime strings.
+fn string_literal(language: &str, kind: &str) -> bool {
+    match language {
+        "python" => kind == "string",
+        "rust" => matches!(kind, "string_literal" | "raw_string_literal"),
+        "go" => matches!(kind, "interpreted_string_literal" | "raw_string_literal"),
+        "typescript" | "tsx" => matches!(kind, "string" | "template_string"),
+        _ => false,
+    }
+}
+
+struct CodeWindowSelection {
+    window: Option<Site>,
+    omitted_literal: bool,
+}
+
 /// Largest small enclosing syntax node whose entire subtree belongs to this
 /// callable. A nested callable/type, parser recovery, or scan limit rejects the
 /// larger window. Exact bytes come from extraction, never a query-time file.
@@ -279,10 +295,17 @@ fn code_window(
     source: &[u8],
     language: &str,
     visits_left: &mut usize,
-) -> Option<Site> {
+) -> CodeWindowSelection {
+    let literal_seed = string_literal(language, node.kind());
     let mut selected = None;
-    let mut parent = node.parent();
-    for _ in 0..8 {
+    // Direct-expression arrows/lambdas have no intervening safe parent.
+    // Consider a literal's own whole subtree, then the existing8 ancestors.
+    let mut parent = if literal_seed {
+        Some(node)
+    } else {
+        node.parent()
+    };
+    for _ in 0..(8 + usize::from(literal_seed)) {
         let Some(candidate) = parent else { break };
         if callable(language, candidate.kind())
             || barrier(candidate.kind())
@@ -330,7 +353,10 @@ fn code_window(
         selected = site(candidate, source, 512);
         parent = candidate.parent();
     }
-    selected
+    CodeWindowSelection {
+        omitted_literal: literal_seed && selected.is_none(),
+        window: selected,
+    }
 }
 
 /// Input and traversal limits are independent of the graph's dependency model.
@@ -408,12 +434,14 @@ fn project(
         }
         if let Some(at) = child_owner {
             let scope = &mut result.scopes[at];
-            if identifier(node.kind())
-                && scope.name_span != Some((node.start_byte(), node.end_byte()))
-            {
+            let identifier_site = identifier(node.kind())
+                && scope.name_span != Some((node.start_byte(), node.end_byte()));
+            if identifier_site || string_literal(language, node.kind()) {
+                // AST preorder is the declared shared code-window priority.
+                // New literal seeds can consume capacity before later identifiers.
                 // Code-window quotas are independent of identifier/comment
-                // quotas. Profiles 1–4 keep windows inspection-only; profile 5
-                // also indexes their retained novel vocabulary.
+                // quotas. Profiles 3–4 keep windows inspection-only; profiles
+                // 5–7 also index their retained novel vocabulary.
                 let covered = scope.code_windows.iter().any(|window| {
                     window.start <= node.start_byte() && node.end_byte() <= window.end
                 });
@@ -424,8 +452,8 @@ fn project(
                     {
                         scope.omitted_code_windows = scope.omitted_code_windows.saturating_add(1);
                     } else {
-                        let window = code_window(node, source, language, &mut code_visits_left);
-                        if let Some(window) = window
+                        let selection = code_window(node, source, language, &mut code_visits_left);
+                        if let Some(window) = selection.window
                             && window.start >= scope.start
                             && window.end <= scope.end
                             && !scope
@@ -442,12 +470,14 @@ fn project(
                                 scope.omitted_code_windows =
                                     scope.omitted_code_windows.saturating_add(1);
                             }
-                        } else if code_visits_left == 0 {
+                        } else if selection.omitted_literal || code_visits_left == 0 {
                             scope.omitted_code_windows =
                                 scope.omitted_code_windows.saturating_add(1);
                         }
                     }
                 }
+            }
+            if identifier_site {
                 if let Some(value) = site(node, source, 256) {
                     // Never keep a truncated identifier as a different spelling.
                     if value.end != node.end_byte()
@@ -1518,6 +1548,864 @@ mod tests {
         assert_eq!(projection.scopes[1].name.as_deref(), Some("run"));
         assert_eq!(projection.scopes[1].parent_scope, None);
         assert_eq!(projection.scopes[2].parent_scope, Some(1));
+        Ok(())
+    }
+    #[test]
+    fn literal_only_bodies_supply_exact_direct_owner_code_windows()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (language, source) in [
+            ("python", "def opaque():\n    return \"session expired\"\n"),
+            ("rust", "fn opaque() { \"session expired\"; }"),
+            (
+                "go",
+                "package p\nfunc Opaque() string { return \"session expired\" }",
+            ),
+            (
+                "typescript",
+                "function opaque() { return \"session expired\"; }",
+            ),
+            ("tsx", "function opaque() { return \"session expired\"; }"),
+            ("python", "opaque = lambda: \"session expired\""),
+            ("typescript", "const opaque = () => \"session expired\";"),
+            ("tsx", "const opaque = () => \"session expired\";"),
+        ] {
+            let tree = parse(source, language)?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection
+                .scopes
+                .first()
+                .ok_or("missing literal-only callable")?;
+            assert!(
+                owner
+                    .code_windows
+                    .iter()
+                    .any(|window| window.text.contains("session expired")),
+                "literal-only body lacks code evidence: {language}: {source}"
+            );
+            for window in &owner.code_windows {
+                assert_eq!(
+                    source.get(window.start..window.end),
+                    Some(window.text.as_str())
+                );
+                assert!(owner.callable_start <= window.start && window.end <= owner.callable_end);
+            }
+            assert_eq!(owner.omitted_code_windows, 0, "{language}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_whole_byte_and_scan_limits_remain_honest() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for size in [512, 513] {
+            let literal = format!("\"{}\"", "a".repeat(size - 2));
+            let source = format!("def opaque():\n    return {literal}\n");
+            let tree = parse(&source, "python")?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection.scopes.first().ok_or("missing literal owner")?;
+            assert_eq!(owner.code_windows.len(), usize::from(size == 512));
+            assert_eq!(owner.omitted_code_windows, u64::from(size == 513));
+            if size == 512 {
+                assert_eq!(owner.code_windows[0].text, literal);
+            }
+            assert!(!projection.truncated && !owner.truncated);
+            assert!(owner.names.is_empty() && owner.comments.is_empty());
+        }
+        let source = "def opaque():\n    return 'session expired'\n";
+        let tree = parse(source, "python")?;
+        let mut covered = 0;
+        let mut omitted = 0;
+        for budget in 0..=64 {
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits {
+                    code_visits: budget,
+                    ..Limits::default()
+                },
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection.scopes.first().ok_or("missing scan owner")?;
+            if owner.code_windows.is_empty() {
+                omitted += 1;
+                assert_eq!(owner.omitted_code_windows, 1);
+            } else {
+                covered += 1;
+                assert_eq!(owner.omitted_code_windows, 0);
+            }
+            assert!(!owner.truncated && !projection.truncated);
+        }
+        assert!(covered > 0 && omitted > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn covered_literals_do_not_add_omissions_and_original_channels_stay_independent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = "def opaque():\n    return decode('session expired')\n";
+        let tree = parse(source, "python")?;
+        let mut covered_cases = 0;
+        for budget in 0..=256 {
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits {
+                    code_visits: budget,
+                    ..Limits::default()
+                },
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection.scopes.first().ok_or("missing covered owner")?;
+            if owner
+                .code_windows
+                .iter()
+                .any(|w| w.text.contains("decode('session expired')"))
+            {
+                covered_cases += 1;
+                assert_eq!(
+                    owner.omitted_code_windows, 0,
+                    "covered seeds at budget {budget}"
+                );
+            }
+        }
+        assert!(covered_cases > 0);
+        for (language, source) in [
+            (
+                "python",
+                "def opaque(block):\n    # lexical comment\n    marker = block\n    return 'session expired'\n",
+            ),
+            (
+                "rust",
+                "fn opaque(block: usize) { let marker = block; /* lexical comment */ \"session expired\"; }",
+            ),
+            (
+                "go",
+                "package p\nfunc Opaque(block int) string { marker := block; /* lexical comment */ _ = marker; return \"session expired\" }",
+            ),
+            (
+                "typescript",
+                "function opaque(block: number) { const marker = block; /* lexical comment */ return 'session expired'; }",
+            ),
+            (
+                "tsx",
+                "function opaque(block: number) { const marker = block; /* lexical comment */ return 'session expired'; }",
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            let zero = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits {
+                    code_visits: 0,
+                    ..Limits::default()
+                },
+            )
+            .map_err(std::io::Error::other)?;
+            let full = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            assert_eq!(zero.visits, full.visits);
+            assert_eq!(zero.retained_bytes, full.retained_bytes);
+            assert_eq!(zero.retained_parameter_bytes, full.retained_parameter_bytes);
+            assert_eq!(zero.scopes.len(), full.scopes.len());
+            for (left, right) in zero.scopes.iter().zip(&full.scopes) {
+                assert_eq!(left.names, right.names, "{language}");
+                assert_eq!(left.comments, right.comments, "{language}");
+                assert_eq!(
+                    left.parameter_bindings, right.parameter_bindings,
+                    "{language}"
+                );
+                assert_eq!(left.truncated, right.truncated);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_capacity_uses_declared_ast_preorder_without_losing_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for identifier_first in [false, true] {
+            let literals = (0..20)
+                .map(|i| format!("    'marker_{i}_{}'\n", "q".repeat(180)))
+                .collect::<String>();
+            let source = if identifier_first {
+                format!("def opaque():\n    decode()\n{literals}")
+            } else {
+                format!("def opaque():\n{literals}    decode()\n")
+            };
+            let tree = parse(&source, "python")?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection.scopes.first().ok_or("missing capacity owner")?;
+            assert_eq!(owner.code_windows.len(), 16);
+            assert!(owner.omitted_code_windows > 0);
+            assert!(owner.names.contains_key("decode"));
+            assert_eq!(
+                owner
+                    .code_windows
+                    .iter()
+                    .any(|w| w.text.contains("decode()")),
+                identifier_first
+            );
+            assert!(!owner.truncated && !projection.truncated);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_windows_never_borrow_nested_callable_or_type_text()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (language, source, root_name) in [
+            (
+                "python",
+                "def opaque():\n    def inner():\n        return 'nested_secret'\n    class Hidden:\n        def method(self):\n            return 'type_secret'\n    return 'outer_marker'\n\ndef peer():\n    return 'peer_secret'\n",
+                "opaque",
+            ),
+            (
+                "typescript",
+                "function opaque() { function inner() { return 'nested_secret'; } class Hidden { method() { return 'type_secret'; } } return 'outer_marker'; } function peer() { return 'peer_secret'; }",
+                "opaque",
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection
+                .scopes
+                .iter()
+                .find(|o| o.name.as_deref() == Some(root_name))
+                .ok_or("missing outer literal owner")?;
+            assert!(
+                owner
+                    .code_windows
+                    .iter()
+                    .any(|w| w.text.contains("outer_marker"))
+            );
+            assert!(
+                owner
+                    .code_windows
+                    .iter()
+                    .all(|w| !w.text.contains("nested_secret")
+                        && !w.text.contains("type_secret")
+                        && !w.text.contains("peer_secret"))
+            );
+        }
+        for (language, source) in [
+            (
+                "python",
+                "def opaque():\n    return f\"topic {(lambda: 'nested_secret')()}\"\n",
+            ),
+            (
+                "typescript",
+                "function opaque() { return `topic ${(() => 'nested_secret')()}`; }",
+            ),
+            (
+                "tsx",
+                "function opaque() { return `topic ${(() => 'nested_secret')()}`; }",
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection
+                .scopes
+                .iter()
+                .find(|o| o.name.as_deref() == Some("opaque"))
+                .ok_or("missing interpolation owner")?;
+            assert!(
+                owner
+                    .code_windows
+                    .iter()
+                    .all(|w| !w.text.contains("nested_secret"))
+            );
+            assert!(
+                owner.omitted_code_windows > 0,
+                "unsafe literal must disclose omission: {language}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_markers_remain_with_their_unique_direct_callable_owner()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (language, source) in [
+            (
+                "python",
+                "def opaque():\n    def inner():\n        return 'nested_secret'\n    class Hidden:\n        def method(self):\n            return 'type_secret'\n    return 'outer_marker'\n\ndef peer():\n    return 'peer_secret'\n",
+            ),
+            (
+                "rust",
+                "fn opaque() -> &'static str { fn inner() -> &'static str { \"nested_secret\" } \"outer_marker\" } struct Hidden; impl Hidden { fn method() -> &'static str { \"type_secret\" } } fn peer() -> &'static str { \"peer_secret\" }",
+            ),
+            (
+                "go",
+                "package p\nfunc Opaque() string { inner := func() string { return \"nested_secret\" }; _ = inner; return \"outer_marker\" }\ntype Hidden struct{}\nfunc (h Hidden) Method() string { return \"type_secret\" }\nfunc Peer() string { return \"peer_secret\" }",
+            ),
+            (
+                "typescript",
+                "function opaque() { function inner() { return 'nested_secret'; } class Hidden { method() { return 'type_secret'; } } return 'outer_marker'; } function peer() { return 'peer_secret'; }",
+            ),
+            (
+                "tsx",
+                "function opaque() { function inner() { return 'nested_secret'; } class Hidden { method() { return 'type_secret'; } } return 'outer_marker'; } function peer() { return 'peer_secret'; }",
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            assert!(!tree.root_node().has_error(), "invalid {language} control");
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let mut owner_ranges = std::collections::BTreeSet::new();
+            for marker in [
+                "nested_secret",
+                "type_secret",
+                "outer_marker",
+                "peer_secret",
+            ] {
+                let start = source.find(marker).ok_or("missing fixture marker")?;
+                let owners: Vec<_> = projection
+                    .scopes
+                    .iter()
+                    .filter(|owner| {
+                        owner
+                            .code_windows
+                            .iter()
+                            .any(|window| window.text.contains(marker))
+                    })
+                    .collect();
+                assert_eq!(owners.len(), 1, "{language}: {marker}");
+                let owner = owners[0];
+                assert!(
+                    owner.callable_start <= start && start + marker.len() <= owner.callable_end
+                );
+                assert!(
+                    owner_ranges.insert((owner.callable_start, owner.callable_end)),
+                    "markers borrowed by one owner: {language}"
+                );
+                for window in owner
+                    .code_windows
+                    .iter()
+                    .filter(|window| window.text.contains(marker))
+                {
+                    assert_eq!(
+                        source.get(window.start..window.end),
+                        Some(window.text.as_str())
+                    );
+                    assert!(
+                        window.start >= owner.callable_start && window.end <= owner.callable_end
+                    );
+                    for other in [
+                        "nested_secret",
+                        "type_secret",
+                        "outer_marker",
+                        "peer_secret",
+                    ] {
+                        if other != marker {
+                            assert!(
+                                !window.text.contains(other),
+                                "{language}: {marker} borrowed {other}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (language, source, syntax) in [
+            (
+                "python",
+                "def opaque():\n    return f\"topic {(lambda: 'nested_secret')()}\"\n",
+                "lambda",
+            ),
+            (
+                "typescript",
+                "function opaque() { return `topic ${(() => 'nested_secret')()}`; }",
+                "arrow_function",
+            ),
+            (
+                "tsx",
+                "function opaque() { return `topic ${(() => 'nested_secret')()}`; }",
+                "arrow_function",
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            assert!(
+                !tree.root_node().has_error(),
+                "invalid {language} interpolation control"
+            );
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owners: Vec<_> = projection
+                .scopes
+                .iter()
+                .filter(|owner| {
+                    owner
+                        .code_windows
+                        .iter()
+                        .any(|window| window.text.contains("nested_secret"))
+                })
+                .collect();
+            assert_eq!(owners.len(), 1, "missing unique inner literal: {language}");
+            assert_eq!(owners[0].syntax, syntax);
+            assert!(
+                owners[0]
+                    .code_windows
+                    .iter()
+                    .all(|window| !window.text.contains("topic"))
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn raw_literal_bytes_and_unicode_source_positions_are_preserved()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (language, prefix, literal, suffix) in [
+            (
+                "python",
+                "def café():\n    return ",
+                r####"r"session \u0065xpired界""####,
+                "\n",
+            ),
+            (
+                "python",
+                "def café():\n    return ",
+                "'''session\nexpired界'''",
+                "\n",
+            ),
+            (
+                "python",
+                "def café():\n    return ",
+                r####"b"session\x20expired""####,
+                "\n",
+            ),
+            (
+                "rust",
+                "fn café() { ",
+                r####"r##"session \u{20}expired界"##"####,
+                "; }",
+            ),
+            (
+                "rust",
+                "fn café() { ",
+                r####""session\nexpired界""####,
+                "; }",
+            ),
+            (
+                "rust",
+                "fn café() { ",
+                r####"b"session\x20expired""####,
+                "; }",
+            ),
+            (
+                "rust",
+                "fn café() { ",
+                r####"br##"session \x20expired"##"####,
+                "; }",
+            ),
+            (
+                "go",
+                "package p\nfunc Café() string { return ",
+                "`session\nexpired界`",
+                " }",
+            ),
+            (
+                "go",
+                "package p\nfunc Café() string { return ",
+                r####""session\nexpired界""####,
+                " }",
+            ),
+            (
+                "typescript",
+                "function café() { return ",
+                "`session\nexpired界`",
+                "; }",
+            ),
+            (
+                "typescript",
+                "function café() { return ",
+                r####"'session\nexpired界'"####,
+                "; }",
+            ),
+            (
+                "tsx",
+                "function café() { return ",
+                r####""session\u0065xpired界""####,
+                "; }",
+            ),
+        ] {
+            let source = format!("{prefix}{literal}{suffix}");
+            let tree = parse(&source, language)?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = projection.scopes.first().ok_or("missing literal owner")?;
+            if language == "rust" && literal.starts_with('b') {
+                assert!(
+                    owner.names.is_empty(),
+                    "Rust byte control must have no identifier seed"
+                );
+            }
+            let window = owner
+                .code_windows
+                .iter()
+                .find(|w| w.start <= prefix.len() && prefix.len() + literal.len() <= w.end)
+                .ok_or("whole raw literal missing")?;
+            assert_eq!(
+                source.get(window.start..window.end),
+                Some(window.text.as_str())
+            );
+            assert!(
+                window.text.contains(literal),
+                "raw source was decoded: {language}"
+            );
+            for (byte, point) in [
+                (window.start, window.start_point),
+                (window.end, window.end_point),
+            ] {
+                let preceding = source.get(..byte).ok_or("non-UTF8 site boundary")?;
+                assert_eq!(point.row, preceding.bytes().filter(|b| *b == b'\n').count());
+                assert_eq!(
+                    point.column,
+                    preceding.rfind('\n').map_or(byte, |at| byte - at - 1)
+                );
+            }
+            assert_eq!(owner.omitted_code_windows, 0, "{language}");
+        }
+        for (language, kind) in [
+            ("rust", "char_literal"),
+            ("go", "rune_literal"),
+            ("tsx", "jsx_text"),
+            ("python", "integer"),
+            ("javascript", "string"),
+        ] {
+            assert!(!super::string_literal(language, kind));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn nested_python_decorator_stays_with_its_lexical_enclosing_owner()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = "def outer():\n    @decorate('decorator_secret')\n    def inner():\n        return 'inner_marker'\n    return 0\n";
+        let tree = parse(source, "python")?;
+        assert!(!tree.root_node().has_error());
+        let projection = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        for (marker, definition) in [
+            ("decorator_secret", "def outer"),
+            ("inner_marker", "def inner"),
+        ] {
+            let owners = projection
+                .scopes
+                .iter()
+                .filter(|o| o.code_windows.iter().any(|w| w.text.contains(marker)))
+                .collect::<Vec<_>>();
+            assert_eq!(owners.len(), 1, "{marker}");
+            assert_eq!(
+                owners[0].callable_start,
+                source.find(definition).ok_or("missing definition")?
+            );
+            for window in owners[0]
+                .code_windows
+                .iter()
+                .filter(|w| w.text.contains(marker))
+            {
+                assert_eq!(
+                    source.get(window.start..window.end),
+                    Some(window.text.as_str())
+                );
+                assert!(
+                    window.start >= owners[0].callable_start
+                        && window.end <= owners[0].callable_end
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_subtree_and_ancestor_boundaries_are_exact() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for (tail, expected_nodes) in [("", 128), ("b", 129)] {
+            let literal = format!("f\"a{}{tail}\"", "{0}".repeat(31));
+            let source = format!("def opaque():\n    return {literal}\n");
+            let tree = parse(&source, "python")?;
+            let start = source.find(&literal).ok_or("missing fixture literal")?;
+            let node = tree
+                .root_node()
+                .named_descendant_for_byte_range(start, start + literal.len())
+                .filter(|node| node.kind() == "string" && node.start_byte() == start)
+                .ok_or("missing whole string AST")?;
+            let mut stack = vec![node];
+            let mut nodes = 0;
+            while let Some(next) = stack.pop() {
+                nodes += 1;
+                assert!(nodes <= 256);
+                let mut cursor = next.walk();
+                stack.extend(next.children(&mut cursor));
+            }
+            assert_eq!(nodes, expected_nodes, "pinned grammar boundary");
+            let mut budget = 4096;
+            let selected = super::code_window(node, source.as_bytes(), "python", &mut budget);
+            assert_eq!(selected.omitted_literal, expected_nodes > 128);
+            assert_eq!(
+                selected.window.map(|w| w.text),
+                (expected_nodes == 128).then_some(literal)
+            );
+            assert!(4096 - budget <= 9 * 128);
+        }
+        for depth in [8, 9, 10] {
+            let source = format!(
+                "def opaque():\n    return {}'topic'{}\n",
+                "(".repeat(depth),
+                ")".repeat(depth)
+            );
+            let tree = parse(&source, "python")?;
+            let start = source.find("'topic'").ok_or("missing nested literal")?;
+            let node = tree
+                .root_node()
+                .named_descendant_for_byte_range(start, start + 7)
+                .filter(|node| node.kind() == "string")
+                .ok_or("missing nested string AST")?;
+            let mut budget = 4096;
+            let selected = super::code_window(node, source.as_bytes(), "python", &mut budget);
+            let window = selected.window.ok_or("safe self/ancestor window missing")?;
+            assert_eq!(
+                window.text,
+                format!("{}'topic'{}", "(".repeat(8), ")".repeat(8))
+            );
+            assert_eq!(window.start, start - 8);
+            assert_eq!(window.end, start + 7 + 8);
+            assert!(!selected.omitted_literal);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_file_bytes_and_precovered_last_slot_disclose_only_real_omissions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let literals = (0..15)
+            .map(|i| format!("    'marker{i}_{}'\n", "q".repeat(180)))
+            .collect::<String>();
+        let source = format!("def opaque():\n{literals}    decode('tail')\n");
+        let tree = parse(&source, "python")?;
+        let p = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        assert_eq!(p.scopes[0].code_windows.len(), 16);
+        assert_eq!(p.scopes[0].omitted_code_windows, 0);
+        assert!(
+            p.scopes[0]
+                .code_windows
+                .iter()
+                .any(|w| w.text.contains("decode('tail')"))
+        );
+        for last_size in [511, 512] {
+            let mut source = String::new();
+            for owner in 0..64 {
+                source.push_str(&format!("def opaque{owner}():\n"));
+                for slot in 0..8 {
+                    let size = if owner == 63 && slot == 7 {
+                        last_size
+                    } else {
+                        512
+                    };
+                    source.push_str(&format!("    '{}'\n", "q".repeat(size - 2)));
+                }
+            }
+            source.push_str("def overflow():\n    ''\n");
+            let tree = parse(&source, "python")?;
+            let p = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            assert_eq!(p.retained_code_bytes, 511 * 512 + last_size);
+            assert_eq!(
+                p.scopes.iter().map(|o| o.code_windows.len()).sum::<usize>(),
+                512
+            );
+            assert_eq!(
+                p.scopes.iter().map(|o| o.omitted_code_windows).sum::<u64>(),
+                1
+            );
+            assert!(!p.truncated && p.scopes.iter().all(|o| !o.truncated));
+            assert!(
+                p.scopes
+                    .last()
+                    .ok_or("missing overflow scope")?
+                    .code_windows
+                    .is_empty()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_global_scan_exhaustion_keeps_original_channels_complete()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let literal = format!("f\"a{}\"", "{0}".repeat(31));
+        let mut source = String::new();
+        for owner in 0..64 {
+            source.push_str(&format!("def opaque{owner}():\n"));
+            for _ in 0..16 {
+                source.push_str(&format!("    return {literal}\n"));
+            }
+        }
+        let tree = parse(&source, "python")?;
+        // A literal has128 nodes and its return parent129: two128-node
+        // attempts consume256 visits, exhausting200000 before all1024 seeds.
+        assert_eq!(Limits::default().code_visits, 200_000);
+        let p = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        assert_eq!(
+            p.scopes.iter().map(|o| o.code_windows.len()).sum::<usize>(),
+            781
+        );
+        assert_eq!(p.retained_code_bytes, 781 * literal.len());
+        assert_eq!(
+            p.scopes.iter().map(|o| o.omitted_code_windows).sum::<u64>(),
+            1024 - 781
+        );
+        assert!(!p.truncated && p.visits < 200_000);
+        assert!(p.scopes.iter().all(|o| !o.truncated
+            && o.names.is_empty()
+            && o.parameter_bindings.status == super::ParameterBindingStatus::Complete));
+        Ok(())
+    }
+
+    #[test]
+    fn whole_multibyte_literals_and_recovered_syntax_keep_honest_boundaries()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for suffix in ["", "x"] {
+            let literal = format!("'{}{suffix}'", "界".repeat(170));
+            let source = format!("def opaque():\n    return {literal}\n");
+            assert_eq!(literal.len(), 512 + suffix.len());
+            let tree = parse(&source, "python")?;
+            let p = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "python",
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = p.scopes.first().ok_or("missing multibyte owner")?;
+            assert_eq!(owner.code_windows.len(), usize::from(suffix.is_empty()));
+            assert_eq!(owner.omitted_code_windows, u64::from(!suffix.is_empty()));
+            if let Some(window) = owner.code_windows.first() {
+                assert_eq!(window.text, literal);
+            }
+            assert!(!owner.truncated && !p.truncated);
+        }
+        for (language, source) in [
+            ("python", "def opaque():\n    return 'unsafe_marker\n"),
+            ("rust", "fn opaque() { \"unsafe_marker }"),
+            (
+                "go",
+                "package p\nfunc Opaque() string { return \"unsafe_marker }",
+            ),
+            ("typescript", "function opaque() { return 'unsafe_marker; }"),
+            ("tsx", "const opaque = () => 'unsafe_marker;"),
+        ] {
+            let mut parser = tree_sitter::Parser::new();
+            parser.set_language(&tree_sitter_language_pack::get_language(language)?)?;
+            let tree = parser.parse(source, None).ok_or("missing recovery tree")?;
+            assert!(
+                tree.root_node().has_error(),
+                "{language}: fixture must be malformed"
+            );
+            let mut extraction = crate::Extraction::default();
+            super::attach(
+                &mut extraction,
+                "sample",
+                language,
+                source.as_bytes(),
+                tree.root_node(),
+            );
+            let value: super::SourceQueryExtraction = serde_json::from_value(
+                extraction
+                    .extensions
+                    .remove(super::EXTRACTION_EXTENSION)
+                    .ok_or("recovery evidence missing")?,
+            )?;
+            assert!(value.syntax_recovery);
+            assert_eq!(value.byte_size, source.len() as u64);
+            assert!(value.projection.visits <= 200_000 && value.projection.scopes.len() <= 512);
+            assert!(
+                value
+                    .projection
+                    .scopes
+                    .iter()
+                    .flat_map(|o| &o.code_windows)
+                    .all(|w| !w.text.contains("unsafe_marker")
+                        && source.get(w.start..w.end) == Some(w.text.as_str())),
+                "unsafe recovered code: {language}"
+            );
+        }
         Ok(())
     }
 }

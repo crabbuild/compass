@@ -1723,7 +1723,8 @@ and 256 KiB per source file, also charged to the existing aggregate site/text
 budgets. The parameter channel uses remaining capacity after original lexical
 retention and keeps its own coverage. It adds no postings, document-frequency
 counts or ranking weight. Profiles1–5 remain readable with their original
-meaning; profile5 code vocabulary remains enabled after profile6 becomes current.
+meaning; profiles5–6 code vocabulary and profile6 binding availability remain
+enabled after profile7 becomes current.
 
 Enumerated `site_limit`, `text_limit`, `aggregate_limit` and
 `unsupported_spelling` reasons require a positive known omission count and
@@ -1770,3 +1771,29 @@ positive sites are usable; missing sites do not prove absence. This bounded
 metadata adds no recall postings, so omitted bindings absent from ordinary fields
 cannot be exhaustively recovered. Other questions avoid irrelevant role warnings.
 `query-ranker/21-typed-topic-roles` invalidates disposable response caches.
+
+
+## Literal-only callable code windows
+
+Current `source-query/7-literal-seeded-code` artifacts use the existing
+`owners[].codeWindows` and `omittedCodeWindows` fields. Raw string/template
+source can seed a window without another identifier. A whole safe literal or
+ancestor is retained; source escapes and interpolation are never evaluated.
+The producer tests self plus at most eight ancestors,128 nodes per candidate,
+and the existing200000-visit file budget. Windows remain512 bytes,16 per owner,
+256 KiB per file and8 MiB/32768 windows per artifact. Within each file the
+producer shares code capacity in AST preorder with identifier-seeded windows;
+later code windows can be displaced. Subsequent deterministic aggregate
+collection accounts whole files, and publication accounts owners with nested
+contexts afterward.
+Covered literals are not additional omissions. Code clipping remains distinct
+from original identifier/comment and parameter coverage.
+
+Broad candidates dependent on this vocabulary retain Low relevance and
+`body_code` origin; quotes retain `callable_code`, exact source anchors and raw
+text. A default expression is evidence from that callable's syntax, not proof
+of its behavior. Anonymous/unpublished scopes do not invent graph nodes or
+call edges. Partial-topic candidates disclose missing context and cannot borrow
+another owner's quotation. Source profiles1–6 retain their original document,
+DF and role semantics, including V6 binding availability. Ranked JSON4 and
+ranker21 are unchanged; artifact hashes invalidate stale responses.

@@ -246,3 +246,14 @@ independently prove syntax without the original source. A serialized role label
 is not authentication or proof of runtime behavior. The new sites share the
 existing local disclosure and untrusted-content boundaries, add no source reads
 at query time and create no graph relationships.
+
+
+## Literal-seeded source retention
+
+Source-query profile7 can retain a whole raw literal from callable syntax even
+without an identifier seed. It uses the existing bounded local artifact and
+quoted-output boundary. Raw text may include sensitive source content, just as
+existing code windows do. It is not decoded, interpolated or executed. Only
+safe AST-contained slices join unique graph owners; missing or unsafe evidence
+is reported rather than invented. Query readers do not re-open current source
+files, and this change introduces no credential or network boundary.

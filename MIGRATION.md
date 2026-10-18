@@ -1,13 +1,21 @@
 # Migrate from Graphify to Compass
 
-Current updates use `source-query/6-parameter-bindings`, retaining exact native
-parameter binding sites separately from generic identifier occurrences. Run
-`compass update <root>` with the new binary; AST cache26 refreshes automatically.
+Current updates use `source-query/7-literal-seeded-code`. Whole raw string
+literals can now seed bounded callable-owned code windows without another
+identifier. Parameter bindings remain separate from generic occurrences. Run
+`compass update <root>` with the new binary; AST cache27 refreshes automatically.
 If publication reports older retained extraction, run
-`compass update <root> --force`. Older binaries reject profile6 and must be
-upgraded. Readers preserve profiles1–5 with their original lexical/statistical
-meaning, including profile5 code vocabulary, without inferring parameter roles.
-Historical realizations are not rewritten.
+`compass update <root> --force`. Older binaries reject profile7 and must be
+upgraded. Readers preserve profiles1–6 with their original lexical/statistical
+meaning, including profiles5–6 code vocabulary and profile6 typed bindings.
+Parameter roles are never synthesized for profiles1–5.
+Historical realizations are not rewritten. Raw literal text is not a decoded
+runtime value. Shared per-file producer capacity follows AST preorder and may
+displace later code windows; deterministic aggregate clipping follows afterward;
+code omissions remain visible without altering original lexical/role coverage.
+Clipped code evidence and possible aggregate code-capacity transitions now use
+the complete cached/fresh extraction path during incremental update. This may
+reduce fast-path reuse; it does not rewrite historical artifacts or increase limits.
 
 Direct-owner code vocabulary remains searchable, with code-dependent matches
 kept Low and source-cited. Parameter metadata adds no retrieval weight or graph
@@ -31,11 +39,11 @@ code candidates with explicit translations and separate literal context. No
 manual cache deletion, graph rebuild or source/index schema migration is needed
 for this query-only change. Exact-symbol commands retain their contracts.
 
-Current updates rebuild AST cache26 and retain callable-body evidence for direct
+Current updates rebuild AST cache27 and retain callable-body evidence for direct
 TypeScript/TSX variable initializers. Their source ranges now cover the complete
 definition; original binding identity and AST provenance stay distinct. Older
 `source-query/1-ast-callable-lexemes` artifacts remain readable and historical
-realizations are unchanged. New artifacts use profile6; older binaries must be
+realizations are unchanged. New artifacts use profile7; older binaries must be
 upgraded to read that projection. JavaScript3 and TypeScript4 remain `Qualifying`
 pending source audit and release promotion.
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Reject mixed incremental source-evidence reuse when code was clipped or its aggregate capacity may be exhausted; recover through the complete cached/fresh path.
+- Retrieve bounded literal-only callable vocabulary in Python, Rust, Go and
+  TypeScript/TSX without an identifier seed. Preserve exact raw source slices,
+  callable ownership, code omissions, and independent lexical/parameter
+  coverage. Keep dependent matches Low. Source-query profile7 and AST cache27
+  distinguish the new AST-order evidence; immutable profiles1–6 keep their
+  original capabilities and statistical meaning. Graph facts are unchanged.
+
 - Require independent topic evidence for broad decision-predicate questions.
   Retain ambiguous block/permit nouns through exact native parameter sites or
   actual class/struct declaration names, with whole source anchors and Low

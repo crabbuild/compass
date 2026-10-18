@@ -1,5 +1,46 @@
 # Compass compatibility
 
+## Literal-seeded code evidence
+
+Current updates publish `source-query/7-literal-seeded-code` with AST cache27.
+A string literal can seed a code window even when its callable has no other
+identifier occurrence. The producer considers the whole literal and at most
+eight enclosing AST nodes, retaining only safe complete source slices of at
+most512 UTF-8 bytes. Each candidate subtree is limited to128 nodes within the
+shared200000-visit code budget. Nested callables/types and parser recovery
+cannot lend text to an enclosing owner. Only unique published callable owners
+are indexed; anonymous scopes may instead supply existing nested inspection.
+
+Pinned literal kinds are Python `string` (including raw/formatted/bytes source
+syntax), Rust string/raw-string literals (including byte-string source syntax), Go interpreted/raw strings, and
+TypeScript/TSX strings and templates. These are raw source bytes, with no escape
+decoding, interpolation execution or runtime-value claim. Rust character
+literals, Go runes and TSX text do not independently seed this channel; an
+existing identifier-owned code window may still quote surrounding source.
+Defaults stay with their own callable. Class fields outside callables are
+excluded. A nested Python decorator expression can belong to its lexical
+enclosing callable; it is not attributed to the decorated inner callable and
+does not establish runtime execution or ownership.
+
+The existing16-window/owner,256 KiB/file and8 MiB/32768-window aggregate code
+limits remain. Per-file producer selection follows AST preorder: literal seeds
+can consume a slot before a later identifier-derived code window. Later
+aggregate clipping is deterministic: collection accounts whole files, while
+publication accounts owners with nested contexts considered afterward.
+Identifier/comment and
+parameter retention remain separate. Already covered literals consume no new
+slot or omission; unsafe, oversized or exhausted new windows disclose code
+omissions. Code-dependent candidates stay Low inspection leads. Partial-topic
+leads must disclose missing context; text occurrence does not prove behavior.
+
+Profiles1–6 retain their original capabilities and document frequencies,
+including code vocabulary in5–6 and parameter roles in6. Unknown profiles fail
+explicitly. Update with the new binary for literal-only recall; cache27 refreshes
+disposable extraction state, while immutable historical artifacts remain
+unchanged. Ranker21 and ranked JSON4 remain current; the source-artifact digest
+separates responses for changed evidence. No query-time source reads, graph
+relationships, provider calls or mandatory dependencies are introduced.
+
 ## Broad query topic roles
 
 `query-ranker/21-typed-topic-roles` distinguishes finite decision-predicate
@@ -24,7 +65,8 @@ The ranker epoch refreshes disposable response caches automatically.
 
 ## Parameter-binding source evidence
 
-Current source evidence uses `source-query/6-parameter-bindings`. Each exact
+Parameter bindings were introduced by `source-query/6-parameter-bindings` and
+remain available in current profile7. Each exact
 callable owner has a separate ordered `parameterBindings` list with whole source
 identifiers and byte/line/column anchors. Coverage is `complete`, `partial` or
 `unsupported`; `omittedSites` counts known omissions only, with finite reasons
@@ -50,9 +92,17 @@ and TypeScript/TSX; Go blank identifiers and Rust wildcard patterns are excluded
 Fact-neutral incremental publication uses prior owners only when a conservative
 bound rules out shared text/site exhaustion. Every unchanged evidence file,
 including files without published owners, is charged its full 1 MiB native text
-allowance for this check. Otherwise update uses the existing full cached/fresh
-extraction path. Previously aggregate-clipped role evidence is also refreshed
-through that path, allowing deletions to release capacity deterministically.
+allowance for this check. Current profile7 also charges each unchanged file its
+full native code allowance:8192 windows (512 scopes times16) and256 KiB, including
+zero-owner and conservatively deleted files. Fresh inputs count retained code
+from all raw scopes, including unpublished scopes. Equality at32768 windows or
+8 MiB is allowed; a possible excess uses the full cached/fresh extraction path.
+Prior direct/nested code omissions and fresh code omissions reject mixed reuse,
+as do previously aggregate-clipped roles. Without reason-specific code omission
+provenance, even local code omissions conservatively refresh through the full
+path. This recovers evidence when deletions release capacity and preserves
+clean/update equivalence. The same guard protects direct mixed publication
+before source artifacts are replaced.
 This may reduce fast-path reuse; it changes no source, memory or artifact limit
 and makes no update-latency claim. Successful early source reads retain their
 exact digest/size through fallback, even when the full stage loads their newly
@@ -61,15 +111,15 @@ rejects any source-evidence/inventory disagreement.
 
 Profiles1–5 keep their original payload and search/statistical meaning, including
 profile5 code vocabulary. They supply no parameter-role provenance. Older
-readers reject profile6 explicitly. AST cache26 refreshes disposable extraction
+readers reject profile6 explicitly. AST cache27 refreshes disposable extraction
 state on `compass update <root>`; use `compass update <root> --force` if current
 publication reports an older retained extraction. Historical realizations stay
-immutable. The developer collector accepts profiles1–6; freeze new actors and
+immutable. The developer collector accepts profiles1–7; freeze new actors and
 collect a new run rather than relabeling historical evidence.
 
 ## Owned code vocabulary
 
-Profiles5 and6 support owned code vocabulary. A separate
+Profiles5–7 support owned code vocabulary. A separate
 `body_code` field indexes bounded direct-owner code windows, including string
 literals. Words already present in the owner's identifier/comment fields are
 not counted again. Nested callable windows remain inspection-only. Matches
@@ -80,7 +130,7 @@ is not proof of behavior. Exact/qualified identities and graph facts are unchang
 Immutable profiles 1–4 keep their original identifier/comment-only retrieval and
 document-frequency meaning. Older readers reject profile 5 explicitly. Run
 `compass update <root>` with the new binary for current code vocabulary; no
-historical realization is rewritten. AST cache26 refreshes disposable per-file
+historical realization is rewritten. AST cache27 refreshes disposable per-file
 profile metadata. Channel-completeness behavior introduced by
 `query-ranker/18-channel-completeness` remains supported by the current ranker
 described above.
@@ -91,8 +141,9 @@ Existing code-window and per-field byte/term quotas remain in force; omitted
 code limits recall explicitly. Ranked JSON remains version4 with the additional
 matched-field label. No current source is read at query time.
 
-Retrieval covers retained windows; a literal-only body may have no window.
-The developer collector/assessor now accepts profiles 1–6. Freeze new actor
+Retrieval covers retained windows; omitted, unsafe or unpublishable scopes can
+still have no supporting evidence.
+The developer collector/assessor now accepts profiles1–7. Freeze new actor
 hashes and collect a new run for the current source profile; historical captures
 remain unchanged.
 
@@ -185,10 +236,10 @@ requires new reports and the corresponding pre-output protocol freeze.
 ## Nested callable inspection context
 
 Nested inspection was introduced by `source-query/4-nested-callable-context`;
-current evidence also supports profiles5 and6. Ranked JSON uses
-`compass.query.ranked-view/4`. Readers retain source profiles1–5 and ranked
+current evidence also supports profiles5–7. Ranked JSON uses
+`compass.query.ranked-view/4`. Readers retain source profiles1–6 and ranked
 views1–3 with their original meanings; older readers reject new versions.
-AST cache24 introduced the native scope metadata; current cache26 refreshes
+AST cache24 introduced the native scope metadata; current cache27 refreshes
 disposable metadata automatically.
 
 An already retrieved callable can expose `nested_callable_code` quotations from

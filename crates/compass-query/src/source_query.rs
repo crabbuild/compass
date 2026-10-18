@@ -156,7 +156,7 @@ impl Index {
             .map_err(|e| corrupt(e.to_string()))
     }
     pub fn supports_parameter_bindings(&self) -> bool {
-        self.profile == SOURCE_QUERY_PROFILE
+        source_query_uses_parameter_bindings(&self.profile)
     }
     pub fn owner(&self, id: &str) -> Option<&SourceQueryOwner> {
         self.by_id.get(id).and_then(|at| self.owners.get(*at))

@@ -240,7 +240,8 @@ pub(crate) fn reusable(output: &Path) -> Option<SourceQueryArtifact> {
     artifact.validate().ok()?;
     if artifact.aggregate_truncated
         || artifact.owners.iter().any(|owner| {
-            owner.omitted_nested_contexts > 0
+            owner.omitted_code_windows > 0
+                || owner.omitted_nested_contexts > 0
                 || owner.parameter_bindings.as_ref().is_some_and(|bindings| {
                     bindings
                         .reasons
@@ -262,22 +263,32 @@ pub(crate) fn reusable(output: &Path) -> Option<SourceQueryArtifact> {
 /// artifact cannot recover those counters, so bound each unchanged file by its
 /// full native allowance. If shared role pruning is possible, the caller must
 /// use the complete cached/fresh extraction universe instead of mixing owners.
+/// Code accounting likewise includes unpublished scopes: each unchanged file
+/// receives its full 512-scope/16-window and 256 KiB native allowances.
 pub(crate) fn can_reuse_with_inputs(prior: &SourceQueryArtifact, inputs: &Inputs) -> bool {
     if prior.profile != SOURCE_QUERY_PROFILE
         || prior.aggregate_truncated
         || inputs.aggregate_truncated
         || prior.owners.iter().any(|owner| {
-            owner.parameter_bindings.as_ref().is_some_and(|bindings| {
-                bindings
-                    .reasons
-                    .contains(&ParameterBindingOmission::AggregateLimit)
-            })
+            owner.omitted_code_windows > 0
+                || owner.omitted_nested_contexts > 0
+                || owner
+                    .nested_contexts
+                    .iter()
+                    .any(|context| context.omitted_code_windows > 0)
+                || owner.parameter_bindings.as_ref().is_some_and(|bindings| {
+                    bindings
+                        .reasons
+                        .contains(&ParameterBindingOmission::AggregateLimit)
+                })
         })
     {
         return false;
     }
     let mut bound = 0_usize;
     let mut sites = 0_usize;
+    let mut code_sites = 0_usize;
+    let mut code_bytes = 0_usize;
     let mut prior_file_bytes = BTreeMap::<&str, usize>::new();
     for owner in &prior.owners {
         let parameter_sites = owner
@@ -305,14 +316,17 @@ pub(crate) fn can_reuse_with_inputs(prior: &SourceQueryArtifact, inputs: &Inputs
     for file in &prior.files {
         if !inputs.files.contains_key(&file.file) {
             bound = bound.saturating_add(SOURCE_QUERY_MAX_FILE_TEXT_BYTES);
+            code_sites = code_sites.saturating_add(512 * 16);
+            code_bytes = code_bytes.saturating_add(256 * 1024);
         }
     }
     for file in inputs.files.values() {
         if file.projection.scopes.iter().any(|scope| {
-            scope
-                .parameter_bindings
-                .reasons
-                .contains(&raw::ParameterBindingOmission::AggregateLimit)
+            scope.omitted_code_windows > 0
+                || scope
+                    .parameter_bindings
+                    .reasons
+                    .contains(&raw::ParameterBindingOmission::AggregateLimit)
         }) {
             return false;
         }
@@ -320,6 +334,10 @@ pub(crate) fn can_reuse_with_inputs(prior: &SourceQueryArtifact, inputs: &Inputs
             .saturating_add(file.projection.retained_bytes)
             .saturating_add(file.projection.retained_parameter_bytes);
         for scope in &file.projection.scopes {
+            code_sites = code_sites.saturating_add(scope.code_windows.len());
+            code_bytes = scope.code_windows.iter().fold(code_bytes, |sum, window| {
+                sum.saturating_add(window.text.len())
+            });
             sites = sites
                 .saturating_add(scope.comments.len())
                 .saturating_add(scope.parameter_bindings.sites.len());
@@ -328,7 +346,10 @@ pub(crate) fn can_reuse_with_inputs(prior: &SourceQueryArtifact, inputs: &Inputs
             }
         }
     }
-    bound <= SOURCE_QUERY_MAX_TEXT_BYTES && sites <= SOURCE_QUERY_MAX_SITES
+    bound <= SOURCE_QUERY_MAX_TEXT_BYTES
+        && sites <= SOURCE_QUERY_MAX_SITES
+        && code_sites <= SOURCE_QUERY_MAX_CODE_WINDOWS
+        && code_bytes <= SOURCE_QUERY_MAX_CODE_BYTES
 }
 
 #[cfg(test)]
@@ -456,7 +477,7 @@ pub(crate) fn publish(
             })
         {
             return Err(invalid(
-                "older source-query evidence lacks parameter provenance; run compass update --force",
+                "older source-query evidence uses a different projection profile; run compass update --force",
             ));
         }
         if prior.files.iter().any(|file| {
@@ -464,7 +485,7 @@ pub(crate) fn publish(
         }) && !can_reuse_with_inputs(&prior, inputs)
         {
             return Err(invalid(
-                "mixed source-query evidence may exceed shared role limits; run compass update --force",
+                "mixed source-query evidence may lose shared code or role evidence; run compass update --force",
             ));
         }
         for file in prior.files {

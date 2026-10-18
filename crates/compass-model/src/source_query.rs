@@ -12,7 +12,8 @@ pub const SOURCE_QUERY_PROFILE_V2: &str = "source-query/2-callable-definition-en
 pub const SOURCE_QUERY_PROFILE_V3: &str = "source-query/3-owned-code-windows";
 pub const SOURCE_QUERY_PROFILE_V4: &str = "source-query/4-nested-callable-context";
 pub const SOURCE_QUERY_PROFILE_V5: &str = "source-query/5-owned-code-lexemes";
-pub const SOURCE_QUERY_PROFILE: &str = "source-query/6-parameter-bindings";
+pub const SOURCE_QUERY_PROFILE_V6: &str = "source-query/6-parameter-bindings";
+pub const SOURCE_QUERY_PROFILE: &str = "source-query/7-literal-seeded-code";
 pub const SOURCE_QUERY_MAX_PARAMETER_SITES: usize = 64;
 pub const SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES: usize = 256 * 1024;
 pub const SOURCE_QUERY_MAX_FILE_TEXT_BYTES: usize = 1024 * 1024;
@@ -34,6 +35,7 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
             | SOURCE_QUERY_PROFILE_V3
             | SOURCE_QUERY_PROFILE_V4
             | SOURCE_QUERY_PROFILE_V5
+            | SOURCE_QUERY_PROFILE_V6
             | SOURCE_QUERY_PROFILE
     )
 }
@@ -41,7 +43,37 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
 /// Profile capabilities are explicit: advancing current must not change V5.
 #[must_use]
 pub fn source_query_uses_code_lexemes(profile: &str) -> bool {
-    matches!(profile, SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE)
+    matches!(
+        profile,
+        SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE_V6 | SOURCE_QUERY_PROFILE
+    )
+}
+
+/// Historical profile capabilities are explicit, not ordered string versions.
+#[must_use]
+pub fn source_query_uses_code_windows(profile: &str) -> bool {
+    matches!(
+        profile,
+        SOURCE_QUERY_PROFILE_V3
+            | SOURCE_QUERY_PROFILE_V4
+            | SOURCE_QUERY_PROFILE_V5
+            | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE
+    )
+}
+#[must_use]
+pub fn source_query_uses_nested_context(profile: &str) -> bool {
+    matches!(
+        profile,
+        SOURCE_QUERY_PROFILE_V4
+            | SOURCE_QUERY_PROFILE_V5
+            | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE
+    )
+}
+#[must_use]
+pub fn source_query_uses_parameter_bindings(profile: &str) -> bool {
+    matches!(profile, SOURCE_QUERY_PROFILE_V6 | SOURCE_QUERY_PROFILE)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,7 +193,7 @@ pub struct SourceQueryOwner {
     pub comments: Vec<SourceQuerySite>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_bindings: Option<ParameterBindings>,
-    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profiles 5 and 6
+    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profiles 5–7
     /// also index vocabulary absent from the identifier/comment fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_windows: Vec<SourceQuerySite>,
@@ -391,19 +423,16 @@ impl SourceQueryArtifact {
             {
                 return Err(fail("per-owner site limit exceeded"));
             }
-            if !matches!(
-                self.profile.as_str(),
-                SOURCE_QUERY_PROFILE_V3
-                    | SOURCE_QUERY_PROFILE_V4
-                    | SOURCE_QUERY_PROFILE_V5
-                    | SOURCE_QUERY_PROFILE
-            ) && (!owner.code_windows.is_empty() || owner.omitted_code_windows > 0)
+            if !source_query_uses_code_windows(&self.profile)
+                && (!owner.code_windows.is_empty() || owner.omitted_code_windows > 0)
             {
                 return Err(fail("legacy profile does not support code windows"));
             }
-            if (self.profile == SOURCE_QUERY_PROFILE) != owner.parameter_bindings.is_some() {
+            if source_query_uses_parameter_bindings(&self.profile)
+                != owner.parameter_bindings.is_some()
+            {
                 return Err(fail(
-                    "parameter coverage must be explicit only under profile6",
+                    "parameter coverage must be explicit only under supported binding profiles",
                 ));
             }
             let parameter_sites = if let Some(bindings) = &owner.parameter_bindings {
@@ -480,7 +509,7 @@ impl SourceQueryArtifact {
                     }
                     total_sites = total_sites.saturating_add(1);
                     total_text = total_text.saturating_add(site.text.len());
-                    if self.profile == SOURCE_QUERY_PROFILE {
+                    if source_query_uses_parameter_bindings(&self.profile) {
                         let bytes = file_text_bytes.entry(&owner.source.file).or_default();
                         *bytes = bytes.saturating_add(site.text.len());
                         if *bytes > SOURCE_QUERY_MAX_FILE_TEXT_BYTES {
@@ -495,10 +524,8 @@ impl SourceQueryArtifact {
                 }
             }
             if owner.nested_contexts.len() > SOURCE_QUERY_MAX_NESTED_CONTEXTS
-                || (!matches!(
-                    self.profile.as_str(),
-                    SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE
-                ) && (!owner.nested_contexts.is_empty() || owner.omitted_nested_contexts > 0))
+                || (!source_query_uses_nested_context(&self.profile)
+                    && (!owner.nested_contexts.is_empty() || owner.omitted_nested_contexts > 0))
             {
                 return Err(fail(
                     "nested context is oversized or unsupported by this profile",

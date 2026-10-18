@@ -8189,6 +8189,150 @@ mod tests {
     }
 
     #[test]
+    fn clipped_code_evidence_neutral_update_matches_clean_publication() -> Result<(), Box<dyn Error>>
+    {
+        use compass_model::source_query::{SOURCE_QUERY_FILE, SourceQueryArtifact};
+        for storage in [GraphStorage::Json, GraphStorage::Sqlite] {
+            let directory = tempfile::tempdir()?;
+            let root = directory.path().join("repo");
+            fs::create_dir(&root)?;
+            // 15 full a-files plus one half-file leave 128 KiB unused after
+            // clean whole-file allocation rejects the seventeenth b-file.
+            let literal = format!("'{}'", "x".repeat(510));
+            let source = |count: usize| {
+                (0..count)
+                    .map(|i| format!("def opaque{i}():\n    pass\n    {literal}\n"))
+                    .collect::<String>()
+            };
+            let full = source(512);
+            for index in 0..16 {
+                fs::write(
+                    root.join(format!("a{index:02}.py")),
+                    if index == 15 {
+                        source(256)
+                    } else {
+                        full.clone()
+                    },
+                )?;
+            }
+            for index in 0..17 {
+                fs::write(root.join(format!("b{index:02}.py")), &full)?;
+            }
+            let mut options = BuildOptions::new(&root);
+            options.output_root = Some(directory.path().join("incremental"));
+            options.graph_storage = storage;
+            options.no_cluster = true;
+            options.no_viz = true;
+            options.max_workers = Some(1);
+            options.built_at_commit = Some("0123456789012345678901234567890123456789".to_owned());
+            let initial = build_local_graph(&options)?;
+            let initial_state = load_ast_fact_digest_state(&initial.output_dir)
+                .ok_or("missing initial fact state")?;
+            let prior: SourceQueryArtifact =
+                serde_json::from_slice(&fs::read(initial.output_dir.join(SOURCE_QUERY_FILE))?)?;
+            prior.validate()?;
+            assert!(!prior.aggregate_truncated);
+            assert_eq!(
+                prior
+                    .owners
+                    .iter()
+                    .flat_map(|o| &o.code_windows)
+                    .map(|s| s.text.len())
+                    .sum::<usize>(),
+                7 * 1024 * 1024 + 896 * 1024
+            );
+            assert_eq!(
+                prior
+                    .owners
+                    .iter()
+                    .map(|o| o.omitted_code_windows)
+                    .sum::<u64>(),
+                512
+            );
+            assert!(prior.owners.iter().all(|o| {
+                o.identifiers.is_empty()
+                    && o.comments.is_empty()
+                    && o.parameter_bindings
+                        .as_ref()
+                        .is_some_and(|b| b.sites.is_empty())
+            }));
+            let initial_hashes = ["graph.json", SOURCE_QUERY_FILE]
+                .iter()
+                .map(|file| {
+                    fs::read(initial.output_dir.join(file))
+                        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut engine = Engine::default();
+            let mut changed = Vec::new();
+            let updated_source = format!("{full}\n");
+            for index in 0..17 {
+                let file = format!("b{index:02}.py");
+                let before = engine.extract_source(Path::new(&file), full.as_bytes())?;
+                let after = engine.extract_source(Path::new(&file), updated_source.as_bytes())?;
+                assert_eq!(
+                    extraction_fact_digest(&before)?,
+                    extraction_fact_digest(&after)?,
+                    "trailing newline must leave all callable facts unchanged"
+                );
+                fs::write(root.join(&file), &updated_source)?;
+                changed.push(after);
+            }
+            let inputs = crate::source_query::collect(&mut changed)?;
+            assert!(crate::source_query::reusable(&initial.output_dir).is_none());
+            assert!(!crate::source_query::can_reuse_with_inputs(&prior, &inputs));
+            let updated = build_local_graph(&options)?;
+            let current_state = load_ast_fact_digest_state(&updated.output_dir)
+                .ok_or("missing updated fact state")?;
+            assert!(fact_digest_state_matches(&initial_state, &current_state));
+            let mut clean_options = options.clone();
+            clean_options.force = true;
+            clean_options.output_root = Some(directory.path().join("clean"));
+            let clean = build_local_graph(&clean_options)?;
+            for file in ["graph.json", SOURCE_QUERY_FILE] {
+                assert_eq!(
+                    Sha256::digest(fs::read(updated.output_dir.join(file))?),
+                    Sha256::digest(fs::read(clean.output_dir.join(file))?),
+                    "{storage:?} {file}"
+                );
+            }
+            for index in 0..17 {
+                fs::write(root.join(format!("b{index:02}.py")), &full)?;
+            }
+            let restored = build_local_graph(&options)?;
+            for (index, file) in ["graph.json", SOURCE_QUERY_FILE].iter().enumerate() {
+                assert_eq!(
+                    format!(
+                        "{:x}",
+                        Sha256::digest(fs::read(restored.output_dir.join(file))?)
+                    ),
+                    initial_hashes[index],
+                    "{storage:?} restored {file}"
+                );
+            }
+            fs::remove_file(root.join("a00.py"))?;
+            let deleted = build_local_graph(&options)?;
+            let recovered: SourceQueryArtifact =
+                serde_json::from_slice(&fs::read(deleted.output_dir.join(SOURCE_QUERY_FILE))?)?;
+            recovered.validate()?;
+            assert!(
+                recovered.owners.iter().all(|o| o.omitted_code_windows == 0),
+                "deletion must recover formerly clipped b-file evidence"
+            );
+            clean_options.output_root = Some(directory.path().join("clean-deleted"));
+            let clean_deleted = build_local_graph(&clean_options)?;
+            for file in ["graph.json", SOURCE_QUERY_FILE] {
+                assert_eq!(
+                    Sha256::digest(fs::read(deleted.output_dir.join(file))?),
+                    Sha256::digest(fs::read(clean_deleted.output_dir.join(file))?),
+                    "{storage:?} deleted {file}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn compact_extraction_preserves_nested_ast_facts() -> Result<(), Box<dyn Error>> {
         let mut attributes = Map::with_capacity(64);
         for index in 0..32 {
