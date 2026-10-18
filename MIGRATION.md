@@ -1,6 +1,12 @@
 # Migrate from Graphify to Compass
 
-Broad-query response caches now include `query-ranker/15-code-abbreviation`.
+Broad-query response caches now include `query-ranker/16-operation-vocabulary`.
+Ordinary read/lookup/getter and setter wording can inspect conventional get/set
+methods with explicit translations, separate literal context and Low relevance.
+Literal-hit groups retain their original field and source-enrichment provenance;
+hinted names cannot hide source-dependent Low relevance or silently promote an
+operation through namespace/prose mentions. The disposable repair epoch advances
+automatically; this needs no manual cache deletion or graph rebuild.
 Ordinary parameter/dictionary/time-unit words can recall tentative abbreviated
 code candidates with explicit translations and separate literal context. No
 manual cache deletion, graph rebuild or source/index schema migration is needed

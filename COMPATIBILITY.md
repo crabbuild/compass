@@ -199,7 +199,7 @@ postings; older snapshots remain readable with an explicit incomplete-recall
 warning. Run `compass update` on a current checkout to publish those postings.
 Historical realizations are never rewritten. Graph identities, relationship
 kinds/direction/multiplicity and exact-symbol command meanings are unchanged.
-The active query ranker profile is `query-ranker/15-code-abbreviation`; existing response
+The active query ranker profile is `query-ranker/16-operation-vocabulary`; existing response
 cache identities include that profile and do not reuse old ranked results.
 
 Broad retrieval can give an inspection preference to hyphenated query compounds
@@ -245,6 +245,25 @@ apply. Dependent candidates remain Low, name each translation and receive no
 operation/compound preference. These are lexical inspection leads, not asserted
 equivalences, units or behaviors. Existing literal-only admission is preserved;
 the response-cache ranker profile changes without a graph/index/schema rebuild.
+
+Broad ordinary `read`, `lookup` and `getter` wording additionally considers
+`get`; `setter` considers `set`. These four directional method-spelling hints
+apply even if the original word is indexed elsewhere and add at most four
+frequency reads under the same hard work ceilings. All existing vocabulary
+guards apply: unavailable statistics, explicit/named identities and document
+requests retain literal behavior. Lexical-only dependent candidates require
+separate literal owner-topic evidence; existing explicit semantic-support
+admission is unchanged. Dependent candidates remain Low, name the translation
+and receive no operation or compound preference. Literal-only admission remains
+protected. Within a candidate, groups with a literal match keep their original
+matching fields; a namespace, path, signature or prose mention cannot silently
+authorize a hinted local name as a literal operation. The additional response
+epoch is `vocabulary-literal-fields/2`. Literal dependency attribution is evaluated
+at each original relationship, owned-identifier and body enrichment stage; a
+hinted name cannot hide a source-dependent Low relevance guard. A hint does not establish method
+behavior, data flow or equivalence. Graph/source/index
+schemas and historical artifacts are unchanged; ranker16 refreshes disposable
+response caches without a graph rebuild.
 
 For broad implementation questions with one recognized operation concept,
 callable-local operation identifiers and separate topic evidence receive an
@@ -458,7 +477,7 @@ It never establishes a negative behavior from lexical matches. Unquoted
 conditions, with Low candidates and an explicit diagnostic. These connectives
 do not count as lexical subject evidence; quoted and qualified identifiers
 keep their literal terms. These retrieval
-semantics use `query-ranker/15-code-abbreviation`; prior profile constants remain
+semantics use `query-ranker/16-operation-vocabulary`; prior profile constants remain
 available and disposable response cache identities change automatically.
 Name identity, structural evidence, graph coverage and candidate recall bounds
 remain separate. `responseTruncated` retains discovery's aggregate bound,

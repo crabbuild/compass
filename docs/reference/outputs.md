@@ -67,6 +67,20 @@ fallback. Index absence does not prove source absence. Existing literal-only
 candidates retain their admission screen, and fallback candidates receive no
 operation preference. No graph relationship or behavioral fact is inferred.
 
+For ordinary operation wording, `read`, `lookup` and `getter` may inspect `get`
+methods, while `setter` may inspect `set` methods. Lexical-only hints require
+separate literal owner-topic evidence; existing explicit semantic-support
+admission is unchanged. Each dependent result stays Low, discloses the translation
+and receives no implementation preference. These are lexical leads for source
+inspection, not a claim that the method performs the requested operation.
+Named/explicit identities, document requests and unknown legacy statistics keep
+their existing literal behavior. A long form elsewhere does not suppress a
+conventional method spelling in another owner. Literal matches retain their
+original fields: a namespace/prose literal cannot make a hinted local method
+name count as a literal operation or hide its provenance. The same literal
+variants determine dependency on relationship, owned-identifier and source-body
+evidence at each enrichment stage, preserving source-dependent Low relevance.
+
 The underlying discovery/search response also carries an `incomplete_coverage`
 diagnostic so clients that do not request the ranked view retain the caveat.
 JSON and local SQLite readers also retain graph publication and documentation

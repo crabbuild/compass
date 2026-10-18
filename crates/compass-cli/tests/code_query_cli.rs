@@ -12,6 +12,209 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn operation_hints_preserve_fresh_source_dependency_bands() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("session_values.py"),
+        "def get(session, values):\n    read = None\n    return None\n\ndef ordinary(session, values):\n    read = None\n    return None\n",
+    )?;
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let result = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from("Where are session values read?"),
+                OsString::from("--graph"),
+                output.join("compass-out/graph.json").into_os_string(),
+                OsString::from("--view"),
+                OsString::from("ranked"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(result.code, 0, "{}", result.stderr);
+        let answer: Value = serde_json::from_str(&result.stdout)?;
+        let candidates = answer["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?;
+        let mut fields = None;
+        for name in [
+            "source.session_values.get",
+            "source.session_values.ordinary",
+        ] {
+            let candidate = candidates
+                .iter()
+                .find(|row| row["name"] == name)
+                .ok_or_else(|| format!("missing source owner {name}: {answer}"))?;
+            assert_eq!(candidate["relevance"], "low", "{candidate}");
+            assert!(
+                candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|field| field == "body_identifier"))
+            );
+            assert!(
+                !candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|field| field == "name"))
+            );
+            if let Some(fields) = &fields {
+                assert_eq!(&candidate["matchedFields"], fields);
+            } else {
+                fields = Some(candidate["matchedFields"].clone());
+            }
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&answer["candidates"], expected);
+        } else {
+            expected = Some(answer["candidates"].clone());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operation_words_recall_fresh_native_owners_with_json_store_parity() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    let mut source = "def get(session):\n    return session.values\n\ndef set(session, values):\n    session.values = values\n\ndef widget_get(widget):\n    return widget\n\n".to_owned();
+    for index in 0..7 {
+        source.push_str(&format!(
+            "def transform_session_values_{index}(session):\n    return session.values\n\n"
+        ));
+    }
+    std::fs::write(root.join("sample.py"), source)?;
+    std::fs::write(
+        root.join("read.py"),
+        "def get(session, values):\n    return None\n",
+    )?;
+    std::fs::write(
+        root.join("prose.py"),
+        "def get(session, values):\n    \"\"\"Read session values.\"\"\"\n    return None\n",
+    )?;
+
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let mut rows = Vec::new();
+        for (question, name, translation) in [
+            ("Where are session values read?", "get", "read -> get"),
+            (
+                "Which session lookup handles values?",
+                "get",
+                "lookup -> get",
+            ),
+            (
+                "Which session setter handles values?",
+                "set",
+                "setter -> set",
+            ),
+        ] {
+            let result = run(
+                Frontend::Compass,
+                [
+                    OsString::from("query"),
+                    OsString::from(question),
+                    OsString::from("--graph"),
+                    output.join("compass-out/graph.json").into_os_string(),
+                    OsString::from("--view"),
+                    OsString::from("ranked"),
+                    OsString::from("--format"),
+                    OsString::from("json"),
+                ],
+            );
+            assert_eq!(result.code, 0, "{}", result.stderr);
+            let answer: Value = serde_json::from_str(&result.stdout)?;
+            let candidates = answer["candidates"]
+                .as_array()
+                .ok_or("missing candidates")?;
+            let target = candidates
+                .iter()
+                .take(5)
+                .find(|row| {
+                    row["name"]
+                        .as_str()
+                        .is_some_and(|value| value == format!("source.sample.{name}"))
+                })
+                .ok_or_else(|| format!("missing {translation} owner in first five: {answer}"))?;
+            assert_eq!(target["relevance"], "low");
+            if question == "Where are session values read?" {
+                for row in candidates.iter().filter(|row| {
+                    matches!(
+                        row["name"].as_str(),
+                        Some("source.read.get" | "source.prose.get")
+                    )
+                }) {
+                    assert!(
+                        !row["reasons"].to_string().contains("inspection preference"),
+                        "mixed weak-literal operation promotion: {row}"
+                    );
+                    if row["matchedFields"]
+                        .as_array()
+                        .is_some_and(|fields| fields.iter().any(|field| field == "name"))
+                    {
+                        assert!(
+                            row["reasons"].to_string().contains("read -> get"),
+                            "undisclosed hinted name: {row}"
+                        );
+                        assert_eq!(row["relevance"], "low");
+                    }
+                }
+            }
+
+            assert!(
+                target["reasons"].to_string().contains(translation),
+                "{target}"
+            );
+            rows.push(answer["candidates"].clone());
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&rows, expected);
+        } else {
+            expected = Some(rows);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn code_abbreviations_recall_fresh_native_owners_with_json_store_parity()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -2276,8 +2479,8 @@ fn typed_text_paging_continues_the_same_result_with_a_cursor() -> Result<(), Box
     assert_eq!(second.code, 0, "{}", second.stderr);
     assert!(second.stdout.contains("range="), "{}", second.stdout);
     assert_ne!(first.stdout, second.stdout);
-    assert!(first.stdout.len() + 1 <= 480);
-    assert!(second.stdout.len() + 1 <= 480);
+    assert!(first.stdout.len() < 480);
+    assert!(second.stdout.len() < 480);
 
     let rejected = run(
         Frontend::Compass,
@@ -2759,7 +2962,7 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(first.code, 0, "{command}: {}", first.stderr);
-        assert!(first.stdout.len() + 1 <= 240);
+        assert!(first.stdout.len() < 240);
         assert!(first.stdout.contains("compass output"));
 
         let second = run(
@@ -2776,7 +2979,7 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(second.code, 0, "{command}: {}", second.stderr);
-        assert!(second.stdout.len() + 1 <= 240);
+        assert!(second.stdout.len() < 240);
         assert_ne!(first.stdout, second.stdout);
     }
 

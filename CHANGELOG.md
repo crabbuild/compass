@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Recall conventional `get`/`set` method spellings for broad read, lookup,
+  getter and setter questions. Require separate literal owner context, disclose
+  the translations and keep dependent candidates Low without an implementation
+  preference. Preserve exact identity and graph facts; ranker16 refreshes
+  disposable response caches. Preserve literal field provenance so namespace,
+  signature or prose words cannot silently promote a hinted operation. Keep
+  relationship, owned-identifier and source-body dependency attribution literal
+  so hinted names cannot raise source-dependent relevance.
+
 - Preserve declared native source-query evidence beside each developer-captured
   Compass graph. Bind the sidecar to its graph and frozen input, reject omitted
   or drifting sidecars, and isolate repositories' fixed filenames. Correct old

@@ -51,6 +51,256 @@ fn fixture(path: &std::path::Path) -> Result<GraphDocument, Box<dyn std::error::
 }
 
 #[test]
+fn operation_hints_preserve_relationship_and_identifier_dependency_bands()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::code_graph::EdgeKind;
+    use compass_query::RelevanceBand;
+    for kind in [EdgeKind::References, EdgeKind::Contains] {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        support::write_graph(&path)?;
+        let mut graph = GraphDocument::load(&path)?;
+        let template = graph.links.first().cloned().ok_or("missing edge fixture")?;
+        graph.nodes.clear();
+        graph.links.clear();
+        for name in ["get", "ordinary"] {
+            let mut owner = support::node(
+                name,
+                NodeKind::Function,
+                name,
+                &format!("session.values.{name}"),
+            );
+            owner.details = Some(serde_json::from_value(serde_json::json!({
+                "type":"symbol", "data":{"signature":"fn(session: Session, values: Values)"}
+            }))?);
+            let child_id = format!("child:{name}");
+            let child = support::node(&child_id, NodeKind::Variable, "read", "fixture.read");
+            let mut edge = template.clone();
+            edge.source = name.to_owned();
+            edge.target = child_id;
+            edge.kind = kind;
+            edge.relationship_site = child.source.clone();
+            for proof in &mut edge.evidence {
+                proof.anchors = vec![child.source.clone().ok_or("missing child source")?];
+            }
+            edge.id = compass_model::identity::edge_id(
+                &edge.source,
+                edge.kind,
+                &edge.target,
+                edge.relationship_site.as_ref(),
+                None,
+            );
+            edge.key = edge.id.clone();
+            graph.nodes.extend([owner, child]);
+            graph.links.push(edge);
+        }
+        std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+        let json = open(&path, None, &directory.path().join("json-cache"))?;
+        let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+        let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+        GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+        let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+        let question = request("Where are session values read?");
+        let answer = json.discover_ranked(question.clone())?;
+        assert_eq!(
+            answer.candidates,
+            stored.discover_ranked(question)?.candidates
+        );
+        let mut fields = None;
+        for name in ["get", "ordinary"] {
+            let candidate = answer
+                .candidates
+                .iter()
+                .find(|row| row.node.id == name)
+                .ok_or_else(|| format!("missing {kind:?} {name}: {answer:?}"))?;
+            assert_eq!(
+                candidate.relevance,
+                RelevanceBand::Low,
+                "{kind:?}: {candidate:?}"
+            );
+            let required = if kind == EdgeKind::Contains {
+                "owned_identifier"
+            } else {
+                "code_reference"
+            };
+            assert!(
+                candidate
+                    .matched_fields
+                    .iter()
+                    .any(|field| field == required)
+            );
+            assert!(!candidate.matched_fields.iter().any(|field| field == "name"));
+            if let Some(fields) = &fields {
+                assert_eq!(&candidate.matched_fields, fields);
+            } else {
+                fields = Some(candidate.matched_fields.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operation_words_recall_named_owners_with_separate_literal_context()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_query::RelevanceBand;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph.nodes.clear();
+    graph.links.clear();
+    for (id, name, signature) in [
+        (
+            "getter-target",
+            "get",
+            "fn(session: Session, values: Values)",
+        ),
+        (
+            "setter-target",
+            "set",
+            "fn(session: Session, values: Values)",
+        ),
+        ("namespace-only", "get", "fn(widget: Widget)"),
+        ("namespace-only-set", "set", "fn(widget: Widget)"),
+        (
+            "weak-namespace",
+            "get",
+            "fn(session: Session, values: Values)",
+        ),
+        (
+            "weak-signature",
+            "get",
+            "fn(session: Session, values: Values, read: Reader)",
+        ),
+        (
+            "literal-read",
+            "read_session_values",
+            "fn(session: Session)",
+        ),
+    ] {
+        let qualified = if id == "weak-namespace" {
+            "read::get".to_owned()
+        } else if id.starts_with("namespace-only") {
+            format!("session::values::{name}")
+        } else {
+            format!("fixture::{name}")
+        };
+        let mut node = support::node(id, NodeKind::Function, name, &qualified);
+        node.details = Some(serde_json::from_value(serde_json::json!({
+            "type":"symbol", "data":{"signature":signature}
+        }))?);
+        graph.nodes.push(node);
+    }
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let json = open(&path, None, &directory.path().join("json-cache"))?;
+    let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+    for (word, target, translation) in [
+        ("read", "getter-target", "read -> get"),
+        ("lookup", "getter-target", "lookup -> get"),
+        ("getter", "getter-target", "getter -> get"),
+        ("setter", "setter-target", "setter -> set"),
+    ] {
+        let question = request(&format!("Where is session values {word} implementation?"));
+        let answer = json.discover_ranked(question.clone())?;
+        assert_eq!(
+            answer.candidates,
+            stored.discover_ranked(question)?.candidates
+        );
+        let target = answer
+            .candidates
+            .iter()
+            .find(|row| row.node.id == target)
+            .ok_or_else(|| format!("missing {word} target: {answer:?}"))?;
+        assert_eq!(target.relevance, RelevanceBand::Low);
+        assert!(
+            target
+                .reasons
+                .iter()
+                .any(|reason| reason.contains(translation)),
+            "{target:?}"
+        );
+        assert!(
+            target
+                .reasons
+                .iter()
+                .all(|reason| !reason.contains("inspection preference"))
+        );
+        let negative = if word == "setter" {
+            "namespace-only-set"
+        } else {
+            "namespace-only"
+        };
+        assert!(
+            !answer.candidates.iter().any(|row| row.node.id == negative),
+            "{word}: namespace-only hint admitted: {answer:?}"
+        );
+    }
+    let read = json.discover_ranked(request("Where are session values read?"))?;
+    assert_eq!(read.candidates[0].node.id, "literal-read");
+    assert!(
+        read.candidates[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("inspection preference"))
+    );
+    for id in ["weak-namespace", "weak-signature"] {
+        let weak = read
+            .candidates
+            .iter()
+            .find(|row| row.node.id == id)
+            .ok_or("missing weak literal candidate")?;
+        assert!(
+            weak.reasons
+                .iter()
+                .all(|reason| !reason.contains("inspection preference")),
+            "mixed literal/hint promotion: {weak:?}"
+        );
+        assert!(
+            !weak.matched_fields.iter().any(|field| field == "name"),
+            "hint must not masquerade as a literal name match: {weak:?}"
+        );
+    }
+
+    assert_eq!(
+        json.discover_ranked(request("getter-target"))?.candidates[0]
+            .node
+            .id,
+        "getter-target"
+    );
+    assert!(
+        json.discover_ranked(request("Where are MissingSession values read?"))?
+            .candidates
+            .is_empty()
+    );
+    for question in [
+        "Where are `session` values read?",
+        "Where is session values read documentation?",
+    ] {
+        let answer = json.discover_ranked(request(question))?;
+        assert!(answer.candidates.iter().all(|row| {
+            row.reasons
+                .iter()
+                .all(|reason| !reason.contains("read -> get"))
+        }));
+    }
+    graph.nodes.reverse();
+    let reordered = directory.path().join("reordered.json");
+    std::fs::write(&reordered, serde_json::to_vec(&graph)?)?;
+    let reversed = open(&reordered, None, &directory.path().join("reordered-cache"))?;
+    assert_eq!(
+        read.candidates,
+        reversed
+            .discover_ranked(request("Where are session values read?"))?
+            .candidates
+    );
+    Ok(())
+}
+
+#[test]
 fn code_abbreviations_recall_with_indexed_long_forms_and_literal_context()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_query::RelevanceBand;

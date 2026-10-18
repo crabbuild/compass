@@ -672,11 +672,12 @@ impl CodeQueryEngine {
             if df > 0 {
                 literal_supported_terms.insert(term.clone());
             }
-            // Ordinary paraphrases require verified zero frequency. Code
-            // abbreviations remain useful when a long form exists elsewhere;
+            // Absent-word paraphrases require verified zero frequency.
+            // Conventional code spellings remain useful when indexed elsewhere;
             // explicit identities and unknown statistics stay literal.
             let candidate_aliases = crate::concepts::code_abbreviation_alternatives(&term)
                 .iter()
+                .chain(crate::concepts::operation_vocabulary_alternatives(&term))
                 .chain(if df == 0 {
                     crate::concepts::unindexed_vocabulary_alternatives(&term).iter()
                 } else {
@@ -1201,10 +1202,17 @@ impl CodeQueryEngine {
                         .collect(),
                 );
             }
+            // Attribute dependency at its original enrichment stage using literal
+            // variants. A hinted local name must not mask a literal available
+            // only through relationship, owned-identifier or body evidence.
+            // Hint-only matches stay Low through vocabulary_needed below.
             // Only terminal names on verified outgoing code relationships,
             // never the target's namespace, path or documentation.
             let relationship_terms = relationships.terms.remove(&node.id).unwrap_or_default();
-            let relationship_needed = groups.iter().any(|(_, variants, _, _)| {
+            let relationship_needed = groups.iter().any(|(term, variants, _, _)| {
+                let variants = vocabulary_fallbacks
+                    .get(term)
+                    .map_or(variants, |(literal, _)| literal);
                 matching(&document, variants).is_empty()
                     && variants
                         .iter()
@@ -1214,7 +1222,10 @@ impl CodeQueryEngine {
                 document.fields.insert("code_reference", relationship_terms);
             }
             let identifier_terms = ownership.terms.remove(&node.id).unwrap_or_default();
-            let identifier_needed = groups.iter().any(|(_, variants, _, _)| {
+            let identifier_needed = groups.iter().any(|(term, variants, _, _)| {
+                let variants = vocabulary_fallbacks
+                    .get(term)
+                    .map_or(variants, |(literal, _)| literal);
                 matching(&document, variants).is_empty()
                     && variants.iter().any(|term| identifier_terms.contains(term))
             });
@@ -1239,7 +1250,10 @@ impl CodeQueryEngine {
                     ));
                 }
                 let body = owner.document();
-                body_needed = groups.iter().any(|(_, variants, _, _)| {
+                body_needed = groups.iter().any(|(term, variants, _, _)| {
+                    let variants = vocabulary_fallbacks
+                        .get(term)
+                        .map_or(variants, |(literal, _)| literal);
                     // Some existing header projections include leading body
                     // comments. Repeated signature/body terms are not independent
                     // corroboration of the requested behavior.
@@ -1277,6 +1291,21 @@ impl CodeQueryEngine {
             let exact_id = node.id == request.query;
             let exact_name = normalize_symbol(&node.name) == normalize_symbol(&request.query)
                 || normalize_symbol(&node.qualified_name) == normalize_symbol(&request.query);
+            // A literal match keeps its literal field provenance. In particular,
+            // read in a namespace/signature/prose must not let hinted get in the
+            // local name masquerade as a literal implementation operation.
+            // Clone only affected, already bounded groups; no additional reads.
+            let mut literal_groups = None;
+            for (index, (term, variants, _, _)) in groups.iter().enumerate() {
+                if let Some((literal, _)) = vocabulary_fallbacks.get(term)
+                    && variants != literal
+                    && !matching(&document, literal).is_empty()
+                {
+                    let selected = literal_groups.get_or_insert_with(|| groups.clone());
+                    selected[index].1.clone_from(literal);
+                }
+            }
+            let groups = literal_groups.as_ref().unwrap_or(&groups);
             let mut vocabulary_matches = Vec::new();
             for (term, (literal, aliases)) in &vocabulary_fallbacks {
                 if matching(&document, literal).is_empty() {
@@ -1368,7 +1397,7 @@ impl CodeQueryEngine {
             let mut implementation_action = false;
             let mut implementation_subject = false;
             let mut compound_subject = false;
-            for (term, variants, idf, _) in &groups {
+            for (term, variants, idf, _) in groups {
                 let fields = matching(&document, variants);
                 if fields.is_empty() {
                     continue;

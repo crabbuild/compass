@@ -33,9 +33,11 @@ impl ResponseCache {
         digest.update(graph.as_bytes());
         digest.update(env!("CARGO_PKG_VERSION").as_bytes());
         digest.update(crate::QUERY_PLANNER_PROFILE_V2.as_bytes());
-        digest.update(crate::QUERY_RANKER_PROFILE_V15.as_bytes());
+        digest.update(crate::QUERY_RANKER_PROFILE_V16.as_bytes());
         digest.update(b"compound-identifier/2");
         digest.update(b"unindexed-vocabulary/1");
+        // Literal metadata must not launder hinted local-operation fields.
+        digest.update(b"vocabulary-literal-fields/2");
         // Invalidate experimental single-action answers lacking context vetoes.
         digest.update(b"single-operation-context/1");
         // Projection epoch: old cached responses

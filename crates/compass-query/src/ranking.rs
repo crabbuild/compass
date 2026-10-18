@@ -23,6 +23,7 @@ pub const QUERY_RANKER_PROFILE_V12: &str = "query-ranker/12-single-operation-ins
 pub const QUERY_RANKER_PROFILE_V13: &str = "query-ranker/13-unindexed-vocabulary";
 pub const QUERY_RANKER_PROFILE_V14: &str = "query-ranker/14-compound-identifier";
 pub const QUERY_RANKER_PROFILE_V15: &str = "query-ranker/15-code-abbreviation";
+pub const QUERY_RANKER_PROFILE_V16: &str = "query-ranker/16-operation-vocabulary";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {

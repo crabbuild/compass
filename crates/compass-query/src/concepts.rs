@@ -42,6 +42,18 @@ pub(crate) fn code_abbreviation_alternatives(term: &str) -> &'static [&'static s
     }
 }
 
+/// Ordinary operation wording can point at conventional method spellings.
+/// These four directional hints add at most four frequency reads. The broad
+/// retriever requires separate literal owner context, discloses each hint and
+/// keeps dependent candidates Low without an implementation preference.
+pub(crate) fn operation_vocabulary_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "read" | "lookup" | "getter" => &["get"],
+        "setter" => &["set"],
+        _ => &[],
+    }
+}
+
 // These are recall alternatives, never assertions of equivalent code meaning.
 const SYNONYMS: &[(&[&str], &[&str])] = &[
     (
