@@ -641,11 +641,19 @@ def _span(raw: dict, output: bytes) -> None:
 
 def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex | None = None,
                output: bytes | None = None) -> dict:
+    """Historical protocol1 entry point; its128-claim bound is unchanged."""
+    return _score_task_impl(task, observation, judgment, graph, output)
+
+
+def _score_task_impl(task: dict, observation: dict, judgment: dict, graph: GraphIndex | None = None,
+                     output: bytes | None = None, *, claims_override=None, labels_override=None,
+                     span_validator=None) -> dict:
     """Score typed, independently reviewed facts, never matching expected prose.
 
     graph/output are required by the file-backed auditor; None is for isolated
     synthetic scorer-contract tests only and does not establish provenance.
     """
+    check_span = span_validator if span_validator is not None else _span
     disposition = _choice(observation.get("disposition"),
                           ("answered", "ambiguous", "abstain", "error", "limit"), "answer disposition")
     ranking_kind = _choice(observation.get("rankingKind"),
@@ -663,7 +671,7 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
         if first:
             page.append(identity)
             if output is not None:
-                _span(candidate.get("span"), output)
+                check_span(candidate.get("span"), output)
     _unique(identities, "ranked declaration identities")
     _unique(node_ids, "ranked node IDs")
     if ranking_kind == "unavailable" and ranked:
@@ -685,8 +693,10 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
     facts = {x["id"]: x for x in task["facts"]}
     groups = _fact_groups(task)
     essential = {key for key, fact in facts.items() if fact["essential"]}
-    claims = _array(observation.get("claims"), "returned claims", MAX_CLAIMS)
-    labels = _array(judgment.get("claims"), "claim judgments", MAX_CLAIMS)
+    claims = (_array(observation.get("claims"), "returned claims", MAX_CLAIMS)
+              if claims_override is None else claims_override)
+    labels = (_array(judgment.get("claims"), "claim judgments", MAX_CLAIMS)
+              if labels_override is None else labels_override)
     labels_by_id = {}
     for label in labels:
         identifier = _text(label.get("id"), "reviewed claim id", 128)
@@ -700,7 +710,7 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
             raise ValueError("duplicate returned claim id")
         seen_claims.add(identifier)
         if output is not None:
-            _span(claim.get("span"), output)
+            check_span(claim.get("span"), output)
         label = labels_by_id.get(identifier)
         identity = Identity.parse(claim.get("identity"))
         relation = _relation(claim.get("relation"), observed=True)

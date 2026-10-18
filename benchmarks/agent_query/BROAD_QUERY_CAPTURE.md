@@ -1,5 +1,36 @@
 # Frozen native query capture
 
+Protocol2 normalization, printed-coverage and task-scoring components are being
+integrated under `broad_query_protocol.py`, `broad_query_coverage.py`,
+`broad_query_normalize_v2.py` and `broad_query_score_v2.py`. They are internal
+components, not a capture or assessment entry point. The public collector,
+file-backed auditor and panel binder below still accept only protocol1. They
+reject protocol2 and mixed versions. Do not collect a new comparison through
+these components until the complete actor, lineage, publication and panel
+integration has been reviewed.
+
+`broad_query_actors_v2.py` freezes all non-test Python sources under
+`benchmarks/agent_query` and `benchmarks/performance/compass`, including imported
+helpers and graph auditors. Its protocol descriptor binds the complete ordered
+inventory and the capture, normalizer, assessor and panel roles. Added, removed
+or changed source files require a new pre-output freeze. Source discovery is
+bounded by 16,384 entries, 512 directories and 512 Python files; retained code
+is bounded by 64 MiB. Original and retained bytes are rechecked using the shared
+bounded artifact reader and existing no-clobber bundle. Runtime callers must use
+their own code root, never a root supplied by captured metadata. These integrity
+components do not authenticate the execution or an independent source review.
+
+The staged components retain all printed occurrences in globally bounded
+batches, exact byte-line coverage and typed source assertions. Initial
+normalization always remains pending independent review. Rejection emits zero
+normalized records with unknown actual assertion count; it never establishes
+empty output. Incomplete semantic coverage or required judgments leaves full
+precision unavailable. Diagnostic partial fractions cannot establish paired
+precision noninferiority. These rules do not authenticate source truth or
+reviewer independence. Historical protocol1 parsing, its 128-claim cap and its
+scoring arithmetic remain unchanged; do not convert or regrade historical
+captures. Freeze new actors for a new experiment when integration is complete.
+
 `broad_query_capture.py` is developer evaluation tooling. It reuses
 `runner.run_bounded`, executes explicit preinstalled tools against explicit
 prebuilt graphs, and never builds, installs, downloads, or changes source.
