@@ -1241,23 +1241,8 @@ def _policy(registration: dict) -> dict:
                 seed=_integer(policy.get("seed", 29), "bootstrap seed", 0, 2**32 - 1))
 
 
-def assess(manifest: dict, root: Path) -> dict:
-    """Recompute a report from frozen registration, raw captures, and judgments."""
-    if manifest.get("schema") != MANIFEST_SCHEMA:
-        raise ValueError("unsupported broad-query review-input schema")
-    artifacts = Artifacts(root)
-    registration = validate_registration(artifacts.document(manifest.get("registration")))
-    run = artifacts.document(manifest.get("run"))
-    reviews = artifacts.document(manifest.get("reviews"))
-    if run.get("schema") != RUN_SCHEMA or reviews.get("schema") != REVIEW_SCHEMA:
-        raise ValueError("unsupported capture or judgments schema")
-    if run.get("registrationSha256") != manifest["registration"]["sha256"]:
-        raise ValueError("run is not bound to the frozen source registration")
-    if reviews.get("runSha256") != manifest["run"]["sha256"]:
-        raise ValueError("judgments are not bound to the captured run")
-    started = _timestamp(run.get("startedAt"))
-    if _timestamp(registration["frozenAt"]) >= started:
-        raise ValueError("source registration was not frozen before collection")
+def _prepare_assessment(manifest, registration, run, artifacts, started, *, actors=None):
+    """Shared source, tool, graph and prospective-design verification."""
     sources = _verify_sources(registration, _object(manifest.get("sourceRoots"), "source roots"))
     evidence_refs = _object(manifest.get("exposureEvidence", {}), "exposure evidence references")
     expected_exposure = {event["evidenceSha256"] for event in
@@ -1309,14 +1294,17 @@ def assess(manifest: dict, root: Path) -> dict:
     frozen_capture_plan = registration.get("capturePlan")
     if not isinstance(frozen_capture_plan, dict):
         failures.append("actual command/binary/normalizer capture plan was not frozen before collection")
-    elif frozen_capture_plan.get("assessorSha256") != sha(read_bounded(Path(__file__), MAX_JSON_BYTES)):
+    elif actors is None and frozen_capture_plan.get("assessorSha256") != sha(read_bounded(Path(__file__), MAX_JSON_BYTES)):
         failures.append("assessor differs from the source-frozen analysis protocol")
     if "assessor" in run:
         artifacts.read(run["assessor"])
-        expected_assessor = (frozen_capture_plan.get("assessorSha256") if isinstance(frozen_capture_plan, dict)
+        expected_assessor = (actors["assessor"] if actors is not None else
+                            frozen_capture_plan.get("assessorSha256") if isinstance(frozen_capture_plan, dict)
                              else sha(read_bounded(Path(__file__), MAX_JSON_BYTES)))
         if run["assessor"]["sha256"] != expected_assessor:
             raise ValueError("retained assessor differs from the source-frozen analysis protocol")
+    elif actors is not None:
+        raise ValueError("protocol2 requires its retained assessor reference")
     elif "developmentCalibration" in registration:
         raise ValueError("development calibration requires its retained assessor reference")
     if isinstance(frozen_capture_plan, dict):
@@ -1358,7 +1346,9 @@ def assess(manifest: dict, root: Path) -> dict:
             for field in ("executable", "environment"):
                 if tool.get(field, {}).get("sha256") != frozen.get(field, {}).get("sha256"):
                     raise ValueError("actual tool/dependency bytes differ from source-frozen identity")
-            if tool["normalizer"]["sha256"] != frozen_capture_plan.get("normalizerSha256"):
+            expected_normalizer = (actors["normalizer"] if actors is not None
+                                   else frozen_capture_plan.get("normalizerSha256"))
+            if tool["normalizer"]["sha256"] != expected_normalizer:
                 raise ValueError("actual normalizer differs from source-frozen protocol")
         if tool.get("nativeOffline") is not True:
             failures.append(f"{name}: native offline mode not declared")
@@ -1437,97 +1427,32 @@ def assess(manifest: dict, root: Path) -> dict:
     # Arm choice must be frozen with the source registration, not after observing results.
     if registration.get("arms") != arms:
         failures.append("cost arms are not frozen identically in the registration")
-    review_rows = _array(reviews.get("observations"), "review rows", MAX_TASKS * 4)
-    review_map = {}
-    for row in review_rows:
-        key = (row.get("task"), row.get("tool"), row.get("arm"))
-        if key in review_map:
-            raise ValueError("duplicate observation review")
-        review_map[key] = row
-    observations = _array(run.get("observations"), "captured observations", MAX_TASKS * 4)
-    scored, costs, observed_keys = {}, [], set()
-    for obs in observations:
-        key = (obs.get("task"), obs.get("tool"), obs.get("arm"))
-        if key in observed_keys or key[0] not in tasks or key[1] not in TOOLS or key[2] not in ARMS:
-            raise ValueError("duplicate or unexpected observation")
-        observed_keys.add(key)
-        if key not in review_map:
-            raise ValueError("missing typed observation review")
-        judged = review_map[key]
-        if judged.get("normalizedSha256") != obs.get("normalized", {}).get("sha256"):
-            raise ValueError("review not bound to normalized response")
-        failures += _review_failures(judged.get("independentReview"), f"{key}: output normalization/facts")
-        normalized = artifacts.document(obs.get("normalized"))
-        if normalized.get("normalizationComplete") is not True:
-            failures.append(f"{key}: output normalization remains explicitly incomplete")
-        if normalized.get("schema") != NORMALIZED_SCHEMA:
-            raise ValueError("unsupported normalized-answer schema")
-        if any(normalized.get(field) != expected for field, expected in zip(("task", "tool", "arm"), key)):
-            raise ValueError("normalized response belongs to a different task/tool/arm")
-        captures = _array(obs.get("captures"), "bounded runner captures", 4, 1)
-        stdout_pages, elapsed, total_bytes, timed_out, limited, bad_exit = [], 0, 0, False, False, False
-        for ref in captures:
-            capture = artifacts.document(ref)
-            argv = _array(capture.get("argv"), "recorded argv", 128, 1)
-            for arg in argv:
-                _text(arg, "argv entry", 4096)
-            if tasks[key[0]]["kind"] in ("broad", "unsupported") and tasks[key[0]]["question"] not in argv:
-                raise ValueError("broad/unsupported task question was rewritten or omitted in the measured command")
-            if isinstance(frozen_capture_plan, dict):
-                from benchmarks.agent_query.broad_query_capture import command, launch
-                frozen_tool = next(t for t in frozen_capture_plan["tools"] if t["id"] == key[1])
-                frozen_graph = next(g for g in graph_records if g["repository"] == tasks[key[0]]["repository"] and g["tool"] == key[1])
-                expected_argv = launch(frozen_capture_plan,
-                    command(frozen_capture_plan, frozen_tool, key[2], tasks[key[0]]["question"],
-                            artifacts.root / frozen_graph["artifact"]["path"]), artifacts.root)
-                if tuple(argv) != expected_argv:
-                    raise ValueError("captured argv differs from exact predeclared native command")
-            out = artifacts.read(capture.get("stdout"))
-            err = artifacts.read(capture.get("stderr"))
-            if _integer(capture.get("stdout_bytes"), "stdout bytes") != len(out) or _integer(capture.get("stderr_bytes"), "stderr bytes") != len(err):
-                raise ValueError("capture byte counts disagree with immutable raw output")
-            elapsed += _integer(capture.get("wall_ms"), "capture latency", 0, 86_400_000)
-            total_bytes += len(out)
-            stdout_pages.append(out)
-            timed_out |= _boolean(capture.get("timed_out"), "capture timeout")
-            limited |= _boolean(capture.get("output_limited"), "capture output-limit status")
-            outcome = query_outcome(tool_map[key[1]], capture.get("exit_code"), out,
-                                    timed_out=capture["timed_out"], limited=capture["output_limited"])
-            bad_exit |= outcome == "failure" or (outcome == "no_match" and normalized.get("disposition") != "abstain")
-        if key[2] == "normalized" and len(captures) != 1:
-            raise ValueError("normalized primary arm permits no follow-ups")
-        overflow = key[2] == "normalized" and len(stdout_pages[0]) > budget
-        row = score_task(tasks[key[0]], normalized, judged, graph_indexes[tasks[key[0]]["repository"], key[1]], stdout_pages[0])
-        # Failed/over-budget executions stay in every denominator, never disappear.
-        execution_failed = timed_out or limited or bad_exit or overflow
-        if execution_failed:
-            row["success"] = False
-            row["executionFailed"] = True
-        else:
-            row["executionFailed"] = False
-        if not row["judgmentComplete"]:
-            failures.append(f"{key}: unjudged output or post-output source-oracle correction")
-        for label in judged.get("claims", []):
-            if label.get("verdict") == "supported" and label.get("factId") is None:
-                file, line, text = _site(label.get("source"))
-                data = sources[tasks[key[0]]["repository"]].get(file)
-                lines = data.decode().splitlines() if data is not None else []
-                if line > len(lines) or lines[line - 1].strip() != text.strip():
-                    raise ValueError("extra supported claim lacks a pinned source witness")
-        scored[key] = row
-        peak = obs.get("peakRssBytes")
-        if peak is not None:
-            _integer(peak, "measured peak RSS bytes", 1)
-        condition = _choice(obs.get("condition"), ("fresh_cli", "warm_cli", "warm_mcp", "cold_cli", "unrecorded"), "timing condition")
-        if condition == "unrecorded" or peak is None:
-            failures.append(f"{key}: cost condition or peak RSS measurement unavailable")
-        costs.append(dict(task=key[0], tool=key[1], arm=key[2], firstPageBytes=len(stdout_pages[0]),
-                          workflowBytes=total_bytes, workflowWallMs=elapsed, followUps=len(captures) - 1,
-                          overBudget=overflow, failed=execution_failed,
-                          peakRssBytes=peak, condition=condition))
-    expected_keys = {(task, tool, arm) for task in tasks for tool in TOOLS for arm in ARMS}
-    if observed_keys != expected_keys or set(review_map) != expected_keys:
-        raise ValueError("incomplete paired task/tool/arm matrix")
+    return dict(sources=sources, failures=failures, policy=policy, repositories=repositories,
+        tasks=tasks, languages=languages, cohorts=cohorts, frozen_capture_plan=frozen_capture_plan,
+        tool_map=tool_map, graph_indexes=graph_indexes, graph_records=graph_records,
+        arms=arms, arm_map=arm_map, budget=budget)
+
+
+def _finish_assessment(manifest, registration, artifacts, started, state, scored, costs, reviewer_types,
+                       *, protocol2=False):
+    """Shared canonical comparison, power, graph and final-integrity gates."""
+    failures = state["failures"]
+    policy = state["policy"]
+    repositories = state["repositories"]
+    tasks = state["tasks"]
+    languages = state["languages"]
+    cohorts = state["cohorts"]
+    graph_records = state["graph_records"]
+    arm_map = state["arm_map"]
+    summarize, interval_for = _summary, paired_interval
+    precision_unavailable = False
+    if protocol2:
+        from benchmarks.agent_query.broad_query_statistics_v2 import paired_interval_v2, row_precision, summary_v2
+        summarize, interval_for = summary_v2, paired_interval_v2
+        precision_views = [row_precision(row) for row in scored.values()]
+        precision_unavailable = any(not view["formalPrecisionAvailable"] for view in precision_views)
+        if precision_unavailable:
+            failures.append("required matrix precision is incomplete; formal precision comparison unavailable")
     comparisons = {}
     for name, select, metric in [
         ("broadSuccess", lambda r: r["kind"] == "broad", "success"),
@@ -1538,8 +1463,11 @@ def assess(manifest: dict, root: Path) -> dict:
         for task_id in sorted(tasks):
             a, b = scored[task_id, "compass", "normalized"], scored[task_id, "graphify", "normalized"]
             if (task_id in cohorts[name]["taskIds"] if cohorts else select(a)):
-                pairs.append((a["repository"], a["cluster"], float(a[metric]), float(b[metric])))
-        interval = paired_interval(pairs, samples=policy["resamples"], seed=policy["seed"])
+                pairs.append((a["repository"], a["cluster"],
+                    None if protocol2 and a[metric] is None else float(a[metric]),
+                    None if protocol2 and b[metric] is None else float(b[metric])))
+        interval = interval_for(pairs, samples=policy["resamples"], seed=policy["seed"],
+            **(dict(unavailable=precision_unavailable) if protocol2 and name == "claimPrecisionEmptyZero" else {}))
         comparisons[name] = interval
         minimum_repos = cohorts[name]["minimumRepositories"] if cohorts else policy["minimumRepositories"]
         minimum_clusters = cohorts[name]["minimumIndependentClusters"] if cohorts else 0
@@ -1658,9 +1586,9 @@ def assess(manifest: dict, root: Path) -> dict:
         summaries[tool] = {}
         for arm in ARMS:
             selected = [r for (t, name, a), r in sorted(scored.items()) if name == tool and a == arm]
-            summaries[tool][arm] = _summary(selected)
-            summaries[tool][arm]["byRepository"] = {repo: _summary([r for r in selected if r["repository"] == repo]) for repo in sorted(repositories)}
-            summaries[tool][arm]["byLanguage"] = {language: _summary([r for r in selected if repositories[r["repository"]]["language"] == language]) for language in sorted(languages)}
+            summaries[tool][arm] = summarize(selected)
+            summaries[tool][arm]["byRepository"] = {repo: summarize([r for r in selected if r["repository"] == repo]) for repo in sorted(repositories)}
+            summaries[tool][arm]["byLanguage"] = {language: summarize([r for r in selected if repositories[r["repository"]]["language"] == language]) for language in sorted(languages)}
     for repo in sorted(repositories):
         a = summaries["compass"]["normalized"]["byRepository"][repo]["answerableSuccess"]
         b = summaries["graphify"]["normalized"]["byRepository"][repo]["answerableSuccess"]
@@ -1671,7 +1599,7 @@ def assess(manifest: dict, root: Path) -> dict:
     return dict(eligibleForSuperiorityClaim=not failures, failures=sorted(set(failures)),
                 verificationBoundary="Programmatic integrity and scoring only; reviewer attestations are not authenticated and source semantics are not inferred by this tool. AI review is not human review.",
                 reviewDisclosure=dict(sourceIndependentReviewerType=registration.get("independentReview", {}).get("reviewerType"),
-                                      outputIndependentReviewerTypes=sorted({str(r.get("independentReview", {}).get("reviewerType")) for r in review_rows})),
+                                      outputIndependentReviewerTypes=reviewer_types),
                 policy=policy, comparisons=comparisons, summaries=summaries,
                 graphQualificationScope=sorted(graph_claim_scope), qualifiedGraphRepositories=sorted(qualified_graphs),
                 queryOnlyControlRepositories=sorted(set(repositories) - graph_claim_scope),
@@ -1683,6 +1611,127 @@ def assess(manifest: dict, root: Path) -> dict:
                 costSummaries={tool: {arm: _cost_summary([c for c in costs if c["tool"] == tool and c["arm"] == arm])
                                       for arm in ARMS} for tool in TOOLS},
                 artifacts={p: digest for p, digest in sorted(artifacts.seen.items())})
+
+
+def assess(manifest: dict, root: Path) -> dict:
+    """Recompute a report from frozen registration, raw captures, and judgments."""
+    if manifest.get("schema") != MANIFEST_SCHEMA:
+        raise ValueError("unsupported broad-query review-input schema")
+    artifacts = Artifacts(root)
+    registration = validate_registration(artifacts.document(manifest.get("registration")))
+    run = artifacts.document(manifest.get("run"))
+    reviews = artifacts.document(manifest.get("reviews"))
+    if run.get("schema") != RUN_SCHEMA or reviews.get("schema") != REVIEW_SCHEMA:
+        raise ValueError("unsupported capture or judgments schema")
+    if run.get("registrationSha256") != manifest["registration"]["sha256"]:
+        raise ValueError("run is not bound to the frozen source registration")
+    if reviews.get("runSha256") != manifest["run"]["sha256"]:
+        raise ValueError("judgments are not bound to the captured run")
+    started = _timestamp(run.get("startedAt"))
+    if _timestamp(registration["frozenAt"]) >= started:
+        raise ValueError("source registration was not frozen before collection")
+    state = _prepare_assessment(manifest, registration, run, artifacts, started)
+    sources = state["sources"]
+    failures = state["failures"]
+    tasks = state["tasks"]
+    frozen_capture_plan = state["frozen_capture_plan"]
+    tool_map = state["tool_map"]
+    graph_indexes = state["graph_indexes"]
+    graph_records = state["graph_records"]
+    budget = state["budget"]
+    review_rows = _array(reviews.get("observations"), "review rows", MAX_TASKS * 4)
+    review_map = {}
+    for row in review_rows:
+        key = (row.get("task"), row.get("tool"), row.get("arm"))
+        if key in review_map:
+            raise ValueError("duplicate observation review")
+        review_map[key] = row
+    observations = _array(run.get("observations"), "captured observations", MAX_TASKS * 4)
+    scored, costs, observed_keys = {}, [], set()
+    for obs in observations:
+        key = (obs.get("task"), obs.get("tool"), obs.get("arm"))
+        if key in observed_keys or key[0] not in tasks or key[1] not in TOOLS or key[2] not in ARMS:
+            raise ValueError("duplicate or unexpected observation")
+        observed_keys.add(key)
+        if key not in review_map:
+            raise ValueError("missing typed observation review")
+        judged = review_map[key]
+        if judged.get("normalizedSha256") != obs.get("normalized", {}).get("sha256"):
+            raise ValueError("review not bound to normalized response")
+        failures += _review_failures(judged.get("independentReview"), f"{key}: output normalization/facts")
+        normalized = artifacts.document(obs.get("normalized"))
+        if normalized.get("normalizationComplete") is not True:
+            failures.append(f"{key}: output normalization remains explicitly incomplete")
+        if normalized.get("schema") != NORMALIZED_SCHEMA:
+            raise ValueError("unsupported normalized-answer schema")
+        if any(normalized.get(field) != expected for field, expected in zip(("task", "tool", "arm"), key)):
+            raise ValueError("normalized response belongs to a different task/tool/arm")
+        captures = _array(obs.get("captures"), "bounded runner captures", 4, 1)
+        stdout_pages, elapsed, total_bytes, timed_out, limited, bad_exit = [], 0, 0, False, False, False
+        for ref in captures:
+            capture = artifacts.document(ref)
+            argv = _array(capture.get("argv"), "recorded argv", 128, 1)
+            for arg in argv:
+                _text(arg, "argv entry", 4096)
+            if tasks[key[0]]["kind"] in ("broad", "unsupported") and tasks[key[0]]["question"] not in argv:
+                raise ValueError("broad/unsupported task question was rewritten or omitted in the measured command")
+            if isinstance(frozen_capture_plan, dict):
+                from benchmarks.agent_query.broad_query_capture import command, launch
+                frozen_tool = next(t for t in frozen_capture_plan["tools"] if t["id"] == key[1])
+                frozen_graph = next(g for g in graph_records if g["repository"] == tasks[key[0]]["repository"] and g["tool"] == key[1])
+                expected_argv = launch(frozen_capture_plan,
+                    command(frozen_capture_plan, frozen_tool, key[2], tasks[key[0]]["question"],
+                            artifacts.root / frozen_graph["artifact"]["path"]), artifacts.root)
+                if tuple(argv) != expected_argv:
+                    raise ValueError("captured argv differs from exact predeclared native command")
+            out = artifacts.read(capture.get("stdout"))
+            err = artifacts.read(capture.get("stderr"))
+            if _integer(capture.get("stdout_bytes"), "stdout bytes") != len(out) or _integer(capture.get("stderr_bytes"), "stderr bytes") != len(err):
+                raise ValueError("capture byte counts disagree with immutable raw output")
+            elapsed += _integer(capture.get("wall_ms"), "capture latency", 0, 86_400_000)
+            total_bytes += len(out)
+            stdout_pages.append(out)
+            timed_out |= _boolean(capture.get("timed_out"), "capture timeout")
+            limited |= _boolean(capture.get("output_limited"), "capture output-limit status")
+            outcome = query_outcome(tool_map[key[1]], capture.get("exit_code"), out,
+                                    timed_out=capture["timed_out"], limited=capture["output_limited"])
+            bad_exit |= outcome == "failure" or (outcome == "no_match" and normalized.get("disposition") != "abstain")
+        if key[2] == "normalized" and len(captures) != 1:
+            raise ValueError("normalized primary arm permits no follow-ups")
+        overflow = key[2] == "normalized" and len(stdout_pages[0]) > budget
+        row = score_task(tasks[key[0]], normalized, judged, graph_indexes[tasks[key[0]]["repository"], key[1]], stdout_pages[0])
+        # Failed/over-budget executions stay in every denominator, never disappear.
+        execution_failed = timed_out or limited or bad_exit or overflow
+        if execution_failed:
+            row["success"] = False
+            row["executionFailed"] = True
+        else:
+            row["executionFailed"] = False
+        if not row["judgmentComplete"]:
+            failures.append(f"{key}: unjudged output or post-output source-oracle correction")
+        for label in judged.get("claims", []):
+            if label.get("verdict") == "supported" and label.get("factId") is None:
+                file, line, text = _site(label.get("source"))
+                data = sources[tasks[key[0]]["repository"]].get(file)
+                lines = data.decode().splitlines() if data is not None else []
+                if line > len(lines) or lines[line - 1].strip() != text.strip():
+                    raise ValueError("extra supported claim lacks a pinned source witness")
+        scored[key] = row
+        peak = obs.get("peakRssBytes")
+        if peak is not None:
+            _integer(peak, "measured peak RSS bytes", 1)
+        condition = _choice(obs.get("condition"), ("fresh_cli", "warm_cli", "warm_mcp", "cold_cli", "unrecorded"), "timing condition")
+        if condition == "unrecorded" or peak is None:
+            failures.append(f"{key}: cost condition or peak RSS measurement unavailable")
+        costs.append(dict(task=key[0], tool=key[1], arm=key[2], firstPageBytes=len(stdout_pages[0]),
+                          workflowBytes=total_bytes, workflowWallMs=elapsed, followUps=len(captures) - 1,
+                          overBudget=overflow, failed=execution_failed,
+                          peakRssBytes=peak, condition=condition))
+    expected_keys = {(task, tool, arm) for task in tasks for tool in TOOLS for arm in ARMS}
+    if observed_keys != expected_keys or set(review_map) != expected_keys:
+        raise ValueError("incomplete paired task/tool/arm matrix")
+    return _finish_assessment(manifest, registration, artifacts, started, state, scored, costs,
+        sorted({str(r.get("independentReview", {}).get("reviewerType")) for r in review_rows}))
 
 
 def recompute_report(report: dict) -> dict:

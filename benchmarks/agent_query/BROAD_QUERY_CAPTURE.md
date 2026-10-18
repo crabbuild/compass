@@ -1,6 +1,6 @@
 # Frozen native query capture
 
-Protocol2 normalization, printed-coverage and task-scoring components are being
+Protocol2 normalization, printed-coverage and assessment components are being
 integrated under `broad_query_protocol.py`, `broad_query_coverage.py`,
 `broad_query_normalize_v2.py` and `broad_query_score_v2.py`. They are internal
 components, not a capture or assessment entry point. The public collector,
@@ -63,6 +63,46 @@ reviewed material can supply diagnostics, but cannot erase an original parser
 or limit rejection or promote that observation to success/formal precision.
 These layers require the full assessor to supply verified graph/source inputs
 and do not authenticate execution, reviewer attestations or qualification.
+
+The internal `broad_query_assess_v2.assess_file_v2` connects the entire matrix to
+the existing source/graph/tool and qualification gates. Its own runtime source
+root supplies the actor check. It rechecks the actual review-input file and
+original/retained inputs before returning. Current Git HEAD and cleanliness
+are checked before and after; bounded temporary Git captures are created
+alongside the external evidence directory and removed. Git optional locks,
+fsmonitor and untracked caching are disabled for these checks. This verifies current
+source state and supplied build records, not authentic historical execution.
+
+Capture2 runs must retain `captureInput`, a reference to the original validated
+capture-input2 document. Its plan, original registration and source roots must
+match the retained run. Each tool additionally retains an ordered `dependencies`
+list of `{original, artifact}` records matching every file in its frozen
+environment inventory. `original` is an absolute hash-bound input reference;
+`artifact` is its contained retained copy. Original executables, launchers,
+dependencies, release evidence, graph inputs, build streams and history metadata
+are checked before and after assessment. Original inputs share a 65,536-file /
+2 GiB bound; dependencies additionally share the existing 512 MiB bound.
+Unique input/artifact count excesses reject before any payload read. Reads use
+the remaining aggregate byte allowance; an oversized read may inspect one
+sentinel byte but never hashes an excess payload. Known files are bounded by
+their verified original length. Dependencies are bounded before original reads,
+then retained copies are bounded by the verified original length/digest.
+Release-reference presence as well as its digest must match the pre-output plan.
+
+The shared bounded subprocess runner treats process-group permission errors as
+cleanup failures unless the child has been reaped and a separate group probe
+confirms the group is absent. A live or inaccessible group cannot produce a
+successful capture through that recovery path.
+
+Protocol2 summaries retain unknown precision at the aggregate, repository and
+language levels. Unknown false-empty values are not averaged away. Complete
+paired inputs reuse the existing repository/cluster weights, bootstrap and
+finite-risk bounds exactly. Any unknown required matrix precision, including
+in the default arm, makes formal precision comparison unavailable; no row is
+dropped, imputed to zero or replaced with its diagnostic partial fraction.
+The existing source review, exposure, task balance, prospective power,
+independent graph qualification and subgroup gates remain required. This
+internal assessor still does not enable public collection, scoring or panels2.
 
 The staged components retain all printed occurrences in globally bounded
 batches, exact byte-line coverage and typed source assertions. Initial

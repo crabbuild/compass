@@ -364,6 +364,22 @@ def run_bounded(
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            except PermissionError as error:
+                # Group exit can race with termination. An EPERM is never
+                # cleanup success until the child is reaped and the group is
+                # proven absent. A live/inaccessible group still fails closed.
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                process.wait(timeout=5)
+                try:
+                    os.killpg(process.pid, 0)
+                except ProcessLookupError:
+                    pass
+                else:
+                    raise error
             break
         time.sleep(0.01)
     process.wait(timeout=5)
