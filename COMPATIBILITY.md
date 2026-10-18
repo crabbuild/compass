@@ -18,6 +18,25 @@ an empty answer does not imply complete indexing.
 
 ## Developer comparison-panel binding
 
+Developer graph entries may freeze an optional `sourceQueryArtifact` reference
+for Compass's fixed `source-query.json` sibling. Collection retains graph and
+sidecar together in a separate directory per repository, checks the native
+envelope/digest, and rechecks original and retained inputs before completion.
+Existing but undeclared source sidecars now reject new collection. Canonical
+review binds the copied sidecar to the plan and rejects undeclared retained
+siblings. Old graph-only captures retain their layout and reduced retrieval
+meaning; correct omitted evidence through a new frozen experiment. This does
+not change native artifact schemas or add source facts to graph qualification.
+
+New developer captures may freeze an optional tool `queryExitContract` with
+schema `compass.broad-query-query-exits/1`. It recognizes one explicitly declared
+nonzero no-match code only with an exact bounded stdout line plus LF. The run
+retains and binds this contract to its source-frozen plan. Timeouts, capture
+limits, budgets and other errors retain their meaning; no-match is not a correct
+answer to an answerable question. Legacy plans keep all-nonzero-fail semantics.
+Use new actor hashes and a new experiment; original results are immutable.
+Native Compass commands, graph formats and query ranking are unchanged.
+
 Version-2 developer registrations may opt into the bounded
 `compass.broad-query-development-calibration/1` profile for explicitly exposed
 development recaptures. It verifies a historical registration/run pair, exact

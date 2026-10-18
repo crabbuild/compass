@@ -135,6 +135,67 @@ identified and supplies graph-stage diagnostics only. Wall time includes the
 same measurement wrapper for both tools; stdout/stderr and limit/exit status
 are retained separately.
 
+## Coherent Compass graph inputs
+
+When a native graph has a sibling `source-query.json`, its graph entry must
+freeze `sourceQueryArtifact: {path, sha256}` alongside `artifact`. The input
+path must be that exact sibling, and the file must be regular, not a symlink.
+The collector rejects an existing but undeclared sibling before executing any
+process. Without this artifact, native graph-only queries lack source-body
+recall; graph JSON alone does not represent the full current query index.
+
+The collector retains each declared pair at
+`graphs/<repository>-compass/{graph.json,source-query.json}`. Separate directories
+prevent repositories from sharing the fixed sibling filename. Both query arms
+receive that graph path. The sidecar is bounded at the native 64 MiB ceiling;
+its schema must be `compass.source-query/1`, its profile one of the four native
+profiles 1–4, and `graphDigest` must equal the exact graph-byte SHA-256. This
+checks the envelope and binding; native Compass still validates the full
+payload. A valid envelope does not establish source or graph quality.
+
+The run retains the reference, and canonical assessment checks its hash against
+the frozen plan and its location against the actual graph path. Original and
+retained bytes, regular-file status and undeclared sibling absence are rechecked
+before completion. An undeclared retained sibling cannot silently affect the
+native query. Legacy graph-only captures retain their old layout and meaning;
+they do not gain body-evidence coverage retrospectively. Freeze new actor
+hashes and collect a new run to correct an omitted artifact. This optional field
+applies only to Compass and introduces no dependency on the comparator.
+
+## Native query exit outcomes
+
+A tool may optionally declare this exact `queryExitContract` in its frozen
+capture plan. Collection validates it before launching any subprocess, copies
+it into `run.tools`, and canonical assessment checks equality with the plan:
+
+```json
+{
+  "schema": "compass.broad-query-query-exits/1",
+  "noMatchExitCode": 4,
+  "noMatchStdoutLine": "No matching nodes found."
+}
+```
+
+The source reviewer must verify the declared CLI outcome against the pinned
+tool's implementation. This example describes Graphify 0.9.92's documented
+query no-match outcome. The contract requires exactly these fields, a nonzero
+exit code in 1–255, and a nonblank, control-free UTF-8 line of at most 4,096
+bytes. Recognition requires that exact code and exactly the encoded line plus
+one LF byte. No substring, trimming, extra output or CRLF substitution is used.
+Unknown versions, extra fields and malformed contracts fail explicitly.
+
+A recognized no-match is an abstention suggestion pending independent review.
+It is still an incorrect answer to an answerable question. It cannot produce a
+successful answered disposition. Timeouts, capture limits, output-budget
+overruns and every other nonzero outcome remain failures in every denominator.
+Raw exit status, stdout, stderr and costs are retained. Without this optional
+contract, legacy interpretation is unchanged: every nonzero exit fails.
+
+Freeze new actor hashes and a new experiment before using this contract.
+Historical captures and their original scoring remain immutable; this is not
+permission to regrade an earlier run under changed semantics. Independent
+answer/source/graph review and all existing qualification gates still apply.
+
 ## Output normalization and review
 
 The normalizer has no registration/oracle input. It reads only the actual

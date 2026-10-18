@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Preserve declared native source-query evidence beside each developer-captured
+  Compass graph. Bind the sidecar to its graph and frozen input, reject omitted
+  or drifting sidecars, and isolate repositories' fixed filenames. Correct old
+  graph-only measurements with a new capture; native query behavior is unchanged.
+
+- Let developer query comparisons predeclare an exact native no-match exit
+  contract. Preserve raw status/output, budgets, genuine failures and legacy
+  scoring; distinguish valid abstention from execution failure only in new
+  frozen experiments. This does not establish a comparative quality result.
+
 - Add an explicit developer-only profile for recapturing exposed development
   questions with linked historical metadata, exact question selection and newly
   reviewed source definitions. Preserve old outcomes and heldout blinding;

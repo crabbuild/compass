@@ -174,6 +174,22 @@ qualification, and underpowered comparisons remain claim-ineligible. Correcting
 an incomplete oracle requires preserving the original result and conducting a
 new confirmation; a result cannot silently change its frozen gold labels.
 
+Native no-match exit interpretation is optional and must be frozen through the
+tool's typed [query exit contract](BROAD_QUERY_CAPTURE.md#native-query-exit-outcomes).
+The collector and assessor share the exact code/byte classifier; raw receipts
+remain unchanged. A valid no-match can be an operationally successful abstention
+while still failing an answerable task. Old plans without the field retain their
+original all-nonzero-fail semantics. A changed contract requires a new experiment,
+not a retroactive exception for an observed outcome.
+
+Native source-body evidence is a separate, hash-bound
+[coherent graph input](BROAD_QUERY_CAPTURE.md#coherent-compass-graph-inputs).
+Canonical assessment verifies the declared `sourceQueryArtifact`, native sibling
+location, schema/profile, graph digest and frozen byte identity. Undeclared
+retained siblings are rejected. Envelope integrity does not prove extraction
+completeness or relevance. Legacy graph-only evidence remains graph-only;
+correcting a missing sidecar requires a new frozen capture, not score promotion.
+
 ## Source registration contract
 
 ### Exposed development calibration

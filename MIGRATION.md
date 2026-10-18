@@ -21,6 +21,20 @@ layout remains visible and clearly owned.
 
 ## Developer comparison registrations
 
+When recapturing native Compass graphs, declare any existing `source-query.json`
+sibling through the graph entry's hash-bound `sourceQueryArtifact` reference.
+Freeze new actor hashes before collection; the adapter now preserves each
+[coherent graph pair](benchmarks/agent_query/BROAD_QUERY_CAPTURE.md#coherent-compass-graph-inputs).
+Original graph-only captures remain immutable and cannot retrospectively claim
+implementation-body recall.
+
+For a new developer capture whose pinned native CLI intentionally uses a
+nonzero no-match exit, predeclare the optional typed
+[query exit contract](benchmarks/agent_query/BROAD_QUERY_CAPTURE.md#native-query-exit-outcomes).
+Verify its meaning from the pinned tool, freeze new capture/assessor hashes and
+collect a new experiment. Existing reports retain their original verifier and
+all-nonzero-fail interpretation; do not edit or silently regrade them.
+
 For recapturing already exposed development questions, use the explicit
 version-2 [development calibration profile](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#exposed-development-calibration).
 Disclose author exposure, retain the linked original registration/run, freeze

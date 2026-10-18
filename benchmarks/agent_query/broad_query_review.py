@@ -17,6 +17,7 @@ import math
 from pathlib import Path, PurePosixPath
 import random
 import re
+import stat
 from statistics import NormalDist, mean
 import sys
 from typing import Any
@@ -30,6 +31,7 @@ REGISTRATION_SCHEMA = "compass.broad-query-registration/1"
 REGISTRATION_SCHEMA_V2 = "compass.broad-query-registration/2"
 FACT_GROUP_SCHEMA = "compass.broad-query-essential-fact-groups/1"
 CALIBRATION_SCHEMA = "compass.broad-query-development-calibration/1"
+QUERY_EXIT_SCHEMA = "compass.broad-query-query-exits/1"
 RUN_SCHEMA = "compass.broad-query-capture/1"
 NORMALIZED_SCHEMA = "compass.broad-query-normalized/1"
 REVIEW_SCHEMA = "compass.broad-query-judgments/1"
@@ -38,6 +40,14 @@ REPORT_SCHEMA = "compass.broad-query-review/1"
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_GRAPH_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
+SOURCE_QUERY_FILE = "source-query.json"
+MAX_SOURCE_QUERY_BYTES = 64 * 1024 * 1024
+SOURCE_QUERY_PROFILES = (
+    "source-query/1-ast-callable-lexemes",
+    "source-query/2-callable-definition-envelopes",
+    "source-query/3-owned-code-windows",
+    "source-query/4-nested-callable-context",
+)
 MAX_TASKS = 2048
 MAX_CANDIDATES = 512
 MAX_CLAIMS = 128
@@ -97,6 +107,37 @@ def _unique(values: list, where: str) -> None:
         raise ValueError(f"duplicate {where}")
 
 
+def query_exit_contract(tool: dict) -> tuple[int, bytes] | None:
+    """Validate a prospective native no-match outcome, never infer one from prose."""
+    if "queryExitContract" not in tool:
+        return None
+    contract = _object(tool["queryExitContract"], "query exit contract")
+    if (set(contract) != {"schema", "noMatchExitCode", "noMatchStdoutLine"}
+            or contract["schema"] != QUERY_EXIT_SCHEMA):
+        raise ValueError("unsupported query exit contract schema or fields")
+    code = _integer(contract["noMatchExitCode"], "no-match exit code", 1, 255)
+    line = _text(contract["noMatchStdoutLine"], "no-match stdout line")
+    if not line.strip():
+        raise ValueError("no-match stdout line must not be whitespace")
+    return code, line.encode() + b"\n"
+
+
+def query_outcome(tool: dict, exit_code: int, stdout: bytes, *,
+                  timed_out: bool = False, limited: bool = False) -> str:
+    """Preserve legacy failure semantics unless an exact outcome was frozen."""
+    contract = query_exit_contract(tool)
+    code = _integer(exit_code, "exit status", -255, 255)
+    timeout = _boolean(timed_out, "capture timeout")
+    output_limited = _boolean(limited, "capture output-limit status")
+    if not isinstance(stdout, bytes):
+        raise ValueError("query stdout must be bytes")
+    if timeout or output_limited:
+        return "failure"
+    if code == 0:
+        return "success"
+    return "no_match" if contract == (code, stdout) else "failure"
+
+
 def _digest(value: Any, where: str = "SHA-256") -> str:
     if not isinstance(value, str) or not SHA.fullmatch(value):
         raise ValueError(f"invalid {where}")
@@ -124,6 +165,49 @@ def _timestamp(value: Any) -> datetime:
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def source_query_reference(entry: dict) -> dict | None:
+    """Only the fixed native sibling is an allowed auxiliary query input."""
+    if "sourceQueryArtifact" not in entry:
+        return None
+    if entry.get("tool") != "compass":
+        raise ValueError("source-query artifact is only a Compass graph input")
+    ref = _object(entry["sourceQueryArtifact"], "source-query artifact reference")
+    if set(ref) != {"path", "sha256"}:
+        raise ValueError("source-query artifact requires exactly path and sha256")
+    path = _text(ref["path"], "source-query artifact path")
+    graph = _text(_object(entry.get("artifact"), "graph reference").get("path"), "graph path")
+    if path != str(PurePosixPath(graph).with_name(SOURCE_QUERY_FILE)):
+        raise ValueError("source-query artifact must be the graph's fixed sibling")
+    _digest(ref["sha256"])
+    return ref
+
+
+def validate_source_query(data: bytes, graph_digest: str) -> None:
+    """Bind the bounded native envelope; the native reader validates its payload."""
+    if len(data) > MAX_SOURCE_QUERY_BYTES:
+        raise ValueError("source-query artifact exceeds native byte bound")
+    artifact = _json(data)
+    if artifact.get("schema") != "compass.source-query/1":
+        raise ValueError("unsupported source-query artifact schema")
+    if artifact.get("profile") not in SOURCE_QUERY_PROFILES:
+        raise ValueError("unsupported source-query artifact profile")
+    if _digest(artifact.get("graphDigest")) != _digest(graph_digest):
+        raise ValueError("source-query artifact is bound to a different graph")
+
+
+def require_regular_source_query(path: Path) -> None:
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError("source-query artifact must be a regular file, not a symlink")
+
+
+def require_absent_source_query(path: Path) -> None:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    raise ValueError("undeclared source-query artifact; freeze its reference before capture")
 
 
 def _json(data: bytes) -> dict:
@@ -861,6 +945,24 @@ class Artifacts:
         self.root = root.resolve()
         self.seen = {}
         self.total = 0
+        self.absent_source_queries = set()
+        self.regular_source_queries = set()
+
+    def source_query(self, entry: dict) -> None:
+        ref = source_query_reference(entry)
+        if entry.get("tool") != "compass":
+            return
+        graph = _relative(entry["artifact"]["path"])
+        sibling = self.root / str(PurePosixPath(graph).with_name(SOURCE_QUERY_FILE))
+        if not sibling.parent.resolve().is_relative_to(self.root):
+            raise ValueError("source-query artifact escapes evidence root")
+        if ref is None:
+            require_absent_source_query(sibling)
+            self.absent_source_queries.add(sibling)
+        else:
+            require_regular_source_query(sibling)
+            self.regular_source_queries.add(sibling)
+            validate_source_query(self.read(ref, MAX_SOURCE_QUERY_BYTES), entry["artifact"]["sha256"])
 
     def read(self, ref: dict, maximum: int = MAX_JSON_BYTES) -> bytes:
         ref = _object(ref, "artifact reference")
@@ -886,6 +988,10 @@ class Artifacts:
         return _json(self.read(ref, maximum))
 
     def recheck(self) -> None:
+        for path in sorted(self.absent_source_queries):
+            require_absent_source_query(path)
+        for path in sorted(self.regular_source_queries):
+            require_regular_source_query(path)
         for path, digest in sorted(self.seen.items()):
             if sha(read_bounded(self.root / path, MAX_GRAPH_BYTES)) != digest:
                 raise ValueError("artifact changed during audit")
@@ -1216,6 +1322,9 @@ def assess(manifest: dict, root: Path) -> dict:
         if name in tool_map:
             raise ValueError("duplicate tool identity")
         tool_map[name] = tool
+        query_exit_contract(tool)
+        if "queryExitContract" in tool and not isinstance(frozen_capture_plan, dict):
+            raise ValueError("query exit contract requires a source-frozen capture plan")
         _text(tool.get("version"), "tool version", 128)
         _text(tool.get("commit"), "tool source commit", 128)
         artifacts.read(tool.get("executable"), MAX_GRAPH_BYTES)
@@ -1230,6 +1339,9 @@ def assess(manifest: dict, root: Path) -> dict:
             for field in ("version", "commit", "nativeOffline", "settings"):
                 if tool.get(field) != frozen.get(field):
                     raise ValueError("actual tool configuration differs from source-frozen settings")
+            query_exit_contract(frozen)
+            if tool.get("queryExitContract") != frozen.get("queryExitContract"):
+                raise ValueError("query exit contract differs from source-frozen settings")
             for field in ("executable", "environment"):
                 if tool.get(field, {}).get("sha256") != frozen.get(field, {}).get("sha256"):
                     raise ValueError("actual tool/dependency bytes differ from source-frozen identity")
@@ -1265,6 +1377,9 @@ def assess(manifest: dict, root: Path) -> dict:
         if key in graph_indexes or key[0] not in repositories or key[1] not in TOOLS:
             raise ValueError("duplicate or unexpected captured graph")
         graph_indexes[key] = GraphIndex(artifacts.document(entry.get("artifact"), MAX_GRAPH_BYTES), key[1])
+        artifacts.source_query(entry)
+        if "sourceQueryArtifact" in entry and not isinstance(frozen_capture_plan, dict):
+            raise ValueError("source-query artifact requires a source-frozen capture plan")
         if entry.get("sourceCommit") != repositories[key[0]]["commit"]:
             raise ValueError("graph source pin conflicts with source registration")
         if entry.get("sourceCleanBeforeAndAfter") is not True:
@@ -1280,6 +1395,11 @@ def assess(manifest: dict, root: Path) -> dict:
             original = artifacts.document(entry.get("originalBuildCapture"))
             frozen_graph = next(g for g in frozen_capture_plan["graphs"]
                                 if (g["repository"], g["tool"]) == key)
+            frozen_source = source_query_reference(frozen_graph)
+            actual_source = source_query_reference(entry)
+            if ((None if frozen_source is None else frozen_source["sha256"]) !=
+                    (None if actual_source is None else actual_source["sha256"])):
+                raise ValueError("source-query artifact differs from source-frozen graph input")
             if entry["originalBuildCapture"]["sha256"] != frozen_graph["buildCapture"]["sha256"]:
                 raise ValueError("build evidence differs from source-frozen graph input")
             if any(entry[field]["sha256"] != frozen_graph[field]["sha256"]
@@ -1358,7 +1478,9 @@ def assess(manifest: dict, root: Path) -> dict:
             stdout_pages.append(out)
             timed_out |= _boolean(capture.get("timed_out"), "capture timeout")
             limited |= _boolean(capture.get("output_limited"), "capture output-limit status")
-            bad_exit |= _integer(capture.get("exit_code"), "exit status", -255, 255) != 0
+            outcome = query_outcome(tool_map[key[1]], capture.get("exit_code"), out,
+                                    timed_out=capture["timed_out"], limited=capture["output_limited"])
+            bad_exit |= outcome == "failure" or (outcome == "no_match" and normalized.get("disposition") != "abstain")
         if key[2] == "normalized" and len(captures) != 1:
             raise ValueError("normalized primary arm permits no follow-ups")
         overflow = key[2] == "normalized" and len(stdout_pages[0]) > budget

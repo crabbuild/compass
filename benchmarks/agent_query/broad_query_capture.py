@@ -24,6 +24,9 @@ from benchmarks.agent_query.broad_query_review import (
     _review_failures, _text, _timestamp, _verify_sources, main as review_main,
     sha, validate_registration, verify_build_capture, exposure_failures,
     verify_calibration_evidence, calibration_review_failures,
+    query_exit_contract, query_outcome,
+    SOURCE_QUERY_FILE, MAX_SOURCE_QUERY_BYTES, source_query_reference,
+    validate_source_query, require_regular_source_query, require_absent_source_query,
 )
 from benchmarks.agent_query.community_tasks import read_bounded
 from benchmarks.agent_query.runner import _terminal_symbol, run_bounded
@@ -79,6 +82,8 @@ class Bundle:
         self.total = 0
         self.paths = 0
         self.inputs: dict[Path, tuple[str, int]] = {}
+        self.absent_source_queries = set()
+        self.regular_source_queries = set()
 
     def put(self, relative: str, value: dict | list | bytes) -> dict:
         path = self.root / _relative(relative)
@@ -99,6 +104,10 @@ class Bundle:
         return self.put(relative, data)
 
     def recheck(self):
+        for path in sorted(self.absent_source_queries):
+            require_absent_source_query(path)
+        for path in sorted(self.regular_source_queries):
+            require_regular_source_query(path)
         for path, (digest, maximum) in self.inputs.items():
             if sha(read_bounded(path, maximum)) != digest:
                 raise ValueError("capture input changed while collecting")
@@ -144,7 +153,7 @@ def _printed_edge_site(line: str) -> tuple[str, dict | None, str | None]:
 
 
 def normalize(output: bytes, tool: str, graph: GraphIndex, *, task: str, arm: str,
-              failed: bool = False, limited: bool = False) -> dict:
+              failed: bool = False, limited: bool = False, no_match_outcome: bool = False) -> dict:
     """Extract printed anchors/edges without reading oracle facts or relevance.
 
     This function intentionally has no source-registration argument. Graph-only
@@ -249,7 +258,7 @@ def normalize(output: bytes, tool: str, graph: GraphIndex, *, task: str, arm: st
         raise ValueError("printed claims exceed normalization bound")
     # Empty prose is not evidence of an unsupported-subject answer. Explicit
     # native no-result signals are suggestions pending independent disposition review.
-    no_match = any(signal in output.decode() for signal in (
+    no_match = no_match_outcome or any(signal in output.decode() for signal in (
         "No matching nodes found", "No node matching", "No supporting indexed evidence found.",
         "No matching indexed", "no_match"))
     declarations = any(item["kind"] == "printed_declaration" for item in queue)
@@ -414,6 +423,7 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     dependency_inputs = {}
     dependency_bytes = 0
     for tool in tools:
+        query_exit_contract(tool)
         external(tool.get("executable"), MAX_GRAPH_BYTES)
         _, environment = external(tool.get("environment"))
         dependencies = _array(_json(environment).get("files"), "environment/dependency files", 65536, 1)
@@ -435,9 +445,21 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     if {(g.get("repository"), g.get("tool")) for g in graph_records} != expected or len(graph_records) != len(expected):
         raise ValueError("prebuilt graph matrix incomplete or duplicated")
     graph_indexes = {}
+    absent_source_queries, regular_source_queries = set(), set()
     for entry in graph_records:
-        _, data = external(entry.get("artifact"), MAX_GRAPH_BYTES)
+        graph_path, data = external(entry.get("artifact"), MAX_GRAPH_BYTES)
         graph_indexes[entry["repository"], entry["tool"]] = GraphIndex(_json(data), entry["tool"])
+        source_ref = source_query_reference(entry)
+        if entry["tool"] == "compass":
+            sibling = graph_path.with_name(SOURCE_QUERY_FILE)
+            if source_ref is None:
+                require_absent_source_query(sibling)
+                absent_source_queries.add(sibling)
+            else:
+                require_regular_source_query(sibling)
+                regular_source_queries.add(sibling)
+                _, source_data = external(source_ref, MAX_SOURCE_QUERY_BYTES)
+                validate_source_query(source_data, entry["artifact"]["sha256"])
         _, build_data = external(entry.get("buildCapture"))
         if not verify_build_capture(_json(build_data), lambda ref: external(ref)[1]):
             raise ValueError("prebuilt graph lacks a successful bounded raw build capture")
@@ -448,6 +470,8 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
         if _json(inv).get("files") != repo["files"] or entry.get("sourceCommit") != repo["commit"]:
             raise ValueError("prebuilt graph inventory/pin differs from registration")
     bundle = Bundle(target)
+    bundle.absent_source_queries = absent_source_queries
+    bundle.regular_source_queries = regular_source_queries
     registration_ref = bundle.copy("registration.json", spec["registration"])
     copied_exposure = {digest: bundle.copy("provenance/exposure/" + digest, exposure_refs[digest])
                        for digest in sorted(exposure_refs)}
@@ -467,6 +491,8 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     tool_records = []
     for tool in tools:
         record = {k: tool[k] for k in ("id", "version", "commit", "nativeOffline", "settings")}
+        if "queryExitContract" in tool:
+            record["queryExitContract"] = tool["queryExitContract"]
         record["executable"] = bundle.copy(f"provenance/{tool['id']}-executable", tool["executable"], MAX_GRAPH_BYTES)
         record["environment"] = bundle.copy(f"provenance/{tool['id']}-environment.json", tool["environment"])
         env = _json(external(tool["environment"])[1])
@@ -514,7 +540,12 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
         prefix = f"graphs/{key(entry['repository'])}-{entry['tool']}"
         copied = {k: entry[k] for k in ("repository", "tool", "sourceCommit")}
         for field in ("artifact", "sourceInventory"):
-            copied[field] = bundle.copy(prefix + "-" + field + ".json", entry[field], MAX_GRAPH_BYTES if field == "artifact" else MAX_JSON_BYTES)
+            relative = (prefix + "/graph.json" if field == "artifact" and "sourceQueryArtifact" in entry
+                        else prefix + "-" + field + ".json")
+            copied[field] = bundle.copy(relative, entry[field], MAX_GRAPH_BYTES if field == "artifact" else MAX_JSON_BYTES)
+        if "sourceQueryArtifact" in entry:
+            copied["sourceQueryArtifact"] = bundle.copy(prefix + "/" + SOURCE_QUERY_FILE,
+                                                        entry["sourceQueryArtifact"], MAX_SOURCE_QUERY_BYTES)
         copied["originalBuildCapture"] = bundle.copy(prefix + "-original-build.json", entry["buildCapture"])
         build = _json(external(entry["buildCapture"])[1])
         for stream in ("stdout", "stderr"):
@@ -535,9 +566,12 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
                 capture, result = execute(timed_argv, prefix + ".json", bundle.root, timeout)
                 # Normalize original bytes, never a replacement-decoded subprocess string.
                 raw = read_bounded(bundle.root / (prefix + ".stdout"), MAX_JSON_BYTES)
+                outcome = query_outcome(tool, result.exit_code, raw,
+                                        timed_out=result.timed_out, limited=result.output_limited)
                 try:
                     answer = normalize(raw, name, graph_indexes[task["repository"], name],
-                                       task=task["id"], arm=arm, failed=result.exit_code != 0,
+                                       task=task["id"], arm=arm, failed=outcome == "failure",
+                                       no_match_outcome=outcome == "no_match",
                                        limited=result.timed_out or result.output_limited)
                 except (UnicodeError, ValueError) as error:
                     answer = dict(schema=NORMALIZED_SCHEMA, task=task["id"], tool=name, arm=arm,
@@ -577,6 +611,9 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     retained = Artifacts(bundle.root)
     retained.read(normalizer_ref)
     retained.read(assessor_ref)
+    for entry in captured_graphs:
+        retained.read(entry["artifact"], MAX_GRAPH_BYTES)
+        retained.source_query(entry)
     verify_calibration_evidence(registration, copied_calibration, retained.read)
     retained.recheck()
     bundle.recheck()
