@@ -1,5 +1,11 @@
 # Migrate from Graphify to Compass
 
+Broad-query response caches now include `query-ranker/15-code-abbreviation`.
+Ordinary parameter/dictionary/time-unit words can recall tentative abbreviated
+code candidates with explicit translations and separate literal context. No
+manual cache deletion, graph rebuild or source/index schema migration is needed
+for this query-only change. Exact-symbol commands retain their contracts.
+
 Current updates rebuild AST cache24 and retain callable-body evidence for direct
 TypeScript/TSX variable initializers. Their source ranges now cover the complete
 definition; original binding identity and AST provenance stay distinct. Older

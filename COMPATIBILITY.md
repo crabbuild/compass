@@ -154,7 +154,7 @@ postings; older snapshots remain readable with an explicit incomplete-recall
 warning. Run `compass update` on a current checkout to publish those postings.
 Historical realizations are never rewritten. Graph identities, relationship
 kinds/direction/multiplicity and exact-symbol command meanings are unchanged.
-The active query ranker profile is `query-ranker/14-compound-identifier`; existing response
+The active query ranker profile is `query-ranker/15-code-abbreviation`; existing response
 cache identities include that profile and do not reuse old ranked results.
 
 Broad retrieval can give an inspection preference to hyphenated query compounds
@@ -189,6 +189,17 @@ preference. Known literal groups and exact identities retain their meaning;
 expansion cannot veto a literal-only candidate that passed its original
 supported-concept screen. Graph/source schemas and immutable artifacts are
 unchanged. The additional response-cache epoch is `unindexed-vocabulary/1`.
+
+Ordinary parameter, dictionary, seconds and nanoseconds questions also consider
+the code spellings `param`, `dict`, `sec` and `nsec`/`nano`. An indexed long form
+does not suppress these alternatives in another owner. This fixed table adds at
+most five frequency reads to the four zero-frequency paraphrase reads above;
+candidate reads and probes keep their existing hard ceilings. The same explicit
+identity, document-intent, legacy-statistics and separate literal-topic guards
+apply. Dependent candidates remain Low, name each translation and receive no
+operation/compound preference. These are lexical inspection leads, not asserted
+equivalences, units or behaviors. Existing literal-only admission is preserved;
+the response-cache ranker profile changes without a graph/index/schema rebuild.
 
 For broad implementation questions with one recognized operation concept,
 callable-local operation identifiers and separate topic evidence receive an
@@ -402,7 +413,7 @@ It never establishes a negative behavior from lexical matches. Unquoted
 conditions, with Low candidates and an explicit diagnostic. These connectives
 do not count as lexical subject evidence; quoted and qualified identifiers
 keep their literal terms. These retrieval
-semantics use `query-ranker/14-compound-identifier`; prior profile constants remain
+semantics use `query-ranker/15-code-abbreviation`; prior profile constants remain
 available and disposable response cache identities change automatically.
 Name identity, structural evidence, graph coverage and candidate recall bounds
 remain separate. `responseTruncated` retains discovery's aggregate bound,

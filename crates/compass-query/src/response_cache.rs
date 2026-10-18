@@ -33,7 +33,7 @@ impl ResponseCache {
         digest.update(graph.as_bytes());
         digest.update(env!("CARGO_PKG_VERSION").as_bytes());
         digest.update(crate::QUERY_PLANNER_PROFILE_V2.as_bytes());
-        digest.update(crate::QUERY_RANKER_PROFILE_V14.as_bytes());
+        digest.update(crate::QUERY_RANKER_PROFILE_V15.as_bytes());
         digest.update(b"compound-identifier/2");
         digest.update(b"unindexed-vocabulary/1");
         // Invalidate experimental single-action answers lacking context vetoes.

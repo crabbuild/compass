@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Recall common code abbreviations for broad parameter, dictionary, seconds and
+  nanoseconds questions even when the unabbreviated word appears elsewhere in
+  the index. Require separate literal owner context, disclose translations and
+  keep dependent matches Low. Exact names, explicit identities and graph facts
+  retain their contracts; ranker15 refreshes disposable response caches.
+
 - Prefer cohesive compound identifiers over scattered word mentions for broad
   questions such as `load-only` field setup. Require separate owner-topic
   evidence, retain Low inspection relevance and bounded real source citations,

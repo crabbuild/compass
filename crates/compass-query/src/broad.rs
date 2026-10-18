@@ -672,10 +672,17 @@ impl CodeQueryEngine {
             if df > 0 {
                 literal_supported_terms.insert(term.clone());
             }
-            // Keep known indexed words and explicit identities literal. Only
-            // a verified zero-frequency ordinary word can use these hints.
-            if df == 0
-                && !group_legacy
+            // Ordinary paraphrases require verified zero frequency. Code
+            // abbreviations remain useful when a long form exists elsewhere;
+            // explicit identities and unknown statistics stay literal.
+            let candidate_aliases = crate::concepts::code_abbreviation_alternatives(&term)
+                .iter()
+                .chain(if df == 0 {
+                    crate::concepts::unindexed_vocabulary_alternatives(&term).iter()
+                } else {
+                    [].iter()
+                });
+            if !group_legacy
                 && !wants_documents
                 && named_contexts.is_empty()
                 && explicit_identifiers.is_empty()
@@ -683,7 +690,7 @@ impl CodeQueryEngine {
                 let literal = variants.clone();
                 let mut aliases = Vec::new();
                 let mut alias_df = 0;
-                for alias in crate::concepts::unindexed_vocabulary_alternatives(&term) {
+                for alias in candidate_aliases {
                     check()?;
                     match frequency(self, &backend, alias)? {
                         Some((n, frequency)) if frequency > 0 => {
@@ -700,7 +707,7 @@ impl CodeQueryEngine {
                     variants.extend(aliases.iter().cloned());
                     variants.sort();
                     variants.dedup();
-                    df = alias_df;
+                    df = df.max(alias_df);
                     vocabulary_fallbacks.insert(term.clone(), (literal, aliases));
                 }
             }
@@ -1608,7 +1615,7 @@ impl CodeQueryEngine {
             };
             let mut reasons = Vec::new();
             if vocabulary_needed {
-                reasons.push(format!("Vocabulary fallback for unindexed words: {}. These are inspection alternatives; equivalence and behavior remain unverified", vocabulary_matches.iter().map(|(term, alias)| format!("{term} -> {alias}")).collect::<Vec<_>>().join(", ")));
+                reasons.push(format!("Vocabulary fallback for ordinary words or code abbreviations: {}. These are inspection alternatives; equivalence and behavior remain unverified", vocabulary_matches.iter().map(|(term, alias)| format!("{term} -> {alias}")).collect::<Vec<_>>().join(", ")));
             }
             if preferred_compound {
                 reasons.push(format!("Compound identifiers match requested words together: {}. Separate owner-topic evidence gives an inspection preference; equivalence and behavior remain unverified", compound_matches.phrases.into_iter().collect::<Vec<_>>().join(", ")));

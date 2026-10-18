@@ -51,6 +51,126 @@ fn fixture(path: &std::path::Path) -> Result<GraphDocument, Box<dyn std::error::
 }
 
 #[test]
+fn code_abbreviations_recall_with_indexed_long_forms_and_literal_context()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_query::RelevanceBand;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph.nodes.clear();
+    graph.links.clear();
+    for (id, name, signature) in [
+        (
+            "lookup",
+            "ByName",
+            "fn(params: Params, name: String) -> String",
+        ),
+        (
+            "clock",
+            "add_current",
+            "fn(sec: u64, nsec: u64, duration: Duration)",
+        ),
+        // Long forms elsewhere in the index must not suppress abbreviated
+        // implementations. They also make the pre-fix coverage veto visible.
+        ("literal-route", "retrieve_route_parameter", "fn()"),
+        ("literal-clock", "accumulate_nanoseconds_seconds", "fn()"),
+        ("namespace-only", "inspect_params", "fn(widget: Widget)"),
+    ] {
+        let qualified = if id == "namespace-only" {
+            "name::inspect_params".to_owned()
+        } else {
+            format!("fixture::{name}")
+        };
+        let mut node = support::node(id, NodeKind::Function, name, &qualified);
+        node.details = Some(serde_json::from_value(serde_json::json!({
+            "type":"symbol", "data":{"signature":signature}
+        }))?);
+        graph.nodes.push(node);
+    }
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let json = open(&path, None, &directory.path().join("json-cache"))?;
+    let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+    for (question, target, translations) in [
+        (
+            "Where is a route parameter retrieved by its name?",
+            "lookup",
+            vec!["parameter -> param"],
+        ),
+        (
+            "Where are accumulated nanoseconds carried into duration seconds?",
+            "clock",
+            vec!["nanosecond -> nsec", "second -> sec"],
+        ),
+    ] {
+        let answer = json.discover_ranked(request(question))?;
+        assert_eq!(
+            answer.candidates,
+            stored.discover_ranked(request(question))?.candidates
+        );
+        let candidate = answer
+            .candidates
+            .iter()
+            .find(|c| c.node.id == target)
+            .ok_or_else(|| format!("abbreviated implementation missing: {question}: {answer:?}"))?;
+        assert_eq!(candidate.relevance, RelevanceBand::Low);
+        for translation in translations {
+            assert!(
+                candidate
+                    .reasons
+                    .iter()
+                    .any(|reason| reason.contains(translation)),
+                "{candidate:?}"
+            );
+        }
+        assert!(
+            !answer
+                .candidates
+                .iter()
+                .any(|c| c.node.id == "namespace-only")
+        );
+    }
+    for question in [
+        "Where is a Rocket parameter retrieved by its name?",
+        "Where is a `parameter` retrieved by its name?",
+    ] {
+        assert!(
+            !json
+                .discover_ranked(request(question))?
+                .candidates
+                .iter()
+                .any(|c| c.node.id == "lookup"),
+            "{question}"
+        );
+    }
+    // Qualified questions can retain pre-existing partial literal candidates;
+    // they must not acquire an abbreviated match for the named component.
+    for candidate in json
+        .discover_ranked(request("Where is fixture.parameter retrieved by its name?"))?
+        .candidates
+    {
+        if candidate.node.id == "lookup" {
+            assert!(
+                !candidate
+                    .matched_terms
+                    .iter()
+                    .any(|term| term == "parameter")
+            );
+            assert!(
+                !candidate
+                    .reasons
+                    .iter()
+                    .any(|reason| reason.contains("parameter -> param"))
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn unindexed_collection_words_require_literal_context_and_stay_tentative()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_query::RelevanceBand;

@@ -100,6 +100,14 @@ identifier anchors receive priority within the existing eight body-source cap;
 omissions stay visible. This changes ranking/citation selection, not recall,
 graph facts, source ownership or the ranked-view schema.
 
+Broad parameter, dictionary, seconds and nanoseconds questions can match the
+code spellings `param`, `dict`, `sec` and `nsec`/`nano`, including when a long form
+also occurs in another indexed declaration. A dependent candidate must retain
+separate literal owner context and carries Low relevance with the precise
+translation. Qualified/quoted identities, named contexts and document requests
+remain literal for this channel. Abbreviations do not establish units or code
+meaning, change structural confidence, or give an operation/compound preference.
+
 The open `matchedFields` vocabulary includes `code_reference` for identifiers
 on witnessed outgoing call/reference sites inside a callable. These matches map
 to lexical retrieval and preserve the actual site in `supportingSources`.

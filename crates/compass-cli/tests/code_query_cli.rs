@@ -12,6 +12,77 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn code_abbreviations_recall_fresh_native_owners_with_json_store_parity()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("sample.py"),
+        "def lookup(params, name):\n    for param in params:\n        if param.key == name:\n            return param.value\n    return None\n\ndef retrieve_route_parameter():\n    return None\n",
+    )?;
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let answer = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from("Where is a route parameter retrieved by its name?"),
+                OsString::from("--graph"),
+                output.join("compass-out/graph.json").into_os_string(),
+                OsString::from("--view"),
+                OsString::from("ranked"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        let answer: Value = serde_json::from_str(&answer.stdout)?;
+        let candidates = answer["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?;
+        let candidate = candidates
+            .iter()
+            .find(|c| c["name"].as_str().is_some_and(|n| n.ends_with("lookup")))
+            .ok_or_else(|| format!("missing abbreviated owner: {answer}"))?;
+        assert_eq!(candidate["relevance"], "low");
+        assert!(
+            candidate["reasons"]
+                .to_string()
+                .contains("parameter -> param")
+        );
+        assert!(
+            candidate["supportingSources"]
+                .as_array()
+                .is_some_and(|sources| !sources.is_empty())
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(&answer["candidates"], expected);
+        } else {
+            expected = Some(answer["candidates"].clone());
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn compound_words_prefer_owned_identifiers_over_scattered_mentions() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("source");

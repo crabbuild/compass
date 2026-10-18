@@ -27,6 +27,21 @@ pub(crate) fn unindexed_vocabulary_alternatives(term: &str) -> &'static [&'stati
     }
 }
 
+/// Directional spelling hints for common code abbreviations. Unlike conceptual
+/// paraphrases, an indexed long form does not rule out an abbreviated owner.
+/// The four recognized query terms require at most five extra frequency reads.
+/// Broad retrieval still requires separate literal owner context and labels
+/// dependent matches as tentative rather than asserting equivalence.
+pub(crate) fn code_abbreviation_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "parameter" => &["param"],
+        "dictionary" => &["dict"],
+        "second" => &["sec"],
+        "nanosecond" => &["nsec", "nano"],
+        _ => &[],
+    }
+}
+
 // These are recall alternatives, never assertions of equivalent code meaning.
 const SYNONYMS: &[(&[&str], &[&str])] = &[
     (
