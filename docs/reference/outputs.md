@@ -1689,7 +1689,7 @@ kind under views1–3 while continuing to read their original quotation kinds.
 
 ## Owned code vocabulary in ranked answers
 
-Current source-query profile5 adds matched-field label `body_code` for retained,
+Source-query profiles5 and6 support matched-field label `body_code` for retained,
 bounded code vocabulary absent from the same owner's identifier/comment fields.
 It can recover a declaration when a query concept appears in an error string or
 literal key. Direct AST ownership supplies source pointers; lexical occurrence
@@ -1701,3 +1701,44 @@ schemas remain unchanged. Profiles1–4 retain their original retrieval meaning.
 Code-window clipping remains disclosed. It does not remove preferences supported
 by complete identifier/comment fields; code-dependent candidates still cannot
 receive those preferences.
+
+
+## Parameter-binding source metadata
+
+Source-query profile6 adds `owners[].parameterBindings` to the graph-bound
+`source-query.json` artifact. The object has ordered `sites` (exact `text` and
+`source` anchors), `status`, `omittedSites` and an ordered `reasons` set. Statuses
+are `complete`, `partial` and `unsupported`; reasons are `unsupported_pattern`,
+`unsupported_receiver`, `unsupported_spelling`, `syntax_recovery`, `traversal_limit`, `site_limit`,
+`text_limit` and `aggregate_limit`. Complete coverage has no omissions or reasons;
+partial coverage names at least one reason. Unsupported coverage retains no
+sites and names a reason. A known omission count does not count an unvisited or
+unsupported suffix. Absence under profiles1–5 means unavailable provenance,
+not an empty parameter list.
+
+Sites describe direct binding syntax in an exact published callable. They do
+not include type/default identifiers, nested bindings or inferred graph
+parameters. Limits are 64 sites per owner, 256 UTF-8 bytes per whole identifier
+and 256 KiB per source file, also charged to the existing aggregate site/text
+budgets. The parameter channel uses remaining capacity after original lexical
+retention and keeps its own coverage. It adds no postings, document-frequency
+counts or ranking weight. Profiles1–5 remain readable with their original
+meaning; profile5 code vocabulary remains enabled after profile6 becomes current.
+
+Enumerated `site_limit`, `text_limit`, `aggregate_limit` and
+`unsupported_spelling` reasons require a positive known omission count and
+`partial` status. Unsupported syntax, receivers, recovery or unvisited suffixes
+may have count zero under `partial`, or under `unsupported` with no retained
+sites. Unsupported status cannot carry enumerated limits or a known count.
+Mixed known/unknown reasons remain partial with the known count only. Supported
+spelling is a whole Unicode XID identifier, with TypeScript/TSX `$` and Rust
+`r#` forms; escaped JavaScript identifiers are explicitly omitted whole.
+
+Current-profile identifier/comment plus parameter text also shares the native
+1 MiB per-file ceiling; code windows retain their separate existing allowance.
+`_` is retained for Python and TypeScript/TSX, while Go blank identifiers and
+Rust wildcard patterns do not introduce bindings. Incremental updates fall back
+to complete cached/fresh extraction when mixed prior/current facts might cross
+shared text or site limits, preserving deterministic quota allocation. The
+eligibility bound includes zero-owner evidence files; it does not infer the
+unpublished lexical contents from a published owner list.

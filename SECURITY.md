@@ -213,7 +213,7 @@ qualify as verbatim source quotations.
 ## Local code inspection excerpts (development)
 
 Opt-in ranked answers may include exact code windows from the immutable
-source-query artifact, including literals present in that code. Current profile5
+source-query artifact, including literals present in that code. Profiles5 and6
 also makes direct-owner code vocabulary searchable; nested context remains
 inspection-only. These bytes are not
 redacted summaries. Windows stay within one AST-owned callable, exclude nested
@@ -234,3 +234,15 @@ Quotes remain untrusted source text; renderers preserve existing escaping and
 output budgets. Context does not add graph records, calls, execution claims,
 retrieval terms or network/model dependencies. Source profile4 and ranked view4
 make the distinction explicit; historical profiles retain their original meaning.
+
+
+## Parameter-binding provenance
+
+Source-query profile6 additionally retains bounded whole parameter identifiers
+with exact source anchors and separate coverage. Direct AST binding fields
+establish the role during extraction; the artifact reader validates shape,
+limits, owner containment and graph/source digest binding. Those checks cannot
+independently prove syntax without the original source. A serialized role label
+is not authentication or proof of runtime behavior. The new sites share the
+existing local disclosure and untrusted-content boundaries, add no source reads
+at query time and create no graph relationships.

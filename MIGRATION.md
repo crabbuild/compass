@@ -1,13 +1,19 @@
 # Migrate from Graphify to Compass
 
-Current graphs use `source-query/5-owned-code-lexemes` to retrieve vocabulary
-from bounded direct-owner code windows, including string literals. Run
-`compass update <root>` with the new binary to obtain this evidence. Readers
-preserve profiles1–4 with their original lexical/statistical meaning; older
-binaries reject profile5 and must be upgraded. Historical realizations are not
-rewritten. AST cache25 and `query-ranker/18-channel-completeness` refresh disposable
-state automatically. Dependent code matches are Low inspection leads, with
-source locations, rather than behavioral conclusions.
+Current updates use `source-query/6-parameter-bindings`, retaining exact native
+parameter binding sites separately from generic identifier occurrences. Run
+`compass update <root>` with the new binary; AST cache26 refreshes automatically.
+If publication reports older retained extraction, run
+`compass update <root> --force`. Older binaries reject profile6 and must be
+upgraded. Readers preserve profiles1–5 with their original lexical/statistical
+meaning, including profile5 code vocabulary, without inferring parameter roles.
+Historical realizations are not rewritten.
+
+Direct-owner code vocabulary remains searchable, with code-dependent matches
+kept Low and source-cited. Parameter metadata adds no retrieval weight or graph
+facts. Parameter-only omissions do not alter original lexical completeness.
+`query-ranker/18-channel-completeness` retains its response behavior; the source
+artifact digest already separates responses for changed evidence.
 
 The operation-vocabulary rollout introduced ordinary method translations.
 Ordinary read/lookup/getter and setter wording can inspect conventional get/set
@@ -21,11 +27,11 @@ code candidates with explicit translations and separate literal context. No
 manual cache deletion, graph rebuild or source/index schema migration is needed
 for this query-only change. Exact-symbol commands retain their contracts.
 
-Current updates rebuild AST cache25 and retain callable-body evidence for direct
+Current updates rebuild AST cache26 and retain callable-body evidence for direct
 TypeScript/TSX variable initializers. Their source ranges now cover the complete
 definition; original binding identity and AST provenance stay distinct. Older
 `source-query/1-ast-callable-lexemes` artifacts remain readable and historical
-realizations are unchanged. New artifacts use profile5; older binaries must be
+realizations are unchanged. New artifacts use profile6; older binaries must be
 upgraded to read that projection. JavaScript3 and TypeScript4 remain `Qualifying`
 pending source audit and release promotion.
 

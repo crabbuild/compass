@@ -11,7 +11,11 @@ pub const SOURCE_QUERY_PROFILE_V1: &str = "source-query/1-ast-callable-lexemes";
 pub const SOURCE_QUERY_PROFILE_V2: &str = "source-query/2-callable-definition-envelopes";
 pub const SOURCE_QUERY_PROFILE_V3: &str = "source-query/3-owned-code-windows";
 pub const SOURCE_QUERY_PROFILE_V4: &str = "source-query/4-nested-callable-context";
-pub const SOURCE_QUERY_PROFILE: &str = "source-query/5-owned-code-lexemes";
+pub const SOURCE_QUERY_PROFILE_V5: &str = "source-query/5-owned-code-lexemes";
+pub const SOURCE_QUERY_PROFILE: &str = "source-query/6-parameter-bindings";
+pub const SOURCE_QUERY_MAX_PARAMETER_SITES: usize = 64;
+pub const SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES: usize = 256 * 1024;
+pub const SOURCE_QUERY_MAX_FILE_TEXT_BYTES: usize = 1024 * 1024;
 pub const SOURCE_QUERY_MAX_NESTED_CONTEXTS: usize = 8;
 pub const SOURCE_QUERY_MAX_CODE_BYTES: usize = 8 * 1024 * 1024;
 pub const SOURCE_QUERY_MAX_CODE_WINDOWS: usize = 32_768;
@@ -29,8 +33,105 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
             | SOURCE_QUERY_PROFILE_V2
             | SOURCE_QUERY_PROFILE_V3
             | SOURCE_QUERY_PROFILE_V4
+            | SOURCE_QUERY_PROFILE_V5
             | SOURCE_QUERY_PROFILE
     )
+}
+
+/// Profile capabilities are explicit: advancing current must not change V5.
+#[must_use]
+pub fn source_query_uses_code_lexemes(profile: &str) -> bool {
+    matches!(profile, SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterBindingStatus {
+    Complete,
+    Partial,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterBindingOmission {
+    UnsupportedPattern,
+    UnsupportedReceiver,
+    UnsupportedSpelling,
+    SyntaxRecovery,
+    TraversalLimit,
+    SiteLimit,
+    TextLimit,
+    AggregateLimit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ParameterBindings {
+    pub sites: Vec<SourceQuerySite>,
+    pub status: ParameterBindingStatus,
+    /// Known omitted bindings; an unsupported suffix is not an exact count.
+    pub omitted_sites: u64,
+    pub reasons: BTreeSet<ParameterBindingOmission>,
+}
+impl Default for ParameterBindings {
+    fn default() -> Self {
+        Self {
+            sites: Vec::new(),
+            status: ParameterBindingStatus::Complete,
+            omitted_sites: 0,
+            reasons: BTreeSet::new(),
+        }
+    }
+}
+
+impl ParameterBindings {
+    /// Enumerated omissions have a known positive count. Unavailable syntax or
+    /// an unvisited suffix can have an unknown count, represented by zero.
+    #[must_use]
+    pub fn has_coherent_coverage(&self) -> bool {
+        let enumerated = self.reasons.iter().any(|reason| {
+            matches!(
+                reason,
+                ParameterBindingOmission::UnsupportedSpelling
+                    | ParameterBindingOmission::SiteLimit
+                    | ParameterBindingOmission::TextLimit
+                    | ParameterBindingOmission::AggregateLimit
+            )
+        });
+        match self.status {
+            ParameterBindingStatus::Complete => self.omitted_sites == 0 && self.reasons.is_empty(),
+            ParameterBindingStatus::Partial => {
+                !self.reasons.is_empty() && (self.omitted_sites > 0) == enumerated
+            }
+            ParameterBindingStatus::Unsupported => {
+                self.sites.is_empty()
+                    && self.omitted_sites == 0
+                    && !self.reasons.is_empty()
+                    && !enumerated
+            }
+        }
+    }
+}
+
+/// Supported bounded identifier shape. This is not a source/AST role proof.
+/// Unicode XID spellings, TS dollar identifiers and Rust raw identifiers are
+/// retained whole; escaped JS spellings are explicitly unavailable in profile6.
+fn parameter_spelling(text: &str, language: &str) -> bool {
+    if text.is_empty() || text.len() > 256 {
+        return false;
+    }
+    let text = if language == "rust" {
+        text.strip_prefix("r#").unwrap_or(text)
+    } else {
+        text
+    };
+    let dollar = matches!(language, "typescript" | "tsx");
+    let mut chars = text.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '_' || (dollar && c == '$') || unicode_ident::is_xid_start(c))
+        && chars.all(|c| c == '_' || (dollar && c == '$') || unicode_ident::is_xid_continue(c))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,8 +159,10 @@ pub struct SourceQueryOwner {
     pub source_digest: String,
     pub identifiers: Vec<SourceQuerySite>,
     pub comments: Vec<SourceQuerySite>,
-    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profile 5
-    /// also indexes vocabulary absent from the identifier/comment fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_bindings: Option<ParameterBindings>,
+    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profiles 5 and 6
+    /// also index vocabulary absent from the identifier/comment fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_windows: Vec<SourceQuerySite>,
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -149,7 +252,7 @@ impl SourceQueryOwner {
                 "unsupported lexical projection profile".to_owned(),
             ));
         }
-        Ok(self.project_document(profile == SOURCE_QUERY_PROFILE))
+        Ok(self.project_document(source_query_uses_code_lexemes(profile)))
     }
 
     fn project_document(&self, include_code: bool) -> SearchDocument {
@@ -254,6 +357,8 @@ impl SourceQueryArtifact {
         let mut previous = None::<&str>;
         let mut total_code_sites = 0_usize;
         let mut total_code_text = 0_usize;
+        let mut parameter_file_bytes = BTreeMap::<&str, usize>::new();
+        let mut file_text_bytes = BTreeMap::<&str, usize>::new();
         let mut total_sites = 0_usize;
         let mut total_text = 0_usize;
         let mut body_frequencies = BTreeMap::<String, u64>::new();
@@ -288,15 +393,48 @@ impl SourceQueryArtifact {
             }
             if !matches!(
                 self.profile.as_str(),
-                SOURCE_QUERY_PROFILE_V3 | SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE
+                SOURCE_QUERY_PROFILE_V3
+                    | SOURCE_QUERY_PROFILE_V4
+                    | SOURCE_QUERY_PROFILE_V5
+                    | SOURCE_QUERY_PROFILE
             ) && (!owner.code_windows.is_empty() || owner.omitted_code_windows > 0)
             {
                 return Err(fail("legacy profile does not support code windows"));
             }
+            if (self.profile == SOURCE_QUERY_PROFILE) != owner.parameter_bindings.is_some() {
+                return Err(fail(
+                    "parameter coverage must be explicit only under profile6",
+                ));
+            }
+            let parameter_sites = if let Some(bindings) = &owner.parameter_bindings {
+                if bindings.sites.len() > SOURCE_QUERY_MAX_PARAMETER_SITES
+                    || bindings.omitted_sites > 200_000
+                    || !bindings.has_coherent_coverage()
+                {
+                    return Err(fail("invalid parameter binding coverage or bounds"));
+                }
+                for binding in &bindings.sites {
+                    if !files
+                        .get(owner.source.file.as_str())
+                        .is_some_and(|file| parameter_spelling(&binding.text, &file.language))
+                    {
+                        return Err(fail("parameter binding must be a whole identifier"));
+                    }
+                    let bytes = parameter_file_bytes.entry(&owner.source.file).or_default();
+                    *bytes = bytes.saturating_add(binding.text.len());
+                    if *bytes > SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES {
+                        return Err(fail("per-file parameter binding limit exceeded"));
+                    }
+                }
+                bindings.sites.as_slice()
+            } else {
+                &[]
+            };
             for (sites, cap, code) in [
-                (&owner.identifiers, 256_usize, false),
-                (&owner.comments, 4096, false),
-                (&owner.code_windows, 512, true),
+                (owner.identifiers.as_slice(), 256_usize, false),
+                (owner.comments.as_slice(), 4096, false),
+                (owner.code_windows.as_slice(), 512, true),
+                (parameter_sites, 256, false),
             ] {
                 let mut previous = None;
                 for site in sites {
@@ -342,6 +480,13 @@ impl SourceQueryArtifact {
                     }
                     total_sites = total_sites.saturating_add(1);
                     total_text = total_text.saturating_add(site.text.len());
+                    if self.profile == SOURCE_QUERY_PROFILE {
+                        let bytes = file_text_bytes.entry(&owner.source.file).or_default();
+                        *bytes = bytes.saturating_add(site.text.len());
+                        if *bytes > SOURCE_QUERY_MAX_FILE_TEXT_BYTES {
+                            return Err(fail("per-file lexical and parameter limit exceeded"));
+                        }
+                    }
                     if total_sites > SOURCE_QUERY_MAX_SITES
                         || total_text > SOURCE_QUERY_MAX_TEXT_BYTES
                     {
@@ -352,7 +497,7 @@ impl SourceQueryArtifact {
             if owner.nested_contexts.len() > SOURCE_QUERY_MAX_NESTED_CONTEXTS
                 || (!matches!(
                     self.profile.as_str(),
-                    SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE
+                    SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE
                 ) && (!owner.nested_contexts.is_empty() || owner.omitted_nested_contexts > 0))
             {
                 return Err(fail(

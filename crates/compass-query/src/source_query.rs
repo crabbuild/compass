@@ -145,7 +145,7 @@ impl Index {
         // Existing identifier/comment preferences need completeness of those
         // fields, independent of the newer code-window channel. This validated
         // historical projection preserves their byte/term clipping checks.
-        let profile = if self.profile == compass_model::source_query::SOURCE_QUERY_PROFILE {
+        let profile = if source_query_uses_code_lexemes(&self.profile) {
             compass_model::source_query::SOURCE_QUERY_PROFILE_V4
         } else {
             &self.profile

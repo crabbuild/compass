@@ -2933,6 +2933,10 @@ fn build_graph_inner_unscoped(
         || CacheOptions::output_directory(output_cache_root),
         CacheOptions::shared_history,
     );
+    // Both extraction stages can populate the content-addressed AST cache.
+    // Keep digests from successful early reads if conservative source-evidence
+    // reuse rejects and the normal stage later loads those files from cache.
+    let mut fresh_source_digests = BTreeMap::new();
     let early_missing = fact_neutral_pre_cache_sources(
         options,
         semantic,
@@ -3000,28 +3004,34 @@ fn build_graph_inner_unscoped(
                 cache.write_portable_ast_batch_ref(&cache_sources)?;
                 cache.flush()?;
                 let source_query_inputs = crate::source_query::collect(&mut early_extractions)?;
-                timings.deterministic_extract = stage_started.elapsed();
-                let result = publish_fact_neutral_incremental(
-                    options,
-                    root,
-                    output_dir,
-                    &output_container,
-                    guard,
-                    &manifest_path,
-                    prior_manifest,
-                    detection,
-                    &sources,
-                    &early_missing,
-                    early_empty_files,
-                    previous.as_ref(),
-                    &current,
-                    &changed_file_node_ids,
-                    &current_fact_state,
-                    source_query_inputs,
-                    Some(prior_source_query),
-                    &mut timings,
-                )?;
-                return Ok((result, None));
+                if crate::source_query::can_reuse_with_inputs(
+                    &prior_source_query,
+                    &source_query_inputs,
+                ) {
+                    timings.deterministic_extract = stage_started.elapsed();
+                    let result = publish_fact_neutral_incremental(
+                        options,
+                        root,
+                        output_dir,
+                        &output_container,
+                        guard,
+                        &manifest_path,
+                        prior_manifest,
+                        detection,
+                        &sources,
+                        &early_missing,
+                        early_empty_files,
+                        previous.as_ref(),
+                        &current,
+                        &changed_file_node_ids,
+                        &current_fact_state,
+                        source_query_inputs,
+                        Some(prior_source_query),
+                        &mut timings,
+                    )?;
+                    return Ok((result, None));
+                }
+                fresh_source_digests = early_source_digests;
             }
         }
     }
@@ -3391,7 +3401,7 @@ fn build_graph_inner_unscoped(
         .map(|(path, _, _, _, _)| path.clone())
         .collect::<HashSet<_>>();
     let mut fresh_source_text = HashMap::with_capacity(fresh.len());
-    let mut fresh_source_digests = BTreeMap::new();
+    // Any actual normal-stage read supersedes an earlier read of the same file.
     for (path, extraction, source, _, content_hash) in fresh {
         if !extraction_has_cacheable_ast_facts(&extraction) {
             empty_files.push(path.clone());

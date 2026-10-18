@@ -2,11 +2,19 @@
 
 ## Unreleased
 
+- Retain separately bounded native parameter-binding source sites with explicit
+  complete, partial or unsupported coverage. Preserve exact callable ownership,
+  existing lexical priority and profiles1–5 semantics. Source-query profile6
+  and AST cache26 distinguish the new evidence; no graph facts or retrieval
+  scores change solely from these role annotations. Preserve refreshed source
+  digests when conservative update reuse falls back to the full extraction path,
+  including cached edits with an unrelated cache miss.
+
 - Retrieve broad questions whose vocabulary occurs only in bounded AST-owned
   code text, including error strings and literal keys. Keep code-dependent
   matches Low and source-cited, exclude nested callable context, and avoid
   counting identifier/comment words again. Source-query profile5 preserves
-  profiles1–4 with their original retrieval/statistical meaning; AST cache25
+  profiles1–4 with their original retrieval/statistical meaning; AST cache26
   and ranker18 refresh disposable current state. Preserve preferences supported
   by complete identifier/comment fields when only code windows are clipped;
   keep that clipping visible. Graph facts are unchanged.

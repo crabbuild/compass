@@ -22,6 +22,85 @@ fn invalid(message: impl Into<String>) -> CoreError {
     CoreError::InvalidBuildState(message.into())
 }
 
+fn inventory_mismatch(path: &str, extracted: u64, published: u64) -> CoreError {
+    // Bound before escaping: graph paths are validated but have no length cap.
+    let mut characters = path.chars();
+    let context: String = characters.by_ref().take(128).collect();
+    let suffix = if characters.next().is_some() {
+        "..."
+    } else {
+        ""
+    };
+    invalid(format!(
+        "source-query extraction digest does not match published file inventory for {context:?}{suffix}: extracted {extracted} bytes, published {published} bytes; run compass update --force"
+    ))
+}
+
+fn count_site_text<'a>(
+    total: &mut usize,
+    sites: impl Iterator<Item = &'a raw::Site>,
+    site_cap: usize,
+    byte_cap: usize,
+) -> Result<(), CoreError> {
+    for site in sites {
+        *total = total.saturating_add(site.text.len());
+        if site.text.len() > site_cap || *total > byte_cap {
+            return Err(invalid(
+                "oversized cached source-query text accounting; run compass update --force",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate counters before any channel can be dropped by aggregate pruning.
+fn validate_accounting(file: &SourceQueryExtraction) -> Result<(), CoreError> {
+    let mut generic = 0_usize;
+    let mut parameters = 0_usize;
+    let mut code = 0_usize;
+    for scope in &file.projection.scopes {
+        if scope.names.len() > 256
+            || scope.names.values().any(|sites| sites.len() > 4)
+            || scope.comments.len() > 8
+            || scope.code_windows.len() > 16
+            || scope.parameter_bindings.sites.len() > SOURCE_QUERY_MAX_PARAMETER_SITES
+        {
+            return Err(invalid(
+                "oversized cached source-query scope accounting; run compass update --force",
+            ));
+        }
+        count_site_text(
+            &mut generic,
+            scope.names.values().flatten(),
+            256,
+            SOURCE_QUERY_MAX_FILE_TEXT_BYTES,
+        )?;
+        count_site_text(
+            &mut generic,
+            scope.comments.iter(),
+            4096,
+            SOURCE_QUERY_MAX_FILE_TEXT_BYTES,
+        )?;
+        count_site_text(
+            &mut parameters,
+            scope.parameter_bindings.sites.iter(),
+            256,
+            SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES,
+        )?;
+        count_site_text(&mut code, scope.code_windows.iter(), 512, 256 * 1024)?;
+    }
+    if generic != file.projection.retained_bytes
+        || parameters != file.projection.retained_parameter_bytes
+        || code != file.projection.retained_code_bytes
+        || generic.saturating_add(parameters) > SOURCE_QUERY_MAX_FILE_TEXT_BYTES
+    {
+        return Err(invalid(
+            "invalid cached source-query text accounting; run compass update --force",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn collect(extractions: &mut [Extraction]) -> Result<Inputs, CoreError> {
     let mut result = Inputs::default();
     let mut bytes = 0_usize;
@@ -39,11 +118,20 @@ pub(crate) fn collect(extractions: &mut [Extraction]) -> Result<Inputs, CoreErro
             || file.profile != SOURCE_QUERY_PROFILE
             || file.projection.scopes.len() > 512
             || file.projection.visits > 200_000
+            || file
+                .projection
+                .retained_bytes
+                .saturating_add(file.projection.retained_parameter_bytes)
+                > SOURCE_QUERY_MAX_FILE_TEXT_BYTES
+            || file.projection.scopes.iter().any(|scope| {
+                scope.parameter_bindings.sites.len() > SOURCE_QUERY_MAX_PARAMETER_SITES
+            })
         {
             return Err(invalid(
                 "unsupported or oversized source-query extraction; run compass update --force",
             ));
         }
+        validate_accounting(&file)?;
         if bytes.saturating_add(file.projection.retained_bytes) > SOURCE_QUERY_MAX_TEXT_BYTES
             || result.files.len() >= SOURCE_QUERY_MAX_OWNERS
         {
@@ -55,6 +143,7 @@ pub(crate) fn collect(extractions: &mut [Extraction]) -> Result<Inputs, CoreErro
         }
         if file.projection.scopes.is_empty() {
             file.projection.retained_code_bytes = 0;
+            file.projection.retained_parameter_bytes = 0;
         }
         if code_bytes.saturating_add(file.projection.retained_code_bytes)
             > SOURCE_QUERY_MAX_CODE_BYTES
@@ -77,6 +166,46 @@ pub(crate) fn collect(extractions: &mut [Extraction]) -> Result<Inputs, CoreErro
         {
             return Err(invalid("duplicate source-query file identity"));
         }
+    }
+    // Generic lexical evidence receives its original aggregate budget first.
+    let mut spare = SOURCE_QUERY_MAX_TEXT_BYTES.saturating_sub(bytes);
+    for file in result.files.values_mut() {
+        let actual = file
+            .projection
+            .scopes
+            .iter()
+            .flat_map(|scope| &scope.parameter_bindings.sites)
+            .map(|site| site.text.len())
+            .sum::<usize>();
+        if actual != file.projection.retained_parameter_bytes
+            || actual > SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES
+        {
+            return Err(invalid("invalid cached parameter text accounting"));
+        }
+        for scope in &mut file.projection.scopes {
+            scope.parameter_bindings.sites.retain(|site| {
+                if site.text.len() > spare {
+                    scope.parameter_bindings.status = raw::ParameterBindingStatus::Partial;
+                    scope.parameter_bindings.omitted_sites =
+                        scope.parameter_bindings.omitted_sites.saturating_add(1);
+                    scope
+                        .parameter_bindings
+                        .reasons
+                        .insert(raw::ParameterBindingOmission::AggregateLimit);
+                    false
+                } else {
+                    spare -= site.text.len();
+                    true
+                }
+            });
+        }
+        file.projection.retained_parameter_bytes = file
+            .projection
+            .scopes
+            .iter()
+            .flat_map(|scope| &scope.parameter_bindings.sites)
+            .map(|site| site.text.len())
+            .sum();
     }
     Ok(result)
 }
@@ -112,6 +241,11 @@ pub(crate) fn reusable(output: &Path) -> Option<SourceQueryArtifact> {
     if artifact.aggregate_truncated
         || artifact.owners.iter().any(|owner| {
             owner.omitted_nested_contexts > 0
+                || owner.parameter_bindings.as_ref().is_some_and(|bindings| {
+                    bindings
+                        .reasons
+                        .contains(&ParameterBindingOmission::AggregateLimit)
+                })
                 || owner
                     .nested_contexts
                     .iter()
@@ -122,6 +256,122 @@ pub(crate) fn reusable(output: &Path) -> Option<SourceQueryArtifact> {
         return None;
     };
     Some(artifact)
+}
+
+/// The clean collector accounts unpublished lexical scopes too. A retained
+/// artifact cannot recover those counters, so bound each unchanged file by its
+/// full native allowance. If shared role pruning is possible, the caller must
+/// use the complete cached/fresh extraction universe instead of mixing owners.
+pub(crate) fn can_reuse_with_inputs(prior: &SourceQueryArtifact, inputs: &Inputs) -> bool {
+    if prior.profile != SOURCE_QUERY_PROFILE
+        || prior.aggregate_truncated
+        || inputs.aggregate_truncated
+        || prior.owners.iter().any(|owner| {
+            owner.parameter_bindings.as_ref().is_some_and(|bindings| {
+                bindings
+                    .reasons
+                    .contains(&ParameterBindingOmission::AggregateLimit)
+            })
+        })
+    {
+        return false;
+    }
+    let mut bound = 0_usize;
+    let mut sites = 0_usize;
+    let mut prior_file_bytes = BTreeMap::<&str, usize>::new();
+    for owner in &prior.owners {
+        let parameter_sites = owner
+            .parameter_bindings
+            .as_ref()
+            .map_or(&[][..], |bindings| bindings.sites.as_slice());
+        let bytes = owner
+            .identifiers
+            .iter()
+            .chain(&owner.comments)
+            .chain(parameter_sites)
+            .fold(0_usize, |sum, site| sum.saturating_add(site.text.len()));
+        let file_bytes = prior_file_bytes.entry(&owner.source.file).or_default();
+        *file_bytes = file_bytes.saturating_add(bytes);
+        if *file_bytes > SOURCE_QUERY_MAX_FILE_TEXT_BYTES {
+            return false;
+        }
+        if !inputs.files.contains_key(&owner.source.file) {
+            sites = sites
+                .saturating_add(owner.identifiers.len())
+                .saturating_add(owner.comments.len())
+                .saturating_add(parameter_sites.len());
+        }
+    }
+    for file in &prior.files {
+        if !inputs.files.contains_key(&file.file) {
+            bound = bound.saturating_add(SOURCE_QUERY_MAX_FILE_TEXT_BYTES);
+        }
+    }
+    for file in inputs.files.values() {
+        if file.projection.scopes.iter().any(|scope| {
+            scope
+                .parameter_bindings
+                .reasons
+                .contains(&raw::ParameterBindingOmission::AggregateLimit)
+        }) {
+            return false;
+        }
+        bound = bound
+            .saturating_add(file.projection.retained_bytes)
+            .saturating_add(file.projection.retained_parameter_bytes);
+        for scope in &file.projection.scopes {
+            sites = sites
+                .saturating_add(scope.comments.len())
+                .saturating_add(scope.parameter_bindings.sites.len());
+            for occurrences in scope.names.values() {
+                sites = sites.saturating_add(occurrences.len());
+            }
+        }
+    }
+    bound <= SOURCE_QUERY_MAX_TEXT_BYTES && sites <= SOURCE_QUERY_MAX_SITES
+}
+
+#[cfg(test)]
+mod tests;
+
+fn parameter_bindings(file: &str, scope: &raw::Scope) -> Result<ParameterBindings, CoreError> {
+    use raw::ParameterBindingOmission as R;
+    let bindings = &scope.parameter_bindings;
+    if bindings.sites.len() > SOURCE_QUERY_MAX_PARAMETER_SITES || bindings.omitted_sites > 200_000 {
+        return Err(invalid("oversized parameter binding evidence"));
+    }
+    let mut sites = Vec::new();
+    for raw_site in &bindings.sites {
+        if raw_site.start < scope.callable_start || raw_site.end > scope.callable_end {
+            return Err(invalid(
+                "parameter binding escapes its exact callable syntax",
+            ));
+        }
+        sites.push(site(file, raw_site)?);
+    }
+    Ok(ParameterBindings {
+        sites,
+        status: match bindings.status {
+            raw::ParameterBindingStatus::Complete => ParameterBindingStatus::Complete,
+            raw::ParameterBindingStatus::Partial => ParameterBindingStatus::Partial,
+            raw::ParameterBindingStatus::Unsupported => ParameterBindingStatus::Unsupported,
+        },
+        omitted_sites: bindings.omitted_sites,
+        reasons: bindings
+            .reasons
+            .iter()
+            .map(|reason| match reason {
+                R::UnsupportedPattern => ParameterBindingOmission::UnsupportedPattern,
+                R::UnsupportedReceiver => ParameterBindingOmission::UnsupportedReceiver,
+                R::UnsupportedSpelling => ParameterBindingOmission::UnsupportedSpelling,
+                R::SyntaxRecovery => ParameterBindingOmission::SyntaxRecovery,
+                R::TraversalLimit => ParameterBindingOmission::TraversalLimit,
+                R::SiteLimit => ParameterBindingOmission::SiteLimit,
+                R::TextLimit => ParameterBindingOmission::TextLimit,
+                R::AggregateLimit => ParameterBindingOmission::AggregateLimit,
+            })
+            .collect(),
+    })
 }
 
 fn enclosed(owner: &SourceAnchor, site: &SourceAnchor) -> bool {
@@ -200,6 +450,23 @@ pub(crate) fn publish(
     let mut result = SourceQueryArtifact::empty(digest.to_owned());
     result.aggregate_truncated = inputs.aggregate_truncated;
     if let Some(prior) = prior {
+        if prior.profile != SOURCE_QUERY_PROFILE
+            && prior.files.iter().any(|file| {
+                !inputs.files.contains_key(&file.file) && files.contains_key(file.file.as_str())
+            })
+        {
+            return Err(invalid(
+                "older source-query evidence lacks parameter provenance; run compass update --force",
+            ));
+        }
+        if prior.files.iter().any(|file| {
+            !inputs.files.contains_key(&file.file) && files.contains_key(file.file.as_str())
+        }) && !can_reuse_with_inputs(&prior, inputs)
+        {
+            return Err(invalid(
+                "mixed source-query evidence may exceed shared role limits; run compass update --force",
+            ));
+        }
         for file in prior.files {
             if !inputs.files.contains_key(&file.file)
                 && files.get(file.file.as_str()).is_some_and(|f| {
@@ -230,6 +497,15 @@ pub(crate) fn publish(
         }
     }
 
+    // Role evidence is allocated only after all original lexical channels.
+    let mut pending_parameters = BTreeMap::new();
+    for owner in &mut result.owners {
+        let bindings = owner
+            .parameter_bindings
+            .take()
+            .ok_or_else(|| invalid("current source owner lacks parameter coverage"))?;
+        pending_parameters.insert(owner.node_id.clone(), bindings);
+    }
     let mut retained_sites = result
         .owners
         .iter()
@@ -258,8 +534,10 @@ pub(crate) fn publish(
             continue;
         };
         if file.content_digest != input.source_digest || file.byte_size != input.byte_size {
-            return Err(invalid(
-                "source-query extraction digest does not match published file inventory",
+            return Err(inventory_mismatch(
+                &file.path,
+                input.byte_size,
+                file.byte_size,
             ));
         }
         let mut summary = SourceQueryFile {
@@ -342,6 +620,15 @@ pub(crate) fn publish(
             }
             retained_sites += count;
             retained_text += bytes;
+            if pending_parameters
+                .insert(
+                    node.id.clone(),
+                    parameter_bindings(&input.source_file, scope)?,
+                )
+                .is_some()
+            {
+                return Err(invalid("duplicate parameter owner identity"));
+            }
             result.owners.push(SourceQueryOwner {
                 node_id: node.id.clone(),
                 source: node
@@ -351,6 +638,7 @@ pub(crate) fn publish(
                 source_digest: input.source_digest.clone(),
                 identifiers,
                 comments,
+                parameter_bindings: None,
                 code_windows,
                 omitted_code_windows,
                 nested_contexts: Vec::new(),
@@ -529,6 +817,28 @@ pub(crate) fn publish(
     }
     result.files.sort_by(|a, b| a.file.cmp(&b.file));
     result.owners.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    for owner in &mut result.owners {
+        let mut bindings = pending_parameters
+            .remove(&owner.node_id)
+            .ok_or_else(|| invalid("parameter coverage lost its exact owner"))?;
+        bindings.sites.retain(|site| {
+            if retained_sites >= SOURCE_QUERY_MAX_SITES
+                || retained_text.saturating_add(site.text.len()) > SOURCE_QUERY_MAX_TEXT_BYTES
+            {
+                bindings.status = ParameterBindingStatus::Partial;
+                bindings.omitted_sites = bindings.omitted_sites.saturating_add(1);
+                bindings
+                    .reasons
+                    .insert(ParameterBindingOmission::AggregateLimit);
+                false
+            } else {
+                retained_sites += 1;
+                retained_text += site.text.len();
+                true
+            }
+        });
+        owner.parameter_bindings = Some(bindings);
+    }
     let summaries = result
         .files
         .iter()

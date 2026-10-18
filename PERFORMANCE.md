@@ -1,5 +1,19 @@
 # Compass performance qualification
 
+
+## Parameter-evidence update paths
+
+Source-query profile6 keeps the existing per-file and aggregate text/site caps.
+A fact-neutral mixed update can reuse prior role evidence only when bounded
+accounting rules out shared text/site pruning. Each unchanged evidence file is
+charged its full 1 MiB native text allowance in this conservative eligibility
+check, including zero-owner files. A possible limit transition, or previously
+aggregate-clipped roles, uses the existing complete cached/fresh extraction
+path. Unchanged cache entries remain reusable there. This can forgo the narrow
+fact-neutral fast path; no latency improvement or non-regression is claimed
+for profile6. Prior measurements do not qualify the new path without a fresh
+source-frozen performance run.
+
 Compass performance is measured against Compass-owned baselines. Qualification
 must never trade away graph correctness, deterministic output, resource bounds,
 or complete error reporting.

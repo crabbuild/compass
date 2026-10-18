@@ -4,10 +4,13 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use tree_sitter::Node;
 
+mod parameters;
+pub use parameters::{ParameterBindingOmission, ParameterBindingStatus, ParameterBindings};
+
 /// Reserved per-file extraction metadata. This is query evidence, not semantic facts.
 pub const EXTRACTION_EXTENSION: &str = "_compass_source_query_evidence";
 pub const EXTRACTION_SCHEMA: &str = "compass.source-query.extraction/1";
-pub const PROJECTION_PROFILE: &str = "source-query/5-owned-code-lexemes";
+pub const PROJECTION_PROFILE: &str = "source-query/6-parameter-bindings";
 
 /// Byte columns and zero-based rows, matching Tree-sitter's source positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +146,7 @@ pub struct Scope {
     pub end_point: Point,
     pub names: BTreeMap<String, Vec<Site>>,
     pub comments: Vec<Site>,
+    pub parameter_bindings: ParameterBindings,
     #[serde(default)]
     pub code_windows: Vec<Site>,
     #[serde(default)]
@@ -161,6 +165,8 @@ pub struct Projection {
     pub truncated: bool,
     #[serde(default)]
     pub retained_code_bytes: usize,
+    #[serde(default)]
+    pub retained_parameter_bytes: usize,
 }
 fn callable(language: &str, kind: &str) -> bool {
     match language {
@@ -350,6 +356,7 @@ fn project(
     }
     let mut result = Projection::default();
     let mut code_visits_left = limits.code_visits;
+    let mut parameter_roots = Vec::new();
     let mut cursor = root.walk();
     let mut owner = None::<usize>;
     let mut ancestors = Vec::<Option<usize>>::new();
@@ -388,12 +395,14 @@ fn project(
                     end_point: Point::from(node.end_position()),
                     names: BTreeMap::new(),
                     comments: Vec::new(),
+                    parameter_bindings: ParameterBindings::default(),
                     code_windows: Vec::new(),
                     omitted_code_windows: 0,
                     omitted_sites: 0,
                     truncated: name_too_large,
                     name_span: name_node.map(|name| (name.start_byte(), name.end_byte())),
                 });
+                parameter_roots.push(node);
                 child_owner = Some(at);
             }
         }
@@ -505,7 +514,13 @@ fn project(
                         scope.truncated = true;
                     }
                 }
-                return Ok(result);
+                return Ok(finish_parameters(
+                    result,
+                    &parameter_roots,
+                    source,
+                    language,
+                    limits,
+                ));
             }
             owner = ancestors.pop().flatten();
         }
@@ -513,7 +528,36 @@ fn project(
     for scope in &mut result.scopes {
         scope.truncated = true;
     }
-    Ok(result)
+    Ok(finish_parameters(
+        result,
+        &parameter_roots,
+        source,
+        language,
+        limits,
+    ))
+}
+
+fn finish_parameters(
+    mut projection: Projection,
+    roots: &[Node<'_>],
+    source: &[u8],
+    language: &str,
+    limits: Limits,
+) -> Projection {
+    let mut visits = limits.visits.saturating_sub(projection.visits);
+    let initial_visits = visits;
+    let mut text = limits
+        .retained_bytes
+        .saturating_sub(projection.retained_bytes)
+        .min(parameters::MAX_PARAMETER_FILE_BYTES);
+    let initial_text = text;
+    for (scope, root) in projection.scopes.iter_mut().zip(roots) {
+        scope.parameter_bindings =
+            parameters::collect(*root, source, language, &mut visits, &mut text);
+    }
+    projection.visits += initial_visits - visits;
+    projection.retained_parameter_bytes = initial_text - text;
+    projection
 }
 
 #[cfg(test)]
@@ -531,6 +575,398 @@ mod tests {
         }
         Ok(tree)
     }
+    #[test]
+    fn parameter_spelling_support_is_explicit_and_keeps_source_bytes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (language, source, expected) in [
+            (
+                "python",
+                "def probe(café, e\u{301}clair):\n    pass\n",
+                vec!["café", "e\u{301}clair"],
+            ),
+            ("rust", "fn probe(r#type: Value) {}", vec!["r#type"]),
+            (
+                "go",
+                "package p\nfunc probe(κλειδί Value) {}",
+                vec!["κλειδί"],
+            ),
+            (
+                "typescript",
+                "function probe($block: Value) {}",
+                vec!["$block"],
+            ),
+            (
+                "tsx",
+                "const probe = ($permit: Value) => <Panel/>;",
+                vec!["$permit"],
+            ),
+            ("python", "def probe(_):\n    return _\n", vec!["_"]),
+            (
+                "typescript",
+                "function probe(_: Value) { return _; }",
+                vec!["_"],
+            ),
+            (
+                "tsx",
+                "const probe = (_: Value) => <Panel item={_}/>;",
+                vec!["_"],
+            ),
+            ("go", "package p\nfunc probe(_ Value) {}", vec![]),
+            ("rust", "fn probe(_: Value) {}", vec![]),
+        ] {
+            let tree = parse(source, language)?;
+            let p = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let bindings = &p
+                .scopes
+                .first()
+                .ok_or("missing callable")?
+                .parameter_bindings;
+            assert_eq!(
+                bindings.status,
+                super::ParameterBindingStatus::Complete,
+                "{language}"
+            );
+            assert_eq!(
+                bindings
+                    .sites
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{language}"
+            );
+            for site in &bindings.sites {
+                assert_eq!(
+                    &source.as_bytes()[site.start..site.end],
+                    site.text.as_bytes()
+                );
+            }
+        }
+        let source = "function probe(\\u0062lock: Value) {}";
+        let tree = parse(source, "typescript")?;
+        let p = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "typescript",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        let bindings = &p
+            .scopes
+            .first()
+            .ok_or("missing callable")?
+            .parameter_bindings;
+        assert!(bindings.sites.is_empty());
+        assert_eq!(bindings.status, super::ParameterBindingStatus::Partial);
+        assert_eq!(bindings.omitted_sites, 1);
+        assert!(
+            bindings
+                .reasons
+                .contains(&super::ParameterBindingOmission::UnsupportedSpelling)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parameter_binding_sites_are_typed_and_separate_from_identifier_dedup()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let cases = [
+            (
+                "python",
+                "def probe(x=use(block), block: Permit=0, *rest, **kwargs):\n    return block\n",
+                vec!["x", "block", "rest", "kwargs"],
+            ),
+            (
+                "rust",
+                "fn probe(mut block: Block, permit: &Permit) {}",
+                vec!["block", "permit"],
+            ),
+            (
+                "go",
+                "package p\nfunc (r *Receiver) probe(block, permit Block, permits ...Permit) (result Result) { return }",
+                vec!["block", "permit", "permits"],
+            ),
+            (
+                "typescript",
+                "function probe(block: Block = fallback, permit?: Permit, ...rest: Item[]) {}",
+                vec!["block", "permit", "rest"],
+            ),
+            (
+                "tsx",
+                "const probe = (block: Block, permit = fallback) => block;",
+                vec!["block", "permit"],
+            ),
+        ];
+        let mut rows = Vec::new();
+        for (language, source, expected) in cases {
+            let tree = parse(source, language)?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            rows.push((
+                language,
+                source,
+                expected,
+                serde_json::to_value(projection)?,
+            ));
+        }
+        for (language, source, expected, value) in rows {
+            let bindings = value["scopes"][0]
+                .get("parameterBindings")
+                .ok_or("typed parameter bindings absent")?;
+            assert_eq!(bindings["status"], "complete", "{language}: {bindings}");
+            let sites = bindings["sites"]
+                .as_array()
+                .ok_or("parameter sites missing")?;
+            assert_eq!(
+                sites
+                    .iter()
+                    .map(|s| s["text"].as_str().unwrap_or_default())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{language}"
+            );
+            for site in sites {
+                let start = site["start"].as_u64().ok_or("missing start")? as usize;
+                let end = site["end"].as_u64().ok_or("missing end")? as usize;
+                assert_eq!(
+                    &source[start..end],
+                    site["text"].as_str().ok_or("missing text")?
+                );
+            }
+            if language == "python" {
+                let generic = &value["scopes"][0]["names"]["block"][0];
+                let binding = sites
+                    .iter()
+                    .find(|s| s["text"] == "block")
+                    .ok_or("missing block binding")?;
+                assert!(
+                    generic["start"].as_u64() < binding["start"].as_u64(),
+                    "default reference must precede real binding"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parameter_coverage_preserves_lexical_priority_and_reports_unknown_suffixes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::{ParameterBindingOmission as R, ParameterBindingStatus as S};
+        let source = "def probe(block):\n    return block\n";
+        let tree = parse(source, "python")?;
+        let full = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        let no_spare = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits {
+                retained_bytes: full.retained_bytes,
+                ..Limits::default()
+            },
+        )
+        .map_err(std::io::Error::other)?;
+        assert_eq!(full.scopes[0].names, no_spare.scopes[0].names);
+        assert!(!no_spare.truncated && !no_spare.scopes[0].truncated);
+        assert_eq!(no_spare.scopes[0].parameter_bindings.status, S::Partial);
+        assert!(
+            no_spare.scopes[0]
+                .parameter_bindings
+                .reasons
+                .contains(&R::TextLimit)
+        );
+        let no_visits = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits {
+                visits: full.visits - 3,
+                ..Limits::default()
+            },
+        )
+        .map_err(std::io::Error::other)?;
+        assert_eq!(
+            no_visits.scopes[0].parameter_bindings.status,
+            S::Unsupported
+        );
+        assert!(
+            no_visits.scopes[0]
+                .parameter_bindings
+                .reasons
+                .contains(&R::TraversalLimit)
+        );
+        assert!(no_visits.scopes[0].parameter_bindings.sites.is_empty());
+        let source = format!(
+            "def probe({}):\n    pass\n",
+            (0..66)
+                .map(|i| format!("arg{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let tree = parse(&source, "python")?;
+        let p = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        assert_eq!(p.scopes[0].parameter_bindings.sites.len(), 64);
+        assert_eq!(p.scopes[0].parameter_bindings.omitted_sites, 2);
+        assert_eq!(p.scopes[0].parameter_bindings.status, S::Partial);
+        assert!(
+            p.scopes[0]
+                .parameter_bindings
+                .reasons
+                .contains(&R::SiteLimit)
+        );
+        let source = format!("def probe({}):\n    pass\n", "é".repeat(129));
+        let tree = parse(&source, "python")?;
+        let p = project(
+            tree.root_node(),
+            source.as_bytes(),
+            "python",
+            Limits::default(),
+        )
+        .map_err(std::io::Error::other)?;
+        assert!(p.scopes[0].parameter_bindings.sites.is_empty());
+        assert_eq!(p.scopes[0].parameter_bindings.omitted_sites, 1);
+        assert!(
+            p.scopes[0]
+                .parameter_bindings
+                .reasons
+                .contains(&R::TextLimit)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parameter_roles_exclude_types_defaults_returns_and_nested_bindings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::ParameterBindingStatus as S;
+        for (language, source, expected, partial) in [
+            (
+                "python",
+                "def probe(value: Block = factory(permit)) -> Return:\n    local = value\n    return local\n",
+                vec!["value"],
+                false,
+            ),
+            (
+                "python",
+                "probe = lambda block=default: block",
+                vec!["block"],
+                false,
+            ),
+            (
+                "rust",
+                "fn probe(callback: fn(block: Block) -> Permit) {}",
+                vec!["callback"],
+                false,
+            ),
+            (
+                "rust",
+                "fn probe((block, permit): (Block, Permit)) {}",
+                vec![],
+                true,
+            ),
+            (
+                "rust",
+                "impl T { fn probe(&self, block: Block) {} }",
+                vec!["block"],
+                true,
+            ),
+            (
+                "rust",
+                "fn outer() { let probe = |block: Block, permit| block; }",
+                vec![],
+                false,
+            ),
+            (
+                "go",
+                "package p\nfunc probe(Block, Permit) (result Result) { return }",
+                vec![],
+                false,
+            ),
+            (
+                "typescript",
+                "function probe(callback: (block: Block) => Permit) {}",
+                vec!["callback"],
+                false,
+            ),
+            (
+                "typescript",
+                "const probe = block => block;",
+                vec!["block"],
+                false,
+            ),
+            (
+                "tsx",
+                "const probe = (block: Block = fallback) => <Panel item={block}/>;",
+                vec!["block"],
+                false,
+            ),
+            (
+                "typescript",
+                "function probe({block: permit, shorthand}: Params) {}",
+                vec![],
+                true,
+            ),
+        ] {
+            let tree = parse(source, language)?;
+            let p = project(
+                tree.root_node(),
+                source.as_bytes(),
+                language,
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = p.scopes.first().ok_or("missing role scope")?;
+            assert_eq!(
+                owner
+                    .parameter_bindings
+                    .sites
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{language}: {source}"
+            );
+            assert_eq!(
+                owner.parameter_bindings.status == S::Partial,
+                partial,
+                "{language}: {source}"
+            );
+            if source.contains("let probe = |") {
+                assert_eq!(
+                    p.scopes[1]
+                        .parameter_bindings
+                        .sites
+                        .iter()
+                        .map(|s| s.text.as_str())
+                        .collect::<Vec<_>>(),
+                    ["block", "permit"]
+                );
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn default_occurrence_budget_preserves_terms_and_code_without_duplicate_sites()
     -> Result<(), Box<dyn std::error::Error>> {

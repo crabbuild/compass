@@ -243,41 +243,69 @@ fn code_window_omissions_preserve_complete_identifier_preferences() -> Result<()
             .truncated,
         "original identifier/comment fields must stay complete"
     );
+    let mut partial = body.clone();
+    for owner in &mut partial.owners {
+        let bindings = owner
+            .parameter_bindings
+            .as_mut()
+            .ok_or("missing current coverage")?;
+        bindings.sites.clear();
+        bindings.status = compass_model::source_query::ParameterBindingStatus::Partial;
+        bindings.omitted_sites = 0;
+        bindings.reasons = std::collections::BTreeSet::from([
+            compass_model::source_query::ParameterBindingOmission::TraversalLimit,
+        ]);
+    }
+    partial.validate()?;
+    let mut historical = body.clone();
+    historical.profile = compass_model::source_query::SOURCE_QUERY_PROFILE_V5.to_owned();
+    for owner in &mut historical.owners {
+        owner.parameter_bindings = None;
+    }
+    historical.validate()?;
+    let variants = [
+        serde_json::to_vec(&body)?,
+        serde_json::to_vec(&partial)?,
+        serde_json::to_vec(&historical)?,
+    ];
     let mut expected = None;
     for mode in [EngineSelection::Json, EngineSelection::Store] {
-        let engine = open_with_engine(
-            &graph,
-            None,
-            &d.path().join(format!("query-{mode:?}")),
-            mode,
-        )?;
-        let mut query = request();
-        query.question = "Where are session values encoded?".to_owned();
-        let answer = engine.discover_ranked(query)?;
-        let candidate = answer
-            .candidates
-            .iter()
-            .find(|c| c.node.id == node.id)
-            .ok_or("source-owned implementation missing")?;
-        assert!(
-            candidate
-                .reasons
+        for bytes in &variants {
+            fs::write(built.output_dir.join(SOURCE_QUERY_FILE), bytes)?;
+            let engine = open_with_engine(
+                &graph,
+                None,
+                &d.path().join(format!("query-{mode:?}")),
+                mode,
+            )?;
+            let mut query = request();
+            query.question = "Where are session values encoded?".to_owned();
+            let answer = engine.discover_ranked(query)?;
+            let candidate = answer
+                .candidates
                 .iter()
-                .any(|r| r.contains("Implementation-local operation identifiers")),
-            "code-only truncation must not erase complete identifier inspection: {candidate:?}"
-        );
-        assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
-        assert!(!candidate.matched_fields.iter().any(|f| f == "body_code"));
-        assert!(
-            candidate
-                .reasons
-                .iter()
-                .any(|r| r.contains("windows were omitted"))
-        );
-        if let Some(expected) = &expected {
-            assert_eq!(&answer.candidates, expected);
-        } else {
-            expected = Some(answer.candidates);
+                .find(|c| c.node.id == node.id)
+                .ok_or("source-owned implementation missing")?;
+            assert!(
+                candidate
+                    .reasons
+                    .iter()
+                    .any(|r| r.contains("Implementation-local operation identifiers")),
+                "code-only truncation must not erase complete identifier inspection: {candidate:?}"
+            );
+            assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+            assert!(!candidate.matched_fields.iter().any(|f| f == "body_code"));
+            assert!(
+                candidate
+                    .reasons
+                    .iter()
+                    .any(|r| r.contains("windows were omitted"))
+            );
+            if let Some(expected) = &expected {
+                assert_eq!(&answer.candidates, expected);
+            } else {
+                expected = Some(answer.candidates);
+            }
         }
     }
     Ok(())
@@ -392,6 +420,10 @@ fn historical_code_windows_do_not_gain_literal_recall_or_reuse_current_answers()
     let original = fs::read(&path)?;
     let mut legacy: SourceQueryArtifact = serde_json::from_slice(&original)?;
     legacy.profile = SOURCE_QUERY_PROFILE_V4.to_owned();
+    legacy
+        .owners
+        .iter_mut()
+        .for_each(|owner| owner.parameter_bindings = None);
     legacy.additional_document_frequencies.clear();
     for owner in &legacy.owners {
         let node = graph
@@ -506,6 +538,7 @@ fn schema_valid_non_callable_body_owners_are_rejected() -> Result<(), Box<dyn Er
         source: node.source.clone().ok_or("missing struct source")?,
         source_digest: artifact.files[0].source_digest.clone(),
         identifiers: Vec::new(),
+        parameter_bindings: Some(Default::default()),
         comments: vec![SourceQuerySite {
             source: SourceAnchor {
                 file: "sample.rs".into(),
@@ -629,6 +662,12 @@ fn immutable_legacy_projection_is_readable_without_rewriting_on_both_backends()
     }
     for profile in [SOURCE_QUERY_PROFILE_V1, SOURCE_QUERY_PROFILE_V2] {
         artifact.profile = profile.to_owned();
+        if profile != SOURCE_QUERY_PROFILE {
+            artifact
+                .owners
+                .iter_mut()
+                .for_each(|owner| owner.parameter_bindings = None);
+        }
         artifact.validate()?;
         let legacy = serde_json::to_vec(&artifact)?;
         fs::write(&path, &legacy)?;
@@ -665,6 +704,145 @@ fn immutable_legacy_projection_is_readable_without_rewriting_on_both_backends()
         };
         assert_eq!(error.kind(), QueryErrorKind::UnsupportedSchema);
         assert_eq!(error.code(), "unsupported_source_query_profile");
+    }
+    Ok(())
+}
+
+#[test]
+fn parameter_binding_publication_keeps_v5_queries_and_exact_owners() -> Result<(), Box<dyn Error>> {
+    use compass_model::source_query::{
+        ParameterBindingStatus, SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V5,
+    };
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    for (file, source) in [
+        (
+            "sample.py",
+            "def probe(x=use(block), block: Permit=0):\n    return block\n",
+        ),
+        ("sample.rs", "fn probe(block: Block, permit: Permit) {}"),
+        ("sample.go", "package p\nfunc probe(block, permit Block) {}"),
+        (
+            "sample.ts",
+            "function probe(block: Block = fallback, permit?: Permit) {}",
+        ),
+        (
+            "sample.tsx",
+            "const probe = (block: Block, permit = fallback) => block;",
+        ),
+    ] {
+        fs::write(root.join(file), source)?;
+    }
+    let mut o = options(&root, &d.path().join("out"));
+    o.graph_storage = GraphStorage::Sqlite;
+    let built = build_local_graph(&o)?;
+    let graph_path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&graph_path)?;
+    let sidecar = built.output_dir.join(SOURCE_QUERY_FILE);
+    let original = fs::read(&sidecar)?;
+    let current: SourceQueryArtifact = serde_json::from_slice(&original)?;
+    assert_eq!(current.profile, SOURCE_QUERY_PROFILE);
+    current.validate()?;
+    for file in [
+        "sample.py",
+        "sample.rs",
+        "sample.go",
+        "sample.ts",
+        "sample.tsx",
+    ] {
+        let node = graph
+            .nodes
+            .iter()
+            .find(|n| n.kind.is_callable() && n.source.as_ref().is_some_and(|s| s.file == file))
+            .ok_or("missing native owner")?;
+        let owner = current
+            .owners
+            .iter()
+            .find(|o| o.node_id == node.id)
+            .ok_or("missing exact published owner")?;
+        assert_eq!(
+            owner.source,
+            *node.source.as_ref().ok_or("missing node source")?
+        );
+        let bindings = owner
+            .parameter_bindings
+            .as_ref()
+            .ok_or("missing explicit parameter coverage")?;
+        assert_eq!(
+            bindings.status,
+            ParameterBindingStatus::Complete,
+            "{file}: {bindings:?}"
+        );
+        let expected = if file == "sample.py" {
+            vec!["x", "block"]
+        } else {
+            vec!["block", "permit"]
+        };
+        assert_eq!(
+            bindings
+                .sites
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{file}"
+        );
+        let source = fs::read(root.join(file))?;
+        for site in &bindings.sites {
+            assert_eq!(site.source.file, file);
+            assert_eq!(
+                &source[site.source.start_byte as usize..site.source.end_byte as usize],
+                site.text.as_bytes()
+            );
+        }
+        if file == "sample.py" {
+            let ordinary = owner
+                .identifiers
+                .iter()
+                .find(|s| s.text == "block")
+                .ok_or("missing generic spelling")?;
+            assert!(ordinary.source.start_byte < bindings.sites[1].source.start_byte);
+        }
+    }
+    let mut legacy = current.clone();
+    legacy.profile = SOURCE_QUERY_PROFILE_V5.to_owned();
+    for owner in &mut legacy.owners {
+        owner.parameter_bindings = None;
+    }
+    legacy.validate()?;
+    let legacy_bytes = serde_json::to_vec(&legacy)?;
+    let mut expected_candidates = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let mut expected = None;
+        for bytes in [&original, &legacy_bytes, &original] {
+            fs::write(&sidecar, bytes)?;
+            let engine = open_with_engine(
+                &graph_path,
+                None,
+                &d.path().join(format!("cache-{mode:?}")),
+                mode,
+            )?;
+            let mut query = request();
+            query.question = "Where are block values decoded?".to_owned();
+            let answer = engine.discover_ranked(query)?;
+            assert!(!answer.candidates.is_empty());
+            if let Some(expected_candidates) = &expected_candidates {
+                assert_eq!(&answer.candidates, expected_candidates);
+            } else {
+                expected_candidates = Some(answer.candidates.clone());
+            }
+            if let Some(expected) = &expected {
+                assert_eq!(&answer, expected);
+            } else {
+                expected = Some(answer);
+            }
+            assert_eq!(
+                &fs::read(&sidecar)?,
+                bytes,
+                "reader rewrote historical profile"
+            );
+        }
     }
     Ok(())
 }

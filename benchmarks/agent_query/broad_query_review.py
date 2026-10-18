@@ -48,6 +48,7 @@ SOURCE_QUERY_PROFILES = (
     "source-query/3-owned-code-windows",
     "source-query/4-nested-callable-context",
     "source-query/5-owned-code-lexemes",
+    "source-query/6-parameter-bindings",
 )
 MAX_TASKS = 2048
 MAX_CANDIDATES = 512

@@ -103,6 +103,7 @@ scip = "=0.9.0"
 thiserror = "2"
 toml = { version = "1.1.3", features = ["preserve_order"] }
 unicode-normalization = "0.1"
+unicode-ident = "1.0.24"
 unicode-casefold = "0.2"
 unicode-properties = { version = "0.1.4", features = ["general-category"] }
 tempfile = "3"

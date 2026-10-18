@@ -19,6 +19,7 @@ rayon.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
+unicode-ident.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

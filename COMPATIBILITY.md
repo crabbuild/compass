@@ -1,8 +1,53 @@
 # Compass compatibility
 
+## Parameter-binding source evidence
+
+Current source evidence uses `source-query/6-parameter-bindings`. Each exact
+callable owner has a separate ordered `parameterBindings` list with whole source
+identifiers and byte/line/column anchors. Coverage is `complete`, `partial` or
+`unsupported`; `omittedSites` counts known omissions only, with finite reasons
+for unsupported syntax/spelling, recovery and resource limits. Unknown suffixes have no
+invented omission count. This metadata is not another retrieval or document-
+frequency field and does not prove behavior or create graph nodes or edges.
+
+The supported spelling shape is a whole Unicode XID identifier, with TypeScript
+`$` and Rust `r#` forms. Escaped JavaScript spellings are explicitly omitted.
+`unicode-ident` supplies bounded native Unicode checks; it was already a locked
+transitive dependency and adds no runtime or network boundary.
+
+Bindings come from direct native AST parameter fields in Python, Rust, Go and
+TypeScript/TSX. Destructuring and Rust receivers are conservatively partial.
+Defaults, annotations, result names and nested callable parameters cannot supply
+bindings to an enclosing owner. Generic lexical evidence receives its existing
+budgets first. Parameter evidence uses spare traversal/text capacity, at most
+64 bindings per owner, 256 UTF-8 bytes per whole identifier and 256 KiB per file,
+within the existing file and artifact aggregate limits. Parameter omissions do
+not make identifier/comment coverage incomplete. `_` remains a binding in Python
+and TypeScript/TSX; Go blank identifiers and Rust wildcard patterns are excluded.
+
+Fact-neutral incremental publication uses prior owners only when a conservative
+bound rules out shared text/site exhaustion. Every unchanged evidence file,
+including files without published owners, is charged its full 1 MiB native text
+allowance for this check. Otherwise update uses the existing full cached/fresh
+extraction path. Previously aggregate-clipped role evidence is also refreshed
+through that path, allowing deletions to release capacity deterministically.
+This may reduce fast-path reuse; it changes no source, memory or artifact limit
+and makes no update-latency claim. Successful early source reads retain their
+exact digest/size through fallback, even when the full stage loads their newly
+cached extraction. Later fresh reads supersede those digests; publication still
+rejects any source-evidence/inventory disagreement.
+
+Profiles1–5 keep their original payload and search/statistical meaning, including
+profile5 code vocabulary. They supply no parameter-role provenance. Older
+readers reject profile6 explicitly. AST cache26 refreshes disposable extraction
+state on `compass update <root>`; use `compass update <root> --force` if current
+publication reports an older retained extraction. Historical realizations stay
+immutable. The developer collector accepts profiles1–6; freeze new actors and
+collect a new run rather than relabeling historical evidence.
+
 ## Owned code vocabulary
 
-Current source evidence uses `source-query/5-owned-code-lexemes`. A separate
+Profiles5 and6 support owned code vocabulary. A separate
 `body_code` field indexes bounded direct-owner code windows, including string
 literals. Words already present in the owner's identifier/comment fields are
 not counted again. Nested callable windows remain inspection-only. Matches
@@ -13,7 +58,7 @@ is not proof of behavior. Exact/qualified identities and graph facts are unchang
 Immutable profiles 1–4 keep their original identifier/comment-only retrieval and
 document-frequency meaning. Older readers reject profile 5 explicitly. Run
 `compass update <root>` with the new binary for current code vocabulary; no
-historical realization is rewritten. AST cache25 refreshes disposable per-file
+historical realization is rewritten. AST cache26 refreshes disposable per-file
 profile metadata, and `query-ranker/18-channel-completeness` refreshes responses.
 Code-only clipping remains visible without suppressing preferences supported by
 complete identifier/comment fields. Code-dependent matches retain their Low
@@ -23,7 +68,7 @@ code limits recall explicitly. Ranked JSON remains version4 with the additional
 matched-field label. No current source is read at query time.
 
 Retrieval covers retained windows; a literal-only body may have no window.
-The developer collector/assessor now accepts profiles 1–5. Freeze new actor
+The developer collector/assessor now accepts profiles 1–6. Freeze new actor
 hashes and collect a new run for profile5; historical captures remain unchanged.
 
 ## Graph coverage diagnostic projections

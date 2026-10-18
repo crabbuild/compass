@@ -32,6 +32,7 @@ tree-sitter-html.workspace = true
 tree-sitter-md.workspace = true
 tree-sitter-language-pack.workspace = true
 unicode-normalization.workspace = true
+unicode-ident.workspace = true
 unicode-casefold.workspace = true
 unicode-properties.workspace = true
 url.workspace = true
