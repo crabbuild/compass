@@ -21,6 +21,15 @@ layout remains visible and clearly owned.
 
 ## Developer comparison registrations
 
+For recapturing already exposed development questions, use the explicit
+version-2 [development calibration profile](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#exposed-development-calibration).
+Disclose author exposure, retain the linked original registration/run, freeze
+the selected question mapping, and obtain new independent source review bound
+to the exact prospective definitions. Supply the two `calibrationEvidence`
+references and freeze new actor hashes. This is a new ineligible diagnostic run,
+not a migration or regrading of historical reports. Heldout captures continue
+to require source-first output-blind authoring and untouched-source lineage.
+
 For a new broad-question experiment requiring equivalent implementation
 witnesses, opt into `compass.broad-query-registration/2` and predeclare reviewed
 `essentialFactGroups` using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#equivalent-implementation-witnesses).

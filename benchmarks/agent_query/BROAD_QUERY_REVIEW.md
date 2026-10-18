@@ -176,6 +176,87 @@ new confirmation; a result cannot silently change its frozen gold labels.
 
 ## Source registration contract
 
+### Exposed development calibration
+
+Version-2 registrations may explicitly opt into
+`compass.broad-query-development-calibration/1` to collect a new diagnostic run
+after the source author has seen earlier outputs. This is permanently
+superiority-ineligible. It does not turn an exposed question into confirmation,
+regrade an old report, approve new source labels, or establish statistical power.
+Unprofiled development and heldout captures retain the output-blind authoring
+requirement.
+
+The `developmentCalibration` envelope has exactly these fields:
+
+```json
+{
+  "schema": "compass.broad-query-development-calibration/1",
+  "purpose": "paired_development_calibration",
+  "priorOutputExposure": true,
+  "priorRegistrationSha256": "<64 lowercase hexadecimal characters>",
+  "priorRunSha256": "<different 64-character digest>",
+  "selection": [{"task": "current-id", "priorTask": "historical-id"}],
+  "selectionRationale": "Predeclared corpus, denominator and excluded-task scope."
+}
+```
+
+Require `designation: development`, `qualificationEligible: false`, a named
+`sourceReview.author`, and `sourceReview.blindToOutputs: false`. Unknown profile
+versions/fields, version-1 opt-ins and conflicting eligibility flags fail.
+Selection covers every current task exactly once, with no historical task
+reused. It need not include every historical task. Disclose the selection
+denominator and exclusions; selection is prospective only for the new run,
+and is neither newly blinded nor necessarily representative.
+
+Capture input and review manifest contain `calibrationEvidence`, mapping exactly
+the two digests to hash-bound artifact references (absolute inputs, contained
+bundle references). The historical run must use the supported capture schema
+and bind that exact original registration digest. Its recorded chronology must
+satisfy `prior.frozenAt < priorRun.startedAt <= priorRun.completedAt < frozenAt`.
+Every selected historical question has exactly one observation for each of the
+two tools and two arms. Current/historical question, kind and expected disposition
+must match exactly, as must repository URL, commit and complete pinned file
+inventory. IDs can change. New oracle annotations may differ only after a new
+independent source review; those annotations never replace old outcomes.
+
+The existing independent source-review requirements still apply. Additionally,
+the reviewer attests `priorOutputsObserved: false` for substantive prior answers,
+normalizations and per-task scores in the selected corpus. Metadata-only joins
+are not answer observation. Freeze the review's UTC `reviewedAt <= frozenAt`
+and `sourceDefinitionSha256`: SHA-256 of UTF-8
+`json.dumps({"repositories": repositories, "tasks": tasks}, sort_keys=True,
+separators=(",", ":"), allow_nan=False)` using Python's default ASCII escaping.
+This binds exact prospective facts/groups, rather than transferring approval
+from a historical oracle. Disclose reviewer familiarity and method. Hashes do
+not authenticate independence or truthful blinding; labels removed after the
+reviewer knew an output's identity do not establish tool-label blindness.
+New answers still require independent source-aware, anonymized output review.
+
+The adapter verifies and copies the two metadata documents before any process,
+rechecks original paths and retained copies after provisional scoring, and
+publishes no `COMPLETE` receipt on drift. Each document is bounded to 64 MiB,
+128 MiB in aggregate. It does not recursively follow historical graph, answer,
+normalization or report references, or accept calibration chains as the parent.
+Keep the original report bundles and outcomes unchanged at their recorded
+locations; cite them separately as historical provenance. This metadata pair
+does not establish complete exposure history or independently authenticated
+chronology. Do not give reviewers embedded answer payloads under a metadata-only
+label. The assessor independently verifies the pair and selection, retains
+diagnostic failures/metrics, and always rejects a superiority claim.
+New runs also bind a contained `assessor` reference to the frozen scoring-code
+digest. This reference is required for this profile. Canonical reassessment
+verifies its bytes and frozen identity; legacy runs without the profile retain
+their original no-reference behavior. Publication rechecks both retained capture
+and assessor code copies, as well as their original paths, after provisional
+scoring and immediately before completion.
+
+Original/lookup panels preserve equal profile metadata excluding `selection`.
+Shared tasks have identical mappings; every panel's mapping must be the exact
+union mapping restricted to that panel's task IDs, independent of list order.
+The two evidence digests and checked bytes remain bound through projection and
+recomputation. New lookup wording is unsupported by this narrow profile unless
+that exact question already exists in the cited historical registration.
+
 Source witness text is one bounded UTF-8 line and may retain indentation tabs.
 Newlines, carriage returns, NUL and escape controls remain invalid. Witness text
 is preserved in the registration; other labels and identities still reject tabs.

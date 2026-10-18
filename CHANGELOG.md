@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add an explicit developer-only profile for recapturing exposed development
+  questions with linked historical metadata, exact question selection and newly
+  reviewed source definitions. Preserve old outcomes and heldout blinding;
+  calibration remains permanently ineligible for comparative superiority.
+  Recheck capture provenance after provisional scoring before completion.
+
 - Add opt-in version-2 developer query-evaluation registrations with predeclared
   groups of equivalent implementation witnesses. Preserve exact fact ownership,
   relationship evidence, legacy scoring and original/lookup panel bindings.

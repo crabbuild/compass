@@ -18,6 +18,20 @@ an empty answer does not imply complete indexing.
 
 ## Developer comparison-panel binding
 
+Version-2 developer registrations may opt into the bounded
+`compass.broad-query-development-calibration/1` profile for explicitly exposed
+development recaptures. It verifies a historical registration/run pair, exact
+question selection and prospective independent oracle review; it never qualifies
+for superiority. Capture/review inputs bind exactly two `calibrationEvidence`
+references. Panels preserve profile metadata and exact restricted selection
+maps. Unprofiled author-blinding and all heldout gates retain their contracts.
+New runs add an `assessor` artifact reference; calibration runs require it.
+Canonical review verifies its frozen hash and retained bytes. Legacy runs
+without the profile and reference remain readable. Both retained actor copies
+are rechecked after scoring before capture completion.
+Freeze current capture/assessor hashes for a new run; original reports and
+outcomes remain immutable. Native commands and graphs are unchanged.
+
 Developer source registrations may opt into
 `compass.broad-query-registration/2` and
 `compass.broad-query-essential-fact-groups/1` for predeclared alternative

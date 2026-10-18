@@ -29,6 +29,7 @@ from benchmarks.agent_query.runner import _node_anchor
 REGISTRATION_SCHEMA = "compass.broad-query-registration/1"
 REGISTRATION_SCHEMA_V2 = "compass.broad-query-registration/2"
 FACT_GROUP_SCHEMA = "compass.broad-query-essential-fact-groups/1"
+CALIBRATION_SCHEMA = "compass.broad-query-development-calibration/1"
 RUN_SCHEMA = "compass.broad-query-capture/1"
 NORMALIZED_SCHEMA = "compass.broad-query-normalized/1"
 REVIEW_SCHEMA = "compass.broad-query-judgments/1"
@@ -362,7 +363,132 @@ def validate_registration(raw: dict) -> dict:
         broad_repos = {task_map[t]["repository"] for t in cohorts["broadSuccess"]["taskIds"]}
         if graph_scope is not None and not broad_repos <= set(graph_scope):
             raise ValueError("graph quality claim scope must cover every broad comparison repository")
+    _calibration_profile(raw)
     return raw
+
+
+def _calibration_profile(registration: dict) -> dict | None:
+    """Explicit exposed-development opt-in; never an untouched-source attestation."""
+    if "developmentCalibration" not in registration:
+        return None
+    profile = _object(registration["developmentCalibration"], "development calibration")
+    if profile.get("schema") != CALIBRATION_SCHEMA:
+        raise ValueError("unsupported development calibration schema")
+    if set(profile) != {"schema", "purpose", "priorOutputExposure", "priorRegistrationSha256",
+                        "priorRunSha256", "selection", "selectionRationale"}:
+        raise ValueError("unsupported development calibration envelope")
+    source_review = _object(registration.get("sourceReview", {}), "development source review")
+    if (registration.get("schema") != REGISTRATION_SCHEMA_V2
+            or registration.get("designation") != "development"
+            or registration.get("qualificationEligible") is not False):
+        raise ValueError("development calibration requires explicitly ineligible version-2 development")
+    if (profile.get("purpose") != "paired_development_calibration"
+            or profile.get("priorOutputExposure") is not True
+            or source_review.get("blindToOutputs") is not False):
+        raise ValueError("development calibration must disclose prior author output exposure")
+    _text(source_review.get("author"), "exposed source author", 256)
+    _text(profile.get("selectionRationale"), "prospective development selection rationale", 16384)
+    digests = [_digest(profile.get(key), "prior calibration " + key)
+               for key in ("priorRegistrationSha256", "priorRunSha256")]
+    _unique(digests, "calibration evidence digests")
+    selected = _array(profile.get("selection"), "development task selection", MAX_TASKS, 1)
+    current, prior = [], []
+    for item in selected:
+        item = _object(item, "development task mapping")
+        if set(item) != {"task", "priorTask"}:
+            raise ValueError("unsupported development task mapping envelope")
+        current.append(_text(item.get("task"), "selected current task", 128))
+        prior.append(_text(item.get("priorTask"), "selected historical task", 128))
+    _unique(current, "selected current tasks")
+    _unique(prior, "selected historical tasks")
+    if set(current) != {t["id"] for t in registration["tasks"]}:
+        raise ValueError("development calibration selection must cover exactly the current tasks")
+    return profile
+
+
+def verify_calibration_evidence(registration: dict, references: dict, read) -> None:
+    """Verify the cited metadata join, without opening or regrading old answers.
+
+    These two artifacts are not a transitive bundle copy or a complete exposure
+    history. Reviewer independence and prior-result preservation remain explicit
+    attestations. An exposed diagnostic cannot establish superiority.
+    """
+    references = _object(references, "calibration evidence references")
+    profile = _calibration_profile(registration)
+    expected = ({profile[key] for key in ("priorRegistrationSha256", "priorRunSha256")}
+                if profile else set())
+    if set(references) != expected:
+        raise ValueError("calibration evidence references differ from frozen linked pair")
+    if profile is None:
+        return
+    documents = {}
+    total = 0
+    for digest in sorted(expected):
+        if _digest(_object(references[digest], "calibration evidence reference").get("sha256")) != digest:
+            raise ValueError("calibration evidence reference digest differs from linked pair")
+        data = read(references[digest])
+        total += len(data)
+        if total > 128 * 1024**2:
+            raise ValueError("calibration metadata aggregate byte limit exceeded")
+        if len(data) > MAX_JSON_BYTES or sha(data) != digest:
+            raise ValueError("calibration evidence digest mismatch or byte limit")
+        documents[digest] = _json(data)
+    prior = documents[profile["priorRegistrationSha256"]]
+    # Keep the evidence boundary finite: cite the original registration/run,
+    # rather than recursively following development reannotation chains.
+    if "developmentCalibration" in prior:
+        raise ValueError("calibration must cite an original registration, not a calibration chain")
+    validate_registration(prior)
+    run = documents[profile["priorRunSha256"]]
+    if (run.get("schema") != RUN_SCHEMA
+            or run.get("registrationSha256") != profile["priorRegistrationSha256"]):
+        raise ValueError("calibration historical run is not bound to the cited registration")
+    if not (_timestamp(prior["frozenAt"]) < _timestamp(run.get("startedAt"))
+            <= _timestamp(run.get("completedAt")) < _timestamp(registration["frozenAt"])):
+        raise ValueError("calibration history must precede the prospective development freeze")
+    old_tasks = {t["id"]: t for t in prior["tasks"]}
+    tasks = {t["id"]: t for t in registration["tasks"]}
+    old_repos = {r["id"]: r for r in prior["repositories"]}
+    repos = {r["id"]: r for r in registration["repositories"]}
+    for selected in profile["selection"]:
+        task, historical = tasks[selected["task"]], old_tasks.get(selected["priorTask"])
+        if historical is None or any(task.get(key) != historical.get(key)
+                                     for key in ("question", "kind", "expected")):
+            raise ValueError("calibration selection changed or invented a historical question/outcome")
+        current_repo, old_repo = repos.get(task["repository"]), old_repos.get(historical["repository"])
+        if current_repo is None or old_repo is None or any(
+                current_repo.get(key) != old_repo.get(key) for key in ("url", "commit", "files")):
+            raise ValueError("calibration selection changed its historical source identity/inventory")
+    observations = _array(run.get("observations"), "historical calibration observations", MAX_TASKS * 4, 1)
+    keys = []
+    for row in observations:
+        row = _object(row, "historical calibration observation")
+        keys.append((_choice(row.get("task"), old_tasks, "historical task"),
+                     _choice(row.get("tool"), TOOLS, "historical tool"),
+                     _choice(row.get("arm"), ARMS, "historical arm")))
+    _unique(keys, "historical calibration observation keys")
+    needed = {(s["priorTask"], tool, arm) for s in profile["selection"] for tool in TOOLS for arm in ARMS}
+    if not needed <= set(keys):
+        raise ValueError("calibration history lacks the complete selected paired matrix")
+
+
+def calibration_review_failures(registration: dict) -> list[str]:
+    """Additional prospective source-review attestations for exposed diagnostics."""
+    if _calibration_profile(registration) is None:
+        return []
+    review = _object(registration.get("independentReview", {}), "development independent review")
+    failures = []
+    if review.get("priorOutputsObserved") is not False:
+        failures.append("development calibration: reviewer prior-output blindness is not attested")
+    definition = dict(repositories=registration["repositories"], tasks=registration["tasks"])
+    digest = sha(json.dumps(definition, sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
+    if review.get("sourceDefinitionSha256") != digest:
+        failures.append("development calibration: independent review does not bind the current source definitions")
+    if review.get("reviewedAt") is None:
+        failures.append("development calibration: prospective source review timestamp is missing")
+    elif _timestamp(review["reviewedAt"]) > _timestamp(registration["frozenAt"]):
+        failures.append("development calibration: source review follows the registration freeze")
+    return failures
 
 
 class GraphIndex:
@@ -1020,6 +1146,10 @@ def assess(manifest: dict, root: Path) -> dict:
     if set(evidence_refs) != expected_exposure:
         raise ValueError("exposure evidence references differ from frozen history")
     failures = exposure_failures(registration, lambda digest: artifacts.read(evidence_refs.get(digest)))
+    verify_calibration_evidence(registration, manifest.get("calibrationEvidence", {}), artifacts.read)
+    if "developmentCalibration" in registration:
+        failures.append("exposed development calibration is permanently ineligible for superiority")
+    failures += calibration_review_failures(registration)
     if registration["designation"] != "heldout" or registration.get("qualificationEligible") is not True:
         failures.append("registration is development or explicitly ineligible")
     failures += _review_failures(registration.get("independentReview"), "frozen source oracles")
@@ -1062,6 +1192,14 @@ def assess(manifest: dict, root: Path) -> dict:
         failures.append("actual command/binary/normalizer capture plan was not frozen before collection")
     elif frozen_capture_plan.get("assessorSha256") != sha(read_bounded(Path(__file__), MAX_JSON_BYTES)):
         failures.append("assessor differs from the source-frozen analysis protocol")
+    if "assessor" in run:
+        artifacts.read(run["assessor"])
+        expected_assessor = (frozen_capture_plan.get("assessorSha256") if isinstance(frozen_capture_plan, dict)
+                             else sha(read_bounded(Path(__file__), MAX_JSON_BYTES)))
+        if run["assessor"]["sha256"] != expected_assessor:
+            raise ValueError("retained assessor differs from the source-frozen analysis protocol")
+    elif "developmentCalibration" in registration:
+        raise ValueError("development calibration requires its retained assessor reference")
     if isinstance(frozen_capture_plan, dict):
         from benchmarks.agent_query.broad_query_capture import child_environment
         if run.get("childEnvironment") != child_environment(frozen_capture_plan, artifacts.root):

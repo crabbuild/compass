@@ -34,6 +34,14 @@ def _semantic_task(task):
     return {key: task[key] for key in TASK_FIELDS if key in task}
 
 
+def _calibration_binding(registration):
+    profile = registration.get("developmentCalibration")
+    if profile is None:
+        return None, {}
+    return ({key: value for key, value in profile.items() if key != "selection"},
+            {item["task"]: item["priorTask"] for item in profile["selection"]})
+
+
 def _content(value):
     """Artifact aliases may differ; their actual, checked bytes may not."""
     if isinstance(value, dict):
@@ -82,6 +90,10 @@ def validate_panels(definition, registrations):
             raise ValueError("lookup pairs must have distinct, unique task IDs")
         mapping[old] = new
     common = set(tasks["original"]) & set(tasks["lookup"])
+    a_profile, a_selection = _calibration_binding(a)
+    b_profile, b_selection = _calibration_binding(b)
+    if a_profile != b_profile or any(a_selection.get(key) != b_selection.get(key) for key in common):
+        raise ValueError("panels have different frozen development calibration bindings")
     if set(tasks["original"]) - common != set(mapping) or set(tasks["lookup"]) - common != set(mapping.values()):
         raise ValueError("lookup pairs do not preserve the complete original panel")
     for key in common:
@@ -169,6 +181,13 @@ def project_capture(manifest, definition_ref, root):
         for field in ("schema", "repositories", "arms", "capturePlan", "exposureLineage"):
             if registrations[role].get(field) != registration.get(field):
                 raise ValueError(f"union and panel have different frozen {field}")
+        profile, selection = _calibration_binding(registrations[role])
+        union_profile, union_selection = _calibration_binding(registration)
+        if profile != union_profile or selection != {key: value for key, value in union_selection.items()
+                                                      if key in tasks[role]}:
+            raise ValueError("panel calibration selection is not the exact union restriction")
+        canonical.verify_calibration_evidence(registrations[role], manifest.get("calibrationEvidence", {}), artifacts.read)
+    canonical.verify_calibration_evidence(registration, manifest.get("calibrationEvidence", {}), artifacts.read)
     observations = _indexed(run.get("observations"), "union observations")
     judgments = _indexed(reviewed.get("observations"), "union judgments")
     expected = {(key, tool, arm) for key in union_tasks for tool in TOOLS for arm in ARMS}
@@ -227,7 +246,7 @@ def assess_panels(manifest, root):
     registrations = {role: artifacts.document(defined[role]) for role in ROLES}
     tasks, common = validate_panels(definition, registrations)
     reports = _roles(manifest.get("reports"), "required reports")
-    assessments, runs, judgments, costs = {}, {}, {}, {}
+    assessments, runs, judgments, costs, calibration = {}, {}, {}, {}, {}
     readers = []
     input_digests = {}
     failures = []
@@ -240,6 +259,7 @@ def assess_panels(manifest, root):
             raise ValueError("panel input changed during recomputation")
         input_digests[Path(report["inputPath"])] = report["inputSha256"]
         source = _json(data)
+        calibration[role] = _content(source.get("calibrationEvidence", {}))
         reader = Artifacts(Path(report["inputPath"]).parent)
         readers.append(reader)
         registration = reader.document(source["registration"])
@@ -254,7 +274,9 @@ def assess_panels(manifest, root):
         if not assessments[role]["eligibleForSuperiorityClaim"]:
             failures.extend(f"{role}: {failure}" for failure in
                             (assessments[role]["failures"] or ["canonical panel is ineligible"]))
-    for field in ("tools", "graphs", "arms", "measurementExecutable", "environmentExecutable", "childEnvironment"):
+    if calibration["original"] != calibration["lookup"]:
+        raise ValueError("panels used different calibration evidence")
+    for field in ("tools", "graphs", "arms", "measurementExecutable", "environmentExecutable", "childEnvironment", "assessor"):
         if _content(runs["original"].get(field)) != _content(runs["lookup"].get(field)):
             raise ValueError(f"panels used different captured {field}")
     observations = {role: _indexed(runs[role]["observations"], "captured observations") for role in ROLES}

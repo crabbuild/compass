@@ -57,8 +57,17 @@ verification reopens the declared path so retargeting cannot evade the check.
 `plan` must equal `registration.capturePlan` exactly, and `plan.arms` must equal
 `registration.arms`. Independent source review must already be confirmed and
 source-first authoring attested, even when the panel is explicitly underpowered
-and `qualificationEligible` is false. Source-only pending registrations cannot
-accidentally launch either tool.
+and `qualificationEligible` is false. The explicit version-2
+[exposed development calibration profile](BROAD_QUERY_REVIEW.md#exposed-development-calibration)
+allows prior author exposure with a verified historical registration/run pair,
+an exact selected-question mapping and new independent source review. Its
+`calibrationEvidence` has exactly those two hash-bound references; original
+paths, retained copies and current actor files are rechecked after provisional
+scoring and before completion. Newly captured runs bind the copied scorer through
+`run.assessor`; profile reassessment requires that reference and verifies its
+source-frozen digest. Both retained code copies receive the final publication
+recheck. It remains permanently claim-ineligible.
+Source-only pending registrations cannot accidentally launch either tool.
 
 Plan schema `compass.broad-query-capture-plan/1` contains:
 

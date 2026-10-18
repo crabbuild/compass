@@ -18,11 +18,12 @@ from typing import Callable
 
 from benchmarks.agent_query.broad_query_oracle import publish_exclusive
 from benchmarks.agent_query.broad_query_review import (
-    ARMS, TOOLS, GraphIndex, Identity, MANIFEST_SCHEMA, MAX_GRAPH_BYTES,
+    ARMS, TOOLS, Artifacts, GraphIndex, Identity, MANIFEST_SCHEMA, MAX_GRAPH_BYTES,
     MAX_JSON_BYTES, NORMALIZED_SCHEMA, REVIEW_SCHEMA, RUN_SCHEMA,
     _array, _boolean, _choice, _digest, _integer, _json, _object, _relative,
     _review_failures, _text, _timestamp, _verify_sources, main as review_main,
     sha, validate_registration, verify_build_capture, exposure_failures,
+    verify_calibration_evidence, calibration_review_failures,
 )
 from benchmarks.agent_query.community_tasks import read_bounded
 from benchmarks.agent_query.runner import _terminal_symbol, run_bounded
@@ -360,12 +361,17 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
         failures = exposure_failures(registration, read_exposure)
         if failures:
             raise ValueError("exposure lineage rejected: " + "; ".join(failures))
+    calibration_refs = _object(spec.get("calibrationEvidence", {}), "calibration evidence references")
+    verify_calibration_evidence(registration, calibration_refs, lambda ref: external(ref)[1])
     # Source acceptance is required even for an underpowered diagnostic capture.
     # Statistical/graph eligibility is assessed separately after measurements.
     if _review_failures(registration.get("independentReview"), "source registration"):
         raise ValueError("source registration lacks completed independent source review")
-    if registration.get("sourceReview", {}).get("blindToOutputs") is not True:
+    if ("developmentCalibration" not in registration
+            and registration.get("sourceReview", {}).get("blindToOutputs") is not True):
         raise ValueError("source-first output-blinded authoring is required")
+    if calibration_review_failures(registration):
+        raise ValueError("development calibration lacks prospective output-blind independent source review")
     if registration.get("independentReview", {}).get("reviewer") == registration.get("sourceReview", {}).get("author"):
         raise ValueError("source author cannot independently review their own labels")
     started = datetime.now(timezone.utc).isoformat()
@@ -445,8 +451,13 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     registration_ref = bundle.copy("registration.json", spec["registration"])
     copied_exposure = {digest: bundle.copy("provenance/exposure/" + digest, exposure_refs[digest])
                        for digest in sorted(exposure_refs)}
+    copied_calibration = {digest: bundle.copy("provenance/calibration/" + digest, calibration_refs[digest])
+                          for digest in sorted(calibration_refs)}
     bundle.put("capture-input.json", spec)
-    normalizer_ref = bundle.put("provenance/broad_query_capture.py", read_bounded(Path(__file__), MAX_JSON_BYTES))
+    normalizer_ref = bundle.copy("provenance/broad_query_capture.py",
+                                dict(path=str(Path(__file__)), sha256=plan["normalizerSha256"]))
+    assessor_ref = bundle.copy("provenance/broad_query_review.py",
+                               dict(path=str(Path(broad_query_review.__file__)), sha256=plan["assessorSha256"]))
     measurement_ref = bundle.copy("provenance/measurement-executable", instrument["executable"], MAX_GRAPH_BYTES)
     environment_launcher_ref = bundle.copy("provenance/environment-executable", plan["environmentExecutable"], MAX_GRAPH_BYTES)
     for name in ENV_PATH_KEYS:
@@ -547,6 +558,7 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     run = bundle.put("run.json", dict(schema=RUN_SCHEMA, registrationSha256=registration_ref["sha256"],
                      startedAt=started, completedAt=datetime.now(timezone.utc).isoformat(), tools=tool_records,
                      graphs=captured_graphs, arms=arms, observations=observations,
+                     assessor=assessor_ref,
                      measurementExecutable=measurement_ref, environmentExecutable=environment_launcher_ref,
                      childEnvironment=isolated_environment,
                      collectionOrder="task_id_then_default_normalized_then_tool_id; no retries or followups",
@@ -554,10 +566,20 @@ def collect(spec: dict, destination: Path, *, runner: Callable = run_bounded) ->
     reviewed = bundle.put("reviews-pending.json", dict(schema=REVIEW_SCHEMA, runSha256=run["sha256"], observations=reviews))
     manifest = dict(schema=MANIFEST_SCHEMA, registration=registration_ref, run=run, reviews=reviewed,
                     sourceRoots=roots, graphQualification=[], exposureEvidence=copied_exposure)
+    if copied_calibration:
+        manifest["calibrationEvidence"] = copied_calibration
     bundle.put("review-input.json", manifest)
     status = review_main(["--score", str(bundle.root / "review-input.json"), "--output", str(bundle.root / "report-provisional.json")])
     if status:
         raise ValueError("captured evidence failed provisional report generation; inspect incomplete bundle")
+    # Scoring can take time. Recheck original metadata/actor paths and retained
+    # calibration copies after it, immediately before publishing completion.
+    retained = Artifacts(bundle.root)
+    retained.read(normalizer_ref)
+    retained.read(assessor_ref)
+    verify_calibration_evidence(registration, copied_calibration, retained.read)
+    retained.recheck()
+    bundle.recheck()
     bundle.put("COMPLETE.json", dict(status="captured_pending_independent_output_review", qualificationEstablished=False,
                                     note="COMPLETE confirms capture publication only. --check must still reject unqualified claims."))
     return dict(bundle=str(bundle.root), observations=len(observations), report=str(bundle.root / "report-provisional.json"),
