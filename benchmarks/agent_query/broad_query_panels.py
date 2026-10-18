@@ -22,7 +22,7 @@ INPUT_SCHEMA = "compass.broad-query-panel-review-input/1"
 REPORT_SCHEMA = "compass.broad-query-panel-review/1"
 ROLES = ("original", "lookup")
 TASK_FIELDS = ("id", "repository", "cluster", "kind", "question", "expected",
-               "relevant", "facts", "rationale", "split", "mechanisms")
+               "relevant", "facts", "rationale", "split", "mechanisms", "essentialFactGroups")
 
 
 def _assessors():
@@ -63,6 +63,8 @@ def validate_panels(definition, registrations):
         if _timestamp(registration["frozenAt"]) > stamp:
             raise ValueError("panel definition predates a source registration")
     a, b = (registrations[role] for role in ROLES)
+    if a["schema"] != b["schema"]:
+        raise ValueError("panels have different registration schemas")
     if a["repositories"] != b["repositories"]:
         raise ValueError("panels have different source inventories or repository order")
     for field in ("arms", "gatePolicy", "metricCohorts", "graphQualificationRepositories", "capturePlan", "exposureLineage"):
@@ -164,7 +166,7 @@ def project_capture(manifest, definition_ref, root):
             or any(_semantic_task(union_tasks[key]) != _semantic_task(expected_tasks[key]) for key in union_tasks)):
         raise ValueError("union capture dropped or changed a required question/fact")
     for role in ROLES:
-        for field in ("repositories", "arms", "capturePlan", "exposureLineage"):
+        for field in ("schema", "repositories", "arms", "capturePlan", "exposureLineage"):
             if registrations[role].get(field) != registration.get(field):
                 raise ValueError(f"union and panel have different frozen {field}")
     observations = _indexed(run.get("observations"), "union observations")

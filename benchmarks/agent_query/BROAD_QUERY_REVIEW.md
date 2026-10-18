@@ -230,11 +230,79 @@ whose name merely fits an expected answer.
 
 Task kinds are `broad`, `exact`, `directed`, `multihop`, `ambiguous`, and
 `unsupported`. Expected outcomes are `answer`, `ambiguous`, and `abstain`.
-Answerable tasks need positive identities and at least one essential fact.
+Answerable tasks need positive identities and at least one essential fact (or a
+version-2 essential group, below).
 Ambiguous tasks need at least two source-reviewed positive identities.
 Unsupported tasks have empty `relevant`/`facts` arrays and a `rationale` scoped
 to the registered source inventory. They mean “no supporting indexed evidence
 in this scope”, not proof that a behavior cannot exist anywhere.
+
+### Equivalent implementation witnesses
+
+New prospective registrations may opt into
+`compass.broad-query-registration/2`. Version 1 retains its original conjunctive
+fact requirements and rejects `essentialFactGroups`; older assessors reject
+version 2. Unknown registration and group versions fail explicitly. Existing
+source registrations, captures and reports are not migrated or rescored in place.
+
+A broad answerable task may add this versioned requirement:
+
+```json
+{
+  "essentialFactGroups": {
+    "schema": "compass.broad-query-essential-fact-groups/1",
+    "groups": [{"id": "expired-lookup", "anyOf": [["get-expiry"], ["peek-expiry"]]}]
+  }
+}
+```
+
+Each alternative in `anyOf` is a complete witness set of fact IDs. For example,
+`[["read", "validate"], ["alternate-read", "alternate-validate"]]` requires
+both facts of one complete path; mixing `read` with `alternate-validate` fails.
+Shared-prefix sets such as `[["read", "validate"], ["read", "reject"]]`
+still require `read` and a complete alternative. Each referenced fact remains an
+entry in `facts`, with its own exact
+declaration identity, source witness and optional relationship/occurrences. Its
+identity must be a frozen positive candidate. Group members have `essential:
+false`; an individually essential fact cannot also be an alternative. A group
+contains at least two alternatives with distinct sets of full declaration
+identities (file, start line, symbol and lexical owner). Two methods in the same
+class can qualify. Different complete paths through identical declaration sets
+cannot be expressed by this contract; do not silently discard valid alternatives
+to fit it. Group IDs are unique and distinct from fact IDs; members are known
+and unique within each witness set. Facts may be shared between alternatives of
+one group, but not between groups. Duplicate or subsumed witness sets fail.
+The existing 64-fact bound applies; groups, alternatives and facts per set each
+have a 64-entry bound, with at most 256 total fact references across alternatives
+per task. The checker evaluates these sets directly without expanding combinations.
+Empty groups/sets, extra group fields and unknown schemas fail. Exact, directed,
+multihop, ambiguous and unsupported tasks cannot use groups.
+
+Success still requires every individually essential fact. It also requires
+all supported, recovered facts of at least one alternative in **every** group. Claim matching never
+substitutes a group member's owner for another fact's owner; relationship
+direction and occurrence requirements remain exact. Unjudged/unsupported claims
+and execution limits retain their original failure behavior. No fact can satisfy
+two groups, and alternatives add no independent tasks or source clusters.
+
+The source author and independent reviewer must approve complete equivalence for
+the question's requirement and quantifier, including branch qualifications and relevant alternative
+implementations. The checker validates declared structure and evidence; it does
+not infer behavioral equivalence from similar text or names. Group membership is
+part of the hashed source task and registration, frozen before outputs. Any
+oracle correction needs a linked prospective source review and new capture-plan/
+assessor hashes. Adding a group after seeing answers cannot rehabilitate a
+held-out result. Original required panels/outcomes remain retained.
+
+The original/lookup panel binder preserves both registration versions and group
+payloads, including through union projection. Scored rows with groups expose
+`essentialFactGroupSchema`, `essentialFactGroups` (`id`, recovered member IDs,
+zero-based `satisfiedAlternativeIndexes` in frozen input order and `satisfied`),
+and `essentialFactGroupRecall`. All completed alternatives are reported. The per-witness source/graph ledger and
+`sourceFactRecall` remain separate: recovering one of two equivalent witnesses
+can satisfy a question with witness recall 0.5. Group recovery is not graph
+precision, source-witness recall, independence or a qualification certificate.
+Rows without groups retain their existing shape and scoring.
 
 A fact optionally includes a typed relationship:
 
@@ -391,7 +459,8 @@ Changing a previously frozen grade is rejected.
 ## Metrics and qualification
 
 An answerable task succeeds only when its first page identifies a relevant
-declaration, answers every essential source fact, and contains no unsupported
+declaration, answers every essential source fact and predeclared version-2 group,
+and contains no unsupported
 or unjudged assertion/candidate. An ambiguity-only list cannot pass an
 answerable task. A valid ambiguity answer explicitly retains at least two
 source-reviewed possibilities. An unsupported task succeeds through explicit

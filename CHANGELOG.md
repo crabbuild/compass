@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add opt-in version-2 developer query-evaluation registrations with predeclared
+  groups of equivalent implementation witnesses. Preserve exact fact ownership,
+  relationship evidence, legacy scoring and original/lookup panel bindings.
+  Group recovery is reported separately from per-witness graph/source recall;
+  no new comparative quality result is claimed.
+
 - Recall common code abbreviations for broad parameter, dictionary, seconds and
   nanoseconds questions even when the unabbreviated word appears elsewhere in
   the index. Require separate literal owner context, disclose translations and

@@ -18,6 +18,18 @@ an empty answer does not imply complete indexing.
 
 ## Developer comparison-panel binding
 
+Developer source registrations may opt into
+`compass.broad-query-registration/2` and
+`compass.broad-query-essential-fact-groups/1` for predeclared alternative
+implementation witnesses in broad answerable tasks. Every member retains exact
+owner/source/relationship checks. All groups and individually essential facts
+must be satisfied. Version 1 keeps its original behavior and rejects the new
+group field; older assessors reject version 2. Panel/union bindings preserve
+versions and group payloads. Existing reports remain immutable with their frozen
+assessors. This changes only the developer comparison protocol; native commands,
+graphs and query ranking are unchanged. See the review protocol for bounds,
+independent semantic review and prospective freeze requirements.
+
 New heldout developer captures require the additive
 `compass.broad-query-exposure-lineage/1` source-registration field described in
 `benchmarks/agent_query/BROAD_QUERY_REVIEW.md`. Every task declares its split and

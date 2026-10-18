@@ -27,6 +27,8 @@ from benchmarks.agent_query.path_audit import _edge_site
 from benchmarks.agent_query.runner import _node_anchor
 
 REGISTRATION_SCHEMA = "compass.broad-query-registration/1"
+REGISTRATION_SCHEMA_V2 = "compass.broad-query-registration/2"
+FACT_GROUP_SCHEMA = "compass.broad-query-essential-fact-groups/1"
 RUN_SCHEMA = "compass.broad-query-capture/1"
 NORMALIZED_SCHEMA = "compass.broad-query-normalized/1"
 REVIEW_SCHEMA = "compass.broad-query-judgments/1"
@@ -194,13 +196,68 @@ def _relation_matches(fact: dict, observed: tuple | None) -> bool:
     return set(observed[4]) <= set(expected[4])
 
 
+def _fact_groups(task: dict, *, allowed: bool = True) -> list[tuple[str, tuple[tuple[str, ...], ...]]]:
+    """Validate predeclared alternatives without inferring semantic equivalence.
+
+    Each alternative is a complete witness set of separately owned facts. The
+    source reviewer must establish that sets answer the same requirement.
+    """
+    if "essentialFactGroups" not in task:
+        return []
+    if not allowed:
+        raise ValueError("essential fact groups require registration version 2")
+    if task.get("kind") != "broad" or task.get("expected") != "answer":
+        raise ValueError("essential fact groups require a broad answerable task")
+    envelope = _object(task["essentialFactGroups"], "essential fact groups")
+    if set(envelope) != {"schema", "groups"} or envelope["schema"] != FACT_GROUP_SCHEMA:
+        raise ValueError("unsupported essential fact groups schema or fields")
+    facts = _array(task.get("facts"), "source facts", 64)
+    by_id = {fact["id"]: fact for fact in facts}
+    _unique([fact["id"] for fact in facts], "fact ids")
+    groups, ids, used, memberships = [], [], set(), 0
+    for group in _array(envelope["groups"], "essential fact groups", 64, 1):
+        group = _object(group, "essential fact group")
+        if set(group) != {"id", "anyOf"}:
+            raise ValueError("essential fact group requires exactly id and anyOf")
+        identifier = _text(group["id"], "essential fact group id", 128)
+        if identifier in by_id:
+            raise ValueError("essential fact group id conflicts with a fact id")
+        alternatives, member_sets, owner_sets = [], [], []
+        group_members = set()
+        for witness in _array(group["anyOf"], "alternative witness sets", 64, 2):
+            members = [_text(member, "alternative fact id", 128)
+                       for member in _array(witness, "witness fact ids", 64, 1)]
+            memberships += len(members)
+            _integer(memberships, "task alternative fact references", 0, 256)
+            _unique(members, "witness fact ids")
+            if any(member not in by_id for member in members):
+                raise ValueError("essential fact group references an unknown fact")
+            if any(_boolean(by_id[member].get("essential"), "essential fact") for member in members):
+                raise ValueError("alternative facts cannot also be individually essential")
+            member_set = frozenset(members)
+            if any(member_set <= prior or prior <= member_set for prior in member_sets):
+                raise ValueError("duplicate or subsumed alternative witness sets")
+            member_sets.append(member_set)
+            owner_sets.append(frozenset(Identity.parse(by_id[member]["identity"]) for member in members))
+            group_members.update(members)
+            alternatives.append(tuple(members))
+        _unique(owner_sets, "alternative declaration identity sets")
+        if used.intersection(group_members):
+            raise ValueError("a fact cannot satisfy multiple essential fact groups")
+        ids.append(identifier)
+        used.update(group_members)
+        groups.append((identifier, tuple(alternatives)))
+    _unique(ids, "essential fact group ids")
+    return groups
+
+
 def validate_registration(raw: dict) -> dict:
     """Validate source registrations, including explicitly pending AI-authored ones.
 
     Validation deliberately cannot upgrade a pending review to qualification.
     """
     raw = _object(raw, "registration")
-    if raw.get("schema") != REGISTRATION_SCHEMA:
+    if raw.get("schema") not in (REGISTRATION_SCHEMA, REGISTRATION_SCHEMA_V2):
         raise ValueError("unsupported broad-query registration schema")
     _choice(raw.get("designation"), ("development", "heldout"), "designation")
     _timestamp(raw.get("frozenAt"))
@@ -262,7 +319,8 @@ def validate_registration(raw: dict) -> dict:
             if any(f not in file_sets[repo] for f, _, _ in sites):
                 raise ValueError("source witness references an unpinned file")
         _unique(fact_ids, "fact ids")
-        if expected == "answer" and (not positive or not any(f["essential"] for f in facts)):
+        groups = _fact_groups(task, allowed=raw["schema"] == REGISTRATION_SCHEMA_V2)
+        if expected == "answer" and (not positive or not (any(f["essential"] for f in facts) or groups)):
             raise ValueError("answerable task needs relevant declarations and essential facts")
         if expected == "ambiguous" and len(positive) < 2:
             raise ValueError("ambiguity requires at least two independently reviewed identities")
@@ -412,6 +470,7 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
     new_positives = [i for i, grade in reviewed.items() if grade >= 2 and i not in relevant]
     grades = {**reviewed, **relevant}
     facts = {x["id"]: x for x in task["facts"]}
+    groups = _fact_groups(task)
     essential = {key for key, fact in facts.items() if fact["essential"]}
     claims = _array(observation.get("claims"), "returned claims", MAX_CLAIMS)
     labels = _array(judgment.get("claims"), "claim judgments", MAX_CLAIMS)
@@ -468,6 +527,8 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
     complete = not unjudged and not unjudged_candidates and not new_positives
     if expected == "answer":
         success = (disposition == "answered" and bool(good_page) and essential <= recovered
+                   and all(any(set(witness) <= recovered for witness in alternatives)
+                           for _, alternatives in groups)
                    and not unsupported and complete)
     elif expected == "ambiguous":
         success = disposition == "ambiguous" and len(good_page) >= 2 and not unsupported and complete
@@ -503,7 +564,7 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
                            topFive=rank is not None and rank <= 5,
                            firstPage=fact_id in recovered))
     answerable = expected == "answer"
-    return dict(task=task["id"], repository=task["repository"], cluster=task["cluster"], kind=task["kind"],
+    result = dict(task=task["id"], repository=task["repository"], cluster=task["cluster"], kind=task["kind"],
                 disposition=disposition, success=success, answerable=answerable,
                 successAt5=bool(ranks and ranks[0] <= 5) if ranking_kind == "retrieval" and ideal else None,
                 mrrAt10=1 / ranks[0] if ranking_kind == "retrieval" and ranks and ranks[0] <= 10 else
@@ -516,6 +577,15 @@ def score_task(task: dict, observation: dict, judgment: dict, graph: GraphIndex 
                 falseEmpty=answerable and (disposition == "abstain" or not page and not claims),
                 judgmentComplete=complete, postOutputPositiveCount=len(new_positives),
                 unjudgedCandidateCount=len(unjudged_candidates), ledger=ledger)
+    if groups:
+        result["essentialFactGroupSchema"] = FACT_GROUP_SCHEMA
+        result["essentialFactGroups"] = [dict(id=identifier,
+            recovered=sorted(recovered.intersection(member for witness in alternatives for member in witness)),
+            satisfiedAlternativeIndexes=[index for index, witness in enumerate(alternatives) if set(witness) <= recovered],
+            satisfied=any(set(witness) <= recovered for witness in alternatives))
+            for identifier, alternatives in groups]
+        result["essentialFactGroupRecall"] = sum(group["satisfied"] for group in result["essentialFactGroups"]) / len(groups)
+    return result
 
 
 def _binomial_cdf(k: int, n: int, probability: float) -> float:

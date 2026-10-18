@@ -21,6 +21,15 @@ layout remains visible and clearly owned.
 
 ## Developer comparison registrations
 
+For a new broad-question experiment requiring equivalent implementation
+witnesses, opt into `compass.broad-query-registration/2` and predeclare reviewed
+`essentialFactGroups` using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#equivalent-implementation-witnesses).
+Keep separately anchored facts for each alternative; preserve flat essential
+facts and exact/directed controls. Freeze new source/assessor/capture bindings
+before collection. Version-1 registrations retain their original semantics and
+must not receive the new field. Preserve old captures, reports and required
+outcomes; this is not a post-output scoring migration or a native-product change.
+
 Before a new heldout comparison, freeze an independently reviewed exposure
 history, explicit task splits/mechanism IDs and hash-bound historical evidence
 using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md).
