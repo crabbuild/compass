@@ -148,8 +148,8 @@ The collector retains each declared pair at
 `graphs/<repository>-compass/{graph.json,source-query.json}`. Separate directories
 prevent repositories from sharing the fixed sibling filename. Both query arms
 receive that graph path. The sidecar is bounded at the native 64 MiB ceiling;
-its schema must be `compass.source-query/1`, its profile one of the four native
-profiles 1–4, and `graphDigest` must equal the exact graph-byte SHA-256. This
+its schema must be `compass.source-query/1`, its profile one of the five native
+profiles 1–5, and `graphDigest` must equal the exact graph-byte SHA-256. This
 checks the envelope and binding; native Compass still validates the full
 payload. A valid envelope does not establish source or graph quality.
 

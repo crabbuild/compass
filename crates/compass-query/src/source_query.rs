@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub(crate) struct Index {
     pub digest: String,
+    profile: String,
     pub owners: Vec<SourceQueryOwner>,
     by_id: BTreeMap<String, usize>,
     postings: BTreeMap<String, Vec<usize>>,
@@ -97,6 +98,7 @@ impl Index {
         let mut clipped_owners = 0_usize;
         let mut result = Self {
             digest,
+            profile: artifact.profile,
             owners: artifact.owners,
             by_id: BTreeMap::new(),
             postings: BTreeMap::new(),
@@ -107,7 +109,7 @@ impl Index {
         let mut count = 0_usize;
         for (at, owner) in result.owners.iter().enumerate() {
             result.by_id.insert(owner.node_id.clone(), at);
-            let document = owner.document();
+            let document = result.document(owner)?;
             clipped_owners += usize::from(document.truncated);
             result.bounded |= document.truncated;
             for term in document.terms() {
@@ -130,6 +132,28 @@ impl Index {
             ));
         }
         Ok(Some(result))
+    }
+    pub fn document(
+        &self,
+        owner: &SourceQueryOwner,
+    ) -> Result<compass_model::search::SearchDocument, QueryError> {
+        owner
+            .document_for_profile(&self.profile)
+            .map_err(|e| corrupt(e.to_string()))
+    }
+    pub fn preference_truncated(&self, owner: &SourceQueryOwner) -> Result<bool, QueryError> {
+        // Existing identifier/comment preferences need completeness of those
+        // fields, independent of the newer code-window channel. This validated
+        // historical projection preserves their byte/term clipping checks.
+        let profile = if self.profile == compass_model::source_query::SOURCE_QUERY_PROFILE {
+            compass_model::source_query::SOURCE_QUERY_PROFILE_V4
+        } else {
+            &self.profile
+        };
+        owner
+            .document_for_profile(profile)
+            .map(|document| document.truncated)
+            .map_err(|e| corrupt(e.to_string()))
     }
     pub fn owner(&self, id: &str) -> Option<&SourceQueryOwner> {
         self.by_id.get(id).and_then(|at| self.owners.get(*at))
@@ -166,10 +190,16 @@ pub(crate) fn attach(
 pub(crate) fn matching_sources(
     owner: &SourceQueryOwner,
     terms: &BTreeSet<String>,
+    include_code: bool,
 ) -> (BTreeSet<SourceAnchor>, bool) {
     let mut sources = BTreeSet::new();
     let mut bounded = false;
-    for site in owner.identifiers.iter().chain(&owner.comments) {
+    let code = if include_code {
+        owner.code_windows.as_slice()
+    } else {
+        &[]
+    };
+    for site in code.iter().chain(&owner.identifiers).chain(&owner.comments) {
         if compass_model::search::identifier_search_terms(&site.text)
             .into_iter()
             .map(compass_model::canonical_code_token)

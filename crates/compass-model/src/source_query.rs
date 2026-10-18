@@ -10,7 +10,8 @@ pub const SOURCE_QUERY_SCHEMA: &str = "compass.source-query/1";
 pub const SOURCE_QUERY_PROFILE_V1: &str = "source-query/1-ast-callable-lexemes";
 pub const SOURCE_QUERY_PROFILE_V2: &str = "source-query/2-callable-definition-envelopes";
 pub const SOURCE_QUERY_PROFILE_V3: &str = "source-query/3-owned-code-windows";
-pub const SOURCE_QUERY_PROFILE: &str = "source-query/4-nested-callable-context";
+pub const SOURCE_QUERY_PROFILE_V4: &str = "source-query/4-nested-callable-context";
+pub const SOURCE_QUERY_PROFILE: &str = "source-query/5-owned-code-lexemes";
 pub const SOURCE_QUERY_MAX_NESTED_CONTEXTS: usize = 8;
 pub const SOURCE_QUERY_MAX_CODE_BYTES: usize = 8 * 1024 * 1024;
 pub const SOURCE_QUERY_MAX_CODE_WINDOWS: usize = 32_768;
@@ -27,6 +28,7 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
         SOURCE_QUERY_PROFILE_V1
             | SOURCE_QUERY_PROFILE_V2
             | SOURCE_QUERY_PROFILE_V3
+            | SOURCE_QUERY_PROFILE_V4
             | SOURCE_QUERY_PROFILE
     )
 }
@@ -56,7 +58,8 @@ pub struct SourceQueryOwner {
     pub source_digest: String,
     pub identifiers: Vec<SourceQuerySite>,
     pub comments: Vec<SourceQuerySite>,
-    /// Exact AST-owned inspection text; excluded from retrieval statistics.
+    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profile 5
+    /// also indexes vocabulary absent from the identifier/comment fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_windows: Vec<SourceQuerySite>,
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -136,13 +139,35 @@ impl SourceQueryOwner {
     /// and document-frequency increments on every backend.
     #[must_use]
     pub fn document(&self) -> SearchDocument {
+        self.project_document(true)
+    }
+
+    /// Preserve the lexical/statistical meaning of immutable older profiles.
+    pub fn document_for_profile(&self, profile: &str) -> Result<SearchDocument, SourceQueryError> {
+        if !is_supported_source_query_profile(profile) {
+            return Err(SourceQueryError(
+                "unsupported lexical projection profile".to_owned(),
+            ));
+        }
+        Ok(self.project_document(profile == SOURCE_QUERY_PROFILE))
+    }
+
+    fn project_document(&self, include_code: bool) -> SearchDocument {
         let mut result = SearchDocument {
-            truncated: self.truncated,
+            truncated: self.truncated || (include_code && self.omitted_code_windows > 0),
             ..SearchDocument::default()
         };
         for (field, sites) in [
-            ("body_identifier", &self.identifiers),
-            ("body_comment", &self.comments),
+            ("body_identifier", self.identifiers.as_slice()),
+            ("body_comment", self.comments.as_slice()),
+            (
+                "body_code",
+                if include_code {
+                    self.code_windows.as_slice()
+                } else {
+                    &[]
+                },
+            ),
         ] {
             let mut bytes = 0_usize;
             let mut terms = BTreeSet::new();
@@ -159,6 +184,12 @@ impl SourceQueryOwner {
                         .into_iter()
                         .map(crate::canonical_code_token),
                 );
+            }
+            if field == "body_code" {
+                // A code window repeats identifiers/comments. Do not count those
+                // words twice or turn their quotation into corroborating evidence.
+                let existing = result.terms();
+                terms.retain(|term| !existing.contains(term));
             }
             result.truncated |= terms.len() > SEARCH_FIELD_MAX_TERMS;
             if !terms.is_empty() {
@@ -257,7 +288,7 @@ impl SourceQueryArtifact {
             }
             if !matches!(
                 self.profile.as_str(),
-                SOURCE_QUERY_PROFILE_V3 | SOURCE_QUERY_PROFILE
+                SOURCE_QUERY_PROFILE_V3 | SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE
             ) && (!owner.code_windows.is_empty() || owner.omitted_code_windows > 0)
             {
                 return Err(fail("legacy profile does not support code windows"));
@@ -319,8 +350,10 @@ impl SourceQueryArtifact {
                 }
             }
             if owner.nested_contexts.len() > SOURCE_QUERY_MAX_NESTED_CONTEXTS
-                || (self.profile != SOURCE_QUERY_PROFILE
-                    && (!owner.nested_contexts.is_empty() || owner.omitted_nested_contexts > 0))
+                || (!matches!(
+                    self.profile.as_str(),
+                    SOURCE_QUERY_PROFILE_V4 | SOURCE_QUERY_PROFILE
+                ) && (!owner.nested_contexts.is_empty() || owner.omitted_nested_contexts > 0))
             {
                 return Err(fail(
                     "nested context is oversized or unsupported by this profile",
@@ -399,7 +432,7 @@ impl SourceQueryArtifact {
                     }
                 }
             }
-            for term in owner.document().terms() {
+            for term in owner.document_for_profile(&self.profile)?.terms() {
                 *body_frequencies.entry(term).or_default() += 1;
             }
         }

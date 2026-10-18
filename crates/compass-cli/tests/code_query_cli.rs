@@ -12,6 +12,75 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn ranked_queries_find_literal_only_concepts_with_source_and_budget() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("policy.py"),
+        "def guard(value):\n    if value == 'retired':\n        raise ValueError('retired account access is rejected')\n    return value\n",
+    )?;
+    let output = directory.path().join("artifacts");
+    let built = run(
+        Frontend::Compass,
+        [
+            OsString::from("extract"),
+            root.as_os_str().to_owned(),
+            OsString::from("--code-only"),
+            OsString::from("--no-viz"),
+            OsString::from("--max-workers"),
+            OsString::from("1"),
+            OsString::from("--out"),
+            output.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(built.code, 0, "{}", built.stderr);
+    let graph = output.join("compass-out/graph.json");
+    for format in ["json", "text"] {
+        let mut arguments = vec![
+            OsString::from("query"),
+            OsString::from("Where are retired account access attempts rejected?"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--view"),
+            OsString::from("ranked"),
+            OsString::from("--format"),
+            OsString::from(format),
+        ];
+        if format == "text" {
+            arguments.extend([OsString::from("--text-budget"), OsString::from("800")]);
+        }
+        let answer = run(Frontend::Compass, arguments);
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        if format == "json" {
+            let value: Value = serde_json::from_str(&answer.stdout)?;
+            let candidate = value["candidates"]
+                .as_array()
+                .and_then(|rows| rows.first())
+                .ok_or("literal-only candidate missing")?;
+            assert_eq!(candidate["relevance"], "low");
+            assert!(
+                candidate["name"]
+                    .as_str()
+                    .is_some_and(|name| name.ends_with(".guard"))
+            );
+            assert!(
+                candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|f| f == "body_code"))
+            );
+        } else {
+            assert!(answer.stdout.len() < 3200, "{}", answer.stdout);
+            assert!(answer.stdout.contains("guard"));
+            assert!(answer.stdout.contains("policy.py:"));
+            assert!(answer.stdout.contains("relevance=low"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn operation_hints_preserve_fresh_source_dependency_bands() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path().join("source");

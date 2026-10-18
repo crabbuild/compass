@@ -51,6 +51,105 @@ fn fixture(path: &std::path::Path) -> Result<GraphDocument, Box<dyn std::error::
 }
 
 #[test]
+fn graph_and_alias_field_clipping_still_veto_compound_preferences()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::code_graph::EdgeKind;
+    use compass_model::search::{search_document, search_document_with_aliases};
+    for mode in ["complete", "signature_clipped", "aliases_clipped"] {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        support::write_graph(&path)?;
+        let mut graph = GraphDocument::load(&path)?;
+        let template = graph
+            .links
+            .first()
+            .cloned()
+            .ok_or("missing edge template")?;
+        graph.nodes.clear();
+        graph.links.clear();
+        let mut target = support::node(
+            "target",
+            NodeKind::Function,
+            "read_only_fields",
+            "fixture::read_only_fields",
+        );
+        let signature = if mode == "signature_clipped" {
+            format!("fn(fields: {})", "Padding ".repeat(1200))
+        } else {
+            "fn(fields: Fields)".to_owned()
+        };
+        target.details = Some(serde_json::from_value(serde_json::json!({
+            "type":"symbol", "data":{"signature":signature}
+        }))?);
+        let mut aliases = Vec::new();
+        if mode == "aliases_clipped" {
+            for index in 0..9 {
+                let id = format!("alias:{index}");
+                let name = format!("unrelated_alias_{index}");
+                aliases.push(name.clone());
+                let alias =
+                    support::node(&id, NodeKind::TypeAlias, &name, &format!("fixture::{name}"));
+                let mut edge = template.clone();
+                edge.source = id;
+                edge.target = target.id.clone();
+                edge.kind = EdgeKind::Aliases;
+                edge.occurrence_rule = None;
+                edge.context = None;
+                edge.details = None;
+                edge.id = compass_model::identity::edge_id(
+                    &edge.source,
+                    edge.kind,
+                    &edge.target,
+                    edge.relationship_site.as_ref(),
+                    None,
+                );
+                edge.key = edge.id.clone();
+                graph.nodes.push(alias);
+                graph.links.push(edge);
+            }
+        }
+        let document = if mode == "aliases_clipped" {
+            search_document_with_aliases(&target, aliases.iter().map(String::as_str))
+        } else {
+            search_document(&target)
+        };
+        assert_eq!(
+            document.truncated,
+            mode != "complete",
+            "{mode}: fixture clipping"
+        );
+        graph.nodes.push(target);
+        std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+        let json = open(&path, None, &directory.path().join("json-cache"))?;
+        let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+        let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+        GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+        let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+        let question = request("Where are read-only fields prepared?");
+        let answer = json.discover_ranked(question.clone())?;
+        assert_eq!(
+            answer.candidates,
+            stored.discover_ranked(question)?.candidates,
+            "{mode}"
+        );
+        let candidate = answer
+            .candidates
+            .iter()
+            .find(|c| c.node.id == "target")
+            .ok_or("missing compound owner")?;
+        assert_eq!(
+            candidate
+                .reasons
+                .iter()
+                .any(|r| r.contains("Compound identifiers")),
+            mode == "complete",
+            "{mode}: {candidate:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn operation_hints_preserve_relationship_and_identifier_dependency_bands()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_model::code_graph::EdgeKind;

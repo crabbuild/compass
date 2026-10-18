@@ -7,7 +7,7 @@ use tree_sitter::Node;
 /// Reserved per-file extraction metadata. This is query evidence, not semantic facts.
 pub const EXTRACTION_EXTENSION: &str = "_compass_source_query_evidence";
 pub const EXTRACTION_SCHEMA: &str = "compass.source-query.extraction/1";
-pub const PROJECTION_PROFILE: &str = "source-query/4-nested-callable-context";
+pub const PROJECTION_PROFILE: &str = "source-query/5-owned-code-lexemes";
 
 /// Byte columns and zero-based rows, matching Tree-sitter's source positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -402,8 +402,9 @@ fn project(
             if identifier(node.kind())
                 && scope.name_span != Some((node.start_byte(), node.end_byte()))
             {
-                // Code windows have independent quotas and never consume the
-                // lexical budget or contribute terms/statistics to retrieval.
+                // Code-window quotas are independent of identifier/comment
+                // quotas. Profiles 1–4 keep windows inspection-only; profile 5
+                // also indexes their retained novel vocabulary.
                 let covered = scope.code_windows.iter().any(|window| {
                     window.start <= node.start_byte() && node.end_byte() <= window.end
                 });

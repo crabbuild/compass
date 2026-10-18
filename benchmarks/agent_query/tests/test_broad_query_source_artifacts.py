@@ -3,6 +3,7 @@ import copy
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import re
 from pathlib import Path
 import unittest
 
@@ -17,10 +18,10 @@ class SourceArtifactTests(unittest.TestCase):
     spec = fixture.MockCaptureTests.spec
     runner = fixture.MockCaptureTests.runner
 
-    def source_spec(self):
+    def source_spec(self, profile="source-query/4-nested-callable-context"):
         spec = self.spec()
         entry = next(g for g in spec["plan"]["graphs"] if g["tool"] == "compass")
-        sidecar = dict(schema="compass.source-query/1", profile="source-query/4-nested-callable-context",
+        sidecar = dict(schema="compass.source-query/1", profile=profile,
                        graphDigest=entry["artifact"]["sha256"], files=[], owners=[],
                        aggregateTruncated=False, omittedOwners=0, omittedFiles=0,
                        additionalDocumentFrequencies={})
@@ -246,12 +247,24 @@ class SourceArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "undeclared source-query"):
             audit.recheck()
 
+    def test_all_native_profiles_roundtrip_collection_and_assessment(self):
+        from benchmarks.agent_query import broad_query_review as review
+        for index, profile in enumerate(review.SOURCE_QUERY_PROFILES):
+            with self.subTest(profile=profile):
+                dest, run = self.capture(self.source_spec(profile), name=f"profile-{index}")
+                native = next(g for g in run["graphs"] if g["tool"] == "compass")
+                sidecar = _json((dest / native["sourceQueryArtifact"]["path"]).read_bytes())
+                self.assertEqual(sidecar["profile"], profile)
+                manifest = _json((dest / "review-input.json").read_bytes())
+                self.assertFalse(assess(manifest, dest)["eligibleForSuperiorityClaim"])
+
     def test_native_envelope_constants_remain_synchronized(self):
         from benchmarks.agent_query import broad_query_review as review
         source = Path(__file__).resolve().parents[3] / "crates/compass-model/src/source_query.rs"
         raw = source.read_text()
-        for profile in review.SOURCE_QUERY_PROFILES:
-            self.assertIn('= "' + profile + '";', raw)
+        native_profiles = re.findall(
+            r'pub const SOURCE_QUERY_PROFILE(?:_V[0-9]+)?: &str = "([^"]+)";', raw)
+        self.assertCountEqual(review.SOURCE_QUERY_PROFILES, native_profiles)
         self.assertIn('SOURCE_QUERY_FILE: &str = "' + review.SOURCE_QUERY_FILE + '";', raw)
         self.assertIn("SOURCE_QUERY_MAX_BYTES: u64 = 64 * 1024 * 1024;", raw)
         self.assertEqual(review.MAX_SOURCE_QUERY_BYTES, 64 * 1024 * 1024)

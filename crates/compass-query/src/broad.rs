@@ -1233,12 +1233,12 @@ impl CodeQueryEngine {
                 document.fields.insert("owned_identifier", identifier_terms);
             }
             let mut body_needed = false;
+            let mut code_needed = false;
+            let mut preference_truncated = document.truncated;
             let mut body_sources = BTreeSet::new();
-            let source_owner = self
-                .source_query
-                .as_ref()
-                .and_then(|index| index.owner(&node.id));
-            if let Some(owner) = source_owner {
+            let source_index = self.source_query.as_ref();
+            let source_owner = source_index.and_then(|index| index.owner(&node.id));
+            if let (Some(index), Some(owner)) = (source_index, source_owner) {
                 if !node.kind.is_callable()
                     || node.source.as_ref() != Some(&owner.source)
                     || !relationships::exact_ast(&node)
@@ -1249,7 +1249,17 @@ impl CodeQueryEngine {
                         "Source evidence no longer matches the pinned graph",
                     ));
                 }
-                let body = owner.document();
+                let body = index.document(owner)?;
+                preference_truncated |= index.preference_truncated(owner)?;
+                code_needed = groups.iter().any(|(term, variants, _, _)| {
+                    let variants = vocabulary_fallbacks
+                        .get(term)
+                        .map_or(variants, |(literal, _)| literal);
+                    matching(&document, variants)
+                        .iter()
+                        .all(|field| *field == "signature")
+                        && matching(&body, variants).contains(&"body_code")
+                });
                 body_needed = groups.iter().any(|(term, variants, _, _)| {
                     let variants = vocabulary_fallbacks
                         .get(term)
@@ -1268,7 +1278,8 @@ impl CodeQueryEngine {
                     .iter()
                     .flat_map(|g| g.1.iter().cloned())
                     .collect::<BTreeSet<_>>();
-                let (sources, limited) = crate::source_query::matching_sources(owner, &terms);
+                let (sources, limited) =
+                    crate::source_query::matching_sources(owner, &terms, code_needed);
                 body_sources = sources;
                 bounded |= limited;
             }
@@ -1279,7 +1290,7 @@ impl CodeQueryEngine {
                 }
                 _ => None,
             });
-            let compound_matches = if document.truncated {
+            let compound_matches = if preference_truncated {
                 compounds::Matches::default()
             } else {
                 compounds.matches(
@@ -1336,6 +1347,7 @@ impl CodeQueryEngine {
                                 | "owned_document"
                                 | "body_identifier"
                                 | "body_comment"
+                                | "body_code"
                                 | "code_reference"
                                 | "owned_identifier"
                         )
@@ -1413,7 +1425,7 @@ impl CodeQueryEngine {
                 // code signal; missing/clipped signatures keep ordinary ranking.
                 implementation_action |= action_terms.contains(term)
                     && (fields.contains(&"name")
-                        || (!document.truncated
+                        || (!preference_truncated
                             && inspection_signature.is_some()
                             && !fields.contains(&"signature")
                             && fields.iter().any(|field| {
@@ -1560,6 +1572,7 @@ impl CodeQueryEngine {
             let preferred_implementation = implementation_action
                 && implementation_subject
                 && !vocabulary_needed
+                && !code_needed
                 // A lexical preference cannot establish the relationship
                 // between multiple actions (e.g. stopping new task starts).
                 && action_terms.len() == 1
@@ -1571,6 +1584,7 @@ impl CodeQueryEngine {
             let preferred_compound = !compound_matches.phrases.is_empty()
                 && compound_subject
                 && !vocabulary_needed
+                && !code_needed
                 && node.kind.is_callable()
                 && !negative_qualification
                 && temporal_qualification.is_empty()
@@ -1685,6 +1699,9 @@ impl CodeQueryEngine {
             if matched_fields.contains("body_identifier") || matched_fields.contains("body_comment")
             {
                 reasons.push("Source-bound AST lexical evidence inside this callable matches query terms. Identifier/comment occurrence supports inspection; it does not establish the requested behavior".to_owned());
+            }
+            if matched_fields.contains("body_code") {
+                reasons.push("Bounded AST-owned code text matches query terms, including literal strings. Text occurrence supports inspection only; it does not establish behavior or execution".to_owned());
             }
             if vocabulary_needed {
                 for (term, alias) in &vocabulary_matches {

@@ -1,5 +1,31 @@
 # Compass compatibility
 
+## Owned code vocabulary
+
+Current source evidence uses `source-query/5-owned-code-lexemes`. A separate
+`body_code` field indexes bounded direct-owner code windows, including string
+literals. Words already present in the owner's identifier/comment fields are
+not counted again. Nested callable windows remain inspection-only. Matches
+depending on new code text remain Low, disclose their origin and do not receive
+an implementation or compound preference from that dependency. Text occurrence
+is not proof of behavior. Exact/qualified identities and graph facts are unchanged.
+
+Immutable profiles 1–4 keep their original identifier/comment-only retrieval and
+document-frequency meaning. Older readers reject profile 5 explicitly. Run
+`compass update <root>` with the new binary for current code vocabulary; no
+historical realization is rewritten. AST cache25 refreshes disposable per-file
+profile metadata, and `query-ranker/18-channel-completeness` refreshes responses.
+Code-only clipping remains visible without suppressing preferences supported by
+complete identifier/comment fields. Code-dependent matches retain their Low
+band and cannot supply those preferences.
+Existing code-window and per-field byte/term quotas remain in force; omitted
+code limits recall explicitly. Ranked JSON remains version4 with the additional
+matched-field label. No current source is read at query time.
+
+Retrieval covers retained windows; a literal-only body may have no window.
+The developer collector/assessor now accepts profiles 1–5. Freeze new actor
+hashes and collect a new run for profile5; historical captures remain unchanged.
+
 ## Graph coverage diagnostic projections
 
 New current-store snapshots add point projections for all graph diagnostic
@@ -88,8 +114,8 @@ requires new reports and the corresponding pre-output protocol freeze.
 
 ## Nested callable inspection context
 
-Current source evidence uses `source-query/4-nested-callable-context` and ranked
-JSON uses `compass.query.ranked-view/4`. Readers retain source profiles 1–3 and
+Nested inspection was introduced by `source-query/4-nested-callable-context`;
+current evidence also supports profile5. Ranked JSON uses `compass.query.ranked-view/4`. Readers retain source profiles 1–4 and
 ranked views 1–3 with their original meanings; older readers reject the new
 versions. AST cache24 refreshes disposable native scope metadata automatically.
 
@@ -199,7 +225,7 @@ postings; older snapshots remain readable with an explicit incomplete-recall
 warning. Run `compass update` on a current checkout to publish those postings.
 Historical realizations are never rewritten. Graph identities, relationship
 kinds/direction/multiplicity and exact-symbol command meanings are unchanged.
-The active query ranker profile is `query-ranker/16-operation-vocabulary`; existing response
+The active query ranker profile is `query-ranker/17-owned-code-lexemes`; existing response
 cache identities include that profile and do not reuse old ranked results.
 
 Broad retrieval can give an inspection preference to hyphenated query compounds
@@ -477,7 +503,7 @@ It never establishes a negative behavior from lexical matches. Unquoted
 conditions, with Low candidates and an explicit diagnostic. These connectives
 do not count as lexical subject evidence; quoted and qualified identifiers
 keep their literal terms. These retrieval
-semantics use `query-ranker/16-operation-vocabulary`; prior profile constants remain
+semantics use `query-ranker/17-owned-code-lexemes`; prior profile constants remain
 available and disposable response cache identities change automatically.
 Name identity, structural evidence, graph coverage and candidate recall bounds
 remain separate. `responseTruncated` retains discovery's aggregate bound,

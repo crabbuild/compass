@@ -64,12 +64,13 @@ fn immutable_v1_projection_stays_readable_and_unknown_profiles_fail()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_model::source_query::{
         SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V1, SOURCE_QUERY_PROFILE_V2,
-        SOURCE_QUERY_PROFILE_V3,
+        SOURCE_QUERY_PROFILE_V3, SOURCE_QUERY_PROFILE_V4,
     };
     for profile in [
         SOURCE_QUERY_PROFILE_V1,
         SOURCE_QUERY_PROFILE_V2,
         SOURCE_QUERY_PROFILE_V3,
+        SOURCE_QUERY_PROFILE_V4,
         SOURCE_QUERY_PROFILE,
     ] {
         let mut value = artifact();
@@ -149,17 +150,21 @@ fn field_caps_report_omissions_without_changing_literal_excerpts() {
 }
 
 #[test]
-fn code_windows_are_bounded_inspection_only_and_legacy_profiles_reject_them()
+fn legacy_code_windows_remain_inspection_only_and_older_profiles_reject_them()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut value = artifact();
-    let document = value.owners[0].document();
+    value.profile = compass_model::source_query::SOURCE_QUERY_PROFILE_V4.to_owned();
+    let document = value.owners[0].document_for_profile(&value.profile)?;
     let mut window = value.owners[0].identifiers[0].clone();
     window.text = "unindexed_literal".to_owned();
     window.source.end_byte = window.source.start_byte + window.text.len() as u64;
     window.source.end_column = window.source.start_column + window.text.len() as u32;
     value.owners[0].code_windows = vec![window];
     value.validate()?;
-    assert_eq!(document, value.owners[0].document());
+    assert_eq!(
+        document,
+        value.owners[0].document_for_profile(&value.profile)?
+    );
     let encoded = serde_json::to_vec(&value)?;
     assert_eq!(
         serde_json::from_slice::<SourceQueryArtifact>(&encoded)?,
@@ -253,5 +258,52 @@ fn nested_context_is_versioned_bounded_and_cannot_change_retrieval_terms()
         })
         .collect();
     assert!(bad.validate().is_err());
+    Ok(())
+}
+
+#[test]
+fn code_lexemes_are_versioned_deduplicated_bounded_and_not_nested()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::source_query::{SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V4};
+    let mut value = artifact();
+    let mut window = value.owners[0].identifiers[0].clone();
+    window.text = "café retired_account_access".to_owned();
+    window.source.end_byte = window.source.start_byte + window.text.len() as u64;
+    window.source.end_column = window.source.start_column + window.text.len() as u32;
+    value.owners[0].code_windows.push(window);
+    let legacy = value.owners[0].document_for_profile(SOURCE_QUERY_PROFILE_V4)?;
+    let current = value.owners[0].document_for_profile(SOURCE_QUERY_PROFILE)?;
+    assert!(!legacy.fields.contains_key("body_code"));
+    assert!(!current.fields["body_code"].is_empty());
+    assert!(current.fields["body_code"].is_disjoint(&current.fields["body_identifier"]));
+    assert!(
+        current.fields["body_code"]
+            .contains(&compass_model::canonical_code_token("retired".to_owned()))
+    );
+    assert!(
+        value.owners[0]
+            .document_for_profile("source-query/999")
+            .is_err()
+    );
+    value.additional_document_frequencies =
+        current.terms().into_iter().map(|term| (term, 1)).collect();
+    value.validate()?;
+    value.profile = SOURCE_QUERY_PROFILE_V4.to_owned();
+    // New vocabulary cannot silently enter an immutable older profile's DF.
+    assert!(value.validate().is_err());
+    value.additional_document_frequencies =
+        legacy.terms().into_iter().map(|term| (term, 1)).collect();
+    value.validate()?;
+    value.owners[0].omitted_code_windows = 1;
+    assert!(
+        !value.owners[0]
+            .document_for_profile(SOURCE_QUERY_PROFILE_V4)?
+            .truncated
+    );
+    assert!(
+        value.owners[0]
+            .document_for_profile(SOURCE_QUERY_PROFILE)?
+            .truncated
+    );
     Ok(())
 }

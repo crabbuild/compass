@@ -31,6 +31,405 @@ fn options(root: &Path, output: &Path) -> BuildOptions {
     o.max_workers = Some(1);
     o
 }
+
+#[test]
+fn source_channel_completeness_guards_operation_and_compound_preferences()
+-> Result<(), Box<dyn Error>> {
+    use compass_model::source_query::SOURCE_QUERY_PROFILE_V4;
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let mut cases = Vec::new();
+    for compound in [false, true] {
+        for mode in [
+            "complete",
+            "code_omitted",
+            "identifier_clipped",
+            "comment_clipped",
+            "mixed",
+        ] {
+            let file = format!(
+                "case_{}_{mode}.py",
+                if compound { "compound" } else { "operation" }
+            );
+            let mut source = if compound {
+                "def opaque(fields):\n    read_only = fields\n".to_owned()
+            } else {
+                "def opaque(session, values):\n    encoded = codec.encode(values)\n".to_owned()
+            };
+            match mode {
+                "code_omitted" => {
+                    for index in 0..24 {
+                        source.push_str(&format!("    marker_{index} = None\n"));
+                    }
+                }
+                "identifier_clipped" => {
+                    for index in 0..64 {
+                        source
+                            .push_str(&format!("    marker_{index}_{} = None\n", "a".repeat(180)));
+                    }
+                }
+                "comment_clipped" => {
+                    for _ in 0..8 {
+                        source.push_str(&format!("    # {}\n", "padding ".repeat(200)));
+                    }
+                }
+                "mixed" => source.push_str("    tag = 'coral reef'\n"),
+                _ => {}
+            }
+            source.push_str(if compound {
+                "    return read_only\n"
+            } else {
+                "    return encoded\n"
+            });
+            fs::write(root.join(&file), source)?;
+            let topic = if mode == "mixed" { "coral reef " } else { "" };
+            let question = if compound {
+                format!("Where are {topic}read-only fields prepared?")
+            } else {
+                format!("Where are {topic}session values encoded?")
+            };
+            cases.push((file, mode, compound, question));
+        }
+    }
+    let mut o = options(&root, &d.path().join("out"));
+    o.graph_storage = GraphStorage::Sqlite;
+    let built = build_local_graph(&o)?;
+    let graph_path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&graph_path)?;
+    let body: SourceQueryArtifact =
+        serde_json::from_slice(&fs::read(built.output_dir.join(SOURCE_QUERY_FILE))?)?;
+    let mut expected = Vec::new();
+    for engine_mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &graph_path,
+            None,
+            &d.path().join(format!("query-{engine_mode:?}")),
+            engine_mode,
+        )?;
+        for (at, (file, mode, compound, question)) in cases.iter().enumerate() {
+            let node = graph
+                .nodes
+                .iter()
+                .find(|n| {
+                    n.source.as_ref().is_some_and(|s| s.file == *file)
+                        && n.name.trim_end_matches("()") == "opaque"
+                })
+                .ok_or("missing native owner")?;
+            let owner = body
+                .owners
+                .iter()
+                .find(|o| o.node_id == node.id)
+                .ok_or("missing body owner")?;
+            let old = owner.document_for_profile(SOURCE_QUERY_PROFILE_V4)?;
+            let clipped = matches!(*mode, "identifier_clipped" | "comment_clipped");
+            assert!(
+                !owner.truncated,
+                "{file}: fixture must exercise projected field limits"
+            );
+            assert_eq!(
+                old.truncated, clipped,
+                "{file}: original field completeness"
+            );
+            assert_eq!(
+                owner.omitted_code_windows > 0,
+                matches!(*mode, "code_omitted" | "identifier_clipped"),
+                "{file}"
+            );
+            if *mode == "mixed" {
+                assert!(!old.terms().contains("coral"), "{file}");
+                assert!(
+                    owner
+                        .document()
+                        .fields
+                        .get("body_code")
+                        .is_some_and(|t| t.contains("coral")),
+                    "{file}"
+                );
+            }
+            let mut query = request();
+            query.question = question.clone();
+            let answer = engine.discover_ranked(query)?;
+            let candidate = answer
+                .candidates
+                .iter()
+                .find(|c| c.node.id == node.id)
+                .ok_or_else(|| format!("missing {file}: {answer:?}"))?;
+            let reason = if *compound {
+                "Compound identifiers"
+            } else {
+                "Implementation-local operation identifiers"
+            };
+            assert_eq!(
+                candidate.reasons.iter().any(|r| r.contains(reason)),
+                !clipped && *mode != "mixed",
+                "{file}: {candidate:?}"
+            );
+            assert_eq!(
+                candidate.relevance,
+                compass_query::RelevanceBand::Low,
+                "{file}"
+            );
+            if *mode == "mixed" {
+                assert!(
+                    candidate.matched_fields.iter().any(|f| f == "body_code"),
+                    "{file}"
+                );
+                assert!(
+                    !candidate
+                        .reasons
+                        .iter()
+                        .any(|r| r.contains("inspection preference")),
+                    "{file}"
+                );
+            }
+            if owner.omitted_code_windows > 0 {
+                assert!(
+                    candidate
+                        .reasons
+                        .iter()
+                        .any(|r| r.contains("windows were omitted")),
+                    "{file}"
+                );
+            }
+            if engine_mode == EngineSelection::Json {
+                expected.push(answer.candidates);
+            } else {
+                assert_eq!(answer.candidates, expected[at], "{file}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn code_window_omissions_preserve_complete_identifier_preferences() -> Result<(), Box<dyn Error>> {
+    use compass_model::source_query::SOURCE_QUERY_PROFILE_V4;
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let mut source =
+        "def opaque(session, values):\n    encoded = codec.encode(values)\n".to_owned();
+    for index in 0..24 {
+        source.push_str(&format!("    marker_{index} = None\n"));
+    }
+    source.push_str("    return encoded\n");
+    fs::write(root.join("sample.py"), source)?;
+    let mut o = options(&root, &d.path().join("out"));
+    o.graph_storage = GraphStorage::Sqlite;
+    let built = build_local_graph(&o)?;
+    let graph = built.output_dir.join("graph.json");
+    let body: SourceQueryArtifact =
+        serde_json::from_slice(&fs::read(built.output_dir.join(SOURCE_QUERY_FILE))?)?;
+    let document = GraphDocument::load(&graph)?;
+    let node = document
+        .nodes
+        .iter()
+        .find(|n| n.name.trim_end_matches("()") == "opaque")
+        .ok_or("missing opaque owner")?;
+    let owner = body
+        .owners
+        .iter()
+        .find(|o| o.node_id == node.id)
+        .ok_or("missing source owner")?;
+    assert!(
+        owner.omitted_code_windows > 0,
+        "fixture must hit only code-window capacity"
+    );
+    assert!(owner.document().truncated);
+    assert!(
+        !owner
+            .document_for_profile(SOURCE_QUERY_PROFILE_V4)?
+            .truncated,
+        "original identifier/comment fields must stay complete"
+    );
+    let mut expected = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &graph,
+            None,
+            &d.path().join(format!("query-{mode:?}")),
+            mode,
+        )?;
+        let mut query = request();
+        query.question = "Where are session values encoded?".to_owned();
+        let answer = engine.discover_ranked(query)?;
+        let candidate = answer
+            .candidates
+            .iter()
+            .find(|c| c.node.id == node.id)
+            .ok_or("source-owned implementation missing")?;
+        assert!(
+            candidate
+                .reasons
+                .iter()
+                .any(|r| r.contains("Implementation-local operation identifiers")),
+            "code-only truncation must not erase complete identifier inspection: {candidate:?}"
+        );
+        assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+        assert!(!candidate.matched_fields.iter().any(|f| f == "body_code"));
+        assert!(
+            candidate
+                .reasons
+                .iter()
+                .any(|r| r.contains("windows were omitted"))
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(&answer.candidates, expected);
+        } else {
+            expected = Some(answer.candidates);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn string_literal_concepts_recall_direct_owners_on_both_backends() -> Result<(), Box<dyn Error>> {
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    for (file, source) in [
+        (
+            "policy.py",
+            "def guard(value):\n    if value == 'retired':\n        raise ValueError('retired account access is rejected')\n    return value\n\ndef enclosing(value):\n    def hidden():\n        raise ValueError('orphan administrator tokens are rejected')\n    return hidden()\n",
+        ),
+        (
+            "policy.rs",
+            "fn guard(value: &str) -> Result<(), &'static str> {\n    if value == \"retired\" { return Err(\"retired account access is rejected\"); }\n    Ok(())\n}\n",
+        ),
+        (
+            "policy.go",
+            "package policy\nimport \"fmt\"\nfunc guard(value string) error {\n    if value == \"retired\" { return fmt.Errorf(\"retired account access is rejected\") }\n    return nil\n}\n",
+        ),
+        (
+            "policy.ts",
+            "function guard(value: string) {\n    if (value === 'retired') { throw new Error('retired account access is rejected'); }\n    return value;\n}\n",
+        ),
+    ] {
+        fs::write(root.join(file), source)?;
+    }
+    let mut o = options(&root, &d.path().join("out"));
+    o.graph_storage = GraphStorage::Sqlite;
+    let built = build_local_graph(&o)?;
+    let graph = built.output_dir.join("graph.json");
+    let mut expected = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &graph,
+            None,
+            &d.path().join(format!("query-{mode:?}")),
+            mode,
+        )?;
+        let mut query = request();
+        query.question = "Where are retired account access attempts rejected?".to_owned();
+        let answer = engine.discover_ranked(query)?;
+        for file in ["policy.py", "policy.rs", "policy.go", "policy.ts"] {
+            let candidate = answer
+                .candidates
+                .iter()
+                .find(|c| {
+                    c.node.source.as_ref().is_some_and(|s| s.file == file)
+                        && c.node.name.trim_end_matches("()") == "guard"
+                })
+                .ok_or_else(|| format!("literal-only owner missing for {file}: {answer:?}"))?;
+            assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+            assert!(candidate.matched_fields.iter().any(|f| f == "body_code"));
+            assert!(!candidate.supporting_sources.is_empty());
+            assert!(
+                candidate
+                    .excerpts
+                    .iter()
+                    .any(|e| e.text.contains("retired account"))
+            );
+            assert!(
+                !candidate
+                    .reasons
+                    .iter()
+                    .any(|r| r.contains("inspection preference"))
+            );
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&answer.candidates, expected);
+        } else {
+            expected = Some(answer.candidates);
+        }
+        let mut nested = request();
+        nested.question = "Where are orphan administrator tokens rejected?".to_owned();
+        let answer = engine.discover_ranked(nested)?;
+        assert!(
+            answer
+                .candidates
+                .iter()
+                .any(|c| c.node.name.trim_end_matches("()") == "hidden")
+        );
+        assert!(
+            !answer
+                .candidates
+                .iter()
+                .any(|c| c.node.name.trim_end_matches("()") == "enclosing")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn historical_code_windows_do_not_gain_literal_recall_or_reuse_current_answers()
+-> Result<(), Box<dyn Error>> {
+    use compass_model::source_query::SOURCE_QUERY_PROFILE_V4;
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    fs::write(
+        root.join("policy.py"),
+        "def guard(value):\n    if value == 'retired':\n        raise ValueError('retired account access is rejected')\n    return value\n",
+    )?;
+    let mut o = options(&root, &d.path().join("out"));
+    o.graph_storage = GraphStorage::Sqlite;
+    let built = build_local_graph(&o)?;
+    let path = built.output_dir.join(SOURCE_QUERY_FILE);
+    let graph_path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&graph_path)?;
+    let original = fs::read(&path)?;
+    let mut legacy: SourceQueryArtifact = serde_json::from_slice(&original)?;
+    legacy.profile = SOURCE_QUERY_PROFILE_V4.to_owned();
+    legacy.additional_document_frequencies.clear();
+    for owner in &legacy.owners {
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == owner.node_id)
+            .ok_or("missing source owner")?;
+        let base = compass_model::search::search_document(node).terms();
+        for term in owner.document_for_profile(SOURCE_QUERY_PROFILE_V4)?.terms() {
+            *legacy
+                .additional_document_frequencies
+                .entry(term.clone())
+                .or_default() += u64::from(!base.contains(&term));
+        }
+    }
+    legacy.validate()?;
+    let legacy_bytes = serde_json::to_vec(&legacy)?;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let cache = d.path().join(format!("cache-{mode:?}"));
+        for (bytes, should_recall) in [(&original, true), (&legacy_bytes, false), (&original, true)]
+        {
+            fs::write(&path, bytes)?;
+            let engine = open_with_engine(&graph_path, None, &cache, mode)?;
+            let mut query = request();
+            query.question = "Where are retired account access attempts rejected?".to_owned();
+            assert_eq!(
+                !engine.discover_ranked(query)?.candidates.is_empty(),
+                should_recall
+            );
+            assert_eq!(
+                &fs::read(&path)?,
+                bytes,
+                "reader rewrote immutable evidence"
+            );
+        }
+    }
+    Ok(())
+}
 #[test]
 fn outside_edit_does_not_widen_a_declaration_that_ends_at_eof() -> Result<(), Box<dyn Error>> {
     let d = tempfile::tempdir()?;
@@ -212,6 +611,17 @@ fn immutable_legacy_projection_is_readable_without_rewriting_on_both_backends()
         owner.code_windows.clear();
         owner.omitted_code_windows = 0;
     }
+    let legacy_terms = artifact
+        .owners
+        .iter()
+        .map(|owner| owner.document_for_profile(SOURCE_QUERY_PROFILE_V2))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flat_map(|document| document.terms())
+        .collect::<std::collections::BTreeSet<_>>();
+    artifact
+        .additional_document_frequencies
+        .retain(|term, _| legacy_terms.contains(term));
     for candidate in &mut expected {
         candidate
             .excerpts

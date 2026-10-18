@@ -17,6 +17,8 @@ entry ordering, continuation positions and raw JSON remain unchanged.
 ## Ranked query answers
 
 `query --view ranked --format json` produces `compass.query.ranked-view/4`.
+Code-text retrieval covers retained source windows; a literal-only body may
+have no retained window and remain outside this channel.
 MCP `query_graph` with `view: "ranked"` returns the same projection in its
 `rankedView` envelope field, alongside the raw discovery `result`.
 
@@ -1683,3 +1685,19 @@ the candidate's callable definition; the quoted slice must be inside that scope.
 The label describes lexical nesting only. Existing byte, quotation-count and
 text-budget limits still apply; omissions are explicit. Readers reject this
 kind under views1–3 while continuing to read their original quotation kinds.
+
+
+## Owned code vocabulary in ranked answers
+
+Current source-query profile5 adds matched-field label `body_code` for retained,
+bounded code vocabulary absent from the same owner's identifier/comment fields.
+It can recover a declaration when a query concept appears in an error string or
+literal key. Direct AST ownership supplies source pointers; lexical occurrence
+alone does not prove behavior. Dependent matches remain Low, disclose their
+origin, and cannot use code-only terms for an implementation/compound preference.
+Nested callable windows remain inspection-only and cannot lend retrieval terms
+to their enclosing owner. Existing quotation/response budgets and ranked-view4
+schemas remain unchanged. Profiles1–4 retain their original retrieval meaning.
+Code-window clipping remains disclosed. It does not remove preferences supported
+by complete identifier/comment fields; code-dependent candidates still cannot
+receive those preferences.

@@ -213,7 +213,9 @@ qualify as verbatim source quotations.
 ## Local code inspection excerpts (development)
 
 Opt-in ranked answers may include exact code windows from the immutable
-source-query artifact, including literals present in that code. They are not
+source-query artifact, including literals present in that code. Current profile5
+also makes direct-owner code vocabulary searchable; nested context remains
+inspection-only. These bytes are not
 redacted summaries. Windows stay within one AST-owned callable, exclude nested
 callable/type subtrees, and have independent extraction/publication/output caps.
 The query never opens current working-tree files to supply missing text. Treat

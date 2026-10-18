@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Retrieve broad questions whose vocabulary occurs only in bounded AST-owned
+  code text, including error strings and literal keys. Keep code-dependent
+  matches Low and source-cited, exclude nested callable context, and avoid
+  counting identifier/comment words again. Source-query profile5 preserves
+  profiles1–4 with their original retrieval/statistical meaning; AST cache25
+  and ranker18 refresh disposable current state. Preserve preferences supported
+  by complete identifier/comment fields when only code windows are clipped;
+  keep that clipping visible. Graph facts are unchanged.
+
 - Recall conventional `get`/`set` method spellings for broad read, lookup,
   getter and setter questions. Require separate literal owner context, disclose
   the translations and keep dependent candidates Low without an implementation
