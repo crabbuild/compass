@@ -15,7 +15,7 @@ categories.workspace = true
 compass-agent-graph = { path = "../compass-agent-graph", version = "0.4.2" }
 compass-files = { path = "../compass-files", version = "0.4.2" }
 regex.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["hooks", "serialize"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

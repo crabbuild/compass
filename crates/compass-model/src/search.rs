@@ -3,12 +3,164 @@ use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-use crate::code_graph::{EdgeKind, GraphDocument};
+use crate::code_graph::{EdgeKind, GraphDocument, NodeKind, NodeRecord};
 use crate::provenance::{EvidenceConfidence, EvidenceOrigin};
 
 pub const OPERATION_ROLE_TOKENS: &[&str] = &[
     "builder", "factory", "handler", "manager", "provider", "service",
 ];
+pub const SEARCH_FIELD_MAX_BYTES: usize = 8192;
+pub const SEARCH_FIELD_MAX_TERMS: usize = 512;
+pub const SEARCH_MAX_ALIASES: usize = 8;
+
+/// Bounded source-evidence projection shared by native query backends.
+/// Fields describe recall evidence, never declaration aliases or graph edges.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchDocument {
+    pub fields: BTreeMap<&'static str, BTreeSet<String>>,
+    pub truncated: bool,
+}
+
+impl SearchDocument {
+    #[must_use]
+    pub fn terms(&self) -> BTreeSet<String> {
+        self.fields
+            .values()
+            .flat_map(|terms| terms.iter().cloned())
+            .collect()
+    }
+
+    /// Reserved implementation channel, using exactly the same enriched
+    /// projection as document-frequency statistics and relevance scoring.
+    #[must_use]
+    pub fn primary_terms(&self, kind: NodeKind) -> BTreeSet<String> {
+        if is_primary_search_kind(kind) {
+            self.terms()
+                .into_iter()
+                .map(|term| format!("__compass_primary_v1_{term}"))
+                .collect()
+        } else {
+            BTreeSet::new()
+        }
+    }
+}
+
+/// Declaration kinds that can own implementation-search evidence. This is a
+/// retrieval category and never changes graph kind or structural confidence.
+#[must_use]
+pub fn is_primary_search_kind(kind: NodeKind) -> bool {
+    kind.is_callable()
+        || matches!(
+            kind,
+            NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Protocol
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+                | NodeKind::ConfigKey
+        )
+}
+
+/// Project only metadata already published with its source owner. General
+/// comments are deliberately not associated by proximity at query time.
+#[must_use]
+pub fn search_document(node: &NodeRecord) -> SearchDocument {
+    search_document_with_aliases(node, std::iter::empty())
+}
+
+/// Enrich a declaration with names from its incoming alias relationships.
+/// Read at most nine entries. More than eight aliases or 8 KiB of alias text
+/// omits the whole alias field and reports truncation, rather than selecting
+/// an order-dependent subset. Duplicate alias relationships count toward the
+/// work bound; callers must preserve their multiplicity on both backends.
+#[must_use]
+pub fn search_document_with_aliases<'a>(
+    node: &NodeRecord,
+    aliases: impl IntoIterator<Item = &'a str>,
+) -> SearchDocument {
+    use crate::code_graph::NodeDetails;
+    let mut document = SearchDocument::default();
+    let mut field = |name, text: &str| {
+        let mut end = text.len().min(SEARCH_FIELD_MAX_BYTES);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let bounded = &text[..end];
+        let terms = identifier_search_terms(bounded)
+            .into_iter()
+            .map(crate::canonical_code_token)
+            .collect::<BTreeSet<_>>();
+        document.truncated |= end < text.len() || terms.len() > SEARCH_FIELD_MAX_TERMS;
+        document.fields.insert(
+            name,
+            terms.into_iter().take(SEARCH_FIELD_MAX_TERMS).collect(),
+        );
+    };
+    field("name", &node.name);
+    field("qualified_name", &node.qualified_name);
+    field("path", node.source_file().unwrap_or_default());
+    field("kind", node.kind.as_str());
+    field("language", node.language.as_deref().unwrap_or_default());
+    let roles = node
+        .roles
+        .iter()
+        .map(|role| format!("{role:?}"))
+        .collect::<BTreeSet<_>>();
+    field("roles", &roles.into_iter().collect::<Vec<_>>().join(" "));
+    match &node.details {
+        Some(NodeDetails::Symbol(details)) => {
+            field(
+                "signature",
+                details.signature.as_deref().unwrap_or_default(),
+            );
+            field(
+                "declaring_type",
+                details.declaring_type.as_deref().unwrap_or_default(),
+            );
+        }
+        Some(NodeDetails::Document(details)) => {
+            field("document", details.content.as_deref().unwrap_or_default())
+        }
+        Some(NodeDetails::Resource(details)) => {
+            field("document", details.content.as_deref().unwrap_or_default())
+        }
+        _ => {}
+    }
+    let aliases = aliases
+        .into_iter()
+        .take(SEARCH_MAX_ALIASES + 1)
+        .collect::<Vec<_>>();
+    let alias_bytes = aliases
+        .iter()
+        .fold(0_usize, |total, alias| total.saturating_add(alias.len()));
+    if aliases.len() > SEARCH_MAX_ALIASES || alias_bytes > SEARCH_FIELD_MAX_BYTES {
+        document.truncated = true;
+    } else if !aliases.is_empty() {
+        // Sorting before normalization makes the projection independent of
+        // graph insertion order and of alias occurrence ordering.
+        let aliases = aliases.into_iter().collect::<BTreeSet<_>>();
+        let terms = aliases
+            .into_iter()
+            .flat_map(identifier_search_terms)
+            .map(crate::canonical_code_token)
+            .collect::<BTreeSet<_>>();
+        document.truncated |= terms.len() > SEARCH_FIELD_MAX_TERMS;
+        document.fields.insert(
+            "alias",
+            terms.into_iter().take(SEARCH_FIELD_MAX_TERMS).collect(),
+        );
+    }
+    document
+}
+
+/// Reserved native recall channel for implementations and type declarations.
+/// A common term's parameter leaves cannot exhaust this posting quota.
+#[must_use]
+pub fn primary_evidence_terms(node: &NodeRecord) -> BTreeSet<String> {
+    search_document(node).primary_terms(node.kind)
+}
 
 /// Structural relationships that can establish a source-backed dependency
 /// on a named target. The structural relationship commands use the bounded
@@ -257,9 +409,89 @@ mod tests {
     use crate::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
 
     use super::{
-        direct_call_source_identifier_postings, direct_call_source_identifier_targets,
-        identifier_search_terms, relationship_source_identifier_postings,
+        SEARCH_FIELD_MAX_BYTES, SEARCH_FIELD_MAX_TERMS, direct_call_source_identifier_postings,
+        direct_call_source_identifier_targets, identifier_search_terms,
+        relationship_source_identifier_postings, search_document_with_aliases,
     };
+
+    fn projection_node() -> NodeRecord {
+        NodeRecord {
+            id: "target".to_owned(),
+            kind: NodeKind::Function,
+            roles: vec![
+                crate::code_graph::NodeRole::RouteHandler,
+                crate::code_graph::NodeRole::Service,
+            ],
+            name: "execute".to_owned(),
+            qualified_name: "app::execute".to_owned(),
+            language: None,
+            framework: None,
+            source: None,
+            details: None,
+            evidence: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        }
+    }
+
+    #[test]
+    fn fielded_projection_preserves_alias_origin_kind_roles_and_canonical_order() {
+        let mut node = projection_node();
+        let a = search_document_with_aliases(&node, ["RenewalGateway", "PaymentEndpoint"]);
+        node.roles.reverse();
+        let b = search_document_with_aliases(&node, ["PaymentEndpoint", "RenewalGateway"]);
+        assert_eq!(a, b);
+        assert!(!a.truncated);
+        assert!(a.fields["alias"].contains("renewal"));
+        assert!(a.fields["kind"].contains("function"));
+        assert!(a.fields["roles"].contains("route"));
+        assert!(a.fields["roles"].contains("handler"));
+        assert!(!a.fields["name"].contains("renewal"));
+        assert!(
+            a.primary_terms(NodeKind::Function)
+                .contains("__compass_primary_v1_renewal")
+        );
+        assert!(a.primary_terms(NodeKind::Parameter).is_empty());
+    }
+
+    #[test]
+    fn alias_projection_omits_overflow_instead_of_selecting_an_arbitrary_subset() {
+        let node = projection_node();
+        let aliases = (0..9)
+            .map(|index| format!("Alias{index}"))
+            .collect::<Vec<_>>();
+        let a = search_document_with_aliases(&node, aliases.iter().map(String::as_str));
+        let b = search_document_with_aliases(&node, aliases.iter().rev().map(String::as_str));
+        assert_eq!(a, b);
+        assert!(a.truncated);
+        assert!(!a.fields.contains_key("alias"));
+        let oversized = "x".repeat(SEARCH_FIELD_MAX_BYTES + 1);
+        let too_large = search_document_with_aliases(&node, [oversized.as_str()]);
+        assert!(too_large.truncated);
+        assert!(!too_large.fields.contains_key("alias"));
+        let read_count = std::cell::Cell::new(0);
+        let unbounded =
+            std::iter::repeat("alias").inspect(|_| read_count.set(read_count.get() + 1));
+        assert!(search_document_with_aliases(&node, unbounded).truncated);
+        assert_eq!(read_count.get(), 9);
+    }
+
+    #[test]
+    fn source_fields_bound_utf8_bytes_and_unique_terms_independently() {
+        let mut node = projection_node();
+        node.name = format!("{}🙂beyondlimit", "é".repeat(4095));
+        let document = super::search_document(&node);
+        assert!(document.truncated);
+        assert!(!document.fields["name"].contains("beyondlimit"));
+        let many_terms = (0..600)
+            .map(|index| format!("token{index:03}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let document = search_document_with_aliases(&projection_node(), [many_terms.as_str()]);
+        assert!(document.truncated);
+        assert_eq!(document.fields["alias"].len(), SEARCH_FIELD_MAX_TERMS);
+    }
 
     #[test]
     fn preserves_full_tokens_and_adds_identifier_subwords() {

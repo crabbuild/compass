@@ -1034,7 +1034,10 @@ fn finish_resolution(
     } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    let mut stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    stub_diagnostics.extend(evidence::leading_documentation_diagnostics(
+        &evidence_batches,
+    ));
     if !stub_diagnostics.is_empty() {
         let mut diagnostics = merged
             .extensions

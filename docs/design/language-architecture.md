@@ -29,10 +29,10 @@ This architecture is transitioning one language at a time. The status labels bel
 | Status | Behavior |
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
-| Available now | Python, Go, Rust, Java, PHP, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy are registered hard-cut `Qualified` evidence pipelines: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-1 `Qualified` pipeline; version 1 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
+| Available now | All registered hard-cut evidence pipelines emit semantic evidence through shared resolution and projection; current Go2, Rust3, JavaScript 3 and TypeScript 4 development producers are `Qualifying` for leading-documentation and primary-member-scope changes, while unchanged approved producers remain `Qualified` |
+| Available now | Rust is a hard-cut version-3 `Qualifying` development pipeline for leading documentation; its existing bounded source semantics preserve bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
 | Available now | Java is a hard-cut version-1 `Qualified` pipeline; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
-| Available now | TypeScript and JavaScript are hard-cut `Qualified` pipelines; TSX uses the TypeScript identity, both share the bounded ECMAScript producer, and their replaced generic publisher is removed |
+| Available now | TypeScript 4 and JavaScript 3 are `Qualifying` for primary member scopes, with TypeScript retaining leading documentation; TSX uses the TypeScript identity, both share the bounded ECMAScript producer, and their replaced generic publisher is removed |
 | Available now | PHP is a hard-cut version-1 `Qualified` pipeline with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
 | Available now | Kotlin is a hard-cut version-1 `Qualified` pipeline with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; compiler-only behavior remains explicitly unresolved |
 | Available now | Ruby is a hard-cut version-1 `Qualified` pipeline; its dedicated producer, method-space-aware resolver policy, replaced Ruby member publisher, and Rails `rails-ruby` universal pack are active under the release promotion decision |
@@ -102,12 +102,23 @@ The hard-cut route is selected by `UniversalEvidenceRegistry`. Presence in the s
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains C#, Dart, Go, Groovy, Java, JavaScript, Kotlin,
 PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript. All registered universal
-evidence producers are at version 1. `Qualified` records that
+evidence producer versions are recorded individually in the runtime registry and
+release-promotion decision. Changed development versions remain `Qualifying`.
+`Qualified` records that
 the release promotion gates passed; it does not claim compiler-grade
 completeness or re-enable the removed direct route. Producer-version changes
 invalidate cached evidence for only the changed
 language. Go identities retain the repository-relative directory prefix and
 use the parsed package clause to distinguish external test packages.
+
+Direct variable-bound ECMAScript functions retain their binding anchors for
+identity and provenance while publishing a uniquely owned function definition
+range. TypeScript/TSX lexical body evidence uses the exact declarator envelope;
+inherited callbacks and ambiguous scopes cannot supply it. This source metadata
+change does not invent semantic relationships. Source-query profile 2 keeps
+immutable profile 1 artifacts readable; JavaScript body-query evidence is not
+added by this change. The updated producers remain `Qualifying` pending source
+audit and release promotion.
 
 ## Grammar substrate
 

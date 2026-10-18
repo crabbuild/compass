@@ -4,20 +4,77 @@ Compass resolves source relationships through a language-neutral evidence
 contract. Every hard-cut language uses the same production route. The release
 promotion decision in
 `tests/qualification/universal-evidence-promotion.json` records all 14
-registered pipelines as `Qualified`; they do not retain a second direct graph
-publisher. Swift, Dart, Scala, and Groovy have complete independent audit
+registered producer versions as `Qualified`; they do not retain a second direct
+graph publisher. New development versions below are not covered by that decision. Swift, Dart, Scala, and Groovy have complete independent audit
 artifacts captured in the mounted qualification target for that decision.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
+
+## In-progress leading documentation
+
+The development registry now marks Go2, Rust3 and TypeScript4 as `Qualifying`.
+They emit optional `DeclarationFact.documentation` metadata under evidence/2:
+an AST attachment kind, exact source range and raw UTF-8 comment text. The first
+slice supports one contiguous leading group on supported named declarations;
+it does not infer owners from nearby names. Python's existing rationale/docstring
+path and JavaScript's documentation extraction remain unchanged. Publication/3 projects these
+as rationale resources with a `documents` edge under the versioned
+`universal-leading-documentation-v1` rule. The existing provenance vector
+retains both the excerpt and unique full declaration range. Graph validation
+rejects an inconsistent claimed proof; query ranker/4 uses the same verifier.
+No comparative recall or release qualification is claimed for this metadata.
+
+Each excerpt is at most 4KiB, with at most 1MiB retained per file. Omitted groups
+produce one bounded `leading_documentation_omitted` evidence diagnostic per file.
+The resolver publishes a bounded `leading_documentation_omission_summary`
+for extraction warnings or excerpts without a unique, non-overlapping full
+definition range. JSON and store queries expose that summary as incomplete
+coverage. Aggregate documentation is capped at 128MiB per resolver index.
+New readers accept old absent metadata. Older strict readers reject the new
+present field and must update; this is not transparent old-reader compatibility.
+Extraction/5 and AST-cache20 invalidate prior disposable facts. The existing
+release-promotion record and its strong matching test remain unchanged pending
+a new source audit and reviewed decision.
+
+## In-progress primary ECMAScript member scopes
+
+JavaScript3 and TypeScript4 are `Qualifying` for a shared receiver-scope
+correction. A member scope must be the unique owned child directly below its
+declaration's binding scope. Nested blocks and callable-type scopes may share
+the owner but cannot be selected by the lexical order of their hashed IDs.
+Ambiguous accessors remain unresolved in the regression fixtures; direct fields,
+methods, nested calls and shadowing retain their exact occurrence proofs.
+JavaScript class-field names use the grammar's `property` child; their exact
+declaration anchors are retained instead of being lost before a constructor write.
+AST-cache20 rebuilds current disposable facts. The extraction/5 ID seed and
+evidence/2 wire shape are unchanged, and the approved historical promotion
+record below is not updated by these development checks.
+
+## In-progress callable initializer definition ranges
+
+JavaScript3 and TypeScript4 also retain the full definition range of a direct
+variable-bound function. The binding declaration keeps its original name anchor
+for identity and provenance. An extended definition requires one directly owned
+function scope whose parent is the binding scope; inherited callbacks and
+ambiguous scopes cannot supply that range. This changes source metadata without
+inventing call or reference edges.
+
+For TypeScript and TSX, source-query projection/2 uses the same exact declarator
+envelope while collecting lexical evidence from the callable body itself.
+Nested callback bodies keep their own ownership. JavaScript body-query evidence
+is not added by this change. Immutable projection/1 artifacts remain readable;
+AST-cache20 rebuilds disposable current extraction facts. These checks do not
+replace independent graph qualification or the promotion decision.
 
 ## Promotion decision (2026-09-15)
 
 The checked-in decision record is the machine-readable source of truth:
 [`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
 It pins the evidence schema, producer versions, canonical dialect aliases, and
-the release gate policy. The runtime registry and Rust conformance test must
-match it exactly.
+the release gate policy. Release-qualified registry versions must match it
+exactly. The current development versions above intentionally do not pass that
+promotion gate until a new audit and reviewed decision exist.
 
 | Canonical language | Producer | Version | Status |
 | --- | --- | ---: | --- |
@@ -58,7 +115,7 @@ invalidates older extraction facts.
 ## Evidence contract
 
 The serialized evidence schema is `compass.languages.evidence/2`. The
-extraction cache identity is `compass.languages.extraction/4`; changing either
+extraction cache identity is `compass.languages.extraction/5`; changing either
 major version invalidates older artifacts instead of attempting an implicit
 translation.
 

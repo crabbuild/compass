@@ -15,6 +15,7 @@ pub mod provenance;
 pub mod query_contract;
 mod query_index;
 pub mod search;
+pub mod source_query;
 mod validation;
 
 pub use artifact::GraphArtifact;

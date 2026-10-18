@@ -60,6 +60,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             signature_hash: None,
             implementation_hash: None,
             source_hash: None,
+            documentation: None,
             definition_start_byte: None,
             range: range(0, 6),
         }],
@@ -166,6 +167,143 @@ fn unknown_fields_are_rejected_at_nested_boundaries() {
     let error =
         serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect_err("unknown field");
     assert!(error.to_string().contains("unknown field"));
+}
+
+fn documentation_batch(content: &str) -> SemanticEvidenceBatch {
+    use compass_languages::{DeclarationDocumentationFact, DeclarationDocumentationKind};
+    let mut batch = valid_batch();
+    batch.pipeline.language = "rust".to_owned();
+    batch.bindings.clear();
+    batch.occurrences.clear();
+    batch.candidates.clear();
+    batch.scopes.clear();
+    let declaration = &mut batch.declarations[0];
+    declaration.language = "rust".to_owned();
+    declaration.range = EvidenceRange {
+        source_file: "src/example.rs".to_owned(),
+        start_byte: content.len() as u64 + 4,
+        end_byte: content.len() as u64 + 10,
+        start_line: content.bytes().filter(|byte| *byte == b'\n').count() as u32 + 2,
+        start_column: 3,
+        end_line: content.bytes().filter(|byte| *byte == b'\n').count() as u32 + 2,
+        end_column: 9,
+    };
+    declaration.documentation = Some(DeclarationDocumentationFact {
+        kind: DeclarationDocumentationKind::RustOuter,
+        range: EvidenceRange {
+            source_file: "src/example.rs".to_owned(),
+            start_byte: 0,
+            end_byte: content.len() as u64,
+            start_line: 1,
+            start_column: 0,
+            end_line: content.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1,
+            end_column: content.rsplit('\n').next().map_or(0, str::len) as u32,
+        },
+        content: content.to_owned(),
+    });
+    batch
+}
+
+#[test]
+fn declaration_documentation_round_trips_without_changing_historical_missing_fields() {
+    let historical = serde_json::to_value(valid_batch()).expect("serialize historical fixture");
+    assert!(historical["declarations"][0].get("documentation").is_none());
+    assert_eq!(
+        serde_json::from_value::<SemanticEvidenceBatch>(historical).expect("old field absence"),
+        valid_batch()
+    );
+    for content in ["/// documentation", "/// café\r\n/// 文"] {
+        let batch = documentation_batch(content);
+        validate_evidence(&batch, EvidenceLimits::default()).expect("exact source metadata");
+        let encoded = serde_json::to_value(&batch).expect("serialize docs");
+        assert_eq!(
+            encoded["declarations"][0]["documentation"]["kind"],
+            "rust_outer"
+        );
+        assert_eq!(
+            serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect("docs round trip"),
+            batch
+        );
+    }
+}
+
+#[test]
+fn declaration_documentation_rejects_wrong_file_language_owner_and_extent() {
+    use compass_languages::DeclarationDocumentationKind;
+    let good = documentation_batch("/// documentation");
+    let mut wrong_file = good.clone();
+    wrong_file.declarations[0]
+        .documentation
+        .as_mut()
+        .expect("docs")
+        .range
+        .source_file = "src/unrelated.rs".to_owned();
+    assert_code(&wrong_file, EvidenceErrorCode::InvalidFact);
+    let mut wrong_language = good.clone();
+    wrong_language.declarations[0]
+        .documentation
+        .as_mut()
+        .expect("docs")
+        .kind = DeclarationDocumentationKind::GoLeading;
+    assert_code(&wrong_language, EvidenceErrorCode::InvalidFact);
+    let mut wrong_owner_kind = good.clone();
+    wrong_owner_kind.declarations[0].kind = "parameter".to_owned();
+    assert_code(&wrong_owner_kind, EvidenceErrorCode::InvalidFact);
+    let mut overlapping = good.clone();
+    overlapping.declarations[0].range.start_byte = 1;
+    assert_code(&overlapping, EvidenceErrorCode::InvalidFact);
+    let mut wrong_bytes = good.clone();
+    wrong_bytes.declarations[0]
+        .documentation
+        .as_mut()
+        .expect("docs")
+        .range
+        .end_byte -= 1;
+    assert_code(&wrong_bytes, EvidenceErrorCode::InvalidFact);
+    let mut wrong_columns = documentation_batch("/// café\r\n/// 文");
+    wrong_columns.declarations[0]
+        .documentation
+        .as_mut()
+        .expect("docs")
+        .range
+        .end_column -= 1;
+    assert_code(&wrong_columns, EvidenceErrorCode::InvalidFact);
+}
+
+#[test]
+fn declaration_documentation_has_closed_attachment_and_content_schema() {
+    let batch = documentation_batch("/// documentation");
+    let mut unknown_field = serde_json::to_value(&batch).expect("serialize docs");
+    unknown_field["declarations"][0]["documentation"]["summary"] = serde_json::json!("invented");
+    assert!(serde_json::from_value::<SemanticEvidenceBatch>(unknown_field).is_err());
+    let mut unknown_kind = serde_json::to_value(&batch).expect("serialize docs");
+    unknown_kind["declarations"][0]["documentation"]["kind"] = serde_json::json!("nearby_comment");
+    assert!(serde_json::from_value::<SemanticEvidenceBatch>(unknown_kind).is_err());
+}
+
+#[test]
+fn declaration_documentation_bounds_each_excerpt_and_aggregate_bytes() {
+    use compass_languages::{MAX_BATCH_DOCUMENTATION_BYTES, MAX_DECLARATION_DOCUMENTATION_BYTES};
+    let content = format!(
+        "/// {}",
+        "x".repeat(MAX_DECLARATION_DOCUMENTATION_BYTES - 4)
+    );
+    let mut batch = documentation_batch(&content);
+    validate_evidence(&batch, EvidenceLimits::default()).expect("exact excerpt ceiling");
+    assert_code(
+        &documentation_batch(&format!("{content}x")),
+        EvidenceErrorCode::ResourceLimit,
+    );
+    let declaration = batch.declarations[0].clone();
+    batch.declarations = (0..=MAX_BATCH_DOCUMENTATION_BYTES / MAX_DECLARATION_DOCUMENTATION_BYTES)
+        .map(|index| {
+            let mut value = declaration.clone();
+            value.id = format!("decl:{index}");
+            value.graph_node_id = format!("graph:{index}");
+            value
+        })
+        .collect();
+    assert_code(&batch, EvidenceErrorCode::ResourceLimit);
 }
 
 #[test]
@@ -503,7 +641,7 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     }));
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("go").map(|pipeline| pipeline.producer.version),
-        Some(1)
+        Some(2)
     );
     assert_eq!(
         pipelines
@@ -527,17 +665,17 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
-        Some(2)
+        Some(3)
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((1, UniversalEvidenceQualification::Qualified))
+        Some((3, UniversalEvidenceQualification::Qualifying))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("typescript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((1, UniversalEvidenceQualification::Qualified))
+        Some((4, UniversalEvidenceQualification::Qualifying))
     );
 }
 
@@ -709,7 +847,7 @@ fn typescript_javascript_pipeline_is_wired_into_production_extraction() {
         assert_eq!(evidence.pipeline.dialect.as_deref(), Some(dialect));
         assert_eq!(
             evidence.pipeline.qualification,
-            UniversalEvidenceQualification::Qualified
+            UniversalEvidenceQualification::Qualifying
         );
         assert_eq!(evidence.pipeline.id, format!("compass.{language}"));
     }

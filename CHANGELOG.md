@@ -2,6 +2,170 @@
 
 ## Unreleased
 
+- Prefer cohesive compound identifiers over scattered word mentions for broad
+  questions such as `load-only` field setup. Require separate owner-topic
+  evidence, retain Low inspection relevance and bounded real source citations,
+  and preserve exact identities. Code-based inspection preferences now reject
+  missing, empty and native-ellipsis-clipped signatures. Ranker14 refreshes
+  disposable response caches; graph facts and recall postings are unchanged.
+
+- Require frozen, independently reviewed exposure lineage and verified history
+  artifacts for heldout developer comparison captures. Reject known source or
+  linked-mechanism reuse across renamed tasks, question rewrites and commits;
+  preserve legacy diagnostic inputs and the existing numeric quality gates.
+
+- Recall indexed `item`/`element` and `copy`/`clone` alternatives when ordinary
+  broad-query words `entry` or `snapshot` have no indexed literal match. Require
+  separate source-owned literal topic evidence for lexical-only candidates;
+  keep dependent matches Low and disclose each translation. Preserve exact
+  identities and existing literal candidate admission. Refresh disposable
+  response caches; graph facts are unchanged.
+
+- Prefer callable-local operation identifiers with separate topic evidence for
+  broad single-operation inspection. Exclude signature-overlapping identifiers,
+  compound/negative/temporal conditions and mismatched document/test intent from
+  this preference. Preserve uncertainty and exact identity; version disposable
+  response caches as ranking semantics change. Graph facts are unchanged.
+
+- Include retained source citations on compact discovery seed lines before
+  relationship context, keeping selected candidates inspectable on the first
+  page without changing retrieval order or cursor semantics.
+
+- Preserve documentation coverage warnings in local SQLite queries, matching
+  JSON queries. Recover older snapshots through bounded diagnostic reads and
+  invalidate cached answers that could omit these warnings. Retain graph
+  coverage warnings when discovery finds no matching seed.
+
+- Score ranked code quotations without borrowing terms from retained overlapping
+  comments. Preserve the precise comment when it supplies the matching evidence.
+  Under tight text budgets, shorten or omit lower-ranked quotes before clipping
+  the first candidate's inspection evidence. Candidate ranking is unchanged.
+
+- Exclude Python lambda keyword tokens from auxiliary callable scopes. This
+  corrects scope counts and can recover source evidence at the scope quota;
+  semantic graph records are unchanged.
+
+- Add separately labelled nested anonymous-callable inspection context to
+  already retrieved implementations. Native AST parent facts preserve ownership
+  barriers and actual syntax anchors; no graph calls or execution are inferred.
+  Direct windows keep priority within shared limits. Source profile4, ranked
+  view4 and AST cache24 version the change; readers retain older profiles.
+
+
+- Bound disposable JSON query-index validation. Retain the full integrity check;
+  slow eligible file checks can use a size-bounded, byte-identical inspection
+  image, while WAL and mismatched images keep original-file validation. Report
+  startup-budget exhaustion as a typed timeout without rebuilding the index.
+  Cancel and join operation-local SQLite interrupt timers before reusing the
+  connection, avoiding coarse progress-callback overruns in integrity walks.
+
+- Retain one exact callable-local identifier occurrence per spelling for body
+  retrieval, with explicit omitted-occurrence counts. This reduces repeated-site
+  pressure on bounded publication while preserving independently collected code
+  windows. AST cache24 rebuilds disposable source-query evidence.
+
+- Development ranked queries retain bounded AST-owned code windows for
+  comment-free implementations. Ranked JSON uses `compass.query.ranked-view/3`;
+  immutable legacy views and source-query profiles remain readable. Code windows
+  have independent quotas and do not change ranking or graph relationships.
+
+
+- Keep a bare existing node ID as the sole ranked inspection target, excluding
+  unrelated matches for identifier prefixes such as `sha256`. Raw discovery
+  and optional structural context retain their contracts.
+
+- Preserve real source postings when their terms equal store capability markers.
+  Store publication uses separate capability records and retains legacy reads;
+  indexing Compass's own capability constant signatures no longer conflicts with
+  empty markers. Graph records and relationship evidence are unchanged.
+
+- Add bounded source-owned comment/documentation quotations to opt-in ranked
+  answers. Ranked JSON uses version 2 and retains version 1 reader compatibility;
+  text shortens/omits quotes before candidate rows to honor the output budget.
+  Candidate ranking, graph relationships and structural confidence are unchanged.
+  Omit clipped quotation windows that no longer contain matching query terms.
+
+
+- Retain direct variable-initializer function definitions in source ranges and
+  TypeScript/TSX body-query evidence using exact AST owner/parent facts. Preserve
+  original binding provenance, stable identities and relationship occurrences;
+  reject ambiguous ownership. Source-query profile2 reads alongside immutable
+  profile1 artifacts. AST cache20 rebuilds disposable entries. JavaScript3 and
+  TypeScript4 remain `Qualifying` pending independent source audit and promotion.
+
+- Preserve non-file AST declaration/occurrence ranges during fact-neutral edits,
+  including declarations ending at EOF. Refresh existing file-node digest/size
+  metadata from file inventory. Refresh file-scoped container envelopes only
+  with current AST ownership and original declaration provenance; restore Kotlin
+  package updates after metadata-tail truncation while preserving explicit
+  namespace bounds and cold-build/edit-restore equivalence.
+  Reject non-callable body owners and report
+  unknown source-query schema/profile versions through typed error codes.
+
+- Apply broad implementation-search test preferences to colocated test/spec
+  files and typed test/fixture roles. Preserve explicit test intent and both
+  candidate sets; isolate cached answers with ranker/9.
+
+- Select ECMAScript member scopes by their structural parent instead of hashed
+  child IDs. Preserve accessor ambiguity and declared field/method targets across
+  filename changes, and recognize JavaScript class-field name anchors rather
+  than replacing them with constructor writes. JavaScript3 and TypeScript4 remain `Qualifying`; AST cache20
+  rebuilds disposable facts without rewriting historical graphs.
+
+- Add a native, graph-bound callable-body query index for Python, Rust, Go and
+  TypeScript/TSX. Retain bounded AST identifiers/comments with source citations,
+  shared JSON/store recall and statistics, and Low inspection relevance when
+  body evidence supplies missing context. Publish coherent immutable artifacts,
+  refresh both incremental paths, and invalidate caches by content/profile.
+  Comparative quality and release qualification remain under verification.
+
+- Require topic evidence beyond generic kind/language matches for broad
+  questions with additional subjects. Preserve simple listings, exact identity
+  and tentative candidates supported by real topic evidence.
+
+- Recall callable owners of matching local identifiers through bounded exact
+  AST containment. Preserve unique ownership, source citations and shared work
+  ceilings; label inferred query relevance as Low inspection evidence.
+
+- Retain more ranked candidates within the text budget by abbreviating lengthy
+  explanations before dropping an owner. Preserve uncertainty, citations and
+  the byte limit; the JSON projection and query ranking are unchanged.
+
+- Recall broad implementation candidates through bounded, verified outgoing
+  call/reference evidence and retain source citations. Mark matches that depend
+  on referenced identifiers as Low inspection leads. Fix plural acronyms such
+  as TTLs becoming missing symbol names; preserve explicit identity guards.
+
+- Add bounded AST leading documentation for development Rust3, Go2 and
+  TypeScript4 producers, retained as source-proven rationale resources. Require
+  the exact excerpt and full owner anchors before broad retrieval uses leading
+  prose. Preserve citation ranges, report omitted excerpts in graph/query
+  warnings, and invalidate extraction/publication/ranking caches. These producer
+  versions remain `Qualifying` pending source audit and release promotion.
+
+- Improve broad native retrieval with fielded names, signatures, aliases,
+  paths and source-owned prose, shared JSON/store term statistics and bounded
+  declaration recall. Mark partial candidates with missing owner-specific
+  context and retain exact lookup behavior. Unknown ordinary wording can return
+  Low candidates; absent explicitly named subjects remain guarded. Negative
+  qualifications return inspection candidates with an explicit unverified
+  condition warning rather than claiming that the condition holds.
+  Preserve temporal conditions as explicitly unverified while retrieving on
+  substantive terms; keep quoted and qualified names literal.
+  Disposable JSON indexes rebuild to format 4; older immutable stores give an
+  explicit update instruction rather than claiming full field coverage.
+- Recover query-index builds after a process is terminated by using persistent
+  operating-system locks. Recheck index validity and replace invalid indexes
+  only while holding the build lock; a live competing builder yields an
+  actionable bounded-wait error. Keep the new cache namespace separate from
+  older presence-lock builders.
+- Add opt-in `query --view ranked` and MCP `query_graph` with `view: "ranked"`.
+  Show up to five source-located candidates with relevance reasons,
+  separate identity/evidence labels, honest recall bounds and scope refinement.
+  Optional `--include-context` / `include_context` appends witnessed one-hop context.
+  Publish the additive `compass.query.ranked-view/2` projection; existing raw
+  formats and discovery cursor contracts retain their shapes.
+
 ## 0.4.2 - 2026-10-02
 
 - Add source-scoped architecture and community views, compact hotspot rankings,

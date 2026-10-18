@@ -361,6 +361,7 @@ pub struct CodeQueryEngine {
     pub(crate) semantic_search: bool,
     pub(crate) semantic_index: Mutex<Option<crate::semantic_search::SemanticIndex>>,
     pub(crate) response_cache: crate::response_cache::ResponseCache,
+    pub(crate) source_query: Option<crate::source_query::Index>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1251,13 +1252,14 @@ impl PinnedDiscoveryBackend<'_> {
         }
         match self {
             Self::Materialized { lookup, .. } => {
-                let indexed = lookup
-                    .relationship_source_ids_by_term
-                    .get(&normalized)
+                let indexed = lookup.relationship_source_ids_by_term.get(&normalized);
+                let truncated = indexed.is_some_and(|posting| posting.len() > limit);
+                let source_ids = indexed
+                    .into_iter()
+                    .flatten()
+                    .take(limit)
                     .cloned()
-                    .unwrap_or_default();
-                let truncated = indexed.len() > limit;
-                let source_ids = indexed.into_iter().take(limit).collect::<Vec<_>>();
+                    .collect::<Vec<_>>();
                 Ok(RelationshipCandidateRead {
                     node_ids_decoded: u64::try_from(source_ids.len()).unwrap_or(u64::MAX),
                     source_ids,
@@ -1433,7 +1435,15 @@ impl PinnedDiscoveryBackend<'_> {
             };
             (nodes, exact_truncated, exact_work)
         };
-        if nodes.is_empty() && !truncated {
+        // Reserved declaration-channel keys are exact postings. Falling back
+        // to their common `__c` prefix decodes unrelated synthetic terms and
+        // reports truncation even for an absent term in a tiny graph.
+        if nodes.is_empty()
+            && !truncated
+            && !concepts
+                .iter()
+                .any(|term| term.starts_with("__compass_primary_v1_"))
+        {
             (nodes, truncated, work) = reader
                 .nodes_for_terms_bounded_work(concepts, read_limits)
                 .map_err(snapshot_error)?;
@@ -1541,7 +1551,7 @@ fn snapshot_limits(max_items: usize) -> Result<SnapshotReadLimits, QueryError> {
     })
 }
 
-fn snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
+pub(crate) fn snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
     QueryError::new(
         QueryErrorKind::CorruptArtifact,
         "store_graph_snapshot_failed",
@@ -2343,7 +2353,15 @@ impl CodeQueryEngine {
             .collect::<Vec<_>>()
             .join(" AND ");
         let prefix_query = fts_query_from_terms(concepts);
-        for query in [exact_query, prefix_query] {
+        let queries = if concepts
+            .iter()
+            .any(|term| term.starts_with("__compass_primary_v1_"))
+        {
+            vec![exact_query]
+        } else {
+            vec![exact_query, prefix_query]
+        };
+        for query in queries {
             let mut statement = connection
                 .prepare(
                     "SELECT n.id
@@ -4418,7 +4436,7 @@ fn add_admitted_candidates(
     }
 }
 
-fn is_heuristic(edge: &EdgeRecord) -> bool {
+pub(crate) fn is_heuristic(edge: &EdgeRecord) -> bool {
     edge.evidence
         .iter()
         .any(|evidence| evidence.origin == compass_model::provenance::EvidenceOrigin::Heuristic)
@@ -4966,7 +4984,7 @@ pub(crate) fn enforce_response_size(response: &mut CodeQueryResponse) -> Result<
     Ok(())
 }
 
-fn sql_error(error: rusqlite::Error) -> QueryError {
+pub(crate) fn sql_error(error: rusqlite::Error) -> QueryError {
     QueryError::new(
         QueryErrorKind::CorruptArtifact,
         "query_index_error",

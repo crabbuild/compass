@@ -26,6 +26,44 @@ review and evidence explaining the tradeoff.
 
 ## Natural-language answer cost qualification
 
+JSON query-index validation uses a two-second original-file probe and a shared
+30-second validation budget. Only eligible rollback-mode indexes from 16 MiB to
+768 MiB may use a byte-verified in-memory inspection image after that probe.
+Warm file checks normally avoid the image allocation. The image can temporarily
+add up to 768 MiB plus SQLite working memory; eligibility is not a memory-use or
+end-to-end latency qualification. Graph loading and missing-index construction
+are outside this validation-stage deadline.
+
+An operation-local interrupt timer complements SQLite progress callbacks during
+metadata and integrity SQL. It is cancelled and joined before the next operation;
+if the thread cannot start, progress checks use an interval of one. This avoids
+waiting for a coarse callback interval in long integrity walks. Interruption is
+cooperative inside SQLite and cannot cancel a blocked filesystem call. No memory
+mapping hint is added to validation.
+
+The 2026-10-17 bundled-SQLite stage diagnostics in Plan 029 used an exposed
+537,133,056-byte Compass index. Two file checks on fresh APFS clone inodes hit a
+60-second diagnostic deadline; two image checks completed in 3.883/3.518 seconds.
+On the already warm inode, file checks took 0.643/0.647 seconds and image checks
+0.773/0.751 seconds, with peak RSS about 5.8 MB and 545.7 MB respectively. These are
+small stage diagnostics affected by hashing, shared extents and prior cache
+state. They motivated the adaptive candidate; they are neither certified cold
+measurements nor a production performance baseline or Graphify comparison.
+Native end-to-end and platform qualification of the candidate remain required.
+
+Fielded broad retrieval retains the shared hard ceilings of 12,801 indexed
+candidate records and 291 candidate probes, including reserved routing work.
+Its search-stage counters cover posting, documentation-ownership and alias
+reads; bounded intent-routing checks are reserved separately. Optional local
+LSA has its own limits (32,768 nodes and 64 MiB of corpus data), uses the same
+absolute query deadline, and is not included in those indexed-read counters.
+Compare complete process wall time and peak RSS when measuring its cost.
+
+The new broad-query qualification workflow is described in
+[`BROAD_QUERY_REVIEW.md`](benchmarks/agent_query/BROAD_QUERY_REVIEW.md).
+Development traces and native regression tests establish individual fixes;
+they do not establish a current-release superiority or performance claim.
+
 The developer-side [agent query harness](benchmarks/agent_query/README.md)
 qualifies answer recall and output cost separately from runtime performance.
 Run `suite_natural.toml` on its five pinned repositories with the same question
@@ -1554,3 +1592,23 @@ final verdicts.
 contains source and artifact pins, suite and binary hashes, the registration and
 amendment, every oracle observation and every cold/warm timing. These focused
 query measurements do not replace release-wide performance qualification.
+
+## Nested callable quotation bounds
+
+Source profile4 adds lexical context to already retrieved owners without adding
+lexical postings, document-frequency contributions or node-score work. Native
+preorder parent indexes allow a linear bounded ownership pass. Direct windows
+receive publication capacity first; nested code uses the same 16-window owner,
+32,768-window and 8 MiB totals, with at most eight nested scopes per owner. The
+ranked shortlist keeps two512-byte quotes per candidate. Incomplete nested
+context disables reuse of that auxiliary projection on a fact-neutral update;
+it is regenerated through the existing build path. This can increase update
+cost and must be included in end-to-end qualification. No latency, memory or
+Graphify superiority claim follows from these limits.
+
+Python auxiliary scope extraction now requires a named AST node: the unnamed
+`lambda` keyword token is not another callable. This corrects scope counts and
+can recover later source owners when the per-file scope quota was previously
+spent on keyword tokens. The change can affect source-field coverage and
+retrieval scores in quota-limited files; it does not change semantic graph
+records. AST cache24 rebuilds the affected disposable evidence.

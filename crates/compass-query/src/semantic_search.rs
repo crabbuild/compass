@@ -124,9 +124,11 @@ impl SemanticIndex {
                 (term, (index, idf))
             })
             .collect::<BTreeMap<_, _>>();
+        check()?;
         let matrix = documents
             .into_iter()
             .map(|terms| {
+                check()?;
                 let mut row = terms
                     .into_iter()
                     .filter_map(|term| vocabulary.get(&term).copied())
@@ -137,9 +139,9 @@ impl SemanticIndex {
                         *value /= size;
                     }
                 }
-                row
+                Ok(row)
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, QueryError>>()?;
         let mut directions: Vec<Vec<f64>> = Vec::new();
         // Power iteration of A^T A with reorthogonalization. Integer seed
         // arithmetic and ordered sparse rows make equivalent inputs stable.
@@ -147,6 +149,7 @@ impl SemanticIndex {
             .min(vocabulary.len())
             .min(nodes.len().isqrt().max(1))
         {
+            check()?;
             let mut vector = (0..vocabulary.len())
                 .map(|index| {
                     let seed = (index as u64 + 1)
@@ -163,6 +166,7 @@ impl SemanticIndex {
                 check()?;
                 let mut next = vec![0.0; vocabulary.len()];
                 for row in &matrix {
+                    check()?;
                     let dot = row
                         .iter()
                         .map(|(index, weight)| vector[*index] * weight)
@@ -180,7 +184,12 @@ impl SemanticIndex {
             // Degenerate directions do not supply arbitrary similarity.
             let energy = matrix
                 .iter()
-                .map(|row| row.iter().map(|(i, w)| vector[*i] * w).sum::<f64>().powi(2))
+                .map(|row| {
+                    check()?;
+                    Ok(row.iter().map(|(i, w)| vector[*i] * w).sum::<f64>().powi(2))
+                })
+                .collect::<Result<Vec<_>, QueryError>>()?
+                .into_iter()
                 .sum::<f64>();
             if energy <= 1e-8 {
                 continue;
@@ -190,14 +199,16 @@ impl SemanticIndex {
         let embeddings = matrix
             .iter()
             .map(|row| {
+                check()?;
                 let mut embedding = directions
                     .iter()
                     .map(|basis| row.iter().map(|(i, w)| basis[*i] * w).sum())
                     .collect::<Vec<f64>>();
                 norm(&mut embedding);
-                embedding
+                Ok(embedding)
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryError>>()?;
+        check()?;
         Ok(Self {
             nodes,
             vocabulary,
@@ -207,56 +218,66 @@ impl SemanticIndex {
         })
     }
 
-    fn search(&self, query: &str, max_nodes: u32) -> Vec<(NodeRecord, f64)> {
+    fn search(
+        &self,
+        query: &str,
+        max_nodes: u32,
+        check: &dyn Fn() -> Result<(), QueryError>,
+    ) -> Result<Vec<(NodeRecord, f64)>, QueryError> {
+        check()?;
         let terms = crate::query_terms(query)
             .into_iter()
             .filter_map(|term| self.vocabulary.get(&term).copied())
             .collect::<BTreeMap<_, _>>();
         let query_indices = terms.keys().copied().collect::<BTreeSet<_>>();
-        let bridges = self
-            .rows
-            .iter()
-            .filter(|row| row.iter().any(|(index, _)| query_indices.contains(index)))
-            .flat_map(|row| row.iter().map(|(index, _)| *index))
-            .collect::<BTreeSet<_>>();
+        let mut bridges = BTreeSet::new();
+        for row in &self.rows {
+            check()?;
+            if row.iter().any(|(index, _)| query_indices.contains(index)) {
+                bridges.extend(row.iter().map(|(index, _)| *index));
+            }
+        }
         let mut vector = self
             .directions
             .iter()
             .map(|basis| terms.iter().map(|(i, w)| basis[*i] * w).sum())
             .collect::<Vec<f64>>();
         if !norm(&mut vector) {
-            return Vec::new();
+            check()?;
+            return Ok(Vec::new());
         }
-        let mut scores = self
-            .embeddings
-            .iter()
-            .enumerate()
-            .filter_map(|(index, embedding)| {
-                if !self.rows[index]
-                    .iter()
-                    .any(|(index, _)| bridges.contains(index))
-                {
-                    return None;
-                }
-                let similarity = vector
-                    .iter()
-                    .zip(embedding)
-                    .map(|(a, b)| a * b)
-                    .sum::<f64>();
-                let similarity = (similarity.clamp(-1.0, 1.0) * 1_000_000.0).round() / 1_000_000.0;
-                (similarity >= MIN_SIMILARITY).then_some((index, similarity))
-            })
-            .collect::<Vec<_>>();
+        let mut scores = Vec::new();
+        for (index, embedding) in self.embeddings.iter().enumerate() {
+            check()?;
+            if !self.rows[index]
+                .iter()
+                .any(|(index, _)| bridges.contains(index))
+            {
+                continue;
+            }
+            let similarity = vector
+                .iter()
+                .zip(embedding)
+                .map(|(a, b)| a * b)
+                .sum::<f64>();
+            let similarity = (similarity.clamp(-1.0, 1.0) * 1_000_000.0).round() / 1_000_000.0;
+            if similarity >= MIN_SIMILARITY {
+                scores.push((index, similarity));
+            }
+        }
+        check()?;
         scores.sort_by(|(a, ascore), (b, bscore)| {
             bscore
                 .total_cmp(ascore)
                 .then_with(|| self.nodes[*a].id.cmp(&self.nodes[*b].id))
         });
-        scores
+        let result = scores
             .into_iter()
             .take(usize::try_from(max_nodes).unwrap_or(usize::MAX).min(8))
             .map(|(index, score)| (self.nodes[index].clone(), score))
-            .collect()
+            .collect();
+        check()?;
+        Ok(result)
     }
 }
 
@@ -266,11 +287,26 @@ impl CodeQueryEngine {
         query: &str,
         max_nodes: u32,
     ) -> Result<Vec<(NodeRecord, f64)>, QueryError> {
-        self.check_deadline()?;
-        let mut cache = self
-            .semantic_index
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.semantic_candidates_guarded(query, max_nodes, &|| self.check_deadline())
+    }
+
+    pub(crate) fn semantic_candidates_guarded(
+        &self,
+        query: &str,
+        max_nodes: u32,
+        check: &dyn Fn() -> Result<(), QueryError>,
+    ) -> Result<Vec<(NodeRecord, f64)>, QueryError> {
+        check()?;
+        // A query waiting behind another index build retains its own absolute
+        // deadline/cancellation guard instead of blocking in Mutex::lock.
+        let mut cache = loop {
+            check()?;
+            match self.semantic_index.try_lock() {
+                Ok(cache) => break cache,
+                Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => std::thread::yield_now(),
+            }
+        };
         if cache.is_none() {
             let mut nodes = match &self.backend {
                 CodeGraphBackend::Materialized { graph, .. } => {
@@ -291,15 +327,18 @@ impl CodeQueryEngine {
                     })
                     .map_err(|error| limit(&format!("cannot read bounded corpus: {error}")))?,
             };
+            check()?;
             nodes.sort_by(|a, b| a.id.cmp(&b.id));
+            check()?;
             // Publish the cache only after successful, bounded construction.
-            let index = SemanticIndex::build(nodes, || self.check_deadline())?;
-            self.check_deadline()?;
+            let index = SemanticIndex::build(nodes, check)?;
+            check()?;
             *cache = Some(index);
         }
-        Ok(cache
-            .as_ref()
-            .map_or_else(Vec::new, |index| index.search(query, max_nodes)))
+        match cache.as_ref() {
+            Some(index) => index.search(query, max_nodes, check),
+            None => Ok(Vec::new()),
+        }
     }
 }
 
@@ -335,13 +374,13 @@ mod tests {
             node("billing", "invoice payment refund"),
         ];
         let index = SemanticIndex::build(corpus.clone(), || Ok(()))?;
-        let result = index.search("orchard", 3);
+        let result = index.search("orchard", 3, &|| Ok(()))?;
         assert!(
             result.iter().any(|(node, _)| node.id == "fruit"),
             "{result:?}"
         );
         assert!(result.iter().all(|(node, _)| node.id != "billing"));
-        assert!(index.search("absentvocabulary", 3).is_empty());
+        assert!(index.search("absentvocabulary", 3, &|| Ok(()))?.is_empty());
         let repeated = SemanticIndex::build(corpus, || Ok(()))?;
         assert_eq!(index.directions, repeated.directions);
         assert_eq!(index.embeddings, repeated.embeddings);
@@ -377,5 +416,54 @@ mod tests {
             ))
         });
         assert!(matches!(error, Err(error) if error.kind() == QueryErrorKind::Timeout));
+    }
+    #[test]
+    fn cached_semantic_search_observes_guard_while_scanning_rows() -> Result<(), QueryError> {
+        let index = SemanticIndex::build(
+            (0..64)
+                .map(|at| node(&format!("n{at}"), "fruit apples harvest"))
+                .collect(),
+            || Ok(()),
+        )?;
+        let checks = std::cell::Cell::new(0);
+        let error = index.search("fruit", 5, &|| {
+            checks.set(checks.get() + 1);
+            if checks.get() >= 12 {
+                Err(QueryError::new(
+                    QueryErrorKind::Cancelled,
+                    "test_cancelled",
+                    "cancelled during cached semantic search",
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(error, Err(error) if error.kind() == QueryErrorKind::Cancelled));
+        assert_eq!(checks.get(), 12);
+        Ok(())
+    }
+
+    #[test]
+    fn semantic_build_checks_guard_after_tokenization_before_publishing() {
+        let checks = std::cell::Cell::new(0);
+        let result = SemanticIndex::build(
+            (0..32)
+                .map(|at| node(&format!("n{at}"), "fruit apples harvest"))
+                .collect(),
+            || {
+                checks.set(checks.get() + 1);
+                if checks.get() >= 48 {
+                    Err(QueryError::new(
+                        QueryErrorKind::Timeout,
+                        "test_timeout",
+                        "expired in matrix construction",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(matches!(result, Err(error) if error.kind() == QueryErrorKind::Timeout));
+        assert_eq!(checks.get(), 48);
     }
 }

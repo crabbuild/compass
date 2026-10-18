@@ -23,6 +23,7 @@ use compass_model::identity::{
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
     ENDPOINT_REWRITE_RULES_ATTRIBUTE, EndpointRewriteRule, EvidenceConfidence, EvidenceOrigin,
+    LEADING_DOCUMENTATION_OWNER_ANCHOR_ATTRIBUTE, LEADING_DOCUMENTATION_RULE,
     NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE, OccurrenceRule, Provenance,
     ResolutionCandidate, ResolutionState, SEMANTIC_LAYER_EXTRACTOR, SourceAnchor,
     TRUSTED_EDGE_RECORD_ATTRIBUTE, TRUSTED_NODE_RECORD_ATTRIBUTE,
@@ -38,7 +39,7 @@ use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Normalization/publication semantics used by `compass.graph/1`.
-pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/2";
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/3";
 const MAX_DOCUMENT_REFERENCE_CANDIDATES: usize = 20;
 const MAX_DOCUMENT_REFERENCE_PROBES: usize = 100_000;
 use sha2::{Digest, Sha256};
@@ -4692,6 +4693,27 @@ fn normalize_provenance(
         provenance.wiring_site = anchor;
     } else if let Some(anchor) = anchor {
         provenance.anchors.push(anchor);
+    }
+    if let Some(value) = attributes.get(LEADING_DOCUMENTATION_OWNER_ANCHOR_ATTRIBUTE) {
+        if provenance.rule.as_deref() != Some(LEADING_DOCUMENTATION_RULE)
+            || provenance.origin != EvidenceOrigin::Ast
+            || provenance.confidence != EvidenceConfidence::Exact
+            || provenance.anchors.len() != 1
+        {
+            return Err(raw_error(
+                record,
+                "invalid leading documentation owner payload",
+            ));
+        }
+        let mut owner = structured_source_anchor(value)?;
+        owner.file = portable_path(&owner.file, root)?;
+        if !owner.is_valid() {
+            return Err(raw_error(
+                record,
+                "invalid leading documentation owner anchor",
+            ));
+        }
+        provenance.anchors.push(owner);
     }
     provenance
         .validate()

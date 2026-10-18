@@ -7,7 +7,8 @@ use std::thread;
 
 use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
 use compass_model::code_graph::{
-    CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument, NodeKind, NodeRecord,
+    CODE_GRAPH_SCHEMA_V1, DiagnosticSeverity, EdgeKind, GraphDiagnostic, GraphDocument, NodeKind,
+    NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::OccurrenceRule;
@@ -71,6 +72,57 @@ fn assert_discovery_semantically_equal(
     for response in [actual, expected] {
         assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
         assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+    }
+    Ok(())
+}
+
+#[test]
+fn local_store_discovery_preserves_documentation_coverage_diagnostics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    graph.graph.diagnostics.push(GraphDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        code: "leading_documentation_omission_summary".to_owned(),
+        message: "An oversized documentation group was omitted.".to_owned(),
+        anchor: None,
+        related_ids: Vec::new(),
+    });
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let _store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let local = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("local-cache"),
+        EngineSelection::Store,
+    )?;
+    for question in ["UserService.list", "Where are errors handled?"] {
+        let request = discovery_request(question);
+        let expected = json.discover(request.clone())?;
+        let actual = local.discover(request)?;
+        for response in [&expected, &actual] {
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains("oversized documentation group"))
+            );
+        }
+        if question == "UserService.list" {
+            assert_discovery_semantically_equal(&actual, &expected)?;
+        } else {
+            // Backend work limits may differ for a negative neighborhood query.
+            // Both outcomes must retain coverage rather than imply a census.
+            assert!(actual.seeds.is_empty() && expected.seeds.is_empty());
+        }
     }
     Ok(())
 }
@@ -1578,7 +1630,8 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn unknown_json_index_is_rebuilt_to_current_format() -> Result<(), Box<dyn std::error::Error>> {
+fn older_and_unknown_json_indexes_are_rebuilt_to_current_format()
+-> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -1587,21 +1640,30 @@ fn unknown_json_index_is_rebuilt_to_current_format() -> Result<(), Box<dyn std::
     let index_path = engine.index_path().to_path_buf();
     drop(engine);
 
-    let connection = rusqlite::Connection::open(&index_path)?;
-    connection.execute(
-        "UPDATE metadata SET value='compass-code-index/3' WHERE key='format'",
-        [],
-    )?;
-    drop(connection);
-
-    let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
-    assert_eq!(reopened.index_path(), index_path);
-    let connection = rusqlite::Connection::open(index_path)?;
-    let format: String =
-        connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
-            row.get(0)
-        })?;
-    assert_eq!(format, "compass-code-index/2");
+    for legacy in [
+        "compass-code-index/2",
+        "compass-code-index/3",
+        "compass-code-index/999",
+    ] {
+        let connection = rusqlite::Connection::open(&index_path)?;
+        connection.execute("UPDATE metadata SET value=?1 WHERE key='format'", [legacy])?;
+        connection.execute("DROP TABLE fielded_stats", [])?;
+        drop(connection);
+        let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+        assert_eq!(reopened.index_path(), index_path);
+        let connection = rusqlite::Connection::open(&index_path)?;
+        let format: String =
+            connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(format, "compass-code-index/4");
+        let declarations: u64 = connection.query_row(
+            "SELECT frequency FROM fielded_stats WHERE term='function'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(declarations > 0, "rebuild must populate fielded statistics");
+    }
     Ok(())
 }
 

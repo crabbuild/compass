@@ -76,6 +76,30 @@ impl<'a> IndexBuilder<'a> {
     }
 }
 
+const MAX_AGGREGATE_DOCUMENTATION_BYTES: usize = 128 * 1024 * 1024;
+
+fn checked_documentation_bytes(
+    batches: &[SemanticEvidenceBatch],
+    limit: usize,
+) -> Result<usize, String> {
+    let mut total = 0_usize;
+    for documentation in batches
+        .iter()
+        .flat_map(|batch| &batch.declarations)
+        .filter_map(|declaration| declaration.documentation.as_ref())
+    {
+        total = total
+            .checked_add(documentation.content.len())
+            .ok_or_else(|| "universal aggregate documentation bytes overflow usize".to_owned())?;
+        if total > limit {
+            return Err(format!(
+                "universal aggregate documentation bytes {total} exceed limit {limit}"
+            ));
+        }
+    }
+    Ok(total)
+}
+
 impl UniversalResolutionIndex {
     pub fn new(
         batches: &[SemanticEvidenceBatch],
@@ -90,6 +114,7 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
+        checked_documentation_bytes(batches, MAX_AGGREGATE_DOCUMENTATION_BYTES)?;
         Self::new_with_inventory_owned(batches.to_vec(), inventory_nodes, root, limits)
     }
 
@@ -162,6 +187,7 @@ impl IndexBuilder<'_> {
             validate_batches,
             admission,
         } = self;
+        checked_documentation_bytes(&batches, MAX_AGGREGATE_DOCUMENTATION_BYTES)?;
         let languages = LanguagePresence::detect(&batches, inventory_nodes);
         let mut profile_started = Instant::now();
         if validate_batches {
@@ -1256,5 +1282,37 @@ mod tests {
                 ..ResolutionConstraint::default()
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod documentation_limit_tests {
+    use super::checked_documentation_bytes;
+    use compass_languages::Engine;
+
+    #[test]
+    fn aggregate_documentation_is_checked_at_the_exact_byte_boundary()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let batch = Engine::default()
+            .extract_source_combined(
+                std::path::Path::new("sample.rs"),
+                "sample.rs",
+                b"/// documented\nfn work() {}\n",
+            )?
+            .graph
+            .semantic_evidence
+            .ok_or("missing evidence")?;
+        let size = batch
+            .declarations
+            .iter()
+            .filter_map(|declaration| declaration.documentation.as_ref())
+            .map(|documentation| documentation.content.len())
+            .sum::<usize>();
+        assert!(size > 0);
+        let batches = vec![batch.clone(), batch];
+        assert_eq!(checked_documentation_bytes(&batches, size * 2)?, size * 2);
+        assert!(checked_documentation_bytes(&batches, size * 2 - 1).is_err());
+        assert_eq!(checked_documentation_bytes(&[], 0)?, 0);
+        Ok(())
     }
 }

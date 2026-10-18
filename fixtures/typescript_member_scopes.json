@@ -1,0 +1,64 @@
+[
+  {
+    "prefix": "sample",
+    "kind": "ambiguous",
+    "owner": "constructor",
+    "target": "limit",
+    "relation": "accesses_member",
+    "expected": null,
+    "typescript": "export class Queue {\n  callback?: () => void;\n  constructor(value: number) { this.limit = value; }\n  get limit(): number { return 1; }\n  set limit(value: number) {}\n}\n",
+    "javascript": "export class Queue {\n  callback = () => {};\n  constructor(value) { this.limit = value; }\n  get limit() { return 1; }\n  set limit(value) {}\n}\n"
+  },
+  {
+    "prefix": "field",
+    "kind": "positive",
+    "owner": "constructor",
+    "target": "limit",
+    "relation": "accesses_member",
+    "expected": {
+      "kind": "property",
+      "line": 3
+    },
+    "typescript": "export class Queue {\n callback?: () => void;\n limit = 0;\n constructor(value: number) { this.limit = value; }\n}\n",
+    "javascript": "export class Queue {\n callback = () => {};\n limit = 0;\n constructor(value) { this.limit = value; }\n}\n"
+  },
+  {
+    "prefix": "method",
+    "kind": "positive",
+    "owner": "run",
+    "target": "perform",
+    "relation": "calls",
+    "expected": {
+      "kind": "method",
+      "line": 3
+    },
+    "typescript": "export class Queue {\n callback?: () => void;\n perform(value: number) { return value; }\n run(value: number) { return this.perform(value); }\n}\n",
+    "javascript": "export class Queue {\n callback = () => {};\n perform(value) { return value; }\n run(value) { return this.perform(value); }\n}\n"
+  },
+  {
+    "prefix": "nested",
+    "kind": "positive",
+    "owner": "perform",
+    "target": "helper",
+    "relation": "calls",
+    "expected": {
+      "kind": "function",
+      "line": 1
+    },
+    "typescript": "function helper() { return 1; }\nexport class Queue {\n callback?: () => void;\n perform() { if (true) { return helper(); } return 0; }\n}\n",
+    "javascript": "function helper() { return 1; }\nexport class Queue {\n callback = () => {};\n perform() { if (true) { return helper(); } return 0; }\n}\n"
+  },
+  {
+    "prefix": "shadow",
+    "kind": "positive",
+    "owner": "run",
+    "target": "perform",
+    "relation": "calls",
+    "expected": {
+      "kind": "method",
+      "line": 4
+    },
+    "typescript": "function perform() { return 0; }\nexport class Queue {\n callback?: () => void;\n perform() { return 1; }\n run() { return this.perform(); }\n}\n",
+    "javascript": "function perform() { return 0; }\nexport class Queue {\n callback = () => {};\n perform() { return 1; }\n run() { return this.perform(); }\n}\n"
+  }
+]

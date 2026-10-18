@@ -1,5 +1,416 @@
 # Compass compatibility
 
+## Graph coverage diagnostic projections
+
+New current-store snapshots add point projections for all graph diagnostic
+codes, retaining the existing first-occurrence lookup contract. This uses the
+existing `diagnostic-code` metadata namespace and graph-index/1 layout; canonical
+graph records, relationships and historical realizations are unchanged.
+Readers recover missing projections from older immutable diagnostic supplements
+within the standard 1,000-record/1 MiB scan limits. A truncated scan without a
+match returns a limit error rather than asserting that no diagnostic exists.
+Local query readers preserve this as a resource-limit error. Existing response
+caches receive a new diagnostic-projection identity automatically, preventing
+reuse of answers that omitted documentation coverage warnings. No manual cache
+deletion or historical rewrite is required.
+Discovery responses with no matching seed retain graph coverage warnings too;
+an empty answer does not imply complete indexing.
+
+## Developer comparison-panel binding
+
+New heldout developer captures require the additive
+`compass.broad-query-exposure-lineage/1` source-registration field described in
+`benchmarks/agent_query/BROAD_QUERY_REVIEW.md`. Every task declares its split and
+stable mechanism IDs. Hash-verified historical evidence and independently
+confirmed history completeness are required before capture; known repository
+or linked-mechanism exposure rejects confirmation, even with new question/task
+IDs or commits. Original, lookup and union panels bind the same lineage.
+Legacy registrations remain shape-valid and diagnostically readable, but cannot
+qualify without lineage. Explicit development captures retain their existing
+source-review requirement. This changes developer analysis/capture protocol,
+not native product behavior. Freeze current normalizer/assessor hashes for a new
+experiment; historical reports and their verifiers remain immutable.
+
+The developer benchmark adds `compass.broad-query-panels/1`,
+`compass.broad-query-panel-review-input/1` and
+`compass.broad-query-panel-review/1`. Unknown versions fail explicitly. Both the
+original behavior panel and its declaration-lookup correction must pass the
+existing canonical review gates; shared captures and costs are bound once.
+The native product, graph formats and canonical review-report schema are
+unchanged. Freeze the current assessor digests before collection. Historical
+reports retain their original verifier provenance; changed analysis code
+requires new reports and the corresponding pre-output protocol freeze.
+
+## Nested callable inspection context
+
+Current source evidence uses `source-query/4-nested-callable-context` and ranked
+JSON uses `compass.query.ranked-view/4`. Readers retain source profiles 1–3 and
+ranked views 1–3 with their original meanings; older readers reject the new
+versions. AST cache24 refreshes disposable native scope metadata automatically.
+
+An already retrieved callable can expose `nested_callable_code` quotations from
+an anonymous callable with explicit native AST ancestry. Each quotation carries
+its exact `nestedScope` anchor, separate from its retained source slice. Named
+nested functions, separately published callable bindings, ambiguous owners and
+class/type boundaries cannot lend code to an enclosing owner. Lexical nesting
+does not establish a call, execution or the requested behavior.
+
+Direct-owner windows receive capacity first. Direct and nested code share the
+existing 16-window per-owner, 32,768-window and 8 MiB publication bounds; at most
+eight nested scopes are retained per owner. Inspection omissions are explicit.
+Incomplete nested evidence is regenerated on a fact-neutral update rather than
+reusing a truncated prior projection. Ranked results still retain at most two
+512-byte quotations per candidate within the first-page budget. Quote selection
+uses the whole question; it does not change lexical terms, document frequencies,
+candidate admission or node scores through quotations, or graph identities and
+relationships. The separate scope-census correction below can recover evidence
+in quota-limited files. No source
+file is read at query time.
+
+Code-quotation priority excludes terms inside retained overlapping comment
+anchors; those terms still support their separately labelled comment quote.
+Under tight text budgets the first candidate's quote receives priority over
+lower-ranked quotes, with omissions disclosed. JSON/source bytes, candidate
+scores and graph relationships retain their existing contracts.
+
+## Disposable query-index validation
+
+JSON query-index format 4 and its cache keys are unchanged. Validation first
+checks the original file with the existing full `PRAGMA integrity_check`.
+After a two-second file probe, eligible rollback-mode indexes between 16 MiB and
+768 MiB can be inspected through a serialized image. Its complete bytes must
+equal the physical original, including EOF. The image is never published or
+used as the query connection. WAL headers, size mismatches and unavailable
+images retain original-file validation; they do not imply corruption.
+
+Metadata and integrity work share a 30-second validation budget. Expiry returns
+`query_index_validation_timeout` with kind `Timeout` and leaves the cache in
+place. A joined, operation-local SQLite interrupt timer complements progress
+callbacks, so a long integrity operation cannot defer expiry until the next
+coarse callback interval. The timer is cancelled before any subsequent SQL;
+thread-start failure uses finer progress checks. Blocking filesystem operations
+must still return before SQLite can observe interruption. A timeout must not be
+treated as a corrupt index or an empty answer. The budget
+does not cover loading the graph or constructing a missing index. Historical
+graphs, source-query profiles, graph relationships and query response schemas
+are unchanged. No manual cache deletion or data migration is required.
+
+## Callable initializer definition ranges
+
+JavaScript3 and TypeScript4 also publish the full definition range of a direct
+variable-bound function. The binding's original AST anchor continues to identify
+the node and its provenance. The resolver requires a uniquely owned function
+scope parented by the binding scope; inherited callback scopes cannot substitute.
+Multiple qualifying scopes remain ambiguous. No relationship is synthesized.
+
+Source-query profile2 uses the exact direct variable-declarator envelope for
+TypeScript/TSX lexical body ownership. Immutable profile1 artifacts remain
+readable with their original evidence; unknown profiles fail explicitly.
+AST cache24 rebuilds disposable facts. These producers remain `Qualifying`;
+the existing release-promotion decision is unchanged.
+
+## ECMAScript primary member scopes
+
+JavaScript3 and TypeScript4 select a unique owned child whose parent is the
+declaration's binding scope for member lookup. Nested blocks and callable-type
+scopes that inherit the same owner cannot win by hashed ID. Ambiguous accessor
+fixtures remain unresolved; declared fields, methods and lexical shadowing keep
+source anchors and occurrence evidence. JavaScript class fields read their
+grammar's `property` name anchor rather than requiring TypeScript's `name` field.
+These development producers are
+`Qualifying` pending a new source audit and promotion decision.
+
+AST cache24 invalidates disposable extraction entries and current build state.
+Run `compass update <root>` to obtain corrected current references. The
+extraction/5 identity seed, evidence/2 and graph/1 formats are unchanged; published
+historical realizations are not rewritten.
+
+## Broad source-evidence retrieval
+
+Current store snapshots record search capabilities in a separate term-index
+namespace. Source terms equal to older capability-marker strings remain ordinary
+searchable postings, including their complete node IDs and chunks. Readers still
+accept historical empty-posting markers; new writers retain those legacy markers
+where no real source posting occupies their key. Older readers may report the
+affected capability unavailable on a marker collision and should be upgraded.
+Unknown or malformed explicit capability versions fail rather than falling back
+to a legacy marker. The additive records keep graph-index/1 and the graph's
+canonical records, identities and relationships unchanged. Historical snapshots
+are not rewritten.
+
+Broad native implementation questions now use a shared bounded field projection
+of names, paths, existing signatures/types, aliases, kinds, roles, language and
+source-owned document text. Each field is bounded to 8,192 UTF-8 bytes and 512 terms. Alias
+enrichment reads at most nine relationships; more than eight aliases omits the
+alias field and reports bounded recall instead of choosing an arbitrary subset.
+Fielded aliases require nonempty, exact, nonheuristic provenance; ineligible raw
+relationships still count toward the bound. Legacy strict alias lookup retains
+its existing meaning.
+
+JSON query-index format 4 uses a separate cache key from older indexes and
+rebuilds disposable format-2/3 indexes automatically.
+New immutable snapshots publish additive field-frequency and declaration-channel
+postings; older snapshots remain readable with an explicit incomplete-recall
+warning. Run `compass update` on a current checkout to publish those postings.
+Historical realizations are never rewritten. Graph identities, relationship
+kinds/direction/multiplicity and exact-symbol command meanings are unchanged.
+The active query ranker profile is `query-ranker/14-compound-identifier`; existing response
+cache identities include that profile and do not reuse old ranked results.
+
+Broad retrieval can give an inspection preference to hyphenated query compounds
+whose two to four normalized words occur contiguously in a callable's own name
+or a single retained owner-local identifier. It considers at most eight unique
+compounds; larger compound requests retain ordinary ranking without selecting
+an arbitrary subset. It never joins separate identifier sites, uses prose or
+namespace/path mentions as compound proof, or changes recall postings/counts.
+Separate owner-field topic evidence outside the compound is required. Explicit
+identities, document requests, mismatched test contexts, recognized negative or
+temporal conditions and vocabulary-dependent candidates receive no compound
+preference. Clipped field projections keep ordinary ranking. Dependent matches
+remain Low, below exact identity tiers, with explicit unverified-behavior reasons.
+Actual matching identifier anchors receive priority within the existing eight
+body-source citation cap; omissions retain boundedness. This changes neither
+source/graph schemas nor quotations' ownership. The cache epoch is
+`compound-identifier/2`.
+
+Ordinary broad-query words `entry` and `snapshot` have directional vocabulary
+fallbacks to `item`/`element` and `copy`/`clone`, respectively. A group expands
+only when known corpus statistics show no indexed literal variant and an indexed
+alternative exists. These statistics describe the index, not a source-wide or
+query-scope absence proof. Queries with named contexts or explicit identities,
+document requests and unavailable legacy statistics do not use this fallback.
+At most four alternative-frequency probes share the existing work limits.
+Lexical-only candidates depending on an alternative require separate literal
+non-action topic evidence in an owner field; facets, paths, namespace prefixes
+and generic document links cannot supply it. Existing explicit semantic-channel
+admission remains separate. Dependent matches are Low, name the translations,
+use the existing `synonym` concept-match method and receive no operation
+preference. Known literal groups and exact identities retain their meaning;
+expansion cannot veto a literal-only candidate that passed its original
+supported-concept screen. Graph/source schemas and immutable artifacts are
+unchanged. The additional response-cache epoch is `unindexed-vocabulary/1`.
+
+For broad implementation questions with one recognized operation concept,
+callable-local operation identifiers and separate topic evidence receive an
+ordinal inspection preference. An operation mentioned only in prose or a
+retained signature does not supply it. Identifier postings include parameters, so terms
+also present in the retained signature are excluded from this code signal;
+missing/empty signatures, native display signatures ending in `…`, or clipped
+search-field projections retain ordinary ranking for code-based signals.
+This is not an AST body-role classification: an identifier absent from the
+retained signature is still only a lexical inspection signal. A callable's own name
+remains a direct name signal. Multiple-operation, negative and temporal questions,
+document requests and mismatched test contexts retain ordinary ranking. This
+preference changes neither relevance bands nor structural confidence and never
+establishes execution. Exact IDs/full names retain their higher tiers. Graph
+facts, source schemas and read limits are unchanged; the response-cache context
+epoch also invalidates intermediate experimental answers.
+
+Broad method recall also probes at most eight relationship-term postings,
+hydrates at most 64 candidate owners, and examines at most 32 outgoing calls or
+references per owner. This channel charges its decoded records and probes to the
+existing shared hard ceilings, with a separate 6,400-read/96-probe sub-budget.
+It requires nonempty exact AST node/edge evidence and a relationship site inside
+the callable's source range. Only the target's bounded name field contributes;
+its qualified name, path and prose do not. Additional `code_reference` matched
+fields retain source citations and actual relationship kinds/direction. A
+candidate that needs this field to match a concept is Low unless its ID or full
+name matches exactly: using an identifier does not prove the requested behavior.
+Property leaves receive the same implementation-search penalty as fields and
+variables. Older immutable snapshots without broad relationship postings retain
+direct-call recall with a specific update warning. Reached quotas explicitly
+report bounded recall. Ordinary plural acronyms such
+as APIs and TTLs normalize as prose; quoted and qualified identities keep their
+original identity guards. No graph schema, identity or published record changes.
+
+Broad implementation ranking recognizes colocated `.test.`/`.spec.` files,
+conventional Python/Go/Rust test filenames and typed test/fixture roles. The
+existing soft context preference remains reversible by an explicit test request;
+it does not exclude candidates or change exact/directed lookup semantics.
+Response caches use the new ranker profile automatically.
+
+Broad questions require subject evidence beyond `kind` and `language` when
+other subjects are requested. Generic facets cannot stand in for missing topic
+evidence. Queries whose non-action subjects all match those facets retain their
+listing behavior; exact identity and explicit semantic fallback remain intact.
+Unfamiliar wording can still yield tentative candidates that have other topic
+evidence. The 40% supported-concept threshold and work ceilings are unchanged.
+
+Broad local-declaration recall examines up to 32 matching parameter, variable,
+field, property or constant names and four incoming `contains` edges per
+declaration. It requires one unique callable parent with exact AST node/edge
+evidence and enclosed source ranges. Truncated parent lists cannot establish
+uniqueness. Only bounded terminal-name terms contribute `owned_identifier`;
+namespace/path matches and nested callable declarations do not. Answer scopes
+apply to the parent after uniqueness is checked. This channel reserves 288
+decoded records and 32 probes within the existing shared hard ceilings; reached
+limits remain explicit. Source citations and actual containment witnesses are
+retained. A candidate needing this field is Low unless its ID or full name
+matches exactly. Containment establishes ownership, not requested behavior.
+
+A witnessed documentation link contributes an owner's prose only when the
+source range establishes that it is enclosed in that declaration, or when the
+versioned leading-documentation AST proof retains both the exact excerpt and
+full declaration ranges in the same provenance item. General links
+can suggest a candidate only when the source-backed passage contains its actual
+name and the question's subjects. They never establish ownership or structural
+confidence. Missing subject
+evidence yields no supporting indexed evidence, with scope/limit caveats.
+Partial candidates name missing owner-specific subjects or named contexts and
+carry Low relevance; corpus-wide word occurrence does not establish that a
+candidate implements the requested behavior. Source-enclosed prose remains
+available as supporting evidence rather than duplicate implementation rows.
+Standalone `not`, `never` and `without` retain an unverified condition: lexical
+retrieval returns Low inspection candidates with an explicit warning. Inspect
+source or use a structural query to verify the condition. Optional native LSA
+remains explicit and independently bounded;
+it adds approximate candidates without establishing structural confidence.
+
+Query-index builders hold a persistent operating-system lock through validation,
+replacement and publication. Termination releases ownership; the coordination
+file remains and its existence alone does not indicate a live builder. A
+five-second retry budget bounds lock contention, with a typed actionable
+`query_index_lock_timeout`; it does not bound graph loading or index construction.
+Invalid indexes are removed only under the lock, after rechecking whether another
+builder already published a valid result. Format 4 isolates this protocol from
+older binaries that used file presence as ownership. Graph/history formats and
+query ranking are unaffected by this recovery change.
+
+## Source-body query evidence (development implementation)
+
+The native parser now retains bounded callable-local identifiers and inline
+comments for Python, Rust, Go and TypeScript/TSX in a reserved per-file extraction
+extension, `compass.source-query.extraction/1`, with
+`source-query/3-owned-code-windows`. It preserves original UTF-8 source slices,
+byte positions, a source digest and explicit omissions. Nested callables have
+separate owners; class/type boundaries block inheritance. Arbitrary string
+literal contents are excluded. Repeated occurrence omissions are counted
+separately from missing term coverage. Work is bounded to a 4 MiB source file,
+200,000 AST visits, depth 512, 512 scopes, 256 names per scope, one exact site
+per spelling, eight comments per scope, 4 KiB per comment and 1 MiB retained text
+per file. Omitted repeated occurrences increment the occurrence counter without
+claiming missing term coverage. Code windows are collected independently at
+identifier visits, including repeated spellings. Readers retain support for
+historical projections containing up to four sites per spelling.
+Unsupported or out-of-profile evidence is absent or explicitly omitted.
+
+AST cache24 rebuilds disposable extraction entries to retain this metadata.
+The semantic extraction/5 seed, Fact IDs and dependency graph contract do not
+change for this query-only metadata. A typed `compass.source-query/1` auxiliary
+artifact retains bounded source excerpts and corpus-statistic validation. Native
+updates now stage it with the graph, bind it to the exact graph/file digests and
+one unique exact-AST callable range, and include it in atomic publication and
+required build-state seals. Per-file inventory supports both fact-neutral
+incremental paths; invalid or aggregate-truncated prior artifacts require full
+reconstruction. Query-only metadata does not enter structural fact digests;
+existing declaration source hashes still track body-comment edits.
+
+Current JSON and local-store readers share the bounded body projection for
+postings, document-frequency increments and scoring. Body recall probes at most
+eight terms and hydrates at most 64 owners within existing shared work ceilings.
+The in-memory index admits at most 262,144 postings and 65,536 terms; exceeding
+these limits is an explicit error. Auxiliary input is capped at 64 MiB, 32,768
+owners/files, 65,536 source sites and 16 MiB retained text. Reached extraction or
+publication limits remain explicit. Body-only relevance remains Low inspection
+evidence; source occurrence does not establish the requested behavior. Response
+and long-lived engine cache identities include auxiliary content identity.
+Present corrupt, mismatched or unknown-major artifacts fail explicitly. Absent
+older artifacts remain readable with a missing-body-recall warning. Detached
+in-memory graphs and historical selectors do not borrow current source metadata.
+The reader reports unsupported auxiliary versions with `UnsupportedSchema`
+and `unsupported_source_query_schema` / `unsupported_source_query_profile`,
+before interpreting current payload fields. A retrieved owner must remain an
+exact-AST callable. Neutral edits preserve declaration/provenance ranges even
+when a declaration coincides with the old EOF. File nodes and source-proven
+file-scoped language containers can refresh their envelopes. A container requires
+one directly owned full-file scope, its file-root parent, and matching original
+AST declaration provenance; ambiguous scopes use full publication. This restores
+Kotlin package-envelope refresh without widening explicit namespaces or callable
+bodies to include outside comments. Historical realizations remain immutable.
+Integration checks are underway;
+comparative quality and release qualification remain unproven.
+
+## Leading documentation evidence (development)
+
+Rust3, Go2 and TypeScript4 producers are `Qualifying` pending a new source audit
+and release promotion decision. Their optional `DeclarationFact.documentation`
+field under evidence/2 carries one exact leading AST comment group. Rust source
+consumers constructing `DeclarationFact` literals must initialize `documentation`
+(normally `None`); serde readers still accept an absent field. Older strict
+evidence readers must admit this field; absent metadata remains readable.
+Excerpts retain raw UTF-8 source bytes (including the Rust line-comment newline)
+up to 4096 bytes, with 1 MiB per file and 128 MiB per resolver index.
+
+Publication/3 emits `Resource(rationale)` nodes and `documents` edges under
+`universal-leading-documentation-v1`. The existing provenance-anchor vector
+retains the excerpt and its unique full declaration range; graph/1 has no new
+wire fields. A claimed rule with a missing or inconsistent ownership proof is
+invalid. Document content must retain exact nonheuristic evidence with its AST
+excerpt anchor; the owner must retain an exact AST anchor inside its full source
+range. A precise edge cannot promote contradictory node evidence. Generic
+documentation links retain their existing meaning. The query
+ranker consumes the shared proof and preserves source citations; it does not
+infer ownership from names. Excerpt/attachment limits and ambiguous definition
+ranges publish a `leading_documentation_omission_summary` warning consumed by
+both JSON and store query paths. Structural declarations remain available.
+
+Extraction/5 and AST cache24 invalidate prior disposable extraction facts.
+Rebuild current graphs to obtain this evidence; immutable historical graphs are
+not rewritten. Python docstrings and the JavaScript producer are unchanged.
+Native regression checks do not establish comparative query quality or producer
+qualification.
+
+## Ranked implementation view
+
+`compass query QUESTION --view ranked` adds an opt-in implementation shortlist.
+Text shows up to five ranked owners and keeps the whole answer within
+`--text-budget`, including coverage, omission guidance and a narrowing action.
+The renderer first tries shorter combined explanations before dropping a ranked
+owner. It labels abbreviated reasons, retains relevance/identity/evidence labels
+and source citations, and keeps Low matches explicitly unverified. The bounded
+JSON projection retains its original reasons. If metadata and one whole candidate cannot fit, it returns an explicit error.
+`--view ranked --format json` emits `compass.query.ranked-view/4`; this is a
+separate projection, not a change to raw discovery JSON or Agent View.
+Ranked view rejects discovery cursors, result envelopes, evidence mode,
+legacy traversal controls and `agent-json`. Existing modes remain available.
+When the entire question is an existing node ID admitted as a discovery seed,
+the ranked shortlist contains that seed alone. Raw discovery and optional
+structural context retain their existing contracts; words inside an ID do not
+make unrelated lexical matches additional ranked targets.
+
+MCP `query_graph` accepts `view: "ranked"` and an optional `text_budget` (1–65536,
+default 800). Its existing `result` field retains `compass.query.discovery/1`;
+the optional `rankedView` field carries the new projection. Strict envelope
+decoders must admit that field when requesting this view. Default requests
+retain their existing Agent View. Unknown ranked-view major versions fail
+explicitly in the shared decoder.
+
+Ranked context is opt-in through `--include-context` / `include_context: true`
+(default false). It appends up to eight witnessed one-hop relationships with
+their endpoint records, direction, occurrence identity and source evidence.
+Context has its own omission fields and never changes candidate order; text
+drops whole context rows before candidates to satisfy the same answer budget.
+
+Relevance bands are ordinal retrieval judgments, not calibrated probabilities.
+Unknown ordinary query wording can yield Low candidates with missing-context
+reasons instead of suppressing every result. Explicit names (including quoted
+and underscore identifiers) remain guarded when absent from the index.
+Negative wording is retained as an unverified condition: candidates are Low
+with an `incomplete_coverage` diagnostic and an explicit qualification warning.
+It never establishes a negative behavior from lexical matches. Unquoted
+`before`, `after`, `during`, and `until` likewise remain unverified temporal
+conditions, with Low candidates and an explicit diagnostic. These connectives
+do not count as lexical subject evidence; quoted and qualified identifiers
+keep their literal terms. These retrieval
+semantics use `query-ranker/14-compound-identifier`; prior profile constants remain
+available and disposable response cache identities change automatically.
+Name identity, structural evidence, graph coverage and candidate recall bounds
+remain separate. `responseTruncated` retains discovery's aggregate bound,
+including candidate/source-field/context limits; it does not assert that a
+traversal itself was cut short. A zero-result answer reports no supporting
+indexed evidence; it does not claim that the behavior is absent. Historical
+realizations remain immutable.
+
 Concept recall adds optional `conceptMatches` to `compass.query/1` with closed
 methods `synonym`, `document_link`, and `semantic_lsa`. Strict consumers must
 update to the matching enum/field manifest and fingerprint. Absence means no
@@ -557,6 +968,10 @@ Discovery text pagination now uses
 node inventories. Older discovery cursors fail with an explicit version error;
 restart the query to obtain a new cursor. Natural discovery text now defaults
 to an 800-token page; `--text-budget N` and `--cursor` retain caller control.
+Compact `SEED` lines now include their retained source anchor, when available,
+before relationship context can consume the page. Missing anchors remain
+unlocated. This additive text annotation preserves the version 3 entry order,
+semantic positions and cursor contract; JSON and evidence-mode text are unchanged.
 
 The typed commands accept `--format agent-json`; default text is an
 answer-first presentation. MCP keeps `compass.mcp.tool-result/1` and adds the
@@ -1740,3 +2155,52 @@ Graph, Program IR and immutable historical schemas are unchanged. Disposable
 impact/traversal cache headers `TRAILA04` and `TRAILT08` retain the pinned build
 commit; older caches are ignored and rebuilt. Missing Program IR exits with code 3 and recovery
 commands; unknown Program subcommands exit with code 2 before artifact access.
+
+
+## Ranked source quotation projection
+
+The opt-in ranked answer projection now emits `compass.query.ranked-view/4`.
+Native readers retain version 1 compatibility with absent quotations; version 1
+payloads containing the new field and unknown major versions fail explicitly.
+Existing raw discovery JSON and cursor contracts are unchanged.
+
+At most two 512-byte immutable quotations are retained for each of the first five
+candidates. They come only from source-query comments or proven raw leading
+documentation. Normalized docstrings and general links retain their existing
+retrieval pointers. Text may shorten/omit quotations to preserve candidate rows
+inside the whole-response budget. This changes presentation, not ranking or
+structural confidence. The response cache has a new projection epoch while
+query-ranker/10, source-query schemas/profiles and immutable graphs are unchanged.
+
+
+## Bounded code inspection windows (development)
+
+Source-query profile `source-query/3-owned-code-windows` adds optional
+`codeWindows` and `omittedCodeWindows` per callable under `compass.source-query/1`.
+New readers retain immutable profiles1/2; legacy profiles cannot claim these new
+fields. Older readers reject profile3 and must update. AST cache24 rebuilds
+disposable current extraction. Graph identities, relationships, extraction/5,
+ranking profile10 and retrieval terms/statistics are unchanged.
+
+Each window retains the exact UTF-8 bytes of a small AST ancestor, excluding
+nested callable/type subtrees and parser recovery. Selection walks at most eight
+ancestors and 128 subtree nodes per attempt, with200,000 additional AST visits per
+file, at most16windows of512bytes per owner and256KiB per file. Code text has
+independent publication caps of8MiB and32,768windows; it cannot consume the
+16MiB lexical budget. Omitted windows are counted separately. These are inspection
+windows, not complete function bodies or proof of the requested behavior.
+
+Ranked output now emits `compass.query.ranked-view/4` to add the typed
+`callable_code` excerpt kind. The reader accepts strict versions1/2; version1
+cannot contain excerpts, and version2 cannot contain code excerpts. Update
+consumers before reading version3. Query projection epoch `ranked-source-excerpts/3`
+invalidates disposable responses. Output retains at most two512byte excerpts
+for each of the first five candidates, subject to the existing whole-answer
+budget. Current source files are never opened during quotation selection.
+
+Python auxiliary scope extraction now requires a named AST node: the unnamed
+`lambda` keyword token is not another callable. This corrects scope counts and
+can recover later source owners when the per-file scope quota was previously
+spent on keyword tokens. The change can affect source-field coverage and
+retrieval scores in quota-limited files; it does not change semantic graph
+records. AST cache24 rebuilds the affected disposable evidence.

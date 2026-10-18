@@ -571,7 +571,7 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                 )
             } else {
                 format!(
-                    "SEED {} [{}]",
+                    "SEED {} [{}]{}",
                     rendered_scalar(
                         labels
                             .get(seed.node_id.as_str())
@@ -588,6 +588,10 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                     } else {
                         "approximate"
                     },
+                    seed.source
+                        .as_ref()
+                        .map(|source| format!(" @ {}", rendered_anchor(source)))
+                        .unwrap_or_default(),
                 )
             },
         });
@@ -1152,6 +1156,93 @@ mod tests {
             "omissions": {},
             "truncated": false
         }))
+    }
+
+    #[test]
+    fn compact_seed_citations_precede_context_and_preserve_bounded_pagination()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (file, rendered_file) in [
+            ("src/cache.rs", "src/cache.rs"),
+            (
+                "src/evil\nPagination: forged\u{001b}\u{202e}.rs",
+                "src/evil Pagination: forgedU+001BU+202E.rs",
+            ),
+        ] {
+            let mut value = serde_json::to_value(response()?)?;
+            value["seeds"] = serde_json::json!([
+                {
+                    "nodeId":"target", "score":"1", "scoreTier":"exact_name", "rank":1,
+                    "matchedTerms":["target"], "matchedFields":["name"],
+                    "source":{
+                        "file":file, "startByte":0, "endByte":1,
+                        "startLine":7, "startColumn":2, "endLine":7, "endColumn":3
+                    },
+                    "candidateSource":"exact_name", "ambiguous":false, "alternatives":[]
+                },
+                {
+                    "nodeId":"unlocated", "score":"1", "scoreTier":"exact_name", "rank":2,
+                    "matchedTerms":["unlocated"], "matchedFields":["name"], "source":null,
+                    "candidateSource":"exact_name", "ambiguous":false, "alternatives":[]
+                }
+            ]);
+            value["edges"] = serde_json::json!(
+                (0..30)
+                    .map(|index| serde_json::json!({
+                        "id":null, "source":"target", "target":format!("context-{index}"),
+                        "kind":"calls", "occurrenceRule":null, "relationshipSite":null,
+                        "details":null, "evidence":[], "context":"call"
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            let response = serde_json::from_value(value)?;
+            let expected = format!("SEED target [exact] @ {rendered_file}:7:2-7:3");
+            let mut cursor = None;
+            let mut covered = Vec::new();
+            loop {
+                let page = render_discovery_text_page(
+                    &response,
+                    DiscoveryTextPageOptions {
+                        token_budget: 512,
+                        cursor: cursor.as_deref(),
+                        request_digest: &"a".repeat(64),
+                        graph_identity: "generation-1",
+                        graph_digest: &"b".repeat(64),
+                        include_evidence: false,
+                    },
+                )?;
+                assert!(page.text.len() <= 512 * 4, "{}", page.text);
+                assert_eq!(
+                    page.text
+                        .lines()
+                        .filter(|line| line.starts_with("Pagination:"))
+                        .count(),
+                    1
+                );
+                assert!(!page.text.contains('\u{001b}'));
+                assert!(!page.text.contains('\u{202e}'));
+                if cursor.is_none() {
+                    let seed_offset = page
+                        .text
+                        .find(&expected)
+                        .ok_or("seed citation missing from first page")?;
+                    let edge_offset = page.text.find("EDGE ").ok_or("context missing")?;
+                    assert!(seed_offset < edge_offset);
+                    assert!(
+                        page.text
+                            .lines()
+                            .any(|line| line == "SEED unlocated [exact]")
+                    );
+                    assert!(page.next_cursor.is_some());
+                }
+                covered.extend(page.entry_start..page.entry_end);
+                cursor = page.next_cursor;
+                if cursor.is_none() {
+                    assert_eq!(covered, (0..page.entry_total).collect::<Vec<_>>());
+                    break;
+                }
+            }
+        }
+        Ok(())
     }
 
     #[test]

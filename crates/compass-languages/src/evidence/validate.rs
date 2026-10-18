@@ -5,9 +5,10 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    BindingFact, CandidateRelation, DeclarationFact, EvidenceRange, HierarchyConstraint,
-    LanguageCapability, OccurrenceFact, RelationshipCandidate, ScopeFact, SemanticEvidenceBatch,
-    SemanticRole, SymbolNamespace,
+    BindingFact, CandidateRelation, DeclarationDocumentationKind, DeclarationFact, EvidenceRange,
+    HierarchyConstraint, LanguageCapability, MAX_BATCH_DOCUMENTATION_BYTES,
+    MAX_DECLARATION_DOCUMENTATION_BYTES, OccurrenceFact, RelationshipCandidate, ScopeFact,
+    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 
 /// Hard resource ceilings for a single semantic evidence batch.
@@ -264,6 +265,33 @@ fn validate_limits(
             format!("{name} count {count} exceeds limit {limit}"),
         ));
     }
+    let mut documentation_bytes = 0_usize;
+    for documentation in batch
+        .declarations
+        .iter()
+        .filter_map(|declaration| declaration.documentation.as_ref())
+    {
+        if documentation.content.len() > MAX_DECLARATION_DOCUMENTATION_BYTES {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                "declaration documentation exceeds the 4096-byte source excerpt limit",
+            ));
+        }
+        documentation_bytes = documentation_bytes
+            .checked_add(documentation.content.len())
+            .ok_or_else(|| {
+                EvidenceError::new(
+                    EvidenceErrorCode::ResourceLimit,
+                    "documentation byte count overflows usize",
+                )
+            })?;
+        if documentation_bytes > MAX_BATCH_DOCUMENTATION_BYTES {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                "documentation exceeds the per-file aggregate byte limit",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -312,6 +340,7 @@ fn validate_fact(
                 return Err(invalid_fact(&fact.id, "declaration identity is empty"));
             }
             require_optional_reference(&fact.id, "scope", fact.scope_id.as_deref(), scopes)?;
+            validate_declaration_documentation(fact)?;
             validate_callable_types(
                 &fact.id,
                 &fact.parameter_types,
@@ -808,6 +837,87 @@ fn validate_language(
             format!(
                 "fact {id:?} language {language:?} differs from pipeline {pipeline_language:?}"
             ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_declaration_documentation(fact: &DeclarationFact) -> Result<(), EvidenceError> {
+    let Some(documentation) = &fact.documentation else {
+        return Ok(());
+    };
+    validate_range(&documentation.range, &fact.id, false)?;
+    let language_matches = matches!(
+        (documentation.kind, fact.language.as_str()),
+        (DeclarationDocumentationKind::RustOuter, "rust")
+            | (DeclarationDocumentationKind::GoLeading, "go")
+            | (DeclarationDocumentationKind::TypeScriptJsDoc, "typescript")
+    );
+    if !language_matches {
+        return Err(invalid_fact(
+            &fact.id,
+            "documentation attachment kind does not match its declaration language",
+        ));
+    }
+    if !matches!(
+        fact.kind.as_str(),
+        "function"
+            | "method"
+            | "module"
+            | "class"
+            | "struct"
+            | "interface"
+            | "trait"
+            | "enum"
+            | "type_alias"
+    ) {
+        return Err(invalid_fact(
+            &fact.id,
+            "leading documentation requires a supported named declaration",
+        ));
+    }
+    let range = &documentation.range;
+    if range.source_file != fact.range.source_file
+        || range.end_byte > fact.range.start_byte
+        || (range.end_line, range.end_column) > (fact.range.start_line, fact.range.start_column)
+    {
+        return Err(invalid_fact(
+            &fact.id,
+            "leading documentation must precede its declaration in the same source file",
+        ));
+    }
+    if documentation.content.is_empty()
+        || range.end_byte.saturating_sub(range.start_byte) != documentation.content.len() as u64
+    {
+        return Err(invalid_fact(
+            &fact.id,
+            "documentation text must be the nonempty byte-exact recorded source range",
+        ));
+    }
+    let newline_count = documentation
+        .content
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count();
+    let newline_count = u32::try_from(newline_count)
+        .map_err(|_| invalid_fact(&fact.id, "documentation line count overflows u32"))?;
+    let last_column_bytes = documentation
+        .content
+        .rsplit_once('\n')
+        .map_or(documentation.content.len(), |(_, last)| last.len());
+    let last_column = u32::try_from(last_column_bytes)
+        .map_err(|_| invalid_fact(&fact.id, "documentation column overflows u32"))?;
+    let expected_end_column = if newline_count == 0 {
+        range.start_column.checked_add(last_column)
+    } else {
+        Some(last_column)
+    };
+    if range.start_line.checked_add(newline_count) != Some(range.end_line)
+        || expected_end_column != Some(range.end_column)
+    {
+        return Err(invalid_fact(
+            &fact.id,
+            "documentation text does not match its recorded line and byte-column extent",
         ));
     }
     Ok(())

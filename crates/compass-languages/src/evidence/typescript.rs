@@ -1404,7 +1404,16 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let graph_node_id = stable_graph_id(self.source_file, kind, name, node.start_byte());
         let signature = typescript_declaration_signature(node, kind, self.source)
             .map(|signature| self.canonicalize_declaration_signature(scope_id, kind, &signature));
-        let declaration_id = self.builder.declare_with_signature(
+        let documentation = if self.language == "typescript"
+            && matches!(
+                kind,
+                "function" | "method" | "class" | "interface" | "enum" | "type_alias"
+            ) {
+            self.builder.leading_documentation(node, self.source)?
+        } else {
+            None
+        };
+        let declaration_id = self.builder.declare_with_signature_and_documentation(
             kind,
             &graph_node_id,
             name,
@@ -1413,6 +1422,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             Some(scope_id),
             Some(symbol_namespace(namespace)),
             signature.as_deref(),
+            documentation,
             range_for_node(self.source_file, range_node),
         )?;
         self.definition_start_bytes
@@ -9877,11 +9887,21 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     }
 
     fn scope_for_owner_declaration(&self, declaration_id: &str) -> Option<String> {
-        self.scope_owners
+        let declaration = self.declarations.get(declaration_id)?;
+        // Nested blocks and callable types inherit this owner as well. Only
+        // the directly owned child of the declaration's binding scope is its
+        // member scope; hashed IDs cannot choose between structural scopes.
+        let mut scopes = self
+            .scope_owners
             .iter()
-            .filter(|(_, owner)| owner.as_str() == declaration_id)
-            .map(|(scope, _)| scope.clone())
-            .min()
+            .filter(|(scope, owner)| {
+                owner.as_str() == declaration_id
+                    && self.scope_parents.get(*scope).and_then(Option::as_ref)
+                        == Some(&declaration.scope_id)
+            })
+            .map(|(scope, _)| scope);
+        let scope = scopes.next()?;
+        scopes.next().is_none().then(|| scope.clone())
     }
 
     fn scope_for_qualified_nominal(&self, qualified_name: &str) -> Option<String> {
@@ -10222,6 +10242,11 @@ fn declaration_shape<'tree>(
     };
     let name = node
         .child_by_field_name("name")
+        .or_else(|| {
+            (node.kind() == "field_definition")
+                .then(|| node.child_by_field_name("property"))
+                .flatten()
+        })
         .or_else(|| {
             matches!(node.kind(), "pair" | "enum_assignment")
                 .then(|| node.child_by_field_name("key"))

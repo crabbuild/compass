@@ -4,6 +4,157 @@ Compass outputs range from the current `compass-out/` directory to versioned
 CompassQL results and immutable history exports. This reference describes
 consumer responsibilities and authority.
 
+## Compact discovery citations
+
+Default discovery pages show `SEED <name> [exact|approximate|auto-picked]`
+followed by ` @ <file>:<line>:<column>-<line>:<column>` when the retained seed
+has a source anchor. These citations precede relationship context, so a caller
+can inspect selected candidates even when the node inventory falls on a later
+page. Source-less seeds do not acquire a location. Paths use the same control
+escaping as other source locations. Citations count toward `--text-budget`;
+entry ordering, continuation positions and raw JSON remain unchanged.
+
+## Ranked query answers
+
+`query --view ranked --format json` produces `compass.query.ranked-view/4`.
+MCP `query_graph` with `view: "ranked"` returns the same projection in its
+`rankedView` envelope field, alongside the raw discovery `result`.
+
+Each displayed candidate may retain up to two `excerpts`, totaling at most 1,024
+UTF-8 bytes. A quotation includes `kind` (`callable_comment` or
+`ast_documentation`), exact `source` coordinates, raw retained `text`, and
+`clipped`. A retained window must still contain matching query-term evidence;
+if clipping removes every match, omit the quotation and keep the ranked
+candidate. Quotations come from the immutable graph-bound body index or the
+versioned raw leading-documentation ownership proof. Generic document links,
+normalized legacy docstrings and identifier-only sites do not supply quotations.
+Current mutable source files are not read. Comment/documentation text is
+inspection evidence; it does not establish runtime behavior or raise relevance.
+
+Text escapes controls, quotes, backslashes and bidirectional formatting marks.
+It shortens or omits quotations before removing a ranked candidate to meet
+`--text-budget`; omissions and display clipping are labeled. JSON retains the
+bounded exact excerpts. The native reader also accepts ranked-view/1 without
+excerpts; a version 1 payload containing quotations and unknown major versions
+fail explicitly.
+
+The projection retains up to five ordered candidates independently of the graph
+seed limit. Each candidate has a rank, stable graph ID, qualified name,
+kind, source anchor when available, concise reasons, matched fields/terms,
+an ordinal `relevance` (`high`, `medium`, `low`), and separate `nameMatch`,
+`evidence`, and `retrievalKinds` values. Relevant source passages are grouped
+under their owner. `supportingSources` retains up to four supporting passage
+anchors separately from the declaration anchor; `omittedSupportingSources`
+reports the remainder. A relevant approximate match can have exact structural
+provenance; neither label proves implementation equivalence. Text labels each
+candidate's node kind so resource/document matches are distinguishable from
+implementation declarations.
+
+Low candidates can retain partial topic evidence when ordinary query words
+are absent from the index. Their reasons name missing context instead of
+claiming the behavior is established. Negative query conditions always keep
+lexical candidates Low with an explicit unverified-condition reason.
+
+When known index statistics have no literal match for ordinary `entry` or
+`snapshot` wording, broad retrieval may inspect indexed `item`/`element` or
+`copy`/`clone` alternatives. A dependent candidate stays Low and its reason
+names the translations and the unverified equivalence/behavior. Lexical-only
+candidates need another literal non-action topic in source-owned fields;
+paths, namespaces and generic facets do not supply that context. Existing
+explicit semantic-channel admission remains separate. Named/quoted/qualified
+identities, document requests and unavailable statistics do not use this
+fallback. Index absence does not prove source absence. Existing literal-only
+candidates retain their admission screen, and fallback candidates receive no
+operation preference. No graph relationship or behavioral fact is inferred.
+
+The underlying discovery/search response also carries an `incomplete_coverage`
+diagnostic so clients that do not request the ranked view retain the caveat.
+JSON and local SQLite readers also retain graph publication and documentation
+omission summaries. Older snapshots without diagnostic point projections use a
+bounded supplement read; reaching that limit cannot be reported as complete
+coverage or an empty diagnostic result. Discovery retains graph coverage
+warnings even when no matching seed is found.
+
+For an implementation question with one recognized operation,
+operation identifiers in a callable's name or local code can give it an
+inspection preference over contextual mentions. Separate topic evidence is
+required. Signature-overlapping identifiers cannot supply the code signal,
+because parameter declarations are also indexed; missing/empty signatures,
+native display signatures ending in `…`, or clipped search-field projections
+keep ordinary ranking for code-based signals. This does not classify tokens
+as runtime body operations. Compound, negative and temporal conditions retain ordinary
+ranking. This preference is not execution proof and does not raise relevance or
+structural confidence. Missing query context and Low labels remain visible.
+
+Hyphenated compounds such as `read-only` or `load-only` can prefer a callable
+whose own name or one retained owner-local identifier contains those normalized
+words contiguously. Separate identifiers, documentation, paths and namespaces
+cannot supply that cohesion. A separate owner-field topic outside the compound
+is required; a compound alone is insufficient. Code signals use the same
+signature guards above. The preference covers up to eight compounds with two
+to four words each; larger compound requests retain ordinary ranking. Explicit
+identities, document/test intent, recognized negative/temporal conditions and
+vocabulary-dependent matches retain their existing guards. Dependent candidates
+stay Low and name the matched compounds, with behavior unverified. Matching
+identifier anchors receive priority within the existing eight body-source cap;
+omissions stay visible. This changes ranking/citation selection, not recall,
+graph facts, source ownership or the ranked-view schema.
+
+The open `matchedFields` vocabulary includes `code_reference` for identifiers
+on witnessed outgoing call/reference sites inside a callable. These matches map
+to lexical retrieval and preserve the actual site in `supportingSources`.
+Unquoted `before`, `after`, `during`, and `until` identify temporal conditions
+that lexical retrieval cannot establish. Such candidates have Low relevance
+and an explicit warning; the connectives do not contribute subject coverage.
+Quoted names and qualified identifiers retain their literal terms.
+Target namespaces, paths and documentation are excluded. When this evidence
+supplies a concept absent from the owner's fields, relevance is Low (unless the
+query matches its exact ID or full name). A reference demonstrates use of an
+identifier, not implementation of the requested behavior.
+
+`kind` and `language` describe facets. They do not supply missing topic evidence
+for a broad question. Removing facet-only candidates can shorten a shortlist or
+produce no supporting indexed evidence; it does not establish that the requested
+behavior is absent. Exact identity and simple facet listings retain their meaning.
+
+`owned_identifier` is another lexical matched field: a matching local name
+belongs to one uniquely witnessed callable through exact AST containment.
+`supportingSources` retains the local declaration site. Namespaces, paths and
+nested callable names cannot supply it. Relevance is Low when this field
+supplies an otherwise missing concept, unless the ID or full name is exact.
+This evidence establishes ownership, not implementation of a behavior.
+
+`eligibleCount` is the total supported set when known; `null` means the bounded
+retrieval could not establish a complete count. `retainedCount` records the
+retained unique owners before the top-five projection. `moreAvailable`,
+`candidateRecallBounded`, `responseTruncated`, `graphCoverage`, `scope`, and
+`limits` expose limits and coverage. `responseTruncated` is discovery's aggregate
+bound, including candidate, source-field and context limits; it does not assert
+that traversal itself was truncated. Optional context's `truncated` flag also
+retains upstream response bounds as well as omitted context rows.
+`narrowing` gives a concrete source scope
+or asks for a specific subject. Empty results abstain from asserting absence.
+
+The text renderer tries abbreviated explanations before removing a ranked
+candidate. It marks this with `Reasons abbreviated`; `--format json` exposes
+more detail. Source locations, relevance/identity/evidence labels, recall bounds
+and uncertainty remain visible. This changes text packing, not ranking or the
+JSON projection.
+
+The shared text renderer reserves header, limits and refinement guidance inside
+the requested UTF-8 byte budget (approximately four bytes per token), drops
+whole candidate rows when needed, and fails if one candidate plus metadata
+cannot fit. Ranked views are bounded to 128 KiB; oversized machine projections
+fail intact. This view uses no discovery cursor and does not change default
+raw schemas or cursor semantics.
+
+`--include-context` / MCP `include_context: true` adds an optional `context`
+object after the shortlist. It contains at most eight one-hop witnessed edges
+and sixteen endpoint nodes, preserving edge direction, occurrence IDs, source
+anchors and provenance. `omittedEdges` and `truncated` expose context limits.
+Text drops whole context rows before candidate rows when the answer budget
+requires it. Context is disabled by default and does not reorder candidates.
+
 ## Current output directory
 
 Default:
@@ -1490,3 +1641,23 @@ when the original request selected an immutable snapshot path. Freshness is chec
 answers. Standalone and historical artifacts without a source-root marker have
 no advisory check. Program IR currently has no build commit; its own marked
 artifact reports unknown freshness rather than borrowing a graph's revision.
+
+
+## Ranked view version3 code excerpts (development)
+
+Ranked JSON now emits `compass.query.ranked-view/4`. Its `excerpts[].kind`
+may be `callable_code`, `callable_comment`, or `ast_documentation`. Code and
+comment anchors are contained in the owning candidate; attached documentation
+precedes it. Text remains exact UTF-8 source with byte/line/column anchors.
+A code window need not cover the full callable. Versions1/2 remain readable;
+version2 rejects `callable_code` rather than interpreting it as a comment.
+
+### Ranked nested callable code
+
+Ranked view4 adds excerpt kind `nested_callable_code` and the optional
+`nestedScope` source anchor. The field is required for that kind and forbidden
+for direct code, comments and documentation. The scope must be strictly inside
+the candidate's callable definition; the quoted slice must be inside that scope.
+The label describes lexical nesting only. Existing byte, quotation-count and
+text-budget limits still apply; omissions are explicit. Readers reject this
+kind under views1–3 while continuing to read their original quotation kinds.

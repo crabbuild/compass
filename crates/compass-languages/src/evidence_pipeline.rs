@@ -449,11 +449,11 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.go",
             language: "go",
-            version: 1,
+            version: 2,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: GO_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualified,
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
     GROOVY_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
@@ -470,11 +470,11 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.javascript",
             language: "javascript",
-            version: 1,
+            version: 3,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVASCRIPT_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualified,
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
@@ -511,11 +511,11 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.rust",
             language: "rust",
-            version: 2,
+            version: 3,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: RUST_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualified,
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
     SCALA_EVIDENCE_PIPELINE,
     SWIFT_EVIDENCE_PIPELINE,
@@ -523,10 +523,10 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.typescript",
             language: "typescript",
-            version: 1,
+            version: 4,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: TYPESCRIPT_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualified,
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
 ];

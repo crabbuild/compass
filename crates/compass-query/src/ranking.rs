@@ -9,6 +9,19 @@ use crate::recall::{CandidateSource, SearchCandidate};
 use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
 
 pub const QUERY_RANKER_PROFILE_V1: &str = "query-ranker/1";
+pub const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2-fielded";
+pub const QUERY_RANKER_PROFILE_V3: &str = "query-ranker/3-partial-evidence";
+pub const QUERY_RANKER_PROFILE_V4: &str = "query-ranker/4-leading-documentation";
+pub const QUERY_RANKER_PROFILE_V5: &str = "query-ranker/5-code-reference-recall";
+pub const QUERY_RANKER_PROFILE_V6: &str = "query-ranker/6-owned-identifier-recall";
+pub const QUERY_RANKER_PROFILE_V7: &str = "query-ranker/7-topic-evidence";
+pub const QUERY_RANKER_PROFILE_V8: &str = "query-ranker/8-native-body-evidence";
+pub const QUERY_RANKER_PROFILE_V9: &str = "query-ranker/9-test-context";
+pub const QUERY_RANKER_PROFILE_V10: &str = "query-ranker/10-temporal-qualification";
+pub const QUERY_RANKER_PROFILE_V11: &str = "query-ranker/11-implementation-action";
+pub const QUERY_RANKER_PROFILE_V12: &str = "query-ranker/12-single-operation-inspection";
+pub const QUERY_RANKER_PROFILE_V13: &str = "query-ranker/13-unindexed-vocabulary";
+pub const QUERY_RANKER_PROFILE_V14: &str = "query-ranker/14-compound-identifier";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {
@@ -937,11 +950,14 @@ pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
         "decode" => Some("decode"),
         "delete" => Some("delete"),
         "discover" => Some("discover"),
+        "document" => Some("document"),
         "dispatch" => Some("dispatch"),
         "detect" => Some("detect"),
         "drain" => Some("drain"),
         "extract" => Some("extract"),
+        "enforc" | "enforce" => Some("enforce"),
         "find" => Some("find"),
+        "format" => Some("format"),
         "generate" | "generated" => Some("generate"),
         "freeze" => Some("freeze"),
         "get" | "read" | "select" => Some("read"),
@@ -1002,6 +1018,7 @@ pub(crate) fn is_explicit_operation_predicate(token: &str) -> bool {
             | "generate"
             | "generated"
             | "find"
+            | "format"
             | "freeze"
             | "get"
             | "handle"

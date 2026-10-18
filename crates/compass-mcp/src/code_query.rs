@@ -235,6 +235,9 @@ pub(super) fn invoke_with_engine(
 
 pub(super) fn has_discovery_arguments(arguments: &Map<String, Value>) -> bool {
     [
+        "view",
+        "text_budget",
+        "include_context",
         "direction",
         "relation_contexts",
         "scope",
@@ -258,6 +261,9 @@ pub(super) fn validate_query_graph_arguments(
 ) -> Result<(), super::InvocationError> {
     const ALLOWED: &[&str] = &[
         "question",
+        "view",
+        "text_budget",
+        "include_context",
         "semantic_search",
         "project_path",
         "mode",
@@ -289,6 +295,40 @@ pub(super) fn validate_query_graph_arguments(
     let legacy = ["mode", "depth", "token_budget", "context_filter"]
         .iter()
         .any(|name| arguments.contains_key(*name));
+    if let Some(view) = arguments.get("view")
+        && view.as_str() != Some("ranked")
+    {
+        return Err(super::InvocationError::InvalidParams(
+            "view must be ranked when provided".to_owned(),
+        ));
+    }
+    if legacy && arguments.contains_key("view") {
+        return Err(super::InvocationError::InvalidParams(
+            "view requires bounded discovery; omit legacy traversal controls".to_owned(),
+        ));
+    }
+    if let Some(budget) = arguments.get("text_budget") {
+        if !arguments.contains_key("view") {
+            return Err(super::InvocationError::InvalidParams(
+                "text_budget requires view=ranked".to_owned(),
+            ));
+        }
+        if !budget
+            .as_u64()
+            .is_some_and(|budget| (1..=65_536).contains(&budget))
+        {
+            return Err(super::InvocationError::InvalidParams(
+                "text_budget must be an integer between 1 and 65536".to_owned(),
+            ));
+        }
+    }
+    if let Some(include_context) = arguments.get("include_context")
+        && (!arguments.contains_key("view") || !include_context.is_boolean())
+    {
+        return Err(super::InvocationError::InvalidParams(
+            "include_context must be a boolean and requires view=ranked".to_owned(),
+        ));
+    }
     if legacy && arguments.contains_key("semantic_search") {
         return Err(super::InvocationError::InvalidParams(
             "semantic_search requires bounded discovery; omit legacy traversal controls".to_owned(),
@@ -306,6 +346,26 @@ pub(super) fn invoke_discovery_with_engine(
     arguments: &Map<String, Value>,
     engine: &CodeQueryEngine,
 ) -> Result<DiscoveryQueryResponse, super::InvocationError> {
+    engine
+        .discover(discovery_request(arguments)?)
+        .map_err(query_invocation_error)
+}
+
+pub(super) fn invoke_ranked_with_engine(
+    arguments: &Map<String, Value>,
+    engine: &CodeQueryEngine,
+) -> Result<compass_query::RankedDiscoveryResponse, super::InvocationError> {
+    engine
+        .discover_ranked_with_context(
+            discovery_request(arguments)?,
+            boolean(arguments, "include_context")?,
+        )
+        .map_err(query_invocation_error)
+}
+
+fn discovery_request(
+    arguments: &Map<String, Value>,
+) -> Result<DiscoveryQueryRequest, super::InvocationError> {
     let defaults = DiscoveryLimits::default();
     let request = DiscoveryQueryRequest {
         question: required_string(arguments, "question")?,
@@ -343,7 +403,7 @@ pub(super) fn invoke_discovery_with_engine(
             timeout_ms: u64_value(arguments, "timeout_ms", defaults.timeout_ms)?,
         },
     };
-    engine.discover(request).map_err(query_invocation_error)
+    Ok(request)
 }
 
 fn query_invocation_error(error: compass_query::QueryError) -> super::InvocationError {

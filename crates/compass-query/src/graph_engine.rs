@@ -403,21 +403,31 @@ pub(crate) fn open_local_store_snapshot(
         .build;
     let source_commit = build.source_commit;
     let build_generation_identity = build.generation_id;
-    let partial_graph_message = reader
-        .graph_diagnostic_by_code("publication_omission_summary")
-        .map_err(|error| {
+    let mut partial_messages = Vec::new();
+    for code in [
+        "publication_omission_summary",
+        "leading_documentation_omission_summary",
+    ] {
+        if let Some(diagnostic) = reader.graph_diagnostic_by_code(code).map_err(|error| {
             QueryError::new(
-                QueryErrorKind::CorruptArtifact,
+                if matches!(error, compass_graph::SnapshotError::Limit(_)) {
+                    QueryErrorKind::MemoryLimit
+                } else {
+                    QueryErrorKind::CorruptArtifact
+                },
                 "store_graph_snapshot_failed",
                 error.to_string(),
             )
-        })?
-        .map(|diagnostic| {
-            format!(
-                "Published graph coverage is incomplete: {}",
-                diagnostic.message
-            )
-        });
+        })? {
+            partial_messages.push(diagnostic.message);
+        }
+    }
+    let partial_graph_message = (!partial_messages.is_empty()).then(|| {
+        format!(
+            "Published graph coverage is incomplete: {}",
+            partial_messages.join(" ")
+        )
+    });
     drop(reader);
     Ok(LocalStoreSnapshot {
         store,

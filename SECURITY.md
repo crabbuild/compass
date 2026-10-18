@@ -90,6 +90,20 @@ of one size-bounded byte snapshot. Digest equality establishes content identity,
 not authenticity or semantic correctness. Disposable cache decoding is also
 byte-bounded; caches do not authorize access to their source graph.
 
+Disposable JSON query-index metadata and full-integrity inspection have a shared
+validation deadline. A slow file pager may use an inspection-only image bounded
+to 768 MiB, pinned by a read transaction and compared against every original byte
+and EOF. WAL-context images and physically different images are ineligible and
+fall back to original-file inspection. The copy uses the same full integrity
+operation on a writable in-memory handle required by FTS5; it grants no graph
+trust and is never published. A validation timeout preserves the original cache
+and returns a typed error rather than starting a replacement build.
+SQL deadline timers use the safe SQLite interrupt handle, are scoped to one
+operation, and are cancelled and joined before the connection is reused or
+closed. A progress callback remains as a fallback, with finer checks if the
+timer thread cannot start. Blocking filesystem calls may delay observation of
+the deadline; the image retains its byte and size guards.
+
 ## Document and OCR boundary
 
 PDF and OOXML files, XML relationships, compressed members, embedded images,
@@ -138,6 +152,19 @@ include those excerpts as well as existing names and provenance. Apply the same
 repository disclosure policy to these graph artifacts. Corpus size/deadline
 failures remain explicit and do not publish a partially built semantic index.
 
+## Local source-body query evidence
+
+Native extraction caches and the immutable `source-query.json` artifact can
+retain parameter/local identifiers and bounded inline comments from indexed
+source. Treat these as repository-derived source content when sharing output
+folders. They remain local; no provider, credentials or source-file reads are
+added to query execution. Current queries read only the bounded regular-file
+artifact beside the selected graph, validate its schema/profile and digest
+binding, and retain exact source coordinates. Hashes detect content mismatch;
+they do not authenticate source authorship or establish behavioral correctness.
+Detached/historical graph readers do not borrow current body evidence. Text
+occurrence never creates graph dependency edges or structural confidence.
+
 ## Local query and saved-output caches
 
 Completed-output budgets can save source excerpts, report content and diagnostics
@@ -172,3 +199,36 @@ The marked root can be outside the current project; its path appears in the
 advisory recovery command and MCP freshness metadata. Shell quoting is display
 only. Source-root markers are local build metadata, not a trust assertion that
 arbitrary imported graph bytes describe that checkout.
+
+
+Ranked answer quotations can disclose retained comment or documentation bytes
+through local CLI/MCP output. They read only immutable, graph-bound evidence
+with proven declaration ownership; query-time mutable source reads and generic
+neighbor prose are excluded. Quotations remain untrusted data, with controls
+and bidirectional formatting marks escaped in text output. Treat their contents
+as source material, never instructions. Normalized legacy docstrings do not
+qualify as verbatim source quotations.
+
+
+## Local code inspection excerpts (development)
+
+Opt-in ranked answers may include exact code windows from the immutable
+source-query artifact, including literals present in that code. They are not
+redacted summaries. Windows stay within one AST-owned callable, exclude nested
+callable/type subtrees, and have independent extraction/publication/output caps.
+The query never opens current working-tree files to supply missing text. Treat
+these excerpts as untrusted source content when rendering; existing terminal
+control/bidirectional escaping and JSON encoding apply. A source window is
+inspection evidence and must not be interpreted as an instruction or a proven
+runtime relationship.
+
+## Nested lexical source context
+
+Nested code quotations require an explicit bounded native AST parent chain and
+a unique exact published enclosing callable. They retain the actual callable
+syntax range, separately from variable definition envelopes. Class/type scopes,
+named children and separately published callables are ownership boundaries.
+Quotes remain untrusted source text; renderers preserve existing escaping and
+output budgets. Context does not add graph records, calls, execution claims,
+retrieval terms or network/model dependencies. Source profile4 and ranked view4
+make the distinction explicit; historical profiles retain their original meaning.

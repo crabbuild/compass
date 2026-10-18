@@ -1147,7 +1147,7 @@ fn compact_one_hop_and_no_match_answers_cost_only_the_facts() -> Result<(), Box<
     };
     let compact =
         compass_output::render_compact_code_query_text_page(&response, context.clone(), options)?;
-    assert!(compact.text.len() + 1 <= 400, "{}", compact.text);
+    assert!(compact.text.len() < 400, "{}", compact.text);
     assert!(
         compact.text.contains("Caller --calls--> Fixture.Target"),
         "{}",
@@ -1201,7 +1201,7 @@ fn compact_unicode_pages_never_overflow_the_budget_or_skip_entries() -> Result<(
                 cursor: cursor.as_deref(),
             },
         )?;
-        assert!(page.text.len() + 1 <= 1024);
+        assert!(page.text.len() < 1024);
         count += page.entry_end - page.entry_start;
         cursor = page.next_cursor;
         if cursor.is_none() {

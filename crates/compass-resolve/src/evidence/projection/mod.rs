@@ -3,9 +3,11 @@
 use super::*;
 use crate::ResolutionAdmission;
 
+mod documentation;
 mod edges;
 mod nodes;
 
+pub(crate) use documentation::leading_documentation_diagnostics;
 pub(crate) use edges::is_replaced_relation;
 use edges::*;
 pub(in crate::evidence) use nodes::is_deferred_receiver;
@@ -127,6 +129,7 @@ impl UniversalResolutionIndex {
             }
         }
         profile_internal("universal declaration projection", &mut profile_started);
+        self.materialize_leading_documentation(nodes, edges, &graph_ids);
         self.materialize_python_call_sites(nodes, &graph_ids);
         let inventory_kinds = nodes
             .iter()
@@ -744,13 +747,13 @@ fn batch_definition_ranges(
         let Some(declaration) = declarations.get(owner_id.as_str()) else {
             continue;
         };
-        if !range_contains(&scope.range, &declaration.range) || ambiguous.contains(owner_id) {
+        if ambiguous.contains(owner_id) {
             continue;
         }
-        if ranges
-            .insert(owner_id.clone(), scope.range.clone())
-            .is_some()
-        {
+        let Some(range) = definition_range_for_scope(declaration, scope) else {
+            continue;
+        };
+        if ranges.insert(owner_id.clone(), range).is_some() {
             ranges.remove(owner_id);
             ambiguous.insert(owner_id.clone());
         }

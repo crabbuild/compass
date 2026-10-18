@@ -55,6 +55,7 @@ fn external_call_batch() -> SemanticEvidenceBatch {
             signature_hash: None,
             implementation_hash: None,
             source_hash: None,
+            documentation: None,
             definition_start_byte: None,
             range: range(0, 10),
         }],

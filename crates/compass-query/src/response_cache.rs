@@ -33,7 +33,16 @@ impl ResponseCache {
         digest.update(graph.as_bytes());
         digest.update(env!("CARGO_PKG_VERSION").as_bytes());
         digest.update(crate::QUERY_PLANNER_PROFILE_V2.as_bytes());
-        digest.update(crate::QUERY_RANKER_PROFILE_V1.as_bytes());
+        digest.update(crate::QUERY_RANKER_PROFILE_V14.as_bytes());
+        digest.update(b"compound-identifier/2");
+        digest.update(b"unindexed-vocabulary/1");
+        // Invalidate experimental single-action answers lacking context vetoes.
+        digest.update(b"single-operation-context/1");
+        // Projection epoch: old cached responses
+        // must not silently omit retained ranked source quotations.
+        digest.update(b"ranked-source-excerpts/3");
+        // Historical local-store responses may lack documentation omissions.
+        digest.update(b"graph-diagnostic-projection/1");
         if let Some(program) = program {
             // Hash through a writer, without constructing another IR-sized buffer.
             if serde_json::to_writer(DigestWriter(&mut digest), program).is_err() {

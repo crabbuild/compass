@@ -1126,6 +1126,10 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
     } else if page.path == "query" {
         details
             .replace(
+                "--direction <VALUE>",
+                "--view ranked                   Opt-in top-five implementation shortlist\n  --include-context               Append bounded one-hop witnessed context\n  --direction <VALUE>",
+            )
+            .replace(
                 "Query an exact immutable realization; conflicts with --graph",
                 "Resolve REV once to an immutable typed realization; conflicts with --graph",
             )
@@ -1157,6 +1161,9 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
     if !details.is_empty() {
         output.push_str("\n\n");
         output.push_str(&details);
+    }
+    if page.path == "query" {
+        output.push_str("\n\nRanked view:\n  compass query \"where are request errors formatted?\" --view ranked\n  --view ranked --format json emits compass.query.ranked-view/4.\n  --text-budget bounds the whole shortlist, including refinement guidance.\n  Ranked view does not accept discovery cursors, result envelopes, evidence,\n  or agent-json. Relevance and structural evidence are separate labels.\n  --include-context appends bounded one-hop relationships after the shortlist.");
     }
     finish(output, style)
 }

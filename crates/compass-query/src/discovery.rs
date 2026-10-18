@@ -93,21 +93,28 @@ struct DiscoveryCandidateSelection {
     truncated: bool,
 }
 
-struct DiscoveryGuard<'a> {
+pub(crate) struct DiscoveryGuard<'a> {
     deadline: Instant,
     cancelled: Option<&'a AtomicBool>,
 }
 
 impl<'a> DiscoveryGuard<'a> {
-    fn new(timeout_ms: u64, cancelled: Option<&'a AtomicBool>) -> Self {
+    pub(crate) fn new(
+        timeout_ms: u64,
+        cancelled: Option<&'a AtomicBool>,
+        engine_deadline: Option<Instant>,
+    ) -> Self {
         let started = Instant::now();
         Self {
-            deadline: started + Duration::from_millis(timeout_ms),
+            deadline: engine_deadline
+                .map_or(started + Duration::from_millis(timeout_ms), |deadline| {
+                    deadline.min(started + Duration::from_millis(timeout_ms))
+                }),
             cancelled,
         }
     }
 
-    fn check(&self) -> Result<(), QueryError> {
+    pub(crate) fn check(&self) -> Result<(), QueryError> {
         if self
             .cancelled
             .is_some_and(|cancelled| cancelled.load(Ordering::Relaxed))
@@ -395,15 +402,37 @@ impl CodeQueryEngine {
         cancelled: Option<&AtomicBool>,
     ) -> Result<DiscoveryQueryResponse, QueryError> {
         validate_request(&request)?;
-        let guard = DiscoveryGuard::new(request.limits.timeout_ms, cancelled);
+        let guard = DiscoveryGuard::new(request.limits.timeout_ms, cancelled, self.deadline);
+        self.discover_guarded(request, &guard)
+    }
+
+    pub(crate) fn discover_guarded(
+        &self,
+        request: DiscoveryQueryRequest,
+        guard: &DiscoveryGuard<'_>,
+    ) -> Result<DiscoveryQueryResponse, QueryError> {
         guard.check()?;
-        if cancelled.is_none()
-            && let Some(mut response) = self.structured_discovery_answer(&request)?
+        let fielded = self.is_fielded_question(&request.question)?;
+        guard.check()?;
+        if fielded
+            && request.direction == DiscoveryDirection::Auto
+            && request.relation_contexts.is_empty()
         {
-            finish_response(&guard, &mut response)?;
+            let mut response = self
+                .discover_ranked_with_context_guarded(request, true, guard, false)?
+                .discovery;
+            finish_response(guard, &mut response)?;
             return Ok(response);
         }
-        self.discover_neighborhood(request, &guard)
+        // The typed adapter does not carry a caller-owned cancellation flag.
+        // Cancelable requests retain the neighborhood executor's shared guard.
+        if guard.cancelled.is_none()
+            && let Some(mut response) = self.structured_discovery_answer(&request)?
+        {
+            finish_response(guard, &mut response)?;
+            return Ok(response);
+        }
+        self.discover_neighborhood(request, guard)
     }
 
     fn discover_neighborhood(
@@ -577,6 +606,14 @@ impl CodeQueryEngine {
                     path: None,
                 });
             };
+            if let Some(message) = &self.partial_graph_message {
+                response.diagnostics.push(QueryDiagnostic {
+                    code: QueryDiagnosticCode::IncompleteCoverage,
+                    message: message.clone(),
+                    node_id: None,
+                    path: None,
+                });
+            }
             finish_response(guard, &mut response)?;
             return Ok(response);
         }
@@ -600,6 +637,18 @@ impl CodeQueryEngine {
         }
         finish_response(guard, &mut response)?;
         Ok(response)
+    }
+
+    pub(crate) fn ranked_scopes(
+        &self,
+        request: &DiscoveryQueryRequest,
+        guard: &DiscoveryGuard<'_>,
+    ) -> Result<Vec<DiscoveryScope>, QueryError> {
+        guard.check()?;
+        let backend = self.backend.pin_discovery()?;
+        let scopes = self.resolve_scopes(&backend, &request.scope, guard)?;
+        guard.check()?;
+        Ok(scopes)
     }
 
     fn resolve_scopes(
@@ -635,6 +684,7 @@ impl CodeQueryEngine {
                     true,
                 ));
             }
+            guard.check()?;
             let canonical = canonical_resolved_scope(&requested_scope, &values)?;
             resolved.push(canonical);
         }
@@ -1933,7 +1983,7 @@ fn is_explicit_binary_path_question(
         >= 2
 }
 
-fn literal_identifier_terms(question: &str) -> BTreeSet<String> {
+pub(crate) fn literal_identifier_terms(question: &str) -> BTreeSet<String> {
     // Standalone names already use the full-query exact lookup. In prose,
     // underscores and mixed-case internal capitals distinguish code spellings
     // from ordinary words such as "Explain", "close", or "HTTP". This is a
@@ -2143,7 +2193,9 @@ fn intersection_token_bytes(concepts: &[String]) -> usize {
     concepts.iter().map(String::len).sum()
 }
 
-fn infer_discovery_direction(question: &str) -> (DiscoveryDirection, DiscoveryDirectionSource) {
+pub(crate) fn infer_discovery_direction(
+    question: &str,
+) -> (DiscoveryDirection, DiscoveryDirectionSource) {
     let normalized = question
         .chars()
         .map(|character| {
@@ -2350,7 +2402,7 @@ fn scope_resolution_error(
     )
 }
 
-fn validate_request(request: &DiscoveryQueryRequest) -> Result<(), QueryError> {
+pub(crate) fn validate_request(request: &DiscoveryQueryRequest) -> Result<(), QueryError> {
     if !request.limits.is_valid() {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
@@ -2550,7 +2602,7 @@ fn edges_for_direction(
     }
 }
 
-fn edge_matches_context(edge: &EdgeRecord, contexts: &[String]) -> bool {
+pub(crate) fn edge_matches_context(edge: &EdgeRecord, contexts: &[String]) -> bool {
     contexts.is_empty()
         || edge
             .context
@@ -2558,7 +2610,7 @@ fn edge_matches_context(edge: &EdgeRecord, contexts: &[String]) -> bool {
             .is_some_and(|context| contexts.iter().any(|candidate| candidate == context))
 }
 
-fn discovery_edge(edge: &EdgeRecord) -> DiscoveryEdge {
+pub(crate) fn discovery_edge(edge: &EdgeRecord) -> DiscoveryEdge {
     let projected = query_edge(edge);
     DiscoveryEdge {
         id: (!projected.id.is_empty()).then_some(projected.id),
@@ -2871,6 +2923,7 @@ mod tests {
         connection
             .execute_batch(
                 r#"CREATE TABLE nodes(id TEXT PRIMARY KEY);
+                   CREATE TABLE fielded_stats(term TEXT PRIMARY KEY, frequency INTEGER NOT NULL);
                    CREATE VIRTUAL TABLE node_fts USING fts5(
                      node_id UNINDEXED, name, qualified_name, aliases, kind, roles,
                      language, framework, normalized_path, source_file, community_id,
@@ -2891,6 +2944,8 @@ mod tests {
             let identifier_terms = [node.name.as_str(), node.qualified_name.as_str()]
                 .into_iter()
                 .flat_map(compass_model::search::identifier_search_terms)
+                .chain(compass_model::search::search_document(node).terms())
+                .chain(compass_model::search::primary_evidence_terms(node))
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect::<Vec<_>>()
@@ -2920,6 +2975,20 @@ mod tests {
                             .unwrap_or_default(),
                         identifier_terms,
                     ],
+                )
+                .unwrap_or_else(|_| std::process::abort());
+        }
+        let mut frequencies = std::collections::BTreeMap::<String, u64>::new();
+        for node in &graph.nodes {
+            for term in compass_model::search::search_document(node).terms() {
+                *frequencies.entry(term).or_default() += 1;
+            }
+        }
+        for (term, frequency) in frequencies {
+            connection
+                .execute(
+                    "INSERT INTO fielded_stats VALUES(?1,?2)",
+                    rusqlite::params![term, frequency],
                 )
                 .unwrap_or_else(|_| std::process::abort());
         }
@@ -2966,6 +3035,7 @@ mod tests {
             semantic_search: false,
             semantic_index: std::sync::Mutex::new(None),
             response_cache: crate::response_cache::ResponseCache::disabled(),
+            source_query: None,
         }
     }
 
@@ -4911,6 +4981,89 @@ mod tests {
         };
         assert_eq!(error.kind(), crate::QueryErrorKind::Cancelled);
         assert_eq!(error.code(), "discovery_cancelled");
+    }
+
+    #[test]
+    fn cancelable_typed_questions_retain_guarded_neighborhood_routing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let engine = engine(
+            vec![node("n:alpha", "alpha"), node("n:caller", "caller")],
+            vec![edge("e:call", "n:caller", "n:alpha")],
+        );
+        let mut query = request(DiscoveryDirection::Auto);
+        query.question = "who calls alpha".to_owned();
+        let structured = engine
+            .structured_discovery_answer(&query)?
+            .ok_or("typed fixture must exercise the structured adapter")?;
+        let cancelled = AtomicBool::new(false);
+        let guard = super::DiscoveryGuard::new(query.limits.timeout_ms, Some(&cancelled), None);
+        let expected = engine.discover_neighborhood(query.clone(), &guard)?;
+        // Distinct seed metadata proves this fixture distinguishes the routes;
+        // it does not depend on a scheduler race or elapsed wall-clock time.
+        assert_ne!(structured.seeds, expected.seeds);
+        let actual = engine.discover_with_cancellation(query, Some(&cancelled))?;
+        assert_eq!(actual, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_code_definitions_preserve_name_ambiguity() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for name in ["Target", "close", "quoted method", "pkg"] {
+            let mut first = anchored_node("n:first", name, "src/first.rs", 1);
+            let mut second = anchored_node("n:second", name, "src/second.rs", 1);
+            let operand = if name == "pkg" {
+                first.kind = NodeKind::Module;
+                second.kind = NodeKind::Module;
+                name.to_owned()
+            } else if name.contains(' ') {
+                first.kind = NodeKind::Method;
+                second.kind = NodeKind::Method;
+                format!("\"{name}\"")
+            } else {
+                name.to_owned()
+            };
+            let engine = engine(vec![first, second], Vec::new());
+            for question in [
+                format!("where is {operand} defined"),
+                format!("find definition of {operand}"),
+            ] {
+                let mut query = request(DiscoveryDirection::Auto);
+                query.question = question;
+                assert!(!engine.is_fielded_question(&query.question)?);
+                let ordinary = engine.discover_with_cancellation(query.clone(), None)?;
+                let cancelled = AtomicBool::new(false);
+                assert_eq!(
+                    engine.discover_with_cancellation(query.clone(), Some(&cancelled))?,
+                    ordinary
+                );
+                assert_eq!(ordinary.seeds.len(), 2);
+                assert!(
+                    ordinary
+                        .seeds
+                        .iter()
+                        .all(|seed| { seed.ambiguous && !seed.alternatives.is_empty() })
+                );
+                assert!(
+                    ordinary.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code == QueryDiagnosticCode::AmbiguousMatch
+                    })
+                );
+                let ranked = engine.discover_ranked(query)?;
+                assert_eq!(ranked.discovery, ordinary);
+                assert!(ranked.candidates.iter().all(|candidate| {
+                    candidate.relevance == crate::RelevanceBand::Low
+                        && candidate
+                            .reasons
+                            .iter()
+                            .any(|reason| reason.starts_with("Structural query seed"))
+                }));
+            }
+            assert!(engine.is_fielded_question("where are protocol errors formatted")?);
+            assert!(engine.is_fielded_question("where is renewal")?);
+            assert!(engine.is_fielded_question("find definition of unknown context")?);
+        }
+        Ok(())
     }
 
     #[test]

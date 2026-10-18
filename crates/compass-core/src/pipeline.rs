@@ -99,13 +99,14 @@ const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 const SHARED_STORE_GC_MANIFEST_THRESHOLD: usize = 8;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
-const ROOT_ARTIFACTS: [&str; 9] = [
+const ROOT_ARTIFACTS: [&str; 10] = [
     "GRAPH_REPORT.md",
     "orientation.json",
     "graph-overview.json",
     "graph.html",
     "manifest.json",
     "program.json",
+    compass_model::source_query::SOURCE_QUERY_FILE,
     "graph.json",
     "community-quality.json",
     "community-hierarchy.json",
@@ -993,6 +994,11 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
             map.serialize_entry("directBasesComplete", &true)?;
         }
         map.serialize_entry("variadic", &declaration.variadic)?;
+        // Leading comments are outside declaration/body hashes. Retain their
+        // text and ranges so equal-length doc edits cannot reuse stale prose.
+        if let Some(documentation) = &declaration.documentation {
+            map.serialize_entry("documentation", documentation)?;
+        }
         let file_declaration = self.context.declaration_is_file(&declaration.id);
         if !file_declaration {
             if let Some(value) = &declaration.signature_hash {
@@ -1429,7 +1435,16 @@ impl Serialize for FactDigestExtraction<'_> {
         if let Some(error) = &self.extraction.error {
             map.serialize_entry("error", error)?;
         }
-        let mut extensions = self.extraction.extensions.iter().collect::<Vec<_>>();
+        // Query-only source text must not change structural Fact IDs/digests.
+        // Its eventual auxiliary artifact has its own source/content identity.
+        let mut extensions = self
+            .extraction
+            .extensions
+            .iter()
+            .filter(|(key, _)| {
+                key.as_str() != compass_languages::source_query::EXTRACTION_EXTENSION
+            })
+            .collect::<Vec<_>>();
         extensions.sort_unstable_by(|left, right| left.0.cmp(right.0));
         for (key, value) in extensions {
             map.serialize_entry(key, &FactDigestValue(value))?;
@@ -1732,6 +1747,143 @@ fn full_file_source_anchor(
 
 type FactNeutralDocument = (Option<V1GraphDocument>, V1GraphDocument, BTreeSet<String>);
 
+type FileContainerKey = (String, String, String, &'static str);
+
+struct FileContainerEnvelope {
+    declaration: SourceAnchor,
+    envelope: SourceAnchor,
+    extractor: String,
+}
+
+const fn file_container_kind(kind: NodeKind) -> Option<&'static str> {
+    match kind {
+        NodeKind::Module => Some("module"),
+        NodeKind::Package => Some("package"),
+        NodeKind::Namespace => Some("namespace"),
+        _ => None,
+    }
+}
+
+fn evidence_source_anchor(range: &compass_languages::EvidenceRange, root: &Path) -> SourceAnchor {
+    SourceAnchor {
+        file: relative_fact_path(Path::new(&range.source_file), root),
+        start_byte: range.start_byte,
+        end_byte: range.end_byte,
+        start_line: range.start_line,
+        start_column: range.start_column,
+        end_line: range.end_line,
+        end_column: range.end_column,
+    }
+}
+
+/// A file-scoped language container can own the file envelope without being a
+/// file node. Require its directly owned scope and the actual file-root parent;
+/// coincident declaration offsets alone never establish that ownership.
+fn file_container_envelopes(
+    extractions: &[Extraction],
+    root: &Path,
+    source_digests: &BTreeMap<String, SourceDigest>,
+) -> BTreeMap<FileContainerKey, Option<FileContainerEnvelope>> {
+    let mut envelopes = BTreeMap::new();
+    for extraction in extractions {
+        let Some(batch) = &extraction.semantic_evidence else {
+            continue;
+        };
+        if !batch.scopes.iter().any(|scope| {
+            source_digests.contains_key(&relative_fact_path(
+                Path::new(&scope.range.source_file),
+                root,
+            ))
+        }) {
+            continue;
+        }
+        let declarations = batch
+            .declarations
+            .iter()
+            .map(|declaration| (declaration.id.as_str(), declaration))
+            .collect::<BTreeMap<_, _>>();
+        let scopes = batch
+            .scopes
+            .iter()
+            .map(|scope| (scope.id.as_str(), scope))
+            .collect::<BTreeMap<_, _>>();
+        for scope in &batch.scopes {
+            let Some(declaration) = scope
+                .owner_declaration_id
+                .as_deref()
+                .and_then(|id| declarations.get(id))
+            else {
+                continue;
+            };
+            let kind = match declaration.kind.as_str() {
+                "module" => "module",
+                "package" => "package",
+                "namespace" => "namespace",
+                _ => continue,
+            };
+            let envelope = evidence_source_anchor(&scope.range, root);
+            if scope.kind != kind
+                || scope.language != declaration.language
+                || scope.parent_scope_id != declaration.scope_id
+                || scope.range.source_file != declaration.range.source_file
+                || envelope.start_byte != 0
+                || envelope.start_line != 1
+                || envelope.start_column != 0
+                || source_digests
+                    .get(&envelope.file)
+                    .is_none_or(|file| file.byte_size != envelope.end_byte)
+            {
+                continue;
+            }
+            if let Some(parent_id) = scope.parent_scope_id.as_deref() {
+                let Some(parent) = scopes.get(parent_id) else {
+                    continue;
+                };
+                let Some(owner) = parent
+                    .owner_declaration_id
+                    .as_deref()
+                    .and_then(|id| declarations.get(id))
+                else {
+                    continue;
+                };
+                if parent.parent_scope_id.is_some()
+                    || !matches!(parent.kind.as_str(), "file" | "module")
+                    || !matches!(owner.kind.as_str(), "file" | "module")
+                    || owner.scope_id.is_some()
+                    || parent.language != declaration.language
+                    || parent.range != scope.range
+                {
+                    continue;
+                }
+            }
+            let key = (
+                envelope.file.clone(),
+                declaration.language.clone(),
+                declaration.qualified_name.clone(),
+                kind,
+            );
+            let proof = FileContainerEnvelope {
+                declaration: evidence_source_anchor(&declaration.range, root),
+                envelope,
+                extractor: format!("compass.languages.{}.universal", declaration.language),
+            };
+            envelopes
+                .entry(key)
+                .and_modify(|candidate| *candidate = None)
+                .or_insert(Some(proof));
+        }
+    }
+    envelopes
+}
+
+fn is_file_envelope(anchor: &SourceAnchor, source: &str, size: u64) -> bool {
+    anchor.file == source
+        && anchor.start_byte == 0
+        && anchor.end_byte == size
+        && anchor.start_line == 1
+        && anchor.start_column == 0
+}
+
 fn sort_dedup_serialized<T: Serialize>(values: &mut Vec<T>) {
     if values.len() < 2 {
         return;
@@ -1845,6 +1997,7 @@ fn prepare_fact_neutral_document(
     canonicalize_fact_neutral_metadata(&mut evidence.coverage, &mut evidence.diagnostics);
 
     let anchors = extraction_file_anchors(extractions, root);
+    let containers = file_container_envelopes(extractions, root, source_digests);
     let previous_file_sizes = current
         .graph
         .files
@@ -1870,6 +2023,15 @@ fn prepare_fact_neutral_document(
         if !files.contains_key(source.as_str()) {
             continue;
         }
+        // Refresh an existing file payload from the authoritative inventory.
+        // Preserve absent optional details rather than synthesizing a new shape.
+        if let Some(compass_model::code_graph::NodeDetails::File(details)) = node.details.as_mut()
+            && let Some(file) = files.get(source.as_str())
+        {
+            details.content_digest.clone_from(&file.content_digest);
+            details.byte_size = file.byte_size;
+            details.generated = file.generated;
+        }
         // The canonical graph-v1 file inventory owns digest, size, and generated
         // state. Do not synthesize an optional file-node payload only on the
         // fact-neutral route: full publication intentionally preserves the
@@ -1881,40 +2043,66 @@ fn prepare_fact_neutral_document(
                 .cloned()
                 .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
         });
-        if let Some(anchor) = refreshed_envelope.flatten() {
-            let source_was_file_envelope = node.source.as_ref().is_some_and(|previous| {
-                previous.start_byte == 0
-                    && previous_file_sizes
-                        .get(&source)
-                        .is_some_and(|size| previous.end_byte == *size)
+        let previous_size = previous_file_sizes.get(&source).copied();
+        let container = file_container_kind(node.kind)
+            .zip(node.language.as_ref())
+            .and_then(|(kind, language)| {
+                containers.get(&(
+                    source.clone(),
+                    language.clone(),
+                    node.qualified_name.clone(),
+                    kind,
+                ))
             });
-            if node.kind == NodeKind::File || source_was_file_envelope {
-                node.source = Some(anchor.clone());
-            }
+        // Multiple owned scopes are not an authorization to select one. The
+        // full publication route can resolve the current source coherently.
+        if container.is_some_and(Option::is_none) {
+            return Ok(None);
+        }
+        let proven_container = container.and_then(Option::as_ref).filter(|proof| {
+            previous_size.is_some_and(|size| {
+                node.source
+                    .as_ref()
+                    .is_some_and(|anchor| is_file_envelope(anchor, &source, size))
+                    && node.evidence.iter().any(|provenance| {
+                        provenance.origin == EvidenceOrigin::Ast
+                            && provenance.confidence
+                                == compass_model::provenance::EvidenceConfidence::Exact
+                            && provenance.extractor == proof.extractor
+                            && provenance.anchors.iter().any(|anchor| {
+                                *anchor == proof.declaration
+                                    || (proof.declaration == proof.envelope
+                                        && is_file_envelope(anchor, &source, size))
+                            })
+                    })
+            })
+        });
+        // A declaration may coincide with EOF. Refresh a non-file node only
+        // when current AST ownership and its original declaration provenance
+        // prove it is a file-scoped container, rather than widening its body.
+        let refreshed = if node.kind == NodeKind::File {
+            refreshed_envelope.flatten()
+        } else {
+            proven_container.map(|proof| proof.envelope.clone())
+        };
+        if let Some(anchor) = refreshed {
+            node.source = Some(anchor.clone());
             for provenance in &mut node.evidence {
                 for candidate in &mut provenance.anchors {
-                    let candidate_was_file_envelope = candidate.file == source
-                        && candidate.start_byte == 0
-                        && previous_file_sizes
-                            .get(&source)
-                            .is_some_and(|size| candidate.end_byte == *size);
                     if candidate.file == source
-                        && (node.kind == NodeKind::File || candidate_was_file_envelope)
+                        && (node.kind == NodeKind::File
+                            || previous_size
+                                .is_some_and(|size| is_file_envelope(candidate, &source, size)))
                     {
                         candidate.clone_from(&anchor);
                     }
                 }
-                let wiring_was_file_envelope =
-                    provenance.wiring_site.as_ref().is_some_and(|candidate| {
-                        candidate.file == source
-                            && candidate.start_byte == 0
-                            && previous_file_sizes
-                                .get(&source)
-                                .is_some_and(|size| candidate.end_byte == *size)
-                    });
-                if provenance.wiring_site.is_some()
-                    && (node.kind == NodeKind::File || wiring_was_file_envelope)
-                {
+                if provenance.wiring_site.as_ref().is_some_and(|site| {
+                    site.file == source
+                        && (node.kind == NodeKind::File
+                            || previous_size
+                                .is_some_and(|size| is_file_envelope(site, &source, size)))
+                }) {
                     provenance.wiring_site = Some(anchor.clone());
                 }
             }
@@ -1959,6 +2147,8 @@ fn publish_fact_neutral_incremental(
     current: &V1GraphDocument,
     changed_node_ids: &BTreeSet<String>,
     fact_state: &AstFactDigestState,
+    source_query_inputs: crate::source_query::Inputs,
+    prior_source_query: Option<compass_model::source_query::SourceQueryArtifact>,
     timings: &mut BuildTimings,
 ) -> Result<BuildResult, CoreError> {
     let publish_started = Instant::now();
@@ -2021,6 +2211,18 @@ fn publish_fact_neutral_incremental(
             }),
         )
     };
+    crate::source_query::publish(
+        &output_dir,
+        current,
+        &graph_seal
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::InvalidBuildState("missing graph seal for source evidence".to_owned())
+            })?
+            .sha256,
+        &source_query_inputs,
+        prior_source_query,
+    )?;
     if let Some(metrics) = store_metrics {
         record_store_metrics(timings, metrics);
     }
@@ -2746,12 +2948,13 @@ fn build_graph_inner_unscoped(
         &root,
     );
     if let Some(early_missing) = early_missing
+        && let Some(prior_source_query) = crate::source_query::reusable(&output_dir)
         && let Some(early_batch) =
             extract_fact_neutral_sources(&early_missing, options, &root, &project_evidence)?
         && let Some(prior_state) = prior_fact_digest_state.as_ref()
     {
         let FactNeutralExtractionBatch {
-            extractions: early_extractions,
+            extractions: mut early_extractions,
             source_digests: early_source_digests,
             empty_files: early_empty_files,
         } = early_batch;
@@ -2796,6 +2999,7 @@ fn build_graph_inner_unscoped(
                     .collect::<Vec<_>>();
                 cache.write_portable_ast_batch_ref(&cache_sources)?;
                 cache.flush()?;
+                let source_query_inputs = crate::source_query::collect(&mut early_extractions)?;
                 timings.deterministic_extract = stage_started.elapsed();
                 let result = publish_fact_neutral_incremental(
                     options,
@@ -2813,6 +3017,8 @@ fn build_graph_inner_unscoped(
                     &current,
                     &changed_file_node_ids,
                     &current_fact_state,
+                    source_query_inputs,
+                    Some(prior_source_query),
                     &mut timings,
                 )?;
                 return Ok((result, None));
@@ -3284,6 +3490,7 @@ fn build_graph_inner_unscoped(
     cache_result?;
     let premerge_fact_digests = premerge_digest_result?;
     drop(ast_cache_sources);
+    let source_query_inputs = crate::source_query::collect(&mut ordered)?;
     profile_internal_duration("AST cache streaming publication", cache_elapsed);
     profile_internal_duration("AST fact digest construction", digest_elapsed);
     // Declaration/definition merging is project-wide and is not idempotent.
@@ -3370,6 +3577,8 @@ fn build_graph_inner_unscoped(
                 &current,
                 &changed_file_node_ids,
                 &current_fact_state,
+                source_query_inputs,
+                None,
                 &mut timings,
             )?;
             return Ok((result, None));
@@ -3664,6 +3873,20 @@ fn build_graph_inner_unscoped(
             "no-cluster graph and store publication",
             no_cluster_graph_write_started.elapsed(),
         );
+        crate::source_query::publish(
+            &output_dir,
+            &published.document,
+            &graph_seal
+                .as_ref()
+                .ok_or_else(|| {
+                    CoreError::InvalidBuildState(
+                        "missing graph seal for source evidence".to_owned(),
+                    )
+                })?
+                .sha256,
+            &source_query_inputs,
+            None,
+        )?;
         if let Some(metrics) = store_metrics {
             record_store_metrics(&mut timings, metrics);
         }
@@ -4249,6 +4472,18 @@ fn build_graph_inner_unscoped(
     if let Some(metrics) = store_metrics {
         record_store_metrics(&mut timings, metrics);
     }
+    crate::source_query::publish(
+        &output_dir,
+        &published_document,
+        &graph_seal
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::InvalidBuildState("missing graph seal for source evidence".to_owned())
+            })?
+            .sha256,
+        &source_query_inputs,
+        None,
+    )?;
     let graph_seal_for_quality = graph_seal.as_ref().ok_or_else(|| {
         CoreError::InvalidBuildState(
             "graph artifact seal is unavailable for community quality evidence".to_owned(),
@@ -4643,7 +4878,10 @@ fn publish_build_state(
         let metrics = ensure_store_snapshot(output_dir)?;
         record_store_metrics(timings, metrics);
     }
-    let mut required = vec![output_dir.join(OUTPUT_STATS_FILE)];
+    let mut required = vec![
+        output_dir.join(OUTPUT_STATS_FILE),
+        output_dir.join(compass_model::source_query::SOURCE_QUERY_FILE),
+    ];
     if publish_store {
         required.push(output_dir.join(STORE_REF_FILE_NAME));
     }
@@ -4730,6 +4968,13 @@ fn commit_snapshot(
     }
     if guard.staging_directory().join("program.json").is_file() {
         artifacts.push("program.json");
+    }
+    if guard
+        .staging_directory()
+        .join(compass_model::source_query::SOURCE_QUERY_FILE)
+        .is_file()
+    {
+        artifacts.push(compass_model::source_query::SOURCE_QUERY_FILE);
     }
     if publish_store {
         let gc = garbage_collect_shared_store(output_container, guard.staging_directory())?;
@@ -7887,6 +8132,53 @@ mod tests {
     }
 
     #[test]
+    fn source_query_metadata_does_not_change_structural_fact_digests() -> Result<(), Box<dyn Error>>
+    {
+        let path = Path::new("src/sample.rs");
+        let source = "fn opaque(payload: &str) -> &str { // alpha marker\npayload }";
+        let mut engine = Engine::default();
+        let mut first =
+            engine.extract_source_graph_only(path, "src/sample.rs", source.as_bytes())?;
+        let second = engine.extract_source_graph_only(
+            path,
+            "src/sample.rs",
+            source.replace("alpha", "bravo").as_bytes(),
+        )?;
+        let first_metadata = first
+            .extensions
+            .get(compass_languages::source_query::EXTRACTION_EXTENSION)
+            .ok_or("missing source-query evidence")?;
+        let second_metadata = second
+            .extensions
+            .get(compass_languages::source_query::EXTRACTION_EXTENSION)
+            .ok_or("missing updated source-query evidence")?;
+        assert_ne!(
+            first_metadata, second_metadata,
+            "source evidence must notice a same-length comment edit"
+        );
+        let expected = extraction_fact_digest(&first)?;
+        // Body comments remain part of the existing declaration source hash.
+        let first_hash = first
+            .semantic_evidence
+            .as_ref()
+            .and_then(|batch| batch.declarations.iter().find(|d| d.name == "opaque"))
+            .and_then(|d| d.source_hash.as_ref());
+        let second_hash = second
+            .semantic_evidence
+            .as_ref()
+            .and_then(|batch| batch.declarations.iter().find(|d| d.name == "opaque"))
+            .and_then(|d| d.source_hash.as_ref());
+        assert!(first_hash.is_some() && second_hash.is_some());
+        assert_ne!(first_hash, second_hash);
+        assert_ne!(expected, extraction_fact_digest(&second)?);
+        first
+            .extensions
+            .remove(compass_languages::source_query::EXTRACTION_EXTENSION);
+        assert_eq!(expected, extraction_fact_digest(&first)?);
+        Ok(())
+    }
+
+    #[test]
     fn compact_extraction_preserves_nested_ast_facts() -> Result<(), Box<dyn Error>> {
         let mut attributes = Map::with_capacity(64);
         for index in 0..32 {
@@ -8964,6 +9256,138 @@ mod tests {
     }
 
     #[test]
+    fn leading_documentation_edits_change_fact_digest_without_body_or_range_changes()
+    -> Result<(), Box<dyn Error>> {
+        let extract = |source: &[u8]| -> Result<Extraction, Box<dyn Error>> {
+            let extraction = Engine::default()
+                .extract_source_combined(Path::new("sample.rs"), "sample.rs", source)?
+                .graph;
+            if let Some(error) = &extraction.error {
+                return Err(error.clone().into());
+            }
+            Ok(extraction)
+        };
+        let original_source = b"/// alpha documentation\npub fn work() -> u8 { 1 }\n";
+        let changed_source = b"/// omega documentation\npub fn work() -> u8 { 1 }\n";
+        assert_eq!(original_source.len(), changed_source.len());
+        let original = extract(original_source)?;
+        let changed = extract(changed_source)?;
+        let original_declaration = original
+            .semantic_evidence
+            .as_ref()
+            .and_then(|batch| {
+                batch
+                    .declarations
+                    .iter()
+                    .find(|declaration| declaration.name == "work")
+            })
+            .ok_or("original declaration missing")?;
+        let changed_declaration = changed
+            .semantic_evidence
+            .as_ref()
+            .and_then(|batch| {
+                batch
+                    .declarations
+                    .iter()
+                    .find(|declaration| declaration.name == "work")
+            })
+            .ok_or("changed declaration missing")?;
+        assert_eq!(original_declaration.range, changed_declaration.range);
+        assert_eq!(
+            original_declaration.signature_hash,
+            changed_declaration.signature_hash
+        );
+        assert_eq!(
+            original_declaration.implementation_hash,
+            changed_declaration.implementation_hash
+        );
+        assert_eq!(
+            original_declaration.source_hash,
+            changed_declaration.source_hash
+        );
+        assert!(original_declaration.documentation.is_some());
+        assert!(changed_declaration.documentation.is_some());
+        let original_digest = extraction_fact_digest(&original)?;
+        assert_ne!(original_digest, extraction_fact_digest(&changed)?);
+        assert_eq!(
+            original_digest,
+            extraction_fact_digest(&extract(original_source)?)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn leading_documentation_incremental_matches_cold_and_restores_exact_facts()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir_all(&root)?;
+        let source = root.join("sample.rs");
+        let original = "/// alpha documentation\npub fn work() -> u8 { 1 }\n";
+        let changed = "/// omega documentation\npub fn work() -> u8 { 1 }\n";
+        let mut options = BuildOptions::new(&root);
+        options.output_root = Some(directory.path().join("warm-output"));
+        options.cache_root = Some(directory.path().join("warm-cache"));
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.purpose = BuildPurpose::Extract;
+        options.graph_storage = GraphStorage::Json;
+        let semantic = SemanticLayer {
+            fragment: json!({"nodes": [], "edges": [], "hyperedges": []}),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+        let load =
+            |result: &BuildResult| V1GraphDocument::load(&result.output_dir.join("graph.json"));
+        let excerpts = |graph: &V1GraphDocument| {
+            graph
+                .nodes
+                .iter()
+                .filter_map(|node| match &node.details {
+                    Some(compass_model::code_graph::NodeDetails::Resource(details)) => {
+                        details.content.clone()
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        fs::write(&source, original)?;
+        let initial_result = build_graph_with_semantic(&options, &semantic)?;
+        let initial = load(&initial_result)?;
+        assert_eq!(
+            excerpts(&initial),
+            vec!["/// alpha documentation\n".to_owned()]
+        );
+        let warm_result = build_graph_with_semantic(&options, &semantic)?;
+        assert_eq!(warm_result.files_extracted, 0);
+        let warm = load(&warm_result)?;
+        assert_eq!(warm.nodes, initial.nodes);
+        assert_eq!(warm.links, initial.links);
+        fs::write(&source, changed)?;
+        let changed_result = build_graph_with_semantic(&options, &semantic)?;
+        assert_eq!(changed_result.files_extracted, 1);
+        let incremental = load(&changed_result)?;
+        assert_eq!(
+            excerpts(&incremental),
+            vec!["/// omega documentation\n".to_owned()]
+        );
+        let mut cold_options = options.clone();
+        cold_options.output_root = Some(directory.path().join("cold-output"));
+        cold_options.cache_root = Some(directory.path().join("cold-cache"));
+        let cold = load(&build_graph_with_semantic(&cold_options, &semantic)?)?;
+        assert_eq!(incremental.nodes, cold.nodes);
+        assert_eq!(incremental.links, cold.links);
+        assert_eq!(incremental.graph.files, cold.graph.files);
+        fs::write(&source, original)?;
+        let restored = load(&build_graph_with_semantic(&options, &semantic)?)?;
+        assert_eq!(restored.nodes, initial.nodes);
+        assert_eq!(restored.links, initial.links);
+        assert_eq!(restored.graph.files, initial.graph.files);
+        Ok(())
+    }
+
+    #[test]
     fn fact_digest_match_requires_all_cached_source_facts() -> Result<(), Box<dyn Error>> {
         let mut entries = BTreeMap::new();
         entries.insert("changed.rb".to_owned(), "old".to_owned());
@@ -9045,7 +9469,108 @@ mod tests {
             package.source.as_ref().map(|anchor| anchor.end_byte),
             Some(changed_source.len() as u64)
         );
+        let cold_output = tempfile::tempdir()?;
+        let mut cold_options = options.clone();
+        cold_options.output_root = Some(cold_output.path().join("artifacts"));
+        cold_options.cache_root = Some(cold_output.path().join("cache"));
+        let rebuilt = build_local_graph(&cold_options)?;
+        let rebuilt_graph = V1GraphDocument::load(&rebuilt.output_dir.join("graph.json"))?;
+        assert_eq!(changed_graph.nodes, rebuilt_graph.nodes);
+        assert_eq!(changed_graph.links, rebuilt_graph.links);
+        assert_eq!(changed_graph.graph.files, rebuilt_graph.graph.files);
         compass_model::validate_code_graph(&changed_graph)?;
+        fs::write(&source, initial)?;
+        let restored = build_local_graph(&options)?;
+        let restored_graph = V1GraphDocument::load(&restored.output_dir.join("graph.json"))?;
+        assert_eq!(restored_graph.nodes, cold_graph.nodes);
+        assert_eq!(restored_graph.links, cold_graph.links);
+        assert_eq!(restored_graph.graph.files, cold_graph.graph.files);
+        Ok(())
+    }
+
+    #[test]
+    fn file_container_envelopes_reject_inherited_and_ambiguous_scopes() -> Result<(), Box<dyn Error>>
+    {
+        let source = "package example\nclass Main\n";
+        let root = Path::new(".");
+        let extraction = Engine::default()
+            .extract_source_combined(Path::new("Main.kt"), "Main.kt", source.as_bytes())?
+            .graph;
+        let digests = BTreeMap::from([(
+            "Main.kt".to_owned(),
+            SourceDigest {
+                content_digest: "sha256:fixture".to_owned(),
+                byte_size: source.len() as u64,
+            },
+        )]);
+        let proofs = file_container_envelopes(std::slice::from_ref(&extraction), root, &digests);
+        assert_eq!(proofs.values().filter(|proof| proof.is_some()).count(), 1);
+        let mut ambiguous = extraction.clone();
+        let batch = ambiguous
+            .semantic_evidence
+            .as_mut()
+            .ok_or("missing Kotlin evidence")?;
+        let mut repeated = batch
+            .scopes
+            .iter()
+            .find(|scope| scope.kind == "package")
+            .cloned()
+            .ok_or("missing package scope")?;
+        repeated.id = "scope:second-package-envelope".to_owned();
+        batch.scopes.push(repeated);
+        let ambiguous_proofs = file_container_envelopes(&[ambiguous], root, &digests);
+        assert_eq!(ambiguous_proofs.len(), 1);
+        assert!(ambiguous_proofs.values().all(Option::is_none));
+        let mut inherited = extraction;
+        let batch = inherited
+            .semantic_evidence
+            .as_mut()
+            .ok_or("missing Kotlin evidence")?;
+        let scope = batch
+            .scopes
+            .iter_mut()
+            .find(|scope| scope.kind == "package")
+            .ok_or("missing package scope")?;
+        scope.parent_scope_id = Some("scope:unrelated-block".to_owned());
+        assert!(file_container_envelopes(&[inherited], root, &digests).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn an_explicit_namespace_at_eof_does_not_become_a_file_envelope() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir(&root)?;
+        let path = root.join("Main.cs");
+        let original = "namespace Example { public class Main {} }";
+        fs::write(&path, original)?;
+        let mut options = BuildOptions::new(&root);
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.output_root = Some(directory.path().join("artifacts"));
+        options.cache_root = Some(directory.path().join("cache"));
+        let first = build_local_graph(&options)?;
+        let initial = V1GraphDocument::load(&first.output_dir.join("graph.json"))?;
+        let namespace = initial
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Namespace)
+            .ok_or("missing explicit namespace")?;
+        let expected = namespace.clone();
+        assert_eq!(
+            expected.source.as_ref().map(|anchor| anchor.end_byte),
+            Some(original.len() as u64)
+        );
+        fs::write(&path, format!("{original}\n// outside the namespace\n"))?;
+        let next = build_local_graph(&options)?;
+        assert_eq!(next.timings.graph_assembly, Duration::ZERO);
+        let changed = V1GraphDocument::load(&next.output_dir.join("graph.json"))?;
+        assert_eq!(
+            changed.nodes.iter().find(|node| node.id == expected.id),
+            Some(&expected)
+        );
+        assert_eq!(changed.links, initial.links);
         Ok(())
     }
 

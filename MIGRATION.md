@@ -1,9 +1,124 @@
 # Migrate from Graphify to Compass
 
+Current updates rebuild AST cache24 and retain callable-body evidence for direct
+TypeScript/TSX variable initializers. Their source ranges now cover the complete
+definition; original binding identity and AST provenance stay distinct. Older
+`source-query/1-ast-callable-lexemes` artifacts remain readable and historical
+realizations are unchanged. New artifacts use profile4; older binaries must be
+upgraded to read that projection. JavaScript3 and TypeScript4 remain `Qualifying`
+pending source audit and release promotion.
+
 Compass uses its own executable, output directory, environment variable, and
 sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
+
+## Developer comparison registrations
+
+Before a new heldout comparison, freeze an independently reviewed exposure
+history, explicit task splits/mechanism IDs and hash-bound historical evidence
+using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md).
+Previously used repositories remain development inputs even when their commit,
+task IDs or wording change. Legacy diagnostic registrations remain readable;
+they cannot establish an untouched confirmation split. Freeze current capture
+and assessor hashes; preserve existing reports with their original verifier.
+Native Compass commands and graphs require no migration for this protocol.
+
+## Opt into ranked implementation answers
+
+Upgrade ranked JSON consumers to `compass.query.ranked-view/4` before using new
+nested code quotations. `nested_callable_code` includes an exact `nestedScope`
+anchor; it means lexical inspection context, not execution. Consumers must not
+render it as direct-owner code or a graph call. New builds use source profile4
+and AST cache24; run `compass update <root>` to refresh disposable evidence.
+Readers retain old source/ranked versions with their original meanings.
+
+
+JSON query-index validation can now return `query_index_validation_timeout`.
+Treat it as a startup timeout and retry or narrow the build scope. The cache is
+preserved; no format migration or manual cache removal is required.
+
+Current updates retain one callable-local identifier site per spelling, counting
+omitted repeats separately. AST cache24 refreshes disposable evidence
+automatically; no manual cache removal is needed. Historical source artifacts
+retain their original sites. Code windows still inspect repeated identifiers
+independently of the lexical site budget.
+
+Use `compass query "where are request errors formatted?" --view ranked` for a
+top-five shortlist. Existing query formats and cursors require no migration.
+Request `--format json` with this view only when the consumer understands
+`compass.query.ranked-view/4`; it has its own typed fields and rejects unknown
+major versions. The shortlist has no discovery cursor: narrow with its suggested
+source scope to examine other implementations. Do not combine it with
+`--cursor`, `--result-envelope`, `--evidence`, `--format agent-json`, or legacy
+traversal controls.
+
+Optional `--include-context` appends bounded one-hop witnessed relationships
+after the shortlist; it is disabled by default.
+
+Run `compass update <root>` to publish fielded signature/prose/alias postings in
+an existing current graph. Older immutable stores remain readable with a
+limited-recall warning; historical realizations are not rewritten. Disposable
+JSON query indexes rebuild automatically to format 4, isolating their new
+operating-system lock from older presence-lock caches. Terminated builders no
+longer require manual lock-file removal. Retained lock files alone do not mean a
+builder is active. Broad questions with
+negative wording may return Low inspection candidates with a warning that the
+condition remains unverified. Inspect their source or use a structural query to
+verify it. Unquoted `before`, `after`, `during`, and `until` are also reported as
+unverified conditions rather than required lexical subjects. Quoted names and
+qualified identifiers remain literal. Unfamiliar ordinary words reduce relevance and appear as missing
+context; absent explicit names still guard retrieval. A Low partial candidate
+does not establish the requested behavior. Disposable response caches use the
+new `query-ranker/14-compound-identifier` profile automatically. Hyphenated
+compound inspection matches remain Low with explicit reasons; code-based
+preferences require a nonempty retained signature without native `…` clipping.
+Exact identities and graph facts retain their meaning. No manual cache deletion
+or graph rebuild is needed for this ranking-only change.
+
+Run `compass update <root>` to obtain the optional immutable `source-query.json`
+artifact for callable-body identifiers and comments on Python, Rust, Go and
+TypeScript/TSX. AST cache24 rebuilds disposable extraction entries automatically.
+Body-dependent matches carry exact source locations and Low inspection relevance.
+Old graphs keep their existing evidence with an explicit body-recall warning;
+historical realizations are not rewritten. Keep the auxiliary artifact with its
+matching graph snapshot. A present corrupt/mismatched artifact fails explicitly;
+`compass update --force` reconstructs current source evidence.
+
+MCP clients opt in with `view: "ranked"` (and `include_context: true` for context). Read its projection from `rankedView`
+and the raw discovery shape from `result`. Allow the new optional envelope field
+and keep relevance separate from exact identity and structural confidence.
+
+Broad implementation questions can also recall methods through verified local
+call/reference sites. A `code_reference` match is an inspection lead, with a
+source citation and Low relevance when it supplies otherwise missing context.
+It does not establish the requested behavior. No graph rebuild is required for
+this query-only channel when existing relationship postings are available.
+
+## ECMAScript primary member scopes
+
+Run `compass update <root>` to rebuild JavaScript/TypeScript current graphs with
+structurally selected member scopes. AST cache24 discards older disposable
+entries automatically. JavaScript3 and TypeScript4 remain development producers
+marked `Qualifying`; their updated identities do not alter the approved historical
+promotion record. Evidence/2, graph/1 and historical realizations retain their
+existing contracts.
+
+## Leading documentation evidence (development)
+
+Rust integrations constructing `DeclarationFact` values must initialize the new
+optional `documentation` field (normally `None`). Serialized absent fields remain
+readable.
+
+Run `compass update <root>` with the matching new binary to rebuild current
+Rust/Go/TypeScript graphs with leading AST documentation. Strict readers of
+`compass.languages.evidence/2` must allow the optional declaration
+`documentation` object. Graph/1 retains its existing resource, relationship and
+provenance fields; no historical realization is modified. Disposable extraction
+facts rebuild under extraction/5 and AST cache24. The changed producer versions
+remain `Qualifying` until a source audit and new promotion decision are complete.
+Treat ranked results as source inspection candidates, not a verified behavioral
+answer or a claim of superiority over another tool.
 
 ## Scoped views and freshness
 
@@ -671,3 +786,29 @@ Discovery text cursors now use version 3 because compact pages show relationship
 before declarations. Restart a query if a saved version 2 cursor is rejected.
 Natural discovery pages default to 800 tokens. Increase `--text-budget` or
 follow the printed `--cursor` to retrieve more of the same bounded answer.
+
+
+## Consume ranked source quotations
+
+Clients of the opt-in ranked JSON projection must accept
+`compass.query.ranked-view/4` and its bounded `excerpts` per candidate. The native
+reader still accepts immutable version 1 results without quotations; unknown
+major versions fail explicitly. No graph/history migration is required. Older
+graphs can lack quotation evidence and retain their original retrieval scope.
+Quoted comments/docs support source inspection, not verified behavioral answers.
+
+
+## Ranked code excerpts (development)
+
+Consumers of opt-in ranked JSON must accept `compass.query.ranked-view/4`
+and the `callable_code` excerpt kind. Compass still reads immutable ranked views1/2
+and source-query profiles1/2. Run `compass update .` with the updated binary to
+retain code windows for current source; old historical artifacts remain unchanged.
+Code windows do not change candidate ranking or create graph relationships.
+
+Python auxiliary scope extraction now requires a named AST node: the unnamed
+`lambda` keyword token is not another callable. This corrects scope counts and
+can recover later source owners when the per-file scope quota was previously
+spent on keyword tokens. The change can affect source-field coverage and
+retrieval scores in quota-limited files; it does not change semantic graph
+records. AST cache24 rebuilds the affected disposable evidence.

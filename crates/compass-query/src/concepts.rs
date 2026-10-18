@@ -16,6 +16,17 @@ const MAX_CONCEPT_POSTINGS: usize = 768;
 const MAX_DOCUMENT_ROOTS: usize = 8;
 const MAX_DOCUMENT_PROBES: usize = 64;
 
+/// Small, directional recall hints for ordinary words absent from the index.
+/// Broad retrieval checks literal context and keeps dependent matches tentative;
+/// these do not change strict names or the shared concept-equivalence table.
+pub(crate) fn unindexed_vocabulary_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "entry" => &["item", "element"],
+        "snapshot" => &["copy", "clone"],
+        _ => &[],
+    }
+}
+
 // These are recall alternatives, never assertions of equivalent code meaning.
 const SYNONYMS: &[(&[&str], &[&str])] = &[
     (
@@ -397,6 +408,9 @@ impl CodeQueryEngine {
         request: SearchRequest,
         instrumentation: &mut QueryInstrumentation,
     ) -> Result<CodeQueryResponse, QueryError> {
+        if self.is_fielded_question(&request.query)? {
+            return self.broad_search(request, instrumentation, &|_| true);
+        }
         self.search_concepts_instrumented(request, instrumentation, &|_| true)
     }
 

@@ -8,8 +8,9 @@ use tree_sitter::Node;
 use crate::{EXTRACTION_SEMANTICS_VERSION, UniversalEvidencePipeline, file_stem, make_id};
 
 use super::model::{
-    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceDiagnostic,
-    EvidenceRange, HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy,
+    BindingFact, BindingKind, CandidateRelation, DECLARATION_DOCUMENTATION_OMISSION_CODE,
+    DeclarationDocumentationFact, DeclarationFact, EvidenceDiagnostic, EvidenceRange,
+    HierarchyConstraint, MAX_BATCH_DOCUMENTATION_BYTES, OccurrenceFact, ReceiverDispatchStrategy,
     RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
     SymbolNamespace, UniversalEvidenceIdentity,
 };
@@ -29,6 +30,8 @@ pub struct EvidenceBuilder {
     batch: SemanticEvidenceBatch,
     source_file: String,
     limits: EvidenceLimits,
+    documentation_bytes: usize,
+    documentation_omission_reported: bool,
 }
 
 #[derive(Default)]
@@ -41,6 +44,7 @@ struct DeclarationMetadata {
     signature_hash: Option<String>,
     implementation_hash: Option<String>,
     source_hash: Option<String>,
+    documentation: Option<DeclarationDocumentationFact>,
 }
 
 impl EvidenceBuilder {
@@ -83,6 +87,8 @@ impl EvidenceBuilder {
             },
             source_file: source_file.into(),
             limits,
+            documentation_bytes: 0,
+            documentation_omission_reported: false,
         }
     }
 
@@ -155,8 +161,37 @@ impl EvidenceBuilder {
         signature: Option<&str>,
         range: EvidenceRange,
     ) -> Result<String, EvidenceError> {
+        self.declare_with_signature_and_documentation(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            namespace,
+            signature,
+            None,
+            range,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_with_signature_and_documentation(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        documentation: Option<DeclarationDocumentationFact>,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
         let metadata = DeclarationMetadata {
             signature: signature.map(str::to_owned),
+            documentation,
             ..DeclarationMetadata::default()
         };
         self.declare_with_metadata_and_namespace(
@@ -289,13 +324,28 @@ impl EvidenceBuilder {
         scope_id: Option<&str>,
         range: EvidenceRange,
         namespace: Option<SymbolNamespace>,
-        metadata: DeclarationMetadata,
+        mut metadata: DeclarationMetadata,
     ) -> Result<String, EvidenceError> {
         ensure_capacity(
             "declarations",
             self.batch.declarations.len(),
             self.limits.declarations,
         )?;
+        if let Some(documentation) = metadata.documentation.take() {
+            match self
+                .documentation_bytes
+                .checked_add(documentation.content.len())
+            {
+                Some(next) if next <= MAX_BATCH_DOCUMENTATION_BYTES => {
+                    self.documentation_bytes = next;
+                    metadata.documentation = Some(documentation);
+                }
+                _ => self.record_documentation_omission(
+                    documentation.range,
+                    "the per-file aggregate documentation byte ceiling was reached",
+                )?,
+            }
+        }
         let start_byte = range.start_byte.to_string();
         let end_byte = range.end_byte.to_string();
         let mut identity = vec![
@@ -329,10 +379,47 @@ impl EvidenceBuilder {
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
             source_hash: metadata.source_hash,
+            documentation: metadata.documentation,
             definition_start_byte: None,
             range,
         });
         Ok(id)
+    }
+
+    pub(crate) fn leading_documentation(
+        &mut self,
+        node: Node<'_>,
+        source: &[u8],
+    ) -> Result<Option<DeclarationDocumentationFact>, EvidenceError> {
+        match super::documentation::leading_documentation(
+            &self.source_file,
+            source,
+            node,
+            &self.batch.pipeline.language,
+        ) {
+            Ok(documentation) => Ok(documentation),
+            Err(omission) => {
+                self.record_documentation_omission(omission.range, omission.message)?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn record_documentation_omission(
+        &mut self,
+        range: EvidenceRange,
+        message: &str,
+    ) -> Result<(), EvidenceError> {
+        if !self.documentation_omission_reported {
+            self.diagnose(
+                DECLARATION_DOCUMENTATION_OMISSION_CODE,
+                None,
+                Some(range),
+                &format!("Some leading documentation was omitted: {message}. Other groups may also be absent"),
+            )?;
+            self.documentation_omission_reported = true;
+        }
+        Ok(())
     }
 
     pub fn open_scope(
@@ -1227,6 +1314,7 @@ impl<'source> DirectEvidenceState<'source> {
                 .source
                 .get(node.start_byte()..node.end_byte())
                 .map(evidence_normalized_source_hash),
+            documentation: None,
         }
     }
 
@@ -4180,6 +4268,7 @@ impl<'source> DirectEvidenceState<'source> {
             let graph_node_id =
                 self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
             let mut metadata = self.declaration_metadata(node);
+            metadata.documentation = self.builder.leading_documentation(node, self.source)?;
             if kind == "trait" {
                 metadata.direct_bases_complete = !self.overlaps_parser_error(node);
             }
@@ -4438,7 +4527,8 @@ impl<'source> DirectEvidenceState<'source> {
         let qualified_name = rust_join_qualified(&qualified_owner, &name);
         let graph_node_id =
             self.unique_graph_id(make_id(&[&self.module_or_package, &qualified_name]), node);
-        let metadata = self.declaration_metadata(node);
+        let mut metadata = self.declaration_metadata(node);
+        metadata.documentation = self.builder.leading_documentation(node, self.source)?;
         let parent_scope =
             active_impl.map_or(owner.scope_id.as_str(), |value| value.scope_id.as_str());
         let fact_id = self.builder.declare_with_metadata(
@@ -7440,7 +7530,8 @@ impl<'source> DirectEvidenceState<'source> {
                 } else {
                     "type_alias"
                 };
-                let metadata = self.declaration_metadata(node);
+                let mut metadata = self.declaration_metadata(node);
+                metadata.documentation = self.builder.leading_documentation(node, self.source)?;
                 let fact_id = self.builder.declare_with_metadata(
                     kind,
                     &graph_node_id,
@@ -7510,6 +7601,7 @@ impl<'source> DirectEvidenceState<'source> {
             };
             let mut metadata = self.declaration_metadata(node);
             let (parameter_count, variadic) = go_parameter_signature(node);
+            metadata.documentation = self.builder.leading_documentation(node, self.source)?;
             metadata.parameter_count = Some(parameter_count);
             metadata.variadic = variadic;
             let fact_id = self.builder.declare_with_metadata(

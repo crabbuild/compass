@@ -201,6 +201,33 @@ impl CandidateRelation {
     }
 }
 
+/// Maximum retained source text for one declaration's leading documentation.
+pub const MAX_DECLARATION_DOCUMENTATION_BYTES: usize = 4_096;
+/// Aggregate retained documentation ceiling for one per-file evidence batch.
+pub const MAX_BATCH_DOCUMENTATION_BYTES: usize = 1024 * 1024;
+/// One bounded per-file warning marks omitted leading documentation.
+pub const DECLARATION_DOCUMENTATION_OMISSION_CODE: &str = "leading_documentation_omitted";
+
+/// Syntax attachment established by a native language producer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclarationDocumentationKind {
+    RustOuter,
+    GoLeading,
+    #[serde(rename = "typescript_jsdoc")]
+    TypeScriptJsDoc,
+}
+
+/// One contiguous, byte-exact leading documentation group. Its owner is the
+/// enclosing declaration, never a separately resolved spelling or nearby name.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeclarationDocumentationFact {
+    pub kind: DeclarationDocumentationKind,
+    pub range: EvidenceRange,
+    pub content: String,
+}
+
 /// One source declaration that may become a graph node.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -240,6 +267,10 @@ pub struct DeclarationFact {
     pub implementation_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
+    /// Optional AST-attached source documentation. Historical batches without
+    /// this additive metadata retain their original meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<DeclarationDocumentationFact>,
     /// Full syntax-node start for legacy callable identities. The canonical
     /// evidence range may intentionally begin at the identifier, while the
     /// public graph identity historically used the enclosing declaration
