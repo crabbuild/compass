@@ -1,5 +1,12 @@
 # Migrate from Graphify to Compass
 
+Run `compass update <root>` with the new binary to rebuild current graphs under
+AST cache34. Inadmissible explicit exact source targets now remain unresolved;
+the resolver cannot substitute an unrelated same-named
+function for an injected parameter. Historical realizations retain their
+original meaning. No graph-schema or evidence-schema upgrade is required for
+this correction. Missing target IDs still fail evidence validation.
+
 Broad-query consumers must accept and validate raw `compass.query.discovery/2`
 and ranked `compass.query.ranked-view/7` when metered helper navigation is used.
 Unmetered responses retain discovery1/ranked4. Upgrade strict readers before
@@ -21,13 +28,13 @@ above; disposable ranker responses refresh automatically.
 Historical realizations and native graph/source ownership remain unchanged.
 See COMPATIBILITY.md for exact bounds.
 
-Current builds use `source-query/8-callable-comments` and AST cache 33. Run
+Current builds use `source-query/8-callable-comments` and AST cache 34. Run
 `compass update <root>` with the new binary to retain up to 64 callable comments
 instead of eight. Upgrade readers for profile 8; profiles 1–7 retain their original
 meaning and limits. Per-field byte/term and per-file/artifact limits still apply,
 so large callables can remain partial. Comments are inspection pointers rather
 than behavioral proof. Subsequent cache 31 notes describe earlier development
-changes; cache 33 is the current disposable extraction identity.
+changes; cache 34 is the current disposable extraction identity.
 
 Python producer 2 also corrects source-root module identity when no import roots
 are configured. Bare roots use repository-relative modules, independent of the

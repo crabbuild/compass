@@ -1,5 +1,21 @@
 # Compass compatibility
 
+## Exact source-binding resolution
+
+An explicit `exact_target_declaration_id` is authoritative for target identity.
+When that declaration fails the candidate's constraints, resolution remains
+unresolved instead of falling through to a same-spelled
+lexical, module or external target. For example, a JavaScript/TypeScript call
+through an injected parameter cannot become a call to an outer function with
+the same name. This does not infer the parameter's runtime implementation.
+Ordinary admissible exact targets retain their identities and provenance.
+Missing declaration IDs continue to fail evidence validation explicitly.
+
+AST cache34 invalidates disposable current build state so `compass update <root>`
+recomputes resolution. Graph/evidence schemas and immutable historical
+realizations are unchanged. Existing language qualification is not promoted
+by this correction; native controls and independent qualification are separate.
+
 ## Prospective developer graph-precision bounds
 
 The opt-in developer precision design `compass.broad-graph-precision-design/2`
@@ -24,7 +40,7 @@ authorize any capture/reviewer, or weaken existing numeric qualification gates.
 ## Callable comment recall
 
 Current updates publish `source-query/8-callable-comments` and rebuild disposable
-AST cache 32. A callable can retain up to 64 source-anchored comments instead of
+AST cache 34. A callable can retain up to 64 source-anchored comments instead of
 eight, so introductory bookkeeping comments are less likely to exclude later
 implementation explanations. Selection remains source order and is bounded;
 this does not index every comment in arbitrarily large callables. Each comment
@@ -36,10 +52,10 @@ Code-window and parameter limits are unchanged.
 Profiles 1–7 retain their capabilities, projection/statistics and eight-comment
 validation limit. Older readers must upgrade to read profile 8; rebuilding current
 artifacts does not rewrite historical realizations. Run `compass update <root>`
-with the new binary. Ranker 21 and ranked JSON 4 are unchanged; source-artifact
-hashes separate response caches. Comments remain lexical inspection evidence,
-not proof of behavior or new graph relationships. The cache 31 notes below
-describe earlier development changes now superseded by cache 32.
+with the new binary. Comment retention uses the query contracts documented
+below; source-artifact hashes separate response caches. Comments remain lexical
+inspection evidence, not proof of behavior or new graph relationships. The cache 31 notes below
+describe earlier development changes now superseded by cache 34.
 
 ## In-progress TypeScript terminal inventories
 

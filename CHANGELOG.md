@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep inadmissible exact source targets unresolved instead of
+  falling back to unrelated same-named declarations, including JavaScript and
+  TypeScript callable parameters. Rebuild disposable current graphs with AST
+  cache34; historical graphs and language qualification remain unchanged.
+
 - Add opt-in prospective developer graph-precision diagnostics with exact
   conditional finite-population bounds. Preserve legacy formats and all existing
   qualification gates; arithmetic does not establish design acceptance or quality.
