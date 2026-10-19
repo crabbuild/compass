@@ -172,6 +172,13 @@ hints require a separate literal topic; an independently positive optional LSA
 score keeps the existing semantic exception. The mapping does not establish
 comparison semantics or requested behavior. Explicit identities remain literal.
 
+Broad lexical ranking normalizes a comment match using its shortest matching
+owned comment when the retained comment field fits its existing bounds. Adding
+unrelated comments then does not dilute an unchanged matching passage. Clipped
+or recovered comment fields keep the aggregate normalizer. This can reorder
+inspection candidates; admission and relevance labels remain unchanged. Words
+in separate comments do not establish a combined behavior.
+
 Source quotations prefer bounded retained windows covering more distinct
 canonical requested terms, rather than always centering the first match.
 Repeated words do not increase that count; equal window coverage keeps source

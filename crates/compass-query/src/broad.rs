@@ -32,6 +32,7 @@ pub use excerpts::{RankedExcerptKind, RankedSourceExcerpt};
 mod call_context;
 mod compounds;
 mod ownership;
+mod passages;
 mod relationships;
 
 const POSTING_QUOTA: usize = 256;
@@ -1612,6 +1613,14 @@ impl CodeQueryEngine {
                 }
                 continue;
             }
+            // Only complete, exact source-owned comments can change the
+            // comment length normalizer. Admission and confidence are unchanged.
+            let comment_lengths =
+                if let Some(owner) = source_owner.filter(|owner| !owner.syntax_recovery) {
+                    passages::comment_lengths(&owner.comments, groups, check)?
+                } else {
+                    BTreeMap::new()
+                };
             let mut matched_terms = Vec::new();
             let mut matched_fields = BTreeSet::new();
             let mut score = 0.0;
@@ -1680,8 +1689,16 @@ impl CodeQueryEngine {
                 let field_score = fields
                     .iter()
                     .map(|field| {
-                        let length =
-                            document.fields.get(field).map_or(1, BTreeSet::len).max(1) as f64;
+                        let document_length = document.fields.get(field).map_or(1, BTreeSet::len);
+                        let length = if *field == "body_comment" {
+                            comment_lengths
+                                .get(term)
+                                .copied()
+                                .unwrap_or(document_length)
+                        } else {
+                            document_length
+                        }
+                        .max(1) as f64;
                         // BM25F-style saturation/length normalization uses corpus
                         // DF and bounded per-field unique-token frequencies.
                         field_weight(field) / (0.75 + 0.25 * length / 16.0)

@@ -2855,3 +2855,27 @@ cannot invent a term; exact source bytes/coordinates, the two-quote cap and
 behavioral evidence or a confidence probability. Candidate admission/order,
 graph facts, ranker22, ranked JSON4 and context epoch2 are unchanged. No source
 rebuild or historical rewrite is required solely for quotation ordering.
+
+## Comment-passage score normalization (development)
+
+`query-ranker/23-comment-passages` uses the smallest unique canonical token
+count of a retained owned comment matching a concept's existing variants as
+that concept's `body_comment` field length. Other fields and the existing BM25F
+formula are unchanged. Unrelated retained comments cannot dilute an unchanged
+complete matching passage. This is a lexical ranking heuristic; separate
+comments need not jointly establish the requested behavior.
+
+Only exact AST-owned comments from the validated source artifact participate.
+Recovered owners, missing source evidence or comment fields exceeding their
+existing8192-byte/512-term bounds use the previous aggregate length. Fields with
+more than64 sites, sites at their4096-byte retention ceiling or more than32
+query groups also retain the previous normalizer. Unrelated code/identifier
+clipping does not itself change a complete comment field's normalization.
+
+Admission, topic guards, vocabulary disclosure, relevance labels, explicit
+identity tiers, source anchors, graph facts and ranked JSON4 remain unchanged.
+The public ranker profile refreshes disposable responses while preserving
+quotation epoch5 and context epoch2. No graph rebuild or historical rewrite is
+required solely for this query heuristic; omitted source evidence still needs
+an update. Native controls and development observations do not qualify general
+precision, latency or superiority.

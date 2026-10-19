@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Normalize broad-query comment matches by their matching owned passage when
+  the retained comment field is complete, preventing unrelated comments from
+  diluting that evidence. Keep admission, uncertainty and exact-name tiers.
+
 - Prefer distinctive source quotations after requested-action coverage, using
   existing corpus statistics while preserving exact anchors, ownership, token
   boundaries and candidate relevance. Refresh disposable quotation responses.

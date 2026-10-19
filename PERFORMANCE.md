@@ -1,5 +1,14 @@
 # Compass performance qualification
 
+## In-progress comment-passage normalization bounds
+
+Query-local comment lengths inspect only already retained exact-owner data,
+with no extra backend, posting or statistics reads. The optional normalizer
+accepts at most64 comment sites,32 groups,8192 total bytes and512 unique terms;
+sites at4096 bytes or any field overflow retain the prior normalizer. Each
+comment is tokenized once and cancellation is checked per site. These bounds
+are not a measured latency/RSS or independently qualified query-quality claim.
+
 ## In-progress forward-spelling bounds
 
 At most32 canonical broad-query concepts generate two forward spellings each,

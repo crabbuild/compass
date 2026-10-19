@@ -910,3 +910,49 @@ fn distinctive_topic_comment_precedes_generic_signature_quotations() -> Result<(
     }
     Ok(())
 }
+
+#[test]
+fn unrelated_owned_comments_do_not_dilute_a_complete_query_passage() -> Result<(), Box<dyn Error>> {
+    let mut baseline = None;
+    for noisy in [false, true] {
+        let d = tempfile::tempdir()?;
+        let root = d.path().join("repo");
+        fs::create_dir(&root)?;
+        let noise = if noisy {
+            (0..120).map(|n| format!("padding{n} ")).collect::<String>()
+        } else {
+            String::new()
+        };
+        let source = format!("fn opaque() {{\n    // Format record errors.\n    // {noise}\n}}\n");
+        fs::write(root.join("sample.rs"), source)?;
+        let built =
+            build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+        let path = built.output_dir.join("graph.json");
+        for mode in [EngineSelection::Json, EngineSelection::Store] {
+            let engine =
+                open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+            let answer = engine.discover_ranked(request("Where are record errors formatted?"))?;
+            let candidate = answer
+                .candidates
+                .iter()
+                .find(|c| c.node.name.trim_end_matches("()") == "opaque")
+                .ok_or("missing comment owner")?;
+            assert!(
+                candidate
+                    .matched_fields
+                    .iter()
+                    .any(|field| field == "body_comment")
+            );
+            if let Some((score, relevance)) = baseline {
+                assert_eq!(
+                    candidate.score, score,
+                    "unrelated comments dilute an unchanged complete query passage: {candidate:?}"
+                );
+                assert_eq!(candidate.relevance, relevance);
+            } else {
+                baseline = Some((candidate.score, candidate.relevance));
+            }
+        }
+    }
+    Ok(())
+}
