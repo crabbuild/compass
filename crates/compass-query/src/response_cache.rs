@@ -33,7 +33,7 @@ impl ResponseCache {
         digest.update(graph.as_bytes());
         digest.update(env!("CARGO_PKG_VERSION").as_bytes());
         digest.update(crate::QUERY_PLANNER_PROFILE_V2.as_bytes());
-        digest.update(crate::QUERY_RANKER_PROFILE_V23.as_bytes());
+        digest.update(crate::QUERY_RANKER_PROFILE_V24.as_bytes());
         digest.update(b"compound-identifier/2");
         digest.update(b"unindexed-vocabulary/1");
         // Literal metadata must not launder hinted local-operation fields.
@@ -44,6 +44,8 @@ impl ResponseCache {
         // must not silently omit retained ranked source quotations.
         digest.update(b"ranked-source-excerpts/5");
         digest.update(b"ranked-call-context/2");
+        // Ranked adapters retain the typed structural identity tier.
+        digest.update(b"ranked-identity-match/1");
         // Historical local-store responses may lack documentation omissions.
         digest.update(b"graph-diagnostic-projection/1");
         if let Some(program) = program {

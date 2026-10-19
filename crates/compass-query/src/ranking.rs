@@ -29,6 +29,7 @@ pub const QUERY_RANKER_PROFILE_V18: &str = "query-ranker/18-channel-completeness
 pub const QUERY_RANKER_PROFILE_V21: &str = "query-ranker/21-typed-topic-roles";
 pub const QUERY_RANKER_PROFILE_V22: &str = "query-ranker/22-forward-spellings";
 pub const QUERY_RANKER_PROFILE_V23: &str = "query-ranker/23-comment-passages";
+pub const QUERY_RANKER_PROFILE_V24: &str = "query-ranker/24-irregular-operations";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {

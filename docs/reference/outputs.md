@@ -172,6 +172,17 @@ hints require a separate literal topic; an independently positive optional LSA
 score keeps the existing semantic exception. The mapping does not establish
 comparison semantics or requested behavior. Explicit identities remain literal.
 
+Ordinary broad questions also recognize `rebuilt` as a spelling of `rebuild`
+and `written` as a spelling of `write`. Original query groups and relevance
+rules remain; matching a spelling is retrieval evidence, not proof of behavior.
+Explicit named/quoted/qualified contexts stay literal. Build/rebuild and
+write/rewrite remain distinct operations.
+
+Ranked identity labels retain the typed exact-name/ID tier from structural
+discovery. An exact identity can still have Low relevance and incomplete graph
+coverage; these labels describe separate evidence. Lexical seeds retain their
+approximate identity label.
+
 Broad lexical ranking normalizes a comment match using its shortest matching
 owned comment when the retained comment field fits its existing bounds. Adding
 unrelated comments then does not dilute an unchanged matching passage. Clipped

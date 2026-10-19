@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Preserve typed exact-name and ID matches when structural discovery becomes
+  a ranked answer. Keep identity labels separate from relevance and coverage;
+  refresh disposable ranked identity responses.
+
+- Recognize `rebuilt`/`rebuild` and `written`/`write` spellings in broad
+  questions while preserving literal identities, operation distinctions and
+  existing confidence guards. Refresh disposable ranker responses.
+
 - Normalize broad-query comment matches by their matching owned passage when
   the retained comment field is complete, preventing unrelated comments from
   diluting that evidence. Keep admission, uncertainty and exact-name tiers.

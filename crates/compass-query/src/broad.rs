@@ -613,6 +613,23 @@ fn enforce_ranked_response_budget(response: &RankedDiscoveryResponse) -> Result<
     })
 }
 
+// Discovery owns identity matching. Preserve its typed tier in the ranked
+// adapter rather than inferring identity from lexical field names or scores.
+fn ranked_seed_fields(seed: &DiscoverySeed) -> Vec<String> {
+    let mut fields = seed.matched_fields.clone();
+    let identity = match seed.score_tier {
+        DiscoveryScoreTier::ExactId => Some("exact_id"),
+        DiscoveryScoreTier::ExactName => Some("exact_name"),
+        DiscoveryScoreTier::Lexical => None,
+    };
+    if let Some(identity) = identity
+        && !fields.iter().any(|field| field == identity)
+    {
+        fields.push(identity.to_owned());
+    }
+    fields
+}
+
 impl CodeQueryEngine {
     pub(crate) fn is_fielded_question(&self, question: &str) -> Result<bool, QueryError> {
         if !is_broad_question(question) {
@@ -755,6 +772,16 @@ impl CodeQueryEngine {
                         }
                         variants.insert(alternate);
                     }
+                }
+            }
+        }
+        // Ordinary irregular verb forms retain their literal query group and
+        // add one same-operation spelling. This is not build/rebuild or
+        // write/rewrite equivalence, and explicit identities stay literal.
+        if named_contexts.is_empty() && explicit_identifiers.is_empty() {
+            for (past, base) in [("rebuilt", "rebuild"), ("written", "write")] {
+                if let Some(variants) = semantic_groups.get_mut(past) {
+                    variants.insert(base.to_owned());
                 }
             }
         }
@@ -2370,7 +2397,7 @@ impl CodeQueryEngine {
             // structural evidence; retain raw discovery/context separately.
             let candidates = discovery.seeds.iter().filter(|seed| !has_exact_id || seed.node_id == exact_subject).filter_map(|seed| discovery.nodes.iter().find(|node| node.id == seed.node_id).map(|node| RankedCandidate {
                 node: node.clone(), score: seed.score.parse().unwrap_or(0.0), relevance: RelevanceBand::Low,
-                matched_terms: seed.matched_terms.clone(), matched_fields: seed.matched_fields.clone(), reasons: vec!["Structural query seed; relevance is not inferred from graph confidence".to_owned()],
+                matched_terms: seed.matched_terms.clone(), matched_fields: ranked_seed_fields(seed), reasons: vec!["Structural query seed; relevance is not inferred from graph confidence".to_owned()],
                 supporting_sources: Vec::new(), excerpts: Vec::new(),
             })).collect();
             let response = RankedDiscoveryResponse {

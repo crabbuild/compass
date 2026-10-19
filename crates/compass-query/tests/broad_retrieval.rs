@@ -2708,3 +2708,125 @@ fn optional_semantics_keeps_spelling_hints_low_without_a_literal_topic()
     }
     Ok(())
 }
+
+fn check_irregular_operation(
+    past: &str,
+    base: &str,
+    subject: &str,
+    distinct_operation: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph.nodes.clear();
+    graph.links.clear();
+    for (id, name) in [
+        ("z:implementation", format!("{base}_{subject}")),
+        ("a:other-subject", format!("{base}_gadgets")),
+        (
+            "a:other-operation",
+            format!("{distinct_operation}_{subject}"),
+        ),
+        ("literal", past.to_owned()),
+    ] {
+        graph.nodes.push(support::node(
+            id,
+            NodeKind::Function,
+            &name,
+            &format!("fixture::{name}"),
+        ));
+    }
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let json = open(&path, None, &directory.path().join("json-cache"))?;
+    let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+    let question = request(&format!("Where are {subject} {past}?"));
+    let answer = json.discover_ranked(question.clone())?;
+    assert_eq!(
+        answer.candidates,
+        stored.discover_ranked(question)?.candidates
+    );
+    assert_eq!(
+        answer
+            .candidates
+            .first()
+            .map(|candidate| candidate.node.id.as_str()),
+        Some("z:implementation"),
+        "irregular {past} must recall the same operation {base}"
+    );
+    for candidate in &answer.candidates {
+        if matches!(
+            candidate.node.id.as_str(),
+            "a:other-subject" | "a:other-operation"
+        ) {
+            assert_ne!(
+                candidate.relevance,
+                compass_query::RelevanceBand::High,
+                "partial leads must not acquire a different operation or subject's confidence"
+            );
+        }
+    }
+    let literal = json.discover_ranked(request(past))?;
+    assert_eq!(
+        literal
+            .candidates
+            .first()
+            .map(|candidate| candidate.node.id.as_str()),
+        Some("literal")
+    );
+    for (question, field) in [
+        (past.to_owned(), "exact_name"),
+        (format!("fixture::{past}"), "exact_name"),
+        ("literal".to_owned(), "exact_id"),
+    ] {
+        let exact = json.discover_ranked(request(&question))?;
+        assert_eq!(
+            exact.candidates,
+            stored.discover_ranked(request(&question))?.candidates
+        );
+        let first = exact.candidates.first().ok_or("missing exact identity")?;
+        assert_eq!(first.node.id, "literal");
+        assert!(
+            first.matched_fields.iter().any(|value| value == field),
+            "typed identity must survive the ranked adapter: {question} ({field})"
+        );
+    }
+    let partial = json.discover_ranked(request(subject))?;
+    assert!(!partial.candidates.is_empty());
+    assert!(partial.candidates.iter().all(|candidate| {
+        candidate
+            .matched_fields
+            .iter()
+            .all(|field| !matches!(field.as_str(), "exact_name" | "exact_id"))
+    }));
+    graph.nodes.reverse();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let reversed = open(&path, None, &directory.path().join("reversed-cache"))?;
+    assert_eq!(
+        answer.candidates,
+        reversed
+            .discover_ranked(request(&format!("Where are {subject} {past}?")))?
+            .candidates
+    );
+    Ok(())
+}
+
+#[test]
+fn irregular_rebuilt_recalls_rebuild_without_equating_build()
+-> Result<(), Box<dyn std::error::Error>> {
+    check_irregular_operation("rebuilt", "rebuild", "widgets", "build")
+}
+
+#[test]
+fn irregular_written_recalls_write_without_equating_rewrite()
+-> Result<(), Box<dyn std::error::Error>> {
+    check_irregular_operation("written", "write", "reports", "rewrite")
+}
+
+#[test]
+fn irregular_sent_recalls_send_without_equating_resend() -> Result<(), Box<dyn std::error::Error>> {
+    check_irregular_operation("sent", "send", "parcels", "resend")
+}

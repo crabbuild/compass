@@ -2879,3 +2879,23 @@ quotation epoch5 and context epoch2. No graph rebuild or historical rewrite is
 required solely for this query heuristic; omitted source evidence still needs
 an update. Native controls and development observations do not qualify general
 precision, latency or superiority.
+
+
+## Irregular operation spellings in broad questions
+
+Ordinary broad retrieval keeps its original query groups and adds bounded
+same-operation alternatives for `rebuilt`/`rebuild` and `written`/`write`.
+Explicit named/quoted/qualified contexts stay literal. This adds at most two
+variants per query; it does not make build/rebuild or write/rewrite equivalent.
+Action/subject classification, admission predicates, confidence bands and exact
+identity tiers retain their existing rules. Sent/send already uses the unchanged
+canonical token profile. Strict lookup, graph indexes and historical tokens are
+unchanged. `query-ranker/24-irregular-operations` refreshes disposable responses;
+no graph rebuild or user migration is required for these query-side spellings.
+
+Ranked structural candidates now retain discovery's typed `exact_name` or
+`exact_id` match instead of losing that identity metadata at projection. Lexical
+seeds do not gain identity tags. Seed selection, ambiguity, direction, relevance
+and coverage are unchanged; exact identity does not establish semantic relevance
+or source completeness. `ranked-identity-match/1` refreshes disposable responses.
+The existing ranked-view4 enum/schema is unchanged.
