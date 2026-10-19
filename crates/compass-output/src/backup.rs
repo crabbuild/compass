@@ -127,6 +127,27 @@ pub fn backup_if_protected_to(source_dir: &Path, backup_root: &Path) -> BackupRe
 fn backup_if_protected_to_with_copy<F>(
     source_dir: &Path,
     backup_root: &Path,
+    copy: F,
+) -> BackupResult
+where
+    F: FnMut(&Path, &Path, &BackupSeal) -> std::io::Result<()>,
+{
+    backup_if_protected_to_with_limits(
+        source_dir,
+        backup_root,
+        MAX_BACKUP_ARTIFACT_BYTES,
+        MAX_BACKUP_TOTAL_BYTES,
+        copy,
+    )
+}
+
+// The injected limits govern source admission; completed-backup verification
+// and staging cleanup continue to use the production defaults.
+fn backup_if_protected_to_with_limits<F>(
+    source_dir: &Path,
+    backup_root: &Path,
+    artifact_cap: u64,
+    total_cap: u64,
     mut copy: F,
 ) -> BackupResult
 where
@@ -154,10 +175,11 @@ where
         (false, true) => "curated",
         (false, false) => return BackupResult::default(),
     };
-    let inventory = match artifact_inventory(source_dir) {
-        Ok(inventory) => inventory,
-        Err(error) => return backup_warning(error),
-    };
+    let inventory =
+        match artifact_inventory_with_limits(source_dir, artifact_cap, total_cap, file_seal) {
+            Ok(inventory) => inventory,
+            Err(error) => return backup_warning(error),
+        };
     let manifest = BackupManifest {
         schema: BACKUP_COMPLETE_SCHEMA.to_owned(),
         artifacts: inventory,
@@ -354,6 +376,18 @@ fn remove_staging_contents(staging: &Path, contents: Vec<PathBuf>) -> std::io::R
 }
 
 fn validate_staging_contents(staging: &Path) -> std::io::Result<Vec<PathBuf>> {
+    validate_staging_contents_with_limits(
+        staging,
+        MAX_BACKUP_ARTIFACT_BYTES,
+        MAX_BACKUP_TOTAL_BYTES,
+    )
+}
+
+fn validate_staging_contents_with_limits(
+    staging: &Path,
+    artifact_cap: u64,
+    total_cap: u64,
+) -> std::io::Result<Vec<PathBuf>> {
     let max_entries = BACKUP_ARTIFACTS.len() + 1;
     let mut contents = Vec::new();
     let mut total_bytes = 0_u64;
@@ -380,23 +414,23 @@ fn validate_staging_contents(staging: &Path) -> std::io::Result<Vec<PathBuf>> {
             )));
         }
         let size = entry.metadata()?.len();
-        let artifact_cap = if is_completion {
+        let entry_cap = if is_completion {
             MAX_BACKUP_MANIFEST_BYTES
         } else {
-            MAX_BACKUP_ARTIFACT_BYTES
+            artifact_cap
         };
-        if size > artifact_cap {
-            return Err(limit_error("backup staging artifact", size, artifact_cap));
+        if size > entry_cap {
+            return Err(limit_error("backup staging artifact", size, entry_cap));
         }
         if !is_completion {
             total_bytes = total_bytes
                 .checked_add(size)
                 .ok_or_else(|| std::io::Error::other("staging artifact byte count overflow"))?;
-            if total_bytes > MAX_BACKUP_TOTAL_BYTES {
+            if total_bytes > total_cap {
                 return Err(limit_error(
                     "backup staging artifact set",
                     total_bytes,
-                    MAX_BACKUP_TOTAL_BYTES,
+                    total_cap,
                 ));
             }
         }
@@ -856,14 +890,62 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let staging = tempfile::tempdir()?;
         for artifact in ["graph.json", "program.json"] {
-            let file = File::create(staging.path().join(artifact))?;
-            file.set_len(MAX_BACKUP_ARTIFACT_BYTES)?;
+            fs::write(staging.path().join(artifact), [b'x'; 64])?;
         }
         fs::write(staging.path().join(BACKUP_COMPLETE), "{}")?;
 
-        let contents = validate_staging_contents(staging.path())?;
+        // Exercise the real metadata/name walk at the exact artifact total
+        // without depending on sparse-file behavior for sixteen GiB of data.
+        let contents = validate_staging_contents_with_limits(staging.path(), 64, 128)?;
 
         assert_eq!(contents.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn staging_validation_keeps_artifact_total_and_manifest_limits_independent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let staging = tempfile::tempdir()?;
+        fs::write(staging.path().join("graph.json"), b"1234")?;
+        fs::write(staging.path().join("program.json"), b"56")?;
+        fs::write(staging.path().join(BACKUP_COMPLETE), "{}")?;
+        assert_eq!(
+            validate_staging_contents_with_limits(staging.path(), 4, 6)?.len(),
+            3
+        );
+
+        fs::write(staging.path().join("program.json"), b"567")?;
+        let aggregate = validate_staging_contents_with_limits(staging.path(), 4, 6);
+        assert!(aggregate.is_err_and(|error| {
+            error.kind() == std::io::ErrorKind::InvalidData
+                && error.to_string().contains("artifact set")
+        }));
+
+        fs::write(staging.path().join("program.json"), b"56")?;
+        fs::write(staging.path().join("graph.json"), b"12345")?;
+        let artifact = validate_staging_contents_with_limits(staging.path(), 4, 6);
+        assert!(artifact.is_err_and(|error| {
+            error.kind() == std::io::ErrorKind::InvalidData
+                && error.to_string().contains("maximum is 4")
+        }));
+
+        fs::write(staging.path().join("graph.json"), b"1234")?;
+        fs::write(
+            staging.path().join(BACKUP_COMPLETE),
+            vec![b'x'; MAX_BACKUP_MANIFEST_BYTES as usize],
+        )?;
+        assert_eq!(
+            validate_staging_contents_with_limits(staging.path(), 4, 6)?.len(),
+            3
+        );
+        OpenOptions::new()
+            .append(true)
+            .open(staging.path().join(BACKUP_COMPLETE))?
+            .write_all(b"x")?;
+        assert!(
+            validate_staging_contents_with_limits(staging.path(), 4, 6)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+        );
         Ok(())
     }
 
@@ -873,11 +955,19 @@ mod tests {
         let source = tempfile::tempdir()?;
         let backups = tempfile::tempdir()?;
         write_curated_source(source.path())?;
-        OpenOptions::new()
-            .write(true)
-            .open(source.path().join("graph.json"))?
-            .set_len(MAX_BACKUP_ARTIFACT_BYTES + 1)?;
-        let oversized = backup_if_protected_to(source.path(), backups.path());
+        fs::write(source.path().join("graph.json"), [b'x'; 513])?;
+        let mut copies = 0;
+        let oversized = backup_if_protected_to_with_limits(
+            source.path(),
+            backups.path(),
+            512,
+            1024,
+            |_, _, _| {
+                copies += 1;
+                Err(std::io::Error::other("oversized input reached copying"))
+            },
+        );
+        assert_eq!(copies, 0);
         assert!(oversized.path.is_none());
         assert!(
             oversized
@@ -889,12 +979,19 @@ mod tests {
 
         write_curated_source(source.path())?;
         for artifact in ["graph.json", "program.json", "GRAPH_REPORT.md"] {
-            OpenOptions::new()
-                .write(true)
-                .open(source.path().join(artifact))?
-                .set_len(6 * 1024 * 1024 * 1024)?;
+            fs::write(source.path().join(artifact), [b'x'; 384])?;
         }
-        let aggregate = backup_if_protected_to(source.path(), backups.path());
+        let aggregate = backup_if_protected_to_with_limits(
+            source.path(),
+            backups.path(),
+            512,
+            1024,
+            |_, _, _| {
+                copies += 1;
+                Err(std::io::Error::other("oversized input reached copying"))
+            },
+        );
+        assert_eq!(copies, 0);
         assert!(aggregate.path.is_none());
         assert!(
             aggregate
@@ -903,6 +1000,45 @@ mod tests {
                 .is_some_and(|warning| warning.contains("artifact set"))
         );
         assert!(fs::read_dir(backups.path())?.next().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn small_admission_limits_publish_the_same_complete_backup_as_defaults()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = tempfile::tempdir()?;
+        let bounded_backups = tempfile::tempdir()?;
+        let default_backups = tempfile::tempdir()?;
+        write_curated_source(source.path())?;
+
+        let bounded = backup_if_protected_to_with_limits(
+            source.path(),
+            bounded_backups.path(),
+            512,
+            1024,
+            |source, destination, expected| {
+                copy_artifact_bounded(source, destination, expected.bytes)
+            },
+        );
+        let default = backup_if_protected_to(source.path(), default_backups.path());
+        assert!(bounded.warning.is_none());
+        assert!(default.warning.is_none());
+        let bounded_path = bounded.path.ok_or("bounded backup path missing")?;
+        let default_path = default.path.ok_or("default backup path missing")?;
+        assert_eq!(
+            fs::read(bounded_path.join(BACKUP_COMPLETE))?,
+            fs::read(default_path.join(BACKUP_COMPLETE))?
+        );
+        for artifact in [
+            "graph.json",
+            "program.json",
+            "GRAPH_REPORT.md",
+            "labels.json",
+        ] {
+            let expected = fs::read(source.path().join(artifact))?;
+            assert_eq!(fs::read(bounded_path.join(artifact))?, expected);
+            assert_eq!(fs::read(default_path.join(artifact))?, expected);
+        }
         Ok(())
     }
 
