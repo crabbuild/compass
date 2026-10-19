@@ -128,8 +128,8 @@ fn operation_hints_preserve_fresh_source_dependency_bands() -> Result<(), Box<dy
             .ok_or("missing candidates")?;
         let mut fields = None;
         for name in [
-            "source.session_values.get",
-            "source.session_values.ordinary",
+            "session_values.get",
+            "session_values.ordinary",
         ] {
             let candidate = candidates
                 .iter()
@@ -240,7 +240,7 @@ fn operation_words_recall_fresh_native_owners_with_json_store_parity() -> Result
                 .find(|row| {
                     row["name"]
                         .as_str()
-                        .is_some_and(|value| value == format!("source.sample.{name}"))
+                        .is_some_and(|value| value == format!("sample.{name}"))
                 })
                 .ok_or_else(|| format!("missing {translation} owner in first five: {answer}"))?;
             assert_eq!(target["relevance"], "low");
@@ -248,7 +248,7 @@ fn operation_words_recall_fresh_native_owners_with_json_store_parity() -> Result
                 for row in candidates.iter().filter(|row| {
                     matches!(
                         row["name"].as_str(),
-                        Some("source.read.get" | "source.prose.get")
+                        Some("read.get" | "prose.get")
                     )
                 }) {
                     assert!(
