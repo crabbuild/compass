@@ -741,7 +741,7 @@ fn current_per_file_text_boundary_preserves_historical_v5_limits()
 }
 
 #[test]
-fn historical_profile_capabilities_are_explicit_through_v7()
+fn historical_profile_capabilities_are_explicit_through_v8()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_model::source_query::*;
     for (profile, windows, nested, lexemes, bindings) in [
@@ -751,6 +751,7 @@ fn historical_profile_capabilities_are_explicit_through_v7()
         (SOURCE_QUERY_PROFILE_V4, true, true, false, false),
         (SOURCE_QUERY_PROFILE_V5, true, true, true, false),
         (SOURCE_QUERY_PROFILE_V6, true, true, true, true),
+        (SOURCE_QUERY_PROFILE_V7, true, true, true, true),
         (SOURCE_QUERY_PROFILE, true, true, true, true),
     ] {
         assert!(is_supported_source_query_profile(profile));
@@ -775,6 +776,62 @@ fn historical_profile_capabilities_are_explicit_through_v7()
         assert!(!is_supported_source_query_profile(profile));
         assert!(!source_query_uses_parameter_bindings(profile));
         assert!(!source_query_uses_code_lexemes(profile));
+    }
+    Ok(())
+}
+
+#[test]
+fn comment_capacity_is_versioned_and_keeps_the_first_excess_explicit()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_model::source_query::{SOURCE_QUERY_PROFILE, SOURCE_QUERY_PROFILE_V7};
+    for (profile, limit) in [(SOURCE_QUERY_PROFILE_V7, 8), (SOURCE_QUERY_PROFILE, 64)] {
+        for count in [limit, limit + 1] {
+            let mut value = artifact();
+            value.profile = profile.to_owned();
+            value.files[0].byte_size = 4096;
+            value.owners[0].source.end_byte = 4096;
+            value.owners[0].source.end_line = 200;
+            value.owners[0].comments = (0..count)
+                .map(|index| SourceQuerySite {
+                    source: SourceAnchor {
+                        file: "src/sample.rs".to_owned(),
+                        start_byte: 100 + index as u64 * 32,
+                        end_byte: 108 + index as u64 * 32,
+                        start_line: 5 + index as u32,
+                        end_line: 5 + index as u32,
+                        start_column: 0,
+                        end_column: 8,
+                    },
+                    text: "// later".to_owned(),
+                })
+                .collect();
+            value.additional_document_frequencies = value.owners[0]
+                .document_for_profile(profile)?
+                .terms()
+                .into_iter()
+                .map(|term| (term, 1))
+                .collect();
+            assert_eq!(
+                value.validate().is_ok(),
+                count == limit,
+                "{profile}: {count}"
+            );
+            if count == limit {
+                let bytes = serde_json::to_vec(&value)?;
+                let decoded: SourceQueryArtifact = serde_json::from_slice(&bytes)?;
+                decoded.validate()?;
+                assert_eq!(decoded, value);
+                if profile == SOURCE_QUERY_PROFILE {
+                    let before = value.owners[0].document_for_profile(profile)?;
+                    value.profile = SOURCE_QUERY_PROFILE_V7.to_owned();
+                    assert!(value.validate().is_err());
+                    assert_eq!(
+                        before,
+                        value.owners[0].document_for_profile(SOURCE_QUERY_PROFILE_V7)?
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

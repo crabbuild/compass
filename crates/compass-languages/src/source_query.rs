@@ -10,7 +10,7 @@ pub use parameters::{ParameterBindingOmission, ParameterBindingStatus, Parameter
 /// Reserved per-file extraction metadata. This is query evidence, not semantic facts.
 pub const EXTRACTION_EXTENSION: &str = "_compass_source_query_evidence";
 pub const EXTRACTION_SCHEMA: &str = "compass.source-query.extraction/1";
-pub const PROJECTION_PROFILE: &str = "source-query/7-literal-seeded-code";
+pub const PROJECTION_PROFILE: &str = "source-query/8-callable-comments";
 
 /// Byte columns and zero-based rows, matching Tree-sitter's source positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,7 +114,9 @@ impl Default for Limits {
             // spend the publication site budget without adding searchable terms.
             // Code windows are collected independently before this site limit.
             sites_per_name: 1,
-            comments_per_scope: 8,
+            // Eight early comments can exhaust recall before the actual mechanism.
+            // Byte/term, per-file and publication limits remain independent.
+            comments_per_scope: 64,
             comment_bytes: 4096,
             retained_bytes: 1024 * 1024,
             code_visits: 200_000,
@@ -441,7 +443,7 @@ fn project(
                 // New literal seeds can consume capacity before later identifiers.
                 // Code-window quotas are independent of identifier/comment
                 // quotas. Profiles 3–4 keep windows inspection-only; profiles
-                // 5–7 also index their retained novel vocabulary.
+                // 5–8 also index their retained novel vocabulary.
                 let covered = scope.code_windows.iter().any(|window| {
                     window.start <= node.start_byte() && node.end_byte() <= window.end
                 });
@@ -1382,6 +1384,35 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn callable_comment_limit_keeps_later_evidence_and_reports_first_excess()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for count in [8, 25, 64, 65] {
+            let mut source = "fn opaque() {\n".to_owned();
+            for index in 0..count {
+                source.push_str(&format!("// retained detail {index}\n"));
+            }
+            source.push_str("}\nfn sibling() {}\n");
+            let tree = parse(&source, "rust")?;
+            let projection = project(
+                tree.root_node(),
+                source.as_bytes(),
+                "rust",
+                Limits::default(),
+            )
+            .map_err(std::io::Error::other)?;
+            let owner = &projection.scopes[0];
+            assert_eq!(owner.comments.len(), count.min(64));
+            assert_eq!(owner.truncated, count > 64);
+            assert_eq!(owner.omitted_sites, count.saturating_sub(64));
+            assert!(projection.scopes[1].comments.is_empty());
+            for site in &owner.comments {
+                assert_eq!(source.get(site.start..site.end), Some(site.text.as_str()));
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn independent_projection_limits_disclose_omissions() -> Result<(), Box<dyn std::error::Error>>
     {

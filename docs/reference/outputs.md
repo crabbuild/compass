@@ -1775,7 +1775,8 @@ cannot be exhaustively recovered. Other questions avoid irrelevant role warnings
 
 ## Literal-only callable code windows
 
-Current `source-query/7-literal-seeded-code` artifacts use the existing
+Profile7 introduced the literal-seeded code behavior, retained by current
+`source-query/8-callable-comments` artifacts using the existing
 `owners[].codeWindows` and `omittedCodeWindows` fields. Raw string/template
 source can seed a window without another identifier. A whole safe literal or
 ancestor is retained; source escapes and interpolation are never evaluated.
@@ -1797,3 +1798,13 @@ call edges. Partial-topic candidates disclose missing context and cannot borrow
 another owner's quotation. Source profiles1–6 retain their original document,
 DF and role semantics, including V6 binding availability. Ranked JSON4 and
 ranker21 are unchanged; artifact hashes invalidate stale responses.
+
+Current profile 8 permits up to 64 `owners[].comments` entries in source order,
+each an exact bounded source slice. Profiles 1–7 retain their eight-comment
+limit. The searchable comment field remains 8,192 bytes and 512 terms, with the
+same 1 MiB per-file and 16 MiB/65,536-site artifact identifier/comment limits;
+64 entries therefore do not imply complete lexical coverage. Scope/site and
+field clipping remain explicit. Comments from siblings or nested callable
+owners do not become evidence for the enclosing callable. This adds no graph
+relationships and does not turn a comment into verified behavior. Rebuild with
+`compass update <root>`; disposable extraction uses AST cache 32.

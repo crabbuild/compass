@@ -1,5 +1,25 @@
 # Compass compatibility
 
+## Callable comment recall
+
+Current updates publish `source-query/8-callable-comments` and rebuild disposable
+AST cache 32. A callable can retain up to 64 source-anchored comments instead of
+eight, so introductory bookkeeping comments are less likely to exclude later
+implementation explanations. Selection remains source order and is bounded;
+this does not index every comment in arbitrarily large callables. Each comment
+remains limited to 4,096 bytes, each searchable field to 8,192 bytes/512 terms,
+per-file retained identifier/comment text to 1 MiB, and artifact lexical text
+to 16 MiB/65,536 sites. Exhausted limits retain explicit omission/coverage status.
+Code-window and parameter limits are unchanged.
+
+Profiles 1–7 retain their capabilities, projection/statistics and eight-comment
+validation limit. Older readers must upgrade to read profile 8; rebuilding current
+artifacts does not rewrite historical realizations. Run `compass update <root>`
+with the new binary. Ranker 21 and ranked JSON 4 are unchanged; source-artifact
+hashes separate response caches. Comments remain lexical inspection evidence,
+not proof of behavior or new graph relationships. The cache 31 notes below
+describe earlier development changes now superseded by cache 32.
+
 ## In-progress TypeScript terminal inventories
 
 Development TypeScript5 / JavaScript4 and AST cache31 replace the prior

@@ -1,5 +1,13 @@
 # Migrate from Graphify to Compass
 
+Current builds use `source-query/8-callable-comments` and AST cache 32. Run
+`compass update <root>` with the new binary to retain up to 64 callable comments
+instead of eight. Upgrade readers for profile 8; profiles 1–7 retain their original
+meaning and limits. Per-field byte/term and per-file/artifact limits still apply,
+so large callables can remain partial. Comments are inspection pointers rather
+than behavioral proof. Subsequent cache 31 notes describe earlier development
+changes; cache 32 is the current disposable extraction identity.
+
 The development export-proof repair adds `ecmascriptExportInventory` to root
 TypeScript/JavaScript file/module declarations under evidence/2. Upgrade strict
 readers for its explicit version1/complete contract; missing metadata stays

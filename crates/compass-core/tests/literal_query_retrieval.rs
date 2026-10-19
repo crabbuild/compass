@@ -54,6 +54,154 @@ fn same_publication(left: &Path, right: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn later_callable_comments_remain_searchable_without_leaking_to_siblings()
+-> Result<(), Box<dyn Error>> {
+    for (file, opening, comment, ending) in [
+        (
+            "sample.py",
+            "def opaque():\n",
+            "    #",
+            "    return 0\n\ndef sibling():\n    return 1\n",
+        ),
+        ("sample.rs", "fn opaque() {\n", "//", "}\nfn sibling() {}\n"),
+        (
+            "sample.go",
+            "package p\nfunc opaque() {\n",
+            "//",
+            "}\nfunc sibling() {}\n",
+        ),
+        (
+            "sample.ts",
+            "function opaque() {\n",
+            "//",
+            "}\nfunction sibling() {}\n",
+        ),
+        (
+            "sample.tsx",
+            "function opaque() {\n",
+            "//",
+            "}\nfunction sibling() {}\n",
+        ),
+    ] {
+        let d = tempfile::tempdir()?;
+        let root = d.path().join("repo");
+        fs::create_dir(&root)?;
+        let mut source = opening.to_owned();
+        for index in 0..24 {
+            source.push_str(&format!("{comment} bookkeeping detail {index}\n"));
+        }
+        source.push_str(&format!(
+            "{comment} Capacity reservations protect uncommon search terms.\n{ending}"
+        ));
+        fs::write(root.join(file), &source)?;
+        let built =
+            build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+        let path = built.output_dir.join("graph.json");
+        let graph = GraphDocument::load(&path)?;
+        let target = graph
+            .nodes
+            .iter()
+            .find(|n| n.kind.is_callable() && n.name.contains("opaque"))
+            .ok_or("missing native callable")?;
+        let evidence = artifact(&built.output_dir)?;
+        let owner = evidence
+            .owners
+            .iter()
+            .find(|o| o.node_id == target.id)
+            .ok_or("missing source owner")?;
+        let site = owner
+            .comments
+            .iter()
+            .find(|s| s.text.contains("Capacity reservations"))
+            .ok_or("late callable comment was discarded")?;
+        assert_eq!(
+            site.source.start_line,
+            26 + u32::from(file.ends_with(".go")),
+            "{file}"
+        );
+        assert_eq!(
+            source
+                .as_bytes()
+                .get(site.source.start_byte as usize..site.source.end_byte as usize),
+            Some(site.text.as_bytes()),
+            "{file}: retained evidence must quote the original bytes"
+        );
+        assert!(
+            evidence
+                .owners
+                .iter()
+                .filter(|o| o.node_id != target.id)
+                .all(|o| o
+                    .comments
+                    .iter()
+                    .all(|s| !s.text.contains("Capacity reservations")))
+        );
+        let mut previous = None;
+        for mode in [EngineSelection::Json, EngineSelection::Store] {
+            let engine =
+                open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+            let answer = engine.discover_ranked(request(
+                "Where do capacity reservations protect uncommon search terms?",
+            ))?;
+            let candidate = answer
+                .candidates
+                .first()
+                .ok_or("late-comment candidate missing")?;
+            assert_eq!(candidate.node.id, target.id, "{file}: {answer:?}");
+            assert_eq!(candidate.relevance, RelevanceBand::Low);
+            assert!(candidate.matched_fields.iter().any(|f| f == "body_comment"));
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &answer.candidates, "{file}: backend parity");
+            } else {
+                previous = Some(answer.candidates);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn comment_capacity_survives_warm_updates_and_reopening() -> Result<(), Box<dyn Error>> {
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let settings = options(&root, &d.path().join("warm"), GraphStorage::Sqlite);
+    for (step, count) in [64_usize, 65, 64].into_iter().enumerate() {
+        let mut source = "fn opaque() {\n".to_owned();
+        for index in 0..count {
+            source.push_str(&format!("// retained detail {index}\n"));
+        }
+        source.push_str("}\n");
+        fs::write(root.join("sample.rs"), source)?;
+        let built = build_local_graph(&settings)?;
+        let cold = artifact(&built.output_dir)?;
+        let owner = cold.owners.first().ok_or("missing comment owner")?;
+        assert_eq!(owner.comments.len(), 64);
+        assert_eq!(owner.omitted_sites, (count - 64) as u64);
+        assert_eq!(owner.truncated, count > 64);
+        let expected = ["graph.json", SOURCE_QUERY_FILE]
+            .map(|file| fs::read(built.output_dir.join(file)))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        let warm = build_local_graph(&settings)?;
+        assert_eq!(cold, artifact(&warm.output_dir)?);
+        for (file, bytes) in ["graph.json", SOURCE_QUERY_FILE].into_iter().zip(expected) {
+            assert_eq!(
+                bytes,
+                fs::read(warm.output_dir.join(file))?,
+                "{step}: {file}"
+            );
+        }
+        let mut forced = settings.clone();
+        forced.force = true;
+        forced.output_root = Some(d.path().join(format!("forced-{step}")));
+        let clean = build_local_graph(&forced)?;
+        same_publication(&warm.output_dir, &clean.output_dir)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn literal_only_source_reaches_the_exact_native_owner_on_both_backends()
 -> Result<(), Box<dyn Error>> {
     for (file, source) in [

@@ -176,6 +176,27 @@ fn role_publication_rejects_envelope_only_sites_and_omits_nonunique_joins() -> T
 }
 
 #[test]
+fn profile7_artifacts_require_rebuilding_before_current_mixed_reuse() -> TestResult {
+    let (d, graph, mut inputs) = fixture(&[
+        ("kept.py", "def keep(value):\n    return value\n"),
+        ("changed.py", "def change(value):\n    return value\n"),
+    ])?;
+    let output = d.path().join("proof");
+    let mut legacy = write(&output, &graph, &inputs, None)?;
+    legacy.profile = SOURCE_QUERY_PROFILE_V7.to_owned();
+    legacy.validate()?;
+    fs::write(output.join(SOURCE_QUERY_FILE), serde_json::to_vec(&legacy)?)?;
+    let readable = reusable(&output).ok_or("historical profile became unreadable")?;
+    assert!(!can_reuse_with_inputs(&readable, &inputs));
+    inputs.files.remove("kept.py");
+    let error = write(&d.path().join("mixed"), &graph, &inputs, Some(legacy))
+        .err()
+        .ok_or("profile7 missing-file evidence was reused")?;
+    assert!(error.to_string().contains("update --force"));
+    Ok(())
+}
+
+#[test]
 fn mixed_prior_fresh_deleted_files_preserve_parameter_ownership_and_legacy_upgrade() -> TestResult {
     let kept = "def keep(block):\n    return block\n";
     let changed = "def change(permit):\n    return permit\n";

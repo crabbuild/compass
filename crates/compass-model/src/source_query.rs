@@ -13,7 +13,9 @@ pub const SOURCE_QUERY_PROFILE_V3: &str = "source-query/3-owned-code-windows";
 pub const SOURCE_QUERY_PROFILE_V4: &str = "source-query/4-nested-callable-context";
 pub const SOURCE_QUERY_PROFILE_V5: &str = "source-query/5-owned-code-lexemes";
 pub const SOURCE_QUERY_PROFILE_V6: &str = "source-query/6-parameter-bindings";
-pub const SOURCE_QUERY_PROFILE: &str = "source-query/7-literal-seeded-code";
+pub const SOURCE_QUERY_PROFILE_V7: &str = "source-query/7-literal-seeded-code";
+pub const SOURCE_QUERY_PROFILE: &str = "source-query/8-callable-comments";
+pub const SOURCE_QUERY_MAX_COMMENTS: usize = 64;
 pub const SOURCE_QUERY_MAX_PARAMETER_SITES: usize = 64;
 pub const SOURCE_QUERY_MAX_PARAMETER_FILE_BYTES: usize = 256 * 1024;
 pub const SOURCE_QUERY_MAX_FILE_TEXT_BYTES: usize = 1024 * 1024;
@@ -36,6 +38,7 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
             | SOURCE_QUERY_PROFILE_V4
             | SOURCE_QUERY_PROFILE_V5
             | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE_V7
             | SOURCE_QUERY_PROFILE
     )
 }
@@ -45,7 +48,10 @@ pub fn is_supported_source_query_profile(profile: &str) -> bool {
 pub fn source_query_uses_code_lexemes(profile: &str) -> bool {
     matches!(
         profile,
-        SOURCE_QUERY_PROFILE_V5 | SOURCE_QUERY_PROFILE_V6 | SOURCE_QUERY_PROFILE
+        SOURCE_QUERY_PROFILE_V5
+            | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE_V7
+            | SOURCE_QUERY_PROFILE
     )
 }
 
@@ -58,6 +64,7 @@ pub fn source_query_uses_code_windows(profile: &str) -> bool {
             | SOURCE_QUERY_PROFILE_V4
             | SOURCE_QUERY_PROFILE_V5
             | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE_V7
             | SOURCE_QUERY_PROFILE
     )
 }
@@ -68,12 +75,16 @@ pub fn source_query_uses_nested_context(profile: &str) -> bool {
         SOURCE_QUERY_PROFILE_V4
             | SOURCE_QUERY_PROFILE_V5
             | SOURCE_QUERY_PROFILE_V6
+            | SOURCE_QUERY_PROFILE_V7
             | SOURCE_QUERY_PROFILE
     )
 }
 #[must_use]
 pub fn source_query_uses_parameter_bindings(profile: &str) -> bool {
-    matches!(profile, SOURCE_QUERY_PROFILE_V6 | SOURCE_QUERY_PROFILE)
+    matches!(
+        profile,
+        SOURCE_QUERY_PROFILE_V6 | SOURCE_QUERY_PROFILE_V7 | SOURCE_QUERY_PROFILE
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,7 +204,7 @@ pub struct SourceQueryOwner {
     pub comments: Vec<SourceQuerySite>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_bindings: Option<ParameterBindings>,
-    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profiles 5–7
+    /// Exact AST-owned text. Profiles 1–4 use it only for inspection; profiles 5–8
     /// also index vocabulary absent from the identifier/comment fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_windows: Vec<SourceQuerySite>,
@@ -418,7 +429,12 @@ impl SourceQueryArtifact {
                 return Err(fail("owner does not match the source-file inventory"));
             }
             if owner.identifiers.len() > 1024
-                || owner.comments.len() > 8
+                || owner.comments.len()
+                    > if self.profile == SOURCE_QUERY_PROFILE {
+                        SOURCE_QUERY_MAX_COMMENTS
+                    } else {
+                        8
+                    }
                 || owner.code_windows.len() > 16
             {
                 return Err(fail("per-owner site limit exceeded"));

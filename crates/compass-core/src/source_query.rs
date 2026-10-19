@@ -61,7 +61,7 @@ fn validate_accounting(file: &SourceQueryExtraction) -> Result<(), CoreError> {
     for scope in &file.projection.scopes {
         if scope.names.len() > 256
             || scope.names.values().any(|sites| sites.len() > 4)
-            || scope.comments.len() > 8
+            || scope.comments.len() > SOURCE_QUERY_MAX_COMMENTS
             || scope.code_windows.len() > 16
             || scope.parameter_bindings.sites.len() > SOURCE_QUERY_MAX_PARAMETER_SITES
         {
@@ -584,7 +584,7 @@ pub(crate) fn publish(
                 }
             };
             if scope.names.len() > 256
-                || scope.comments.len() > 8
+                || scope.comments.len() > SOURCE_QUERY_MAX_COMMENTS
                 || scope.code_windows.len() > 16
                 || scope.names.values().any(|s| s.len() > 4)
             {

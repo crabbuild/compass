@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Retain up to 64 source-anchored comments per callable, allowing broad queries
+  to find explanations beyond an eight-comment prefix. Keep independent field,
+  file and artifact limits and explicit partial coverage. Source-query profile 8
+  and AST cache 32 refresh current evidence; historical profiles remain unchanged.
+
 - Normalize native path separators in TypeScript source lookup keys, preserving
   nested relative imports and directory-index selection on Windows. Keep exact
   file identity, extension priority and source-root containment checks.
