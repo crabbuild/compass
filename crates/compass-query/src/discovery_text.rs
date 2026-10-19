@@ -229,6 +229,11 @@ fn render_discovery_text_page_internal(
     options: DiscoveryTextPageOptions<'_>,
     prefix: Option<&[String]>,
 ) -> Result<DiscoveryTextPage, DiscoveryTextPageError> {
+    if !response.has_valid_work_contract() {
+        return Err(DiscoveryTextPageError::InvalidEnvelope(
+            "unsupported discovery schema or inconsistent work counters".to_owned(),
+        ));
+    }
     if !(MIN_TEXT_BUDGET..=MAX_TEXT_BUDGET).contains(&options.token_budget) {
         return Err(DiscoveryTextPageError::InvalidBudget);
     }
@@ -258,10 +263,19 @@ fn render_discovery_text_page_internal(
         }
         None => 0,
     };
-    let fixed = prefix.map_or_else(
+    let mut fixed = prefix.map_or_else(
         || default_fixed_lines(response, options.include_evidence, &semantic_result_digest),
         ToOwned::to_owned,
     );
+    if let Some(work) = &response.stats.call_link_work {
+        fixed.push(format!(
+            "Call-linked lookups: {}/{}; indexed recall probes: {}/{}.",
+            work.candidate_probes,
+            work.candidate_probe_limit,
+            work.indexed_candidate_probes,
+            work.indexed_candidate_probe_limit
+        ));
+    }
     let max_chars = options.token_budget.saturating_mul(4).saturating_sub(1);
     let fixed_chars = fixed.iter().map(|line| line.len() + 1).sum::<usize>();
     let mut end = start;
@@ -1662,6 +1676,46 @@ mod tests {
                 .iter()
                 .all(|entry| entry.text.len() < 8_192)
         );
+        Ok(())
+    }
+    #[test]
+    fn prefixed_discovery_pages_retain_work_counts_without_duplicating_default_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = response()?;
+        response.schema = compass_model::query_contract::DISCOVERY_QUERY_SCHEMA_V2.to_owned();
+        response.stats.call_link_work = Some(crate::RankedCallWork {
+            schema: crate::CALL_LINK_WORK_SCHEMA.to_owned(),
+            candidate_probes: 40,
+            candidate_probe_limit: crate::MAX_CALL_LINK_CANDIDATE_PROBES,
+            indexed_candidate_probes: response.stats.candidate_probes,
+            indexed_candidate_probe_limit:
+                compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+        });
+        for prefixed in [false, true] {
+            let options = DiscoveryTextPageOptions {
+                token_budget: 512,
+                cursor: None,
+                request_digest: &"a".repeat(64),
+                graph_identity: "generation",
+                graph_digest: &"b".repeat(64),
+                include_evidence: false,
+            };
+            let page = if prefixed {
+                render_discovery_text_page_with_prefix(
+                    &response,
+                    options,
+                    &["Caller header".to_owned()],
+                )?
+            } else {
+                render_discovery_text_page(&response, options)?
+            };
+            assert_eq!(
+                page.text.matches("Call-linked lookups: 40/40").count(),
+                1,
+                "work counts missing/duplicated with prefixed={prefixed}"
+            );
+            assert!(page.text.len() < 512 * 4);
+        }
         Ok(())
     }
 }

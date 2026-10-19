@@ -23,6 +23,7 @@ mod overview;
 mod program_join;
 mod ranking;
 mod recall;
+mod record_budget;
 mod relevance;
 mod response_cache;
 mod score;
@@ -30,6 +31,9 @@ mod semantic_search;
 mod source;
 mod source_query;
 mod telemetry;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
 mod text;
 mod text_cursor;
 mod traversal;
@@ -37,8 +41,10 @@ mod traversal;
 pub use affected::{DEFAULT_AFFECTED_RELATIONS, affected_nodes, format_affected, resolve_seed};
 pub use benchmark::{BenchmarkQuestion, BenchmarkResult, format_benchmark, run_benchmark};
 pub use broad::{
-    RankedCandidate, RankedDiscoveryResponse, RankedExcerptKind, RankedFilterReason,
-    RankedRetrievalTrace, RankedSourceExcerpt, RankedTargetTrace, RankedTermTrace, RelevanceBand,
+    CALL_LINK_WORK_SCHEMA, MAX_CALL_LINK_CANDIDATE_PROBES, RankedCallEndpoint, RankedCallHint,
+    RankedCallHop, RankedCallLink, RankedCallWork, RankedCandidate, RankedDiscoveryResponse,
+    RankedExcerptKind, RankedFilterReason, RankedRetrievalTrace, RankedSourceExcerpt,
+    RankedTargetTrace, RankedTermTrace, RelevanceBand,
 };
 pub use code_query::{
     CodeQueryEngine, ExactSearchFilter, normalize_symbol as normalize_code_query_symbol,
@@ -88,7 +94,8 @@ pub use ranking::{
     QUERY_RANKER_PROFILE_V13, QUERY_RANKER_PROFILE_V14, QUERY_RANKER_PROFILE_V15,
     QUERY_RANKER_PROFILE_V16, QUERY_RANKER_PROFILE_V17, QUERY_RANKER_PROFILE_V18,
     QUERY_RANKER_PROFILE_V21, QUERY_RANKER_PROFILE_V22, QUERY_RANKER_PROFILE_V23,
-    QUERY_RANKER_PROFILE_V24,
+    QUERY_RANKER_PROFILE_V24, QUERY_RANKER_PROFILE_V25, QUERY_RANKER_PROFILE_V26,
+    QUERY_RANKER_PROFILE_V27,
 };
 pub use relevance::{
     EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,

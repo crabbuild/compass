@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum RankedExcerptKind {
     CallableComment,
     CallableCode,
+    /// Retained helper code without a question-term match; navigation only.
+    LinkedCallablePreview,
     NestedCallableCode,
     AstDocumentation,
 }
@@ -258,6 +260,47 @@ pub(crate) fn select_code(
     select_masked(kind, source, text, terms, max_bytes, comments)
 }
 
+/// Fallback display for an already selected, source-witnessed helper only.
+/// The caller establishes direct callable ownership against the pinned graph.
+/// Prefer the most non-comment tokens, retaining source order on ties. This
+/// question-independent display heuristic does not establish an AST body role.
+/// Empty priority terms prevent this preview from becoming matching evidence.
+pub(crate) fn preview_linked_code(
+    windows: &[SourceQuerySite],
+    comments: &[SourceQuerySite],
+) -> Option<SelectedExcerpt> {
+    if windows.len() > 16 || comments.len() > 64 {
+        return None;
+    }
+    let (window, _) = windows
+        .iter()
+        .filter_map(|window| {
+            if window.text.len() > 512
+                || window.source.file.len() > 4096
+                || !exact_shape(&window.source, &window.text)
+            {
+                return None;
+            }
+            let tokens = source_tokens(&window.source, &window.text, comments)?;
+            (!tokens.is_empty()).then_some((window, tokens.len()))
+        })
+        .max_by(|(left, left_tokens), (right, right_tokens)| {
+            left_tokens
+                .cmp(right_tokens)
+                .then_with(|| right.source.cmp(&left.source))
+        })?;
+    Some(SelectedExcerpt {
+        excerpt: RankedSourceExcerpt {
+            kind: RankedExcerptKind::LinkedCallablePreview,
+            source: window.source.clone(),
+            text: window.text.clone(),
+            clipped: false,
+            nested_scope: None,
+        },
+        terms: BTreeSet::new(),
+    })
+}
+
 fn select_masked(
     kind: RankedExcerptKind,
     source: &SourceAnchor,
@@ -400,6 +443,108 @@ mod tests {
             end_line: finish.0,
             end_column: finish.1,
         })
+    }
+
+    fn preview(
+        source: &SourceAnchor,
+        text: &str,
+        comments: &[SourceQuerySite],
+    ) -> Option<SelectedExcerpt> {
+        preview_linked_code(
+            &[SourceQuerySite {
+                source: source.clone(),
+                text: text.to_owned(),
+            }],
+            comments,
+        )
+    }
+
+    #[test]
+    fn helper_preview_prefers_inspection_context_over_a_parameter_list()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sites = ["(value)", "return value is not None"]
+            .into_iter()
+            .map(|text| {
+                Ok(SourceQuerySite {
+                    source: anchor(text).ok_or("source")?,
+                    text: text.to_owned(),
+                })
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+        let selected = preview_linked_code(&sites, &[]).ok_or("preview")?;
+        assert_eq!(selected.excerpt.text, sites[1].text);
+        assert!(selected.terms.is_empty());
+        let mut later = sites[1].clone();
+        later.source.start_byte += 100;
+        later.source.end_byte += 100;
+        later.source.start_line += 1;
+        later.source.end_line += 1;
+        let tied = preview_linked_code(&[later, sites[1].clone()], &[]).ok_or("tie")?;
+        assert_eq!(tied.excerpt.source, sites[1].source);
+        assert!(preview_linked_code(&vec![sites[0].clone(); 17], &[]).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn helper_preview_retains_bytes_without_claiming_matching_terms()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let text = "return café\n";
+        let source = anchor(text).ok_or("source")?;
+        let selected = preview(&source, text, &[]).ok_or("preview")?;
+        assert!(selected.terms.is_empty());
+        assert_eq!(
+            selected.excerpt.kind,
+            RankedExcerptKind::LinkedCallablePreview
+        );
+        assert_eq!(selected.excerpt.source, source);
+        assert_eq!(selected.excerpt.text, text);
+        assert!(!selected.excerpt.clipped);
+        assert!(selected.excerpt.is_coherent());
+        let mut incoherent = selected.excerpt;
+        incoherent.nested_scope = Some(source);
+        assert!(!incoherent.is_coherent());
+        Ok(())
+    }
+
+    #[test]
+    fn helper_preview_enforces_bounds_before_scanning_or_copying()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let exact = format!("x{}", " ".repeat(511));
+        let source = anchor(&exact).ok_or("source")?;
+        assert!(preview(&source, &exact, &[]).is_some());
+        let oversized = format!("{exact} ");
+        assert!(preview(&anchor(&oversized).ok_or("source")?, &oversized, &[]).is_none());
+        let mut bad = source.clone();
+        bad.end_column += 1;
+        assert!(preview(&bad, &exact, &[]).is_none());
+        bad = source.clone();
+        bad.file = "x".repeat(4097);
+        assert!(preview(&bad, &exact, &[]).is_none());
+        let comments = vec![
+            SourceQuerySite {
+                source,
+                text: exact.clone()
+            };
+            65
+        ];
+        assert!(preview(&anchor(&exact).ok_or("source")?, &exact, &comments).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn helper_preview_requires_code_outside_owned_comments()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let text = "// only a comment";
+        let source = anchor(text).ok_or("source")?;
+        let comments = [SourceQuerySite {
+            source: source.clone(),
+            text: text.to_owned(),
+        }];
+        assert!(preview(&source, text, &comments).is_none());
+        for text in ["", " (); {} ", "   "] {
+            assert!(preview(&anchor(text).ok_or("source")?, text, &[]).is_none());
+        }
+        Ok(())
     }
 
     #[test]

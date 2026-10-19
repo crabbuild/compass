@@ -2858,6 +2858,21 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok((edges, truncated))
     }
 
+    /// Read occurrence identities before hydrating full edge payloads. This
+    /// shares the same directional-kind ordering, prefix bounds and capability
+    /// checks as adjacency_by_kinds; no edge records are decoded by this call.
+    pub fn adjacency_edge_ids_by_kinds(
+        &self,
+        node_id: &str,
+        incoming: bool,
+        kinds: &[EdgeKind],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
+        let (entries, truncated) =
+            self.directional_entries_by_kinds(node_id, incoming, kinds, limits)?;
+        Ok((entries.into_keys().collect(), truncated))
+    }
+
     /// Read one globally bounded directional adjacency prefix. Callers may
     /// filter kinds after this read without multiplying the limit per kind.
     pub fn directional_adjacency(
@@ -2895,6 +2910,20 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         node_id: &str,
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
+        let (ids, truncated) = self.incident_edge_ids(node_id, limits)?;
+        let edge_ids = ids.into_iter().collect::<BTreeSet<_>>();
+        let edges = self
+            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
+        Ok((edges, truncated))
+    }
+
+    /// Return the same bounded incoming/outgoing identity union as incident,
+    /// without decoding full occurrence records. Self-loops appear once.
+    pub fn incident_edge_ids(
+        &self,
+        node_id: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
         let limits = limits.validate()?;
         let (incoming, incoming_truncated) =
             self.directional_entries_by_kinds(node_id, true, ALL_EDGE_KINDS, limits)?;
@@ -2909,9 +2938,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 truncated = true;
             }
         }
-        let edges = self
-            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
-        Ok((edges, truncated))
+        Ok((edge_ids.into_iter().collect(), truncated))
     }
 
     fn directional_entries_by_kinds(
@@ -5366,6 +5393,85 @@ mod tests {
             community: None,
         });
         graph
+    }
+
+    #[test]
+    fn adjacency_identity_prefix_does_not_hydrate_edge_payloads() -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        let node = graph
+            .nodes
+            .first()
+            .ok_or_else(|| SnapshotError::Corrupt("fixture node missing".to_owned()))?;
+        let site = node
+            .source
+            .clone()
+            .ok_or_else(|| SnapshotError::Corrupt("fixture source missing".to_owned()))?;
+        let id = compass_model::identity::edge_id("a", EdgeKind::Calls, "a", Some(&site), None);
+        graph.links.push(EdgeRecord {
+            id: id.clone(),
+            key: id.clone(),
+            source: "a".to_owned(),
+            target: "a".to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: Some(site),
+            details: None,
+            evidence: node.evidence.clone(),
+            weight: None,
+            context: Some("call".to_owned()),
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+        let store = MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("snapshot missing".to_owned()))?;
+        let root = reader
+            .manifest()
+            .roots
+            .iter()
+            .find(|root| root.index == IndexKind::Edges)
+            .ok_or_else(|| SnapshotError::Corrupt("edges root missing".to_owned()))?;
+        // A usable ID index must not need the full occurrence's payload tree.
+        store.put(
+            &NamespaceId::graph(),
+            &object_partition()?,
+            &object_key(&root.digest)?,
+            b"corrupt-edge-payload",
+            WriteCondition::Any,
+        )?;
+        let limits = SnapshotReadLimits {
+            max_items: 1,
+            ..SnapshotReadLimits::default()
+        };
+        let (ids, truncated) =
+            reader.adjacency_edge_ids_by_kinds("a", false, &[EdgeKind::Calls], limits)?;
+        assert_eq!(ids, vec![id.clone()]);
+        assert!(!truncated);
+        assert_eq!(
+            reader.incident_edge_ids("a", limits)?,
+            (vec![id.clone()], false)
+        );
+        assert_eq!(
+            reader.incident_edge_ids("missing", limits)?,
+            (Vec::new(), false)
+        );
+        assert!(reader.get_edge(&id).is_err());
+        assert_eq!(
+            reader.adjacency_edge_ids_by_kinds("missing", false, &[EdgeKind::Calls], limits)?,
+            (Vec::new(), false)
+        );
+        let invalid = SnapshotReadLimits {
+            max_items: 0,
+            ..limits
+        };
+        assert!(matches!(
+            reader.adjacency_edge_ids_by_kinds("a", false, &[EdgeKind::Calls], invalid),
+            Err(SnapshotError::Limit(_))
+        ));
+        Ok(())
     }
 
     fn diagnostic(code: &str, message: &str) -> GraphDiagnostic {

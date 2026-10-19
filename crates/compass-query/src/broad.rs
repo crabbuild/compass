@@ -8,11 +8,11 @@ use compass_model::code_graph::{EdgeKind, NodeKind, NodeRecord, NodeRole};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, SourceAnchor};
 use compass_model::query_contract::{
     CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, ConceptMatch, ConceptMatchMethod,
-    DISCOVERY_QUERY_SCHEMA_V1, DiscoveryDirection, DiscoveryOmissions, DiscoveryQueryRequest,
-    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScoreTier, DiscoverySeed, DiscoverySeedSource,
-    DiscoveryStats, MAX_INDEXED_CANDIDATE_NODES_READ, MAX_INDEXED_CANDIDATE_PROBES,
-    QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryNode, SearchHit, SearchRequest,
-    discovery_scope_matches,
+    DISCOVERY_QUERY_SCHEMA_V1, DISCOVERY_QUERY_SCHEMA_V2, DiscoveryDirection, DiscoveryOmissions,
+    DiscoveryQueryRequest, DiscoveryQueryResponse, DiscoveryScope, DiscoveryScoreTier,
+    DiscoverySeed, DiscoverySeedSource, DiscoveryStats, MAX_INDEXED_CANDIDATE_NODES_READ,
+    MAX_INDEXED_CANDIDATE_PROBES, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryNode,
+    SearchHit, SearchRequest, discovery_scope_matches,
 };
 use compass_model::search::{
     SearchDocument, identifier_search_terms, is_primary_search_kind, search_document,
@@ -30,9 +30,13 @@ use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 mod excerpts;
 pub use excerpts::{RankedExcerptKind, RankedSourceExcerpt};
 mod call_context;
+mod call_work;
+pub use call_work::{CALL_LINK_WORK_SCHEMA, MAX_CALL_LINK_CANDIDATE_PROBES, RankedCallWork};
 mod compounds;
+mod linked;
 mod ownership;
 mod passages;
+pub use linked::{RankedCallEndpoint, RankedCallHint, RankedCallHop, RankedCallLink};
 mod relationships;
 
 const POSTING_QUOTA: usize = 256;
@@ -273,6 +277,8 @@ pub struct RankedCandidate {
     pub supporting_sources: Vec<SourceAnchor>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excerpts: Vec<RankedSourceExcerpt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_link: Option<RankedCallLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -289,6 +295,8 @@ pub struct RankedDiscoveryResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RankedRetrievalTrace {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_link_work: Option<RankedCallWork>,
     pub graph_present: bool,
     pub admitted: bool,
     pub rank: Option<usize>,
@@ -333,6 +341,21 @@ pub struct RankedTargetTrace {
     pub filter_reason: Option<RankedFilterReason>,
 }
 
+#[derive(Clone, Copy)]
+enum RetrievalMode {
+    Search,
+    Discovery {
+        excerpts: bool,
+        relationship_budget: u64,
+        max_depth: u32,
+    },
+}
+
+struct RetrievalWork<'a> {
+    mode: RetrievalMode,
+    metadata: &'a mut crate::record_budget::RecordBudget,
+}
+
 struct Retrieval {
     ranked: Vec<RankedCandidate>,
     admitted: BTreeSet<String>,
@@ -353,6 +376,7 @@ struct Retrieval {
     concept_matches: Vec<ConceptMatch>,
     witness_nodes: Vec<QueryNode>,
     witness_edges: Vec<QueryEdge>,
+    call_witness: linked::Witness,
     target_details: Option<RankedTargetTrace>,
 }
 
@@ -613,6 +637,20 @@ fn enforce_ranked_response_budget(response: &RankedDiscoveryResponse) -> Result<
     })
 }
 
+fn extra_call_nodes(retrieval: &Retrieval) -> usize {
+    retrieval
+        .call_witness
+        .nodes
+        .keys()
+        .filter(|id| {
+            !retrieval
+                .ranked
+                .iter()
+                .any(|candidate| candidate.node.id == **id)
+        })
+        .count()
+}
+
 // Discovery owns identity matching. Preserve its typed tier in the ranked
 // adapter rather than inferring identity from lexical field names or scores.
 fn ranked_seed_fields(seed: &DiscoverySeed) -> Vec<String> {
@@ -687,9 +725,14 @@ impl CodeQueryEngine {
         check: &dyn Fn() -> Result<(), QueryError>,
         admit: &dyn Fn(&NodeRecord) -> bool,
         trace_target: Option<&str>,
-        retain_excerpts: bool,
+        work: RetrievalWork<'_>,
     ) -> Result<Retrieval, QueryError> {
+        let RetrievalWork {
+            mode,
+            metadata: link_budget,
+        } = work;
         let started = Instant::now();
+        let retain_excerpts = matches!(mode, RetrievalMode::Discovery { excerpts: true, .. });
         crate::code_query::validate_limits(&request.limits)?;
         let _ = search_query_terms(&request.query)?;
         let negative_qualification = request
@@ -911,6 +954,24 @@ impl CodeQueryEngine {
         missing_subjects.sort();
         missing_subjects.dedup();
         groups.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| a.0.cmp(&b.0)));
+        let link_plan = linked::Plan::new(
+            &groups,
+            matches!(mode, RetrievalMode::Discovery { .. })
+                && named_contexts.is_empty()
+                && explicit_identifiers.is_empty()
+                && !negative_qualification
+                && temporal_qualification.is_empty()
+                && !wants_documents
+                && !noun_subject_requested
+                && !original_terms
+                    .iter()
+                    .any(|term| matches!(term.as_str(), "test" | "fixture"))
+                && !legacy
+                && request.limits.max_nodes >= 9
+                && request.limits.max_edges >= 8,
+        );
+        let read_ceiling = FIELD_READ_CEILING;
+        let probe_ceiling = FIELD_PROBE_CEILING;
         let mut nodes = BTreeMap::<String, NodeRecord>::new();
         let mut reads = 0_u64;
         let mut probes = 2_u64; // exact ID and exact normalized-name lookups
@@ -1004,9 +1065,9 @@ impl CodeQueryEngine {
         let mut ownership_candidates = BTreeMap::new();
         for query in queries {
             check()?;
-            if probes + 8 + ownership::PROBE_RESERVE >= FIELD_PROBE_CEILING
+            if probes + 8 + ownership::PROBE_RESERVE >= probe_ceiling
                 || reads.saturating_add(POSTING_QUOTA as u64 * 4 + ownership::READ_RESERVE)
-                    > FIELD_READ_CEILING
+                    > read_ceiling
             {
                 bounded = true;
                 break;
@@ -1093,7 +1154,7 @@ impl CodeQueryEngine {
         bounded |= document_ids.len() > 16;
         for (id, _) in document_ids.into_iter().take(16) {
             check()?;
-            if reads.saturating_add(16) > FIELD_READ_CEILING {
+            if reads.saturating_add(16) > read_ceiling {
                 bounded = true;
                 break;
             }
@@ -1126,8 +1187,8 @@ impl CodeQueryEngine {
                         continue;
                     }
                     if visited.len() > 16
-                        || reads.saturating_add(81) > FIELD_READ_CEILING
-                        || probes >= FIELD_PROBE_CEILING
+                        || reads.saturating_add(81) > read_ceiling
+                        || probes >= probe_ceiling
                     {
                         bounded = true;
                         break;
@@ -1214,7 +1275,7 @@ impl CodeQueryEngine {
                 }
             }
             check()?;
-            if reads.saturating_add(17) > FIELD_READ_CEILING || probes >= FIELD_PROBE_CEILING {
+            if reads.saturating_add(17) > read_ceiling || probes >= probe_ceiling {
                 bounded = true;
                 break;
             }
@@ -1342,6 +1403,8 @@ impl CodeQueryEngine {
                 .is_none_or(|index| !index.supports_parameter_bindings());
         let mut parameter_roles_partial = false;
         let mut ranked = Vec::new();
+        let mut deferred = Vec::new();
+        let mut link_signals = BTreeMap::new();
         for node in nodes.into_values() {
             check()?;
             let mut document = search_document(&node);
@@ -1352,7 +1415,7 @@ impl CodeQueryEngine {
                 .iter()
                 .any(|(_, variants, _, _)| matching(&document, variants).is_empty())
             {
-                if reads.saturating_add(20) <= FIELD_READ_CEILING && probes < FIELD_PROBE_CEILING {
+                if reads.saturating_add(20) <= read_ceiling && probes < probe_ceiling {
                     probes += 1;
                     let (aliases, limited) =
                         backend.matching_bounded(&node.id, true, &[EdgeKind::Aliases], true, 9)?;
@@ -1592,10 +1655,21 @@ impl CodeQueryEngine {
                         )
                     })
             });
+            let can_defer = if link_plan.enabled() {
+                let signals = link_plan.signals(&node, &document, groups, link_budget)?;
+                let permits = link_plan.permits(&signals);
+                if signals.is_informative() {
+                    link_signals.insert(node.id.clone(), signals);
+                }
+                permits
+            } else {
+                false
+            };
+            let mut defer = false;
             // Observe one requested target using already hydrated, bounded
             // fields. Normal queries allocate no trace and perform no extra
             // lookups; tracing does not affect admission, scores or ordering.
-            let trace = (trace_target == Some(node.id.as_str())).then(|| {
+            let mut trace = (trace_target == Some(node.id.as_str())).then(|| {
                 let terms = groups
                     .iter()
                     .map(|(term, variants, idf, df)| RankedTermTrace {
@@ -1771,11 +1845,14 @@ impl CodeQueryEngine {
                 && !exact_name
                 && semantic_score == 0.0
             {
-                if let Some(mut details) = trace {
+                if let Some(mut details) = trace.take() {
                     details.filter_reason = Some(RankedFilterReason::MissingSubjectEvidence);
                     target_details = Some(details);
                 }
-                continue;
+                if !can_defer {
+                    continue;
+                }
+                defer = true;
             }
             if matched_terms.is_empty() && !exact_id && !exact_name && semantic_score == 0.0 {
                 if let Some(mut details) = trace {
@@ -1799,11 +1876,14 @@ impl CodeQueryEngine {
                 && !exact_name
                 && semantic_score == 0.0
             {
-                if let Some(mut details) = trace {
+                if let Some(mut details) = trace.take() {
                     details.filter_reason = Some(RankedFilterReason::InsufficientSupportedCoverage);
                     target_details = Some(details);
                 }
-                continue;
+                if !can_defer {
+                    continue;
+                }
+                defer = true;
             }
             score *= coverage * coverage;
             if semantic_score > 0.0 {
@@ -2022,7 +2102,11 @@ impl CodeQueryEngine {
                 details.score = Some(score);
                 target_details = Some(details);
             }
-            ranked.push(RankedCandidate {
+            // This copy exists only for the new deferred-helper channel.
+            if defer {
+                link_budget.node(&node)?;
+            }
+            let candidate = RankedCandidate {
                 node: query_node(&node),
                 excerpts: Vec::new(),
                 score,
@@ -2040,7 +2124,14 @@ impl CodeQueryEngine {
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect(),
-            });
+                call_link: None,
+            };
+            if defer {
+                deferred.push(linked::Deferred { candidate });
+                linked::retain_deferred(&mut deferred, &mut bounded);
+            } else {
+                ranked.push(candidate);
+            }
         }
         if !wants_documents {
             let ranked_ids = ranked
@@ -2064,15 +2155,71 @@ impl CodeQueryEngine {
                 .total_cmp(&a.score)
                 .then_with(|| a.node.id.cmp(&b.node.id))
         });
+        let mut call_witness = linked::Context {
+            backend: &backend,
+            plan: &link_plan,
+            signals: &link_signals,
+            scopes,
+            check,
+        }
+        .apply(
+            &mut ranked,
+            &mut deferred,
+            linked::Work {
+                budget: link_budget,
+                indexed_probes: probes,
+                reads: &mut reads,
+                bounded: &mut bounded,
+                max_depth: match mode {
+                    RetrievalMode::Search => 0,
+                    RetrievalMode::Discovery { max_depth, .. } => max_depth,
+                },
+                relationship_budget: match mode {
+                    RetrievalMode::Search => 0,
+                    RetrievalMode::Discovery {
+                        relationship_budget,
+                        ..
+                    } => relationship_budget,
+                },
+            },
+        )?;
+        if let Some(target) = trace_target.and_then(|id| {
+            ranked
+                .iter()
+                .find(|candidate| candidate.node.id == id && candidate.call_link.is_some())
+        }) && let Some(details) = &mut target_details
+        {
+            details.filter_reason = None;
+            details.score = Some(target.score);
+        }
         let eligible = ranked.len();
         let ranks = ranked
             .iter()
             .enumerate()
             .map(|(at, candidate)| (candidate.node.id.clone(), at + 1))
             .collect();
-        let cap = request.limits.max_candidates.min(request.limits.max_nodes) as usize;
+        let mut cap = request.limits.max_candidates.min(request.limits.max_nodes) as usize;
+        loop {
+            let ranked_ids = ranked
+                .iter()
+                .take(cap)
+                .map(|candidate| candidate.node.id.as_str())
+                .collect::<BTreeSet<_>>();
+            let extra = linked::Witness::required_nodes(&ranked[..ranked.len().min(cap)])
+                .iter()
+                .filter(|id| !ranked_ids.contains(**id))
+                .count();
+            let excess = cap
+                .saturating_add(extra)
+                .saturating_sub(request.limits.max_nodes as usize);
+            if excess == 0 {
+                break;
+            }
+            cap = cap.saturating_sub(excess);
+        }
         bounded |= eligible > cap;
         ranked.truncate(cap);
+        call_witness.retain_for(&ranked);
         let quotation_groups = groups
             .iter()
             .map(|group| group.1.clone())
@@ -2095,7 +2242,13 @@ impl CodeQueryEngine {
             .collect::<BTreeSet<_>>();
         // Quotation selection never feeds admission, score or candidate order.
         // Only the displayed shortlist retains at most 1024 bytes per owner.
-        for candidate in ranked.iter_mut().take(if retain_excerpts { 5 } else { 0 }) {
+        for candidate in ranked.iter_mut().take(
+            if matches!(mode, RetrievalMode::Discovery { excerpts: true, .. }) {
+                5
+            } else {
+                0
+            },
+        ) {
             check()?;
             let mut quotes = owned_excerpts
                 .remove(&candidate.node.id)
@@ -2156,6 +2309,17 @@ impl CodeQueryEngine {
                         }
                     }
                 }
+                // A selected helper can be useful navigation even when none of
+                // its retained code repeats the caller's question vocabulary.
+                // Never borrow those terms or claim behavior from the preview.
+                if quotes.is_empty()
+                    && candidate.call_link.is_some()
+                    && let Some(preview) =
+                        excerpts::preview_linked_code(&owner.code_windows, &owner.comments)
+                {
+                    quotes.push(preview);
+                    candidate.reasons.push("Source-owned helper preview; no question-term match or requested behavior is inferred".to_owned());
+                }
             }
             quotes.sort_by_cached_key(|quote| {
                 (
@@ -2196,6 +2360,7 @@ impl CodeQueryEngine {
             concept_matches,
             witness_nodes: witness_nodes.into_values().collect(),
             witness_edges: witness_edges.into_values().collect(),
+            call_witness,
             target_details,
         })
     }
@@ -2218,7 +2383,18 @@ impl CodeQueryEngine {
             }
             Ok(())
         };
-        let retrieval = self.retrieve_broad(&request, &[], &check, admit, None, false)?;
+        let mut metadata = crate::record_budget::RecordBudget::new();
+        let retrieval = self.retrieve_broad(
+            &request,
+            &[],
+            &check,
+            admit,
+            None,
+            RetrievalWork {
+                mode: RetrievalMode::Search,
+                metadata: &mut metadata,
+            },
+        )?;
         instrumentation.recall += retrieval.recall_time;
         instrumentation.ranking += retrieval.ranking_time;
         instrumentation.work.candidates_read += retrieval.reads;
@@ -2370,7 +2546,8 @@ impl CodeQueryEngine {
         crate::discovery::validate_request(&request)?;
         let guard =
             crate::discovery::DiscoveryGuard::new(request.limits.timeout_ms, None, self.deadline);
-        self.discover_ranked_guarded(request, &guard, true)
+        let mut metadata = crate::record_budget::RecordBudget::new();
+        self.discover_ranked_guarded(request, &guard, true, &mut metadata)
     }
 
     fn discover_ranked_guarded(
@@ -2378,6 +2555,7 @@ impl CodeQueryEngine {
         request: DiscoveryQueryRequest,
         guard: &crate::discovery::DiscoveryGuard<'_>,
         enforce_ranked_budget: bool,
+        metadata: &mut crate::record_budget::RecordBudget,
     ) -> Result<RankedDiscoveryResponse, QueryError> {
         guard.check()?;
         let fielded = self.is_fielded_question(&request.question)?;
@@ -2398,7 +2576,7 @@ impl CodeQueryEngine {
             let candidates = discovery.seeds.iter().filter(|seed| !has_exact_id || seed.node_id == exact_subject).filter_map(|seed| discovery.nodes.iter().find(|node| node.id == seed.node_id).map(|node| RankedCandidate {
                 node: node.clone(), score: seed.score.parse().unwrap_or(0.0), relevance: RelevanceBand::Low,
                 matched_terms: seed.matched_terms.clone(), matched_fields: ranked_seed_fields(seed), reasons: vec!["Structural query seed; relevance is not inferred from graph confidence".to_owned()],
-                supporting_sources: Vec::new(), excerpts: Vec::new(),
+                supporting_sources: Vec::new(), excerpts: Vec::new(), call_link: None,
             })).collect();
             let response = RankedDiscoveryResponse {
                 eligible_count: None,
@@ -2422,9 +2600,33 @@ impl CodeQueryEngine {
             },
         };
         let scopes = self.ranked_scopes(&request, guard)?;
-        let retrieval =
-            self.retrieve_broad(&search, &scopes, &|| guard.check(), &|_| true, None, true)?;
+        let retrieval = self.retrieve_broad(
+            &search,
+            &scopes,
+            &|| guard.check(),
+            &|_| true,
+            None,
+            RetrievalWork {
+                mode: RetrievalMode::Discovery {
+                    excerpts: true,
+                    relationship_budget: request.limits.max_expanded_relationships,
+                    max_depth: request.limits.max_depth,
+                },
+                metadata,
+            },
+        )?;
         guard.check()?;
+        if retrieval
+            .ranked
+            .iter()
+            .any(|candidate| candidate.call_link.is_some())
+        {
+            metadata.projection(&(
+                &retrieval.ranked,
+                &retrieval.call_witness.nodes,
+                &retrieval.call_witness.edges,
+            ))?;
+        }
         let seeds = retrieval
             .ranked
             .iter()
@@ -2438,15 +2640,44 @@ impl CodeQueryEngine {
                 matched_terms: candidate.matched_terms.clone(),
                 matched_fields: candidate.matched_fields.clone(),
                 source: candidate.node.source.clone(),
-                candidate_source: DiscoverySeedSource::TermIndex,
+                candidate_source: if candidate.call_link.is_some() {
+                    DiscoverySeedSource::RelationSeed
+                } else {
+                    DiscoverySeedSource::TermIndex
+                },
                 alternatives: Vec::new(),
                 ambiguous: false,
             })
             .collect();
         let (selected_direction, direction_source) =
             crate::discovery::infer_discovery_direction(&request.question);
+        let mut discovery_nodes = retrieval
+            .ranked
+            .iter()
+            .map(|candidate| candidate.node.clone())
+            .collect::<Vec<_>>();
+        let mut node_ids = discovery_nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<BTreeSet<_>>();
+        for node in retrieval.call_witness.nodes.values() {
+            if node_ids.insert(node.id.clone()) {
+                discovery_nodes.push(node.clone());
+            }
+        }
+        let discovery_edges = retrieval
+            .call_witness
+            .edges
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         let discovery = DiscoveryQueryResponse {
-            schema: DISCOVERY_QUERY_SCHEMA_V1.to_owned(),
+            schema: if retrieval.call_witness.work.is_some() {
+                DISCOVERY_QUERY_SCHEMA_V2
+            } else {
+                DISCOVERY_QUERY_SCHEMA_V1
+            }
+            .to_owned(),
             question: request.question,
             selected_direction,
             direction_source,
@@ -2454,19 +2685,18 @@ impl CodeQueryEngine {
             scope: scopes,
             traversal: request.traversal,
             seeds,
-            nodes: retrieval
-                .ranked
-                .iter()
-                .map(|candidate| candidate.node.clone())
-                .collect(),
-            edges: Vec::new(),
+            nodes: discovery_nodes,
+            edges: discovery_edges,
             diagnostics: self.broad_diagnostics(&retrieval),
             limits: request.limits,
             stats: DiscoveryStats {
                 candidate_probes: retrieval.probes,
+                call_link_work: retrieval.call_witness.work.clone(),
                 candidate_nodes: retrieval.reads,
                 candidates_admitted: retrieval.ranked.len() as u64,
-                returned_nodes: retrieval.ranked.len() as u64,
+                returned_nodes: (retrieval.ranked.len() + extra_call_nodes(&retrieval)) as u64,
+                returned_edges: retrieval.call_witness.edges.len() as u64,
+                expanded_relationships: retrieval.call_witness.expanded,
                 ..DiscoveryStats::default()
             },
             omissions: DiscoveryOmissions::default(),
@@ -2515,8 +2745,13 @@ impl CodeQueryEngine {
         call_roots: CallContextRoots,
     ) -> Result<RankedDiscoveryResponse, QueryError> {
         guard.check()?;
-        let mut response =
-            self.discover_ranked_guarded(request.clone(), guard, enforce_ranked_budget)?;
+        let mut metadata = crate::record_budget::RecordBudget::new();
+        let mut response = self.discover_ranked_guarded(
+            request.clone(),
+            guard,
+            enforce_ranked_budget,
+            &mut metadata,
+        )?;
         guard.check()?;
         if !include_context {
             return Ok(response);
@@ -2532,14 +2767,41 @@ impl CodeQueryEngine {
             guard.check()?;
             return Ok(response);
         }
+        let linked_metadata = response
+            .candidates
+            .iter()
+            .any(|candidate| candidate.call_link.is_some());
+        if linked_metadata {
+            metadata.projection(&(
+                &response.discovery,
+                &response.candidates[..response.candidates.len().min(5)],
+            ))?;
+        }
         let context_roots = response
             .candidates
             .iter()
             .take(5)
             .map(|candidate| candidate.node.clone())
             .collect::<Vec<_>>();
+        let path_ids = response
+            .candidates
+            .iter()
+            .filter_map(|candidate| candidate.call_link.as_ref())
+            .flat_map(|link| {
+                std::iter::once(link.root.id.as_str())
+                    .chain(link.hops.iter().map(|hop| hop.target.id.as_str()))
+            })
+            .collect::<BTreeSet<_>>();
         let mut nodes = context_roots
             .into_iter()
+            .chain(
+                response
+                    .discovery
+                    .nodes
+                    .iter()
+                    .filter(|node| path_ids.contains(node.id.as_str()))
+                    .cloned(),
+            )
             .map(|node| (node.id.clone(), node))
             .collect::<BTreeMap<_, _>>();
         let mut edges = response
@@ -2569,11 +2831,26 @@ impl CodeQueryEngine {
                 bounded = true;
                 break;
             }
-            let (incident, limited, examined) = backend.incident_bounded_counted(
-                &seed.node_id,
-                request.include_heuristic,
-                per_seed.min(remaining_work.saturating_sub(1) as usize),
-            )?;
+            let limit = per_seed.min(remaining_work.saturating_sub(1) as usize);
+            let (incident, limited, examined) = if linked_metadata {
+                backend.incident_for_link(
+                    &seed.node_id,
+                    request.include_heuristic,
+                    limit,
+                    &mut metadata,
+                )?
+            } else {
+                let (records, limited, examined) = backend.incident_bounded_counted(
+                    &seed.node_id,
+                    request.include_heuristic,
+                    limit,
+                )?;
+                (
+                    records.into_iter().map(std::borrow::Cow::Owned).collect(),
+                    limited,
+                    examined,
+                )
+            };
             expanded = expanded.saturating_add(examined as u64);
             bounded |= limited;
             for edge in incident {
@@ -2605,15 +2882,29 @@ impl CodeQueryEngine {
                         bounded = true;
                         continue;
                     }
-                    let Some(node) = backend.node_by_id(neighbor)? else {
+                    let node = if linked_metadata {
+                        backend.node_for_link(neighbor, &mut metadata)?
+                    } else {
+                        backend.node_by_id(neighbor)?.map(std::borrow::Cow::Owned)
+                    };
+                    let Some(node) = node else {
                         continue;
                     };
                     if !discovery_scope_matches(&node, &response.discovery.scope) {
                         continue;
                     }
+                    if linked_metadata {
+                        metadata.node(&node)?;
+                    }
                     nodes.insert(node.id.clone(), query_node(&node));
                 }
-                edges.insert(edge.id.clone(), crate::discovery::discovery_edge(&edge));
+                // Keep a selected native witness already retained by retrieval.
+                if linked_metadata && !edges.contains_key(&edge.id) {
+                    metadata.edge(&edge)?;
+                }
+                edges
+                    .entry(edge.id.clone())
+                    .or_insert_with(|| crate::discovery::discovery_edge(&edge));
             }
         }
         if fielded && response.discovery.selected_direction != DiscoveryDirection::Incoming {
@@ -2636,6 +2927,7 @@ impl CodeQueryEngine {
                 edges: &mut edges,
                 seeds: &continuation_seeds,
                 expanded: &mut expanded,
+                metadata: linked_metadata.then_some(&mut metadata),
             }
             .extend(&backend, &request, &|| guard.check())?;
         }
@@ -2668,6 +2960,8 @@ impl CodeQueryEngine {
         guard.check()?;
         let graph_present = self.backend.node_by_id(expected_id)?.is_some();
         let scopes = self.ranked_scopes(&request, &guard)?;
+        let relationship_budget = request.limits.max_expanded_relationships;
+        let mut metadata = crate::record_budget::RecordBudget::new();
         let retrieval = self.retrieve_broad(
             &SearchRequest {
                 query: request.question,
@@ -2681,12 +2975,25 @@ impl CodeQueryEngine {
             &|| guard.check(),
             &|_| true,
             Some(expected_id),
-            false,
+            RetrievalWork {
+                mode: RetrievalMode::Discovery {
+                    excerpts: false,
+                    relationship_budget,
+                    max_depth: request.limits.max_depth,
+                },
+                metadata: &mut metadata,
+            },
         )?;
         guard.check()?;
         let rank = retrieval.ranks.get(expected_id).copied();
         Ok(RankedRetrievalTrace {
-            schema: "compass.query.retrieval-trace/1".to_owned(),
+            schema: if retrieval.call_witness.work.is_some() {
+                "compass.query.retrieval-trace/2"
+            } else {
+                "compass.query.retrieval-trace/1"
+            }
+            .to_owned(),
+            call_link_work: retrieval.call_witness.work,
             graph_present,
             admitted: retrieval.admitted.contains(expected_id),
             rank,

@@ -2899,3 +2899,57 @@ seeds do not gain identity tags. Seed selection, ambiguity, direction, relevance
 and coverage are unchanged; exact identity does not establish semantic relevance
 or source completeness. `ranked-identity-match/1` refreshes disposable responses.
 The existing ranked-view4 enum/schema is unchanged.
+
+
+## Metered helper navigation and retained previews
+
+Eligible broad questions asking about multiple operations can add Low-relevance
+helper candidates through exact native outgoing call occurrences. This channel
+requires separately supported topic evidence, preserves ambiguity and identity,
+and does not infer requested behavior from a caller or a call path. Explicit
+identities, guarded contexts and stronger answers retain their existing routing.
+Navigation follows the requested depth, capped at four; the default remains two.
+
+Metered responses use `compass.query.discovery/2` with
+`stats.callLinkWork.schema = "compass.query.call-link-work/1"`. The new
+`candidateProbes`/`candidateProbeLimit` pair counts additional helper-candidate
+directional Calls API lookups, including empty/filtered/failed attempts, with a
+shared ceiling of40 across roots. Failed requests still return their typed error.
+The original `stats.candidateProbes` remains indexed recall only, capped at291;
+`indexedCandidateProbes`/`indexedCandidateProbeLimit` mirrors that counter and
+ceiling. These are two logical work ledgers, potentially331 probes combined,
+not physical I/O, CPU, memory or confidence measurements. Work survives root-only
+presentation caps and attempts that find no usable helper. Unmetered discovery
+retains major1 without this field. Consumers must reject unknown/contradictory
+profiles and verify the mirrored indexed count before accepting a response.
+
+The opt-in metered projection uses `compass.query.ranked-view/7`, even when no
+helper survives; unmetered ranked output remains major4. `callLink` uses
+`compass.query.call-link/1` and preserves root, ordered native occurrence IDs,
+endpoints, selected source sites, attribution and the disclosed spelling hint.
+It is approximate/Low navigation evidence. Prior unpublished experimental
+linked majors5/6 are unsupported. Metered retrieval traces use major2; otherwise
+trace major1 remains. Ranker27 and a new disposable response epoch separate the
+retrieval policy. Historical graphs/source profiles and graph identities do not
+change solely because of this reader/query work.
+
+When a displayed helper has no query-matching quotation, it may retain one
+`linked_callable_preview` excerpt from its immutable direct-owner code windows.
+This kind requires ranked-view7 and a coherent helper path. It is rejected on
+unlinked/legacy versions. Selection considers at most16 windows of512bytes and
+64 owned comment ranges, preferring more non-comment tokens and source order
+on ties. This display heuristic does not prove a body role or semantic importance.
+Only the selected source/text is copied; no current source file is read. Preview
+terms never affect candidate admission, rank, matched terms or relevance. Existing
+matching quotations take priority. The first five candidates still retain at
+most two512byte quotations each, inside the existing completed-answer budget.
+Text labels previews as behavior unverified. Disposable quotation responses
+advance to `ranked-source-excerpts/6-linked-preview`.
+
+CLI and MCP share the typed work and ranked contracts. Default text includes
+labeled lookup counts; ranked JSON retains structured paths/work, and raw JSON
+retains typed stats. The generic Agent View major1 keeps its existing shape and
+raw identity plus an informational caveat; canonical work counters remain in the
+raw response. Operational counts remain outside semantic result digests, while
+the raw major distinguishes the profile. These contracts do not establish
+independent query/graph superiority or a performance qualification.

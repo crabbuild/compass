@@ -43,6 +43,7 @@ fn response() -> RankedDiscoveryResponse {
             reasons: vec!["Request subject and action match the signature.".to_owned()],
             supporting_sources: Vec::new(),
             excerpts: Vec::new(),
+            call_link: None,
         })
         .collect::<Vec<_>>();
     RankedDiscoveryResponse {
@@ -512,5 +513,570 @@ fn nested_code_is_separate_lexical_context_and_legacy_views_reject_it() -> Resul
     legacy.candidates[0].excerpts[0].kind = RankedExcerptKind::CallableCode;
     legacy.candidates[0].excerpts[0].nested_scope = None;
     compass_output::RankedQueryView::from_json(&serde_json::to_vec(&legacy)?)?;
+    Ok(())
+}
+
+fn attach_call_work(response: &mut RankedDiscoveryResponse, probes: u64) {
+    use compass_model::query_contract::{DISCOVERY_QUERY_SCHEMA_V2, MAX_INDEXED_CANDIDATE_PROBES};
+    response.discovery.schema = DISCOVERY_QUERY_SCHEMA_V2.to_owned();
+    response.discovery.stats.call_link_work = Some(compass_query::RankedCallWork {
+        schema: compass_query::CALL_LINK_WORK_SCHEMA.to_owned(),
+        candidate_probes: probes,
+        candidate_probe_limit: compass_query::MAX_CALL_LINK_CANDIDATE_PROBES,
+        indexed_candidate_probes: response.discovery.stats.candidate_probes,
+        indexed_candidate_probe_limit: MAX_INDEXED_CANDIDATE_PROBES,
+    });
+}
+
+#[test]
+fn call_link_projection_is_explicit_bounded_and_versioned() -> Result<(), Box<dyn Error>> {
+    use compass_query::{RankedCallEndpoint, RankedCallHint, RankedCallHop, RankedCallLink};
+    let mut response = response();
+    let root = &response.candidates[0].node;
+    let target = &response.candidates[1].node;
+    let endpoint = |node: &QueryNode| -> Result<RankedCallEndpoint, Box<dyn Error>> {
+        Ok(RankedCallEndpoint {
+            id: node.id.clone(),
+            name: node.qualified_name.clone(),
+            source: node.source.clone().ok_or("missing source")?,
+        })
+    };
+    let link = RankedCallLink {
+        schema: "compass.query.call-link/1".to_owned(),
+        root: endpoint(root)?,
+        hops: vec![RankedCallHop {
+            edge_id: "edge:call".to_owned(),
+            source_id: root.id.clone(),
+            target: endpoint(target)?,
+            site: root.source.clone().ok_or("missing root source")?,
+            occurrence_rule: Some("fixture-call".to_owned()),
+            extractor: "native-fixture".to_owned(),
+            rule: Some("direct-call".to_owned()),
+        }],
+        hint: RankedCallHint {
+            requested: "detect".to_owned(),
+            spelling: "validate".to_owned(),
+        },
+    };
+    attach_call_work(&mut response, 1);
+    response.candidates[1].call_link = Some(link.clone());
+    response.candidates[1].relevance = RelevanceBand::Low;
+    let view = build_ranked_query_view(&response, "graph", "digest")?;
+    assert_eq!(view.schema, compass_output::RANKED_QUERY_LINKED_VIEW_SCHEMA);
+    assert_eq!(view.candidates[1].call_link.as_ref(), Some(&link));
+    let serialized = serde_json::to_vec(&view)?;
+    assert_eq!(
+        compass_output::RankedQueryView::from_json(&serialized)?,
+        view
+    );
+    let mut old = serde_json::to_value(&view)?;
+    for schema in [
+        "compass.query.ranked-view/4",
+        "compass.query.ranked-view/5",
+        "compass.query.ranked-view/6",
+    ] {
+        old["schema"] = serde_json::json!(schema);
+        assert!(compass_output::RankedQueryView::from_json(&serde_json::to_vec(&old)?).is_err());
+    }
+    for failure in [
+        "too_many_hops",
+        "broken_chain",
+        "wrong_owner",
+        "strong_relevance",
+        "unknown_path_schema",
+    ] {
+        let mut changed = response.clone();
+        if failure == "strong_relevance" {
+            changed.candidates[1].relevance = RelevanceBand::High;
+        }
+        if let Some(link) = &mut changed.candidates[1].call_link {
+            match failure {
+                "too_many_hops" => link.hops = vec![link.hops[0].clone(); 5],
+                "broken_chain" => link.hops[0].source_id = "not-the-root".to_owned(),
+                "wrong_owner" => link.hops[0].target.source.file = "unrelated.py".to_owned(),
+                "unknown_path_schema" => link.schema = "compass.query.call-link/99".to_owned(),
+                _ => {}
+            }
+        }
+        assert!(
+            build_ranked_query_view(&changed, "graph", "digest").is_err(),
+            "{failure}"
+        );
+    }
+    // Even a discarded sixth candidate cannot bypass compact-path input bounds.
+    response.candidates[5].call_link = Some(link);
+    if let Some(link) = &mut response.candidates[5].call_link {
+        link.hops = vec![link.hops[0].clone(); 5];
+    }
+    assert!(build_ranked_query_view(&response, "graph", "digest").is_err());
+    Ok(())
+}
+
+fn shared_call_paths() -> Result<RankedDiscoveryResponse, Box<dyn Error>> {
+    use compass_query::{RankedCallEndpoint, RankedCallHint, RankedCallHop, RankedCallLink};
+    let mut answer = response();
+    attach_call_work(&mut answer, 2);
+    let endpoint = |node: &QueryNode| -> Result<RankedCallEndpoint, Box<dyn Error>> {
+        Ok(RankedCallEndpoint {
+            id: node.id.clone(),
+            name: node.qualified_name.clone(),
+            source: node.source.clone().ok_or("missing source")?,
+        })
+    };
+    let root = endpoint(&answer.candidates[0].node)?;
+    let mut intermediate = root.clone();
+    intermediate.id = "intermediate".to_owned();
+    intermediate.name = "app::bridge".to_owned();
+    let prefix = RankedCallHop {
+        edge_id: "shared-prefix".to_owned(),
+        source_id: root.id.clone(),
+        target: intermediate.clone(),
+        site: root.source.clone(),
+        occurrence_rule: Some("call".to_owned()),
+        extractor: "native-fixture".to_owned(),
+        rule: None,
+    };
+    for index in [1, 2] {
+        answer.candidates[index].relevance = RelevanceBand::Low;
+        answer.candidates[index].call_link = Some(RankedCallLink {
+            schema: "compass.query.call-link/1".to_owned(),
+            root: root.clone(),
+            hops: vec![
+                prefix.clone(),
+                RankedCallHop {
+                    edge_id: format!("terminal-{index}"),
+                    source_id: intermediate.id.clone(),
+                    target: endpoint(&answer.candidates[index].node)?,
+                    site: intermediate.source.clone(),
+                    occurrence_rule: Some("call".to_owned()),
+                    extractor: "native-fixture".to_owned(),
+                    rule: None,
+                },
+            ],
+            hint: RankedCallHint {
+                requested: "detect".to_owned(),
+                spelling: "validate".to_owned(),
+            },
+        });
+    }
+    Ok(answer)
+}
+
+#[test]
+fn call_link_depth_and_identity_contracts_reject_forged_views() -> Result<(), Box<dyn Error>> {
+    let answer = shared_call_paths()?;
+    let view = build_ranked_query_view(&answer, "graph", "digest")?;
+    // Sharing the exact same prefix is legitimate.
+    assert_eq!(
+        compass_output::RankedQueryView::from_json(&serde_json::to_vec(&view)?)?,
+        view
+    );
+    let mut accepted = Vec::new();
+    for failure in [
+        "request_depth",
+        "duplicate_edge",
+        "intermediate_conflict",
+        "occurrence_conflict",
+        "displayed_intermediate_conflict",
+        "root_after_helper",
+        "oversized_site",
+    ] {
+        let mut input = answer.clone();
+        match failure {
+            "request_depth" => input.discovery.limits.max_depth = 1,
+            "duplicate_edge" => {
+                let link = input.candidates[1]
+                    .call_link
+                    .as_mut()
+                    .ok_or("missing link")?;
+                link.hops[1].edge_id = link.hops[0].edge_id.clone();
+            }
+            "intermediate_conflict" => {
+                input.candidates[2]
+                    .call_link
+                    .as_mut()
+                    .ok_or("missing link")?
+                    .hops[0]
+                    .target
+                    .name = "app::different_bridge".to_owned();
+            }
+            "occurrence_conflict" => {
+                input.candidates[2]
+                    .call_link
+                    .as_mut()
+                    .ok_or("missing link")?
+                    .hops[0]
+                    .extractor = "another-extractor".to_owned();
+            }
+            "displayed_intermediate_conflict" => {
+                input.candidates[3].node.id = "intermediate".to_owned();
+                input.candidates[3].node.qualified_name = "app::different_bridge".to_owned();
+            }
+            "root_after_helper" => input.candidates.swap(0, 1),
+            "oversized_site" => {
+                input.candidates[1]
+                    .call_link
+                    .as_mut()
+                    .ok_or("missing link")?
+                    .hops[0]
+                    .site
+                    .file = "x".repeat(4097);
+            }
+            _ => return Err("unknown test case".into()),
+        }
+        // Exercise the decoder separately from producer admission.
+        let mut forged = view.clone();
+        forged.limits = input.discovery.limits.clone();
+        for (index, candidate) in input.candidates.iter().take(5).enumerate() {
+            forged.candidates[index].id = candidate.node.id.clone();
+            forged.candidates[index].name = candidate.node.qualified_name.clone();
+            forged.candidates[index].source = candidate.node.source.clone();
+            forged.candidates[index].call_link = candidate.call_link.clone();
+        }
+        if failure == "root_after_helper" {
+            forged = view.clone();
+            forged.candidates.swap(0, 1);
+            for (index, candidate) in forged.candidates.iter_mut().enumerate() {
+                candidate.rank = index as u32 + 1;
+            }
+        }
+        if compass_output::RankedQueryView::from_json(&serde_json::to_vec(&forged)?).is_ok() {
+            accepted.push(format!("reader: {failure}"));
+        }
+        if build_ranked_query_view(&input, "graph", "digest").is_ok() {
+            accepted.push(format!("producer: {failure}"));
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "forged paths were accepted: {accepted:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn compact_and_context_occurrences_share_one_identity() -> Result<(), Box<dyn Error>> {
+    use compass_model::provenance::{
+        EvidenceConfidence, EvidenceOrigin, OccurrenceRule, ResolutionCandidate, ResolutionState,
+    };
+    use compass_model::query_contract::{QueryEvidence, QueryEvidenceLayer};
+    let mut answer = shared_call_paths()?;
+    let prefix = answer.candidates[1]
+        .call_link
+        .as_ref()
+        .ok_or("missing link")?
+        .hops[0]
+        .clone();
+    let mut intermediate = answer.candidates[0].node.clone();
+    intermediate.id = prefix.target.id.clone();
+    intermediate.name = prefix.target.name.clone();
+    intermediate.qualified_name = prefix.target.name.clone();
+    intermediate.source = Some(prefix.target.source.clone());
+    answer.discovery.nodes = answer
+        .candidates
+        .iter()
+        .map(|candidate| candidate.node.clone())
+        .chain([intermediate])
+        .collect();
+    answer.discovery.edges = vec![DiscoveryEdge {
+        id: Some(prefix.edge_id.clone()),
+        source: prefix.source_id.clone(),
+        target: prefix.target.id.clone(),
+        kind: EdgeKind::Calls,
+        occurrence_rule: prefix
+            .occurrence_rule
+            .as_ref()
+            .and_then(OccurrenceRule::new),
+        relationship_site: Some(prefix.site.clone()),
+        details: None,
+        context: None,
+        evidence: vec![QueryEvidence {
+            layer: QueryEvidenceLayer::StructuralGraph,
+            origin: EvidenceOrigin::Ast,
+            extractor: prefix.extractor.clone(),
+            confidence: EvidenceConfidence::Exact,
+            anchor: Some(prefix.site.clone()),
+            rule: prefix.rule.clone(),
+            wiring_site: None,
+            resolution: ResolutionState::Exact,
+            candidates: Vec::new(),
+        }],
+    }];
+    let view = build_ranked_query_view_with_context(&answer, "graph", "digest", true)?;
+    assert_eq!(
+        compass_output::RankedQueryView::from_json(&serde_json::to_vec(&view)?)?,
+        view
+    );
+    // A compact path needs no optional context copy.
+    build_ranked_query_view(&answer, "graph", "digest")?;
+    // Nonmatching additional proofs do not erase the selected exact attribution.
+    let mut additional = answer.clone();
+    let mut unrelated = additional.discovery.edges[0].evidence[0].clone();
+    unrelated.origin = EvidenceOrigin::Config;
+    unrelated.confidence = EvidenceConfidence::Inferred;
+    unrelated.resolution = ResolutionState::Unresolved;
+    unrelated.extractor = "unrelated-proof".to_owned();
+    additional.discovery.edges[0].evidence.insert(0, unrelated);
+    let enriched = build_ranked_query_view_with_context(&additional, "graph", "digest", true)?;
+    compass_output::RankedQueryView::from_json(&serde_json::to_vec(&enriched)?)?;
+    let exact_candidate = ResolutionCandidate {
+        node_id: prefix.target.id.clone(),
+        reason: "source-backed target".to_owned(),
+        confidence: EvidenceConfidence::Exact,
+        score: None,
+        anchor: Some(prefix.target.source.clone()),
+    };
+    let mut single = answer.clone();
+    single.discovery.edges[0].evidence[0].candidates = vec![exact_candidate.clone()];
+    let single = build_ranked_query_view_with_context(&single, "graph", "digest", true)?;
+    compass_output::RankedQueryView::from_json(&serde_json::to_vec(&single)?)?;
+    let mut accepted = Vec::new();
+    for failure in [
+        "source",
+        "target",
+        "kind",
+        "site",
+        "rule",
+        "extractor",
+        "proof_rule",
+        "proof_anchor",
+        "proof_origin",
+        "proof_confidence",
+        "ambiguous",
+        "unresolved",
+        "multiple_candidates",
+        "foreign_candidate",
+        "inferred_candidate",
+        "empty_reason",
+        "invalid_candidate_anchor",
+        "duplicate_context",
+        "context_node",
+    ] {
+        let mut input = answer.clone();
+        let edge = &mut input.discovery.edges[0];
+        match failure {
+            "source" => edge.source = input.candidates[1].node.id.clone(),
+            "target" => edge.target = input.candidates[1].node.id.clone(),
+            "kind" => edge.kind = EdgeKind::References,
+            "site" => edge.relationship_site.as_mut().ok_or("site")?.file = "another.rs".to_owned(),
+            "rule" => edge.occurrence_rule = None,
+            "extractor" => edge.evidence[0].extractor = "another".to_owned(),
+            "proof_rule" => edge.evidence[0].rule = Some("another".to_owned()),
+            "proof_anchor" => edge.evidence[0].anchor = None,
+            "proof_origin" => edge.evidence[0].origin = EvidenceOrigin::Config,
+            "proof_confidence" => edge.evidence[0].confidence = EvidenceConfidence::Inferred,
+            "ambiguous" => edge.evidence[0].resolution = ResolutionState::Ambiguous,
+            "unresolved" => edge.evidence[0].resolution = ResolutionState::Unresolved,
+            "multiple_candidates" => edge.evidence[0].candidates = vec![exact_candidate.clone(); 2],
+            "foreign_candidate"
+            | "inferred_candidate"
+            | "empty_reason"
+            | "invalid_candidate_anchor" => {
+                let mut candidate = exact_candidate.clone();
+                match failure {
+                    "foreign_candidate" => candidate.node_id = "other".to_owned(),
+                    "inferred_candidate" => candidate.confidence = EvidenceConfidence::Inferred,
+                    "empty_reason" => candidate.reason = " ".to_owned(),
+                    "invalid_candidate_anchor" => {
+                        candidate
+                            .anchor
+                            .as_mut()
+                            .ok_or("candidate anchor")?
+                            .start_byte = 2
+                    }
+                    _ => return Err("unknown candidate case".into()),
+                }
+                edge.evidence[0].candidates = vec![candidate];
+            }
+            "duplicate_context" => {
+                let mut duplicate = edge.clone();
+                duplicate.context = Some("contradictory retained occurrence".to_owned());
+                input.discovery.edges.push(duplicate);
+            }
+            "context_node" => {
+                let node = input
+                    .discovery
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == prefix.target.id)
+                    .ok_or("intermediate")?;
+                node.qualified_name = "different".to_owned();
+            }
+            _ => return Err("unknown test case".into()),
+        }
+        let mut forged = view.clone();
+        let context = forged.context.as_mut().ok_or("context")?;
+        context.edges = input.discovery.edges.clone();
+        context.nodes = input.discovery.nodes.clone();
+        if compass_output::RankedQueryView::from_json(&serde_json::to_vec(&forged)?).is_ok() {
+            accepted.push(format!("reader: {failure}"));
+        }
+        if build_ranked_query_view_with_context(&input, "graph", "digest", true).is_ok() {
+            accepted.push(format!("producer: {failure}"));
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "contradictory occurrences were accepted: {accepted:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn call_link_text_budgets_preserve_root_before_helper() -> Result<(), Box<dyn Error>> {
+    let view = build_ranked_query_view(&shared_call_paths()?, "graph", "digest")?;
+    let mut saw_helper = false;
+    let mut saw_root_only = false;
+    for budget in [150, 200, 250, 300, 400, 500, 650, 800, 1000, 1500] {
+        let Ok(text) = render_ranked_query_text(&view, budget) else {
+            continue;
+        };
+        let root = text
+            .find("1. app::implementation_0")
+            .ok_or("displayed prefix lost root")?;
+        if let Some(helper) = text.find("Call path (execution unverified)") {
+            assert!(root < helper);
+            saw_helper = true;
+        } else {
+            saw_root_only = true;
+        }
+        assert!(text.len() < budget * 4);
+    }
+    assert!(
+        saw_helper && saw_root_only,
+        "both budget projections must be exercised"
+    );
+    Ok(())
+}
+
+#[test]
+fn call_work_is_reported_without_a_selected_path_and_validated_before_projection()
+-> Result<(), Box<dyn Error>> {
+    let mut input = response();
+    attach_call_work(&mut input, 40);
+    let view = build_ranked_query_view(&input, "graph", "digest")?;
+    assert_eq!(view.schema, compass_output::RANKED_QUERY_LINKED_VIEW_SCHEMA);
+    assert!(
+        view.candidates
+            .iter()
+            .all(|candidate| candidate.call_link.is_none())
+    );
+    assert!(render_ranked_query_text(&view, 1000)?.contains("Call-linked lookups: 40/40"));
+    let value = serde_json::to_value(&view)?;
+    assert_eq!(value["callLinkWork"]["candidateProbes"], 40);
+    for failure in [
+        "absent",
+        "unknown",
+        "overcount",
+        "changed_limit",
+        "old_major",
+    ] {
+        let mut forged = value.clone();
+        match failure {
+            "absent" => {
+                forged
+                    .as_object_mut()
+                    .ok_or("view object")?
+                    .remove("callLinkWork");
+            }
+            "unknown" => {
+                forged["callLinkWork"]["schema"] =
+                    serde_json::json!("compass.query.call-link-work/2")
+            }
+            "overcount" => forged["callLinkWork"]["candidateProbes"] = serde_json::json!(41),
+            "changed_limit" => {
+                forged["callLinkWork"]["candidateProbeLimit"] = serde_json::json!(41)
+            }
+            _ => forged["schema"] = serde_json::json!("compass.query.ranked-view/4"),
+        }
+        assert!(
+            compass_output::RankedQueryView::from_json(&serde_json::to_vec(&forged)?).is_err(),
+            "{failure}"
+        );
+    }
+    input.discovery.stats.candidate_probes += 1;
+    assert!(build_ranked_query_view(&input, "graph", "digest").is_err());
+    let linked = shared_call_paths()?;
+    let mut view = build_ranked_query_view(&linked, "graph", "digest")?;
+    view.call_link_work
+        .as_mut()
+        .ok_or("call work")?
+        .candidate_probes = 1;
+    assert!(compass_output::RankedQueryView::from_json(&serde_json::to_vec(&view)?).is_err());
+    Ok(())
+}
+
+#[test]
+fn helper_previews_require_the_linked_profile_and_an_actual_helper_path()
+-> Result<(), Box<dyn Error>> {
+    use compass_query::{RankedExcerptKind, RankedSourceExcerpt};
+    let mut answer = shared_call_paths()?;
+    answer.candidates[1].excerpts = vec![RankedSourceExcerpt {
+        kind: RankedExcerptKind::LinkedCallablePreview,
+        source: answer.candidates[1].node.source.clone().ok_or("source")?,
+        text: "x".to_owned(),
+        clipped: false,
+        nested_scope: None,
+    }];
+    let view = build_ranked_query_view(&answer, "graph", "digest")?;
+    assert_eq!(
+        compass_output::RankedQueryView::from_json(&serde_json::to_vec(&view)?)?,
+        view
+    );
+    assert!(
+        render_ranked_query_text(&view, 4000)?
+            .contains("Helper code preview (behavior unverified)")
+    );
+    for schema in [
+        "compass.query.ranked-view/1",
+        "compass.query.ranked-view/2",
+        "compass.query.ranked-view/3",
+        "compass.query.ranked-view/4",
+    ] {
+        let mut forged = view.clone();
+        forged.schema = schema.to_owned();
+        forged.call_link_work = None;
+        for candidate in &mut forged.candidates {
+            candidate.call_link = None;
+        }
+        assert!(
+            compass_output::RankedQueryView::from_json(&serde_json::to_vec(&forged)?).is_err(),
+            "{schema}"
+        );
+    }
+    let mut root_preview = view.clone();
+    root_preview.candidates[0].excerpts = vec![RankedSourceExcerpt {
+        source: root_preview.candidates[0].source.clone().ok_or("source")?,
+        ..root_preview.candidates[1].excerpts[0].clone()
+    }];
+    assert!(
+        compass_output::RankedQueryView::from_json(&serde_json::to_vec(&root_preview)?).is_err()
+    );
+    let mut strong = view.clone();
+    strong.candidates[1].relevance = RelevanceBand::High;
+    assert!(compass_output::RankedQueryView::from_json(&serde_json::to_vec(&strong)?).is_err());
+    let mut outside = view.clone();
+    outside.candidates[1].excerpts[0].source.start_byte += 1;
+    outside.candidates[1].excerpts[0].source.end_byte += 1;
+    outside.candidates[1].excerpts[0].source.start_column += 1;
+    outside.candidates[1].excerpts[0].source.end_column += 1;
+    assert!(compass_output::RankedQueryView::from_json(&serde_json::to_vec(&outside)?).is_err());
+    let mut accepted = Vec::new();
+    for kind in [NodeKind::File, NodeKind::Class] {
+        let mut non_callable = answer.clone();
+        non_callable.candidates[1].node.kind = kind;
+        if build_ranked_query_view(&non_callable, "graph", "digest").is_ok() {
+            accepted.push(format!("projection: {kind:?}"));
+        }
+        let mut forged = view.clone();
+        forged.candidates[1].kind = kind;
+        if compass_output::RankedQueryView::from_json(&serde_json::to_vec(&forged)?).is_ok() {
+            accepted.push(format!("reader: {kind:?}"));
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "non-callable preview accepted: {accepted:?}"
+    );
     Ok(())
 }

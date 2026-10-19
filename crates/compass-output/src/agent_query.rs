@@ -624,7 +624,7 @@ pub fn build_discovery_query_view(
     response: &DiscoveryQueryResponse,
     context: AgentQueryContext,
 ) -> Result<AgentQueryView, OutputError> {
-    if response.schema != compass_model::query_contract::DISCOVERY_QUERY_SCHEMA_V1 {
+    if !response.has_valid_work_contract() {
         return Err(invalid(format!(
             "unsupported raw discovery schema {}",
             response.schema
@@ -687,6 +687,16 @@ pub fn build_discovery_query_view(
         .iter()
         .map(agent_caveat)
         .collect::<Vec<_>>();
+    if let Some(work) = &response.stats.call_link_work {
+        all_caveats.push(AgentCaveat {
+            severity: AgentSeverity::Info,
+            code: "call_link_recall_work".to_owned(),
+            statement: format!("Call-linked lookups: {}/{}; indexed recall probes: {}/{}. Raw discovery/2 stats retain the typed work profile.",
+                work.candidate_probes, work.candidate_probe_limit,
+                work.indexed_candidate_probes, work.indexed_candidate_probe_limit),
+            node_id: None, path: None,
+        });
+    }
     all_caveats.sort_by(|left, right| {
         left.severity
             .cmp(&right.severity)

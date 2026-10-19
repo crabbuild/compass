@@ -29,9 +29,10 @@ mod workbench;
 
 pub use overview::render_hotspots_text;
 pub use ranked_query::{
-    RANKED_QUERY_VIEW_SCHEMA, RANKED_VIEW_MAX_CANDIDATES, RankedNameMatch, RankedQueryCandidate,
-    RankedQueryContext, RankedQueryView, RankedRetrievalKind, build_ranked_query_view,
-    build_ranked_query_view_with_context, render_ranked_query_text,
+    RANKED_QUERY_LINKED_VIEW_SCHEMA, RANKED_QUERY_VIEW_SCHEMA, RANKED_VIEW_MAX_CANDIDATES,
+    RankedNameMatch, RankedQueryCandidate, RankedQueryContext, RankedQueryView,
+    RankedRetrievalKind, build_ranked_query_view, build_ranked_query_view_with_context,
+    render_ranked_query_text,
 };
 pub use text_budget::{BudgetedText, render_budgeted_text};
 

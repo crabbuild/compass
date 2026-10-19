@@ -1,4 +1,5 @@
 mod impact_summary;
+mod linked_records;
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};

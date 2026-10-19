@@ -16,18 +16,23 @@ entry ordering, continuation positions and raw JSON remain unchanged.
 
 ## Ranked query answers
 
-`query --view ranked --format json` produces `compass.query.ranked-view/4`.
-Code-text retrieval covers retained source windows; a literal-only body may
-have no retained window and remain outside this channel.
+`query --view ranked --format json` produces `compass.query.ranked-view/4`,
+or major7 when helper navigation is metered. Raw discovery uses major1 without
+that work profile and major2 with it. Code-text retrieval covers retained source
+windows; omitted or unavailable source remains outside this channel.
 MCP `query_graph` with `view: "ranked"` returns the same projection in its
 `rankedView` envelope field, alongside the raw discovery `result`.
 
 Each displayed candidate may retain up to two `excerpts`, totaling at most 1,024
-UTF-8 bytes. A quotation includes `kind` (`callable_comment` or
-`ast_documentation`), exact `source` coordinates, raw retained `text`, and
-`clipped`. A retained window must still contain matching query-term evidence;
-if clipping removes every match, omit the quotation and keep the ranked
-candidate. Quotations come from the immutable graph-bound body index or the
+UTF-8 bytes. A quotation includes `kind` (`callable_comment`, `callable_code`,
+`nested_callable_code`, `ast_documentation`, or linked-major7-only
+`linked_callable_preview`), exact `source` coordinates, raw retained `text`, and
+`clipped`. Nested lexical code also names its enclosing `nestedScope` and does
+not imply execution. Matching quotations require complete retained query-term
+matches. The separate helper-preview fallback requires an actual coherent call
+path, Low relevance and no matching quotation; it carries no matching-term or
+behavior claim. It chooses among at most16 direct-owner512byte windows by
+non-comment token count, then source order, without affecting candidate ranking. Quotations come from the immutable graph-bound body index or the
 versioned raw leading-documentation ownership proof. Generic document links,
 normalized legacy docstrings and identifier-only sites do not supply quotations.
 Current mutable source files are not read. Comment/documentation text is
@@ -39,6 +44,23 @@ It shortens or omits quotations before removing a ranked candidate to meet
 bounded exact excerpts. The native reader also accepts ranked-view/1 without
 excerpts; a version 1 payload containing quotations and unknown major versions
 fail explicitly.
+
+Metered raw stats include `callLinkWork` schema `compass.query.call-link-work/1`.
+`candidateProbes`/`candidateProbeLimit` counts the additional helper Calls API
+lookups (limit40). `indexedCandidateProbes`/`indexedCandidateProbeLimit` mirrors
+original `stats.candidateProbes` and its291 limit. Limits/counts are validated
+independently; neither is a physical I/O or confidence measurement. A profile
+survives no-witness results and presentation pruning. Major1 forbids the field;
+major2 requires it and exact indexed-count agreement. Ranked major7 requires a
+coherent top-level `callLinkWork`; unmetered major4 forbids it. Unknown and
+contradictory versions fail explicitly.
+
+An optional candidate `callLink` uses `compass.query.call-link/1`: root endpoint,
+at most four ordered native hops with occurrence IDs/sites/attribution and a
+disclosed navigation spelling hint. It requires approximate identity and Low
+relevance; consistent repeated endpoints/occurrences and candidate source
+enclosure are validated. No call link establishes behavior. Experimental
+unpublished ranked majors5/6 are unsupported.
 
 The projection retains up to five ordered candidates independently of the graph
 seed limit. Each candidate has a rank, stable graph ID, qualified name,

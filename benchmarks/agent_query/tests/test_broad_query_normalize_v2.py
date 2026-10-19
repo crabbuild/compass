@@ -27,6 +27,28 @@ def raw_claims(count):
 
 
 class Version2NormalizerTests(unittest.TestCase):
+    def test_helper_navigation_and_preview_lines_remain_pending_source_review(self):
+        raw = (b"Call-linked lookups: 2/40; indexed recall probes: 17/291.\n"
+               b"1. Store::save @ store.py:2 [relevance=low]\n"
+               b"2. Store::flush @ store.py:4 [relevance=low]\n"
+               b"   Call path (execution unverified): save -> flush; navigation hint publish -> flush\n"
+               b"   Helper code preview (behavior unverified) @ other.py:99: return value\n")
+        result = normalize(raw)
+        claims = flatten_claim_batches(result)
+        self.assertEqual(result["rankingKind"], "retrieval")
+        self.assertEqual(len(result["ranked"]), 2)
+        self.assertEqual(len(claims), 2)
+        self.assertTrue(all(c["assertionKind"] == "declaration_identity_only" for c in claims))
+        self.assertFalse(result["normalizationComplete"])
+        self.assertFalse(result["semanticCoverageComplete"])
+        self.assertEqual(len(result["lineLedger"]), 5)
+        pending = [entry for entry in result["reviewQueue"] if entry["kind"] == "unparsed_printed_text"]
+        self.assertEqual(len(pending), 3)
+        for entry in pending:
+            span = entry["span"]
+            self.assertTrue(raw[span["startByte"]:span["endByte"]])
+        self.assertFalse(any("relation" in c for c in claims))
+
     def test_resolved_ownerless_and_conflicting_groups_summarize_once_for_both_endpoints(self):
         for case in ("ownerless_same","ownerless_distinct","conflicting","resolved_same","resolved_distinct"):
             count={"gets":0,"calls":0}

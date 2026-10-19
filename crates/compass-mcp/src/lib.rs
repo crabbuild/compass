@@ -1558,9 +1558,9 @@ fn tool_specs() -> Vec<Tool> {
             "Run bounded structured discovery for natural-language questions; explicit legacy traversal fields preserve compatibility text context.",
             json!({"type":"object","additionalProperties":false,"properties":{
                 "question":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_QUESTION_BYTES,"description":"Natural language question or keyword search"},
-                "view":{"type":"string","enum":["ranked"],"description":"Opt-in implementation shortlist in compass.query.ranked-view/4; result retains the raw discovery contract."},
+                "view":{"type":"string","enum":["ranked"],"description":"Opt-in shortlist: ranked-view/4, or ranked-view/7 for metered helper navigation; raw result uses discovery/1 or /2. Helper previews and call paths do not establish behavior."},
                 "text_budget":{"type":"integer","minimum":1,"maximum":65536,"default":800,"description":"Whole ranked text budget (UTF-8 bytes divided by four); requires view=ranked."},
-                "include_context":{"type":"boolean","default":false,"description":"Append bounded one-hop witnessed context after the ranked shortlist; requires view=ranked."},
+                "include_context":{"type":"boolean","default":false,"description":"Append bounded witnessed relationship context after the ranked shortlist; requires view=ranked."},
                 "mode":{"type":"string","enum":["bfs","dfs"],"description":"Explicit legacy mode; selects compatibility traversal"},
                 "depth":{"type":"integer","minimum":0,"maximum":6,"description":"Explicit legacy traversal depth (1-6)"},
                 "token_budget":{"type":"integer","minimum":0,"description":"Explicit legacy text token budget"},

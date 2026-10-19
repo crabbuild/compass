@@ -12,6 +12,7 @@ pub(super) struct Context<'a> {
     pub edges: &'a mut BTreeMap<String, DiscoveryEdge>,
     pub seeds: &'a [DiscoverySeed],
     pub expanded: &'a mut u64,
+    pub metadata: Option<&'a mut crate::record_budget::RecordBudget>,
 }
 
 impl Context<'_> {
@@ -27,6 +28,7 @@ impl Context<'_> {
             edges,
             seeds,
             expanded,
+            mut metadata,
         } = self;
         if request.limits.max_depth <= 1 {
             return Ok(false);
@@ -62,7 +64,12 @@ impl Context<'_> {
                 continue;
             }
             expansions += 1;
-            let Some(owner) = backend.node_by_id(&id)? else {
+            let owner = if let Some(budget) = metadata.as_deref_mut() {
+                backend.node_for_link(&id, budget)?
+            } else {
+                backend.node_by_id(&id)?.map(std::borrow::Cow::Owned)
+            };
+            let Some(owner) = owner else {
                 continue;
             };
             if !owner.kind.is_callable() || !relationships::exact_ast(&owner) {
@@ -71,8 +78,22 @@ impl Context<'_> {
             // Reserve one decoded record for lookahead, including when no output
             // record fits. Heuristic/rejected records consume the same allowance.
             let limit = remaining.saturating_sub(1).min(MAX_FANOUT as u64) as usize;
-            let (calls, limited, examined) =
-                backend.matching_bounded_counted(&id, false, &[EdgeKind::Calls], false, limit)?;
+            let (calls, limited, examined) = if let Some(budget) = metadata.as_deref_mut() {
+                backend.calls_for_link(&id, limit, budget)?
+            } else {
+                let (records, limited, examined) = backend.matching_bounded_counted(
+                    &id,
+                    false,
+                    &[EdgeKind::Calls],
+                    false,
+                    limit,
+                )?;
+                (
+                    records.into_iter().map(std::borrow::Cow::Owned).collect(),
+                    limited,
+                    examined,
+                )
+            };
             *expanded = expanded.saturating_add(examined as u64);
             bounded |= limited;
             for edge in calls {
@@ -85,7 +106,14 @@ impl Context<'_> {
                     bounded = true;
                     break;
                 }
-                let Some(target) = backend.node_by_id(&edge.target)? else {
+                let target = if let Some(budget) = metadata.as_deref_mut() {
+                    backend.node_for_link(&edge.target, budget)?
+                } else {
+                    backend
+                        .node_by_id(&edge.target)?
+                        .map(std::borrow::Cow::Owned)
+                };
+                let Some(target) = target else {
                     continue;
                 };
                 if !target.kind.is_callable()
@@ -99,9 +127,19 @@ impl Context<'_> {
                         bounded = true;
                         continue;
                     }
+                    if let Some(budget) = metadata.as_deref_mut() {
+                        budget.node(&target)?;
+                    }
                     nodes.insert(target.id.clone(), query_node(&target));
                 }
-                edges.insert(edge.id.clone(), crate::discovery::discovery_edge(&edge));
+                if !edges.contains_key(&edge.id)
+                    && let Some(budget) = metadata.as_deref_mut()
+                {
+                    budget.edge(&edge)?;
+                }
+                edges
+                    .entry(edge.id.clone())
+                    .or_insert_with(|| crate::discovery::discovery_edge(&edge));
                 let next = depth + 1;
                 if next < request.limits.max_depth
                     && depths
@@ -113,7 +151,7 @@ impl Context<'_> {
                         continue;
                     }
                     depths.insert(target.id.clone(), next);
-                    frontier.push_back((target.id, next));
+                    frontier.push_back((target.id.clone(), next));
                 }
             }
         }
@@ -122,8 +160,7 @@ impl Context<'_> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/support/mod.rs"]
-mod test_support;
+use crate::test_support;
 
 #[cfg(test)]
 mod tests {
@@ -205,6 +242,7 @@ mod tests {
                 edges: &mut edges,
                 seeds: &ranked.discovery.seeds,
                 expanded: &mut expanded,
+                metadata: None,
             }
             .extend(&backend, &request, &|| {
                 checks.set(checks.get() + 1);

@@ -323,9 +323,24 @@ This view presents up to five implementation owners with source locations,
 reasons, ordinal relevance and separate identity/evidence labels. It reports
 known eligible counts or bounded recall and suggests a narrower scope.
 `--text-budget` bounds the whole text answer, including metadata. Ranked JSON
-uses `compass.query.ranked-view/4`. Do not combine ranked view with discovery
-cursors, result envelopes, evidence, `agent-json`, or legacy traversal controls.
-Default query output keeps its existing format and cursor contracts.
+uses `compass.query.ranked-view/4`, or major7 when bounded helper navigation
+is metered. Raw discovery similarly uses major1 or metered major2. Both paths
+retain the existing cursor protocol; new majors require updated strict consumers.
+Do not combine ranked view with discovery cursors, result envelopes, evidence,
+`agent-json`, or legacy traversal controls.
+
+For eligible broad questions about multiple operations, exact native calls may
+surface Low-relevance helper leads. Call paths show navigation, not execution or
+proof of requested behavior. If a helper has no question-matching excerpt,
+`linked_callable_preview` shows retained code labeled behavior unverified.
+Previews do not change ranking or matched terms. Navigation follows requested
+depth up to four hops; the default remains two. Use `--max-depth 4` to inspect
+deeper helpers. Missing relationships/source windows cannot be invented.
+
+Metered raw stats and ranked JSON retain `callLinkWork`: indexed recall remains
+at most291 logical probes; additional helper lookups share a separate40-probe
+limit. These are API work counts, not confidence or physical I/O. They remain
+present even if a one-candidate cap removes all helper paths.
 An existing node ID supplied as the whole question selects that admitted seed
 alone for the shortlist. Optional structural context remains available.
 

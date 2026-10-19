@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Recover bounded helper candidates for eligible broad multi-operation questions
+  through exact native calls, with Low/unverified navigation paths. Preserve
+  requested depth and ambiguity; expose separate indexed/helper lookup budgets
+  in raw discovery2 and ranked-view7, including after presentation pruning.
+- Show a retained, source-owned helper preview when no question-matching excerpt
+  exists. Label it behavior unverified, keep matching terms/ranking unchanged,
+  and refresh disposable quotation responses. Unmetered ranked-view4 remains.
+
 - Preserve typed exact-name and ID matches when structural discovery becomes
   a ranked answer. Keep identity labels separate from relevance and coverage;
   refresh disposable ranked identity responses.

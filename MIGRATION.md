@@ -1,5 +1,22 @@
 # Migrate from Graphify to Compass
 
+Broad-query consumers must accept and validate raw `compass.query.discovery/2`
+and ranked `compass.query.ranked-view/7` when metered helper navigation is used.
+Unmetered responses retain discovery1/ranked4. Upgrade strict readers before
+enabling the new binary; do not strip unknown work fields or treat a limit as an
+empty answer. The `callLinkWork` record separates indexed recall (291 probes)
+from additional helper lookups (40); original `stats.candidateProbes` keeps its
+indexed-only meaning. Work is retained even when presentation shows only a root.
+
+The new ranked excerpt kind `linked_callable_preview` is an explicitly unverified
+retained helper-code preview, requiring a coherent call path and Low relevance.
+It is not matching-query evidence or proof of behavior. The default depth stays
+two; request `--max-depth 4` to inspect up to four helper hops when available.
+Use `--view ranked` for paths and previews. No graph rebuild is required solely
+for this query change; missing source/call evidence still needs `compass update`.
+Disposable responses refresh automatically. Historical realizations and native
+graph/source ownership remain unchanged. See COMPATIBILITY.md for exact bounds.
+
 Current builds use `source-query/8-callable-comments` and AST cache 33. Run
 `compass update <root>` with the new binary to retain up to 64 callable comments
 instead of eight. Upgrade readers for profile 8; profiles 1–7 retain their original

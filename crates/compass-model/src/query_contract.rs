@@ -10,6 +10,7 @@ use crate::provenance::{
 
 pub const CODE_QUERY_SCHEMA_V1: &str = "compass.query/1";
 pub const DISCOVERY_QUERY_SCHEMA_V1: &str = "compass.query.discovery/1";
+pub const DISCOVERY_QUERY_SCHEMA_V2: &str = "compass.query.discovery/2";
 
 pub const MAX_DISCOVERY_DEPTH: u32 = 8;
 pub const MAX_DISCOVERY_SEEDS: u32 = 3;
@@ -339,6 +340,32 @@ pub struct DiscoveryOmissions {
     pub expanded_relationships: Option<u64>,
 }
 
+pub const CALL_LINK_WORK_SCHEMA: &str = "compass.query.call-link-work/1";
+pub const MAX_CALL_LINK_CANDIDATE_PROBES: u64 = 40;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiscoveryCallLinkWork {
+    pub schema: String,
+    /// Additional directional Calls lookups used to discover helper candidates.
+    /// Empty/filtered lookups count; optional presentation context is separate.
+    pub candidate_probes: u64,
+    pub candidate_probe_limit: u64,
+    /// The original indexed-recall counter, with its established meaning.
+    pub indexed_candidate_probes: u64,
+    pub indexed_candidate_probe_limit: u64,
+}
+
+impl DiscoveryCallLinkWork {
+    pub fn is_coherent(&self) -> bool {
+        self.schema == CALL_LINK_WORK_SCHEMA
+            && self.candidate_probe_limit == MAX_CALL_LINK_CANDIDATE_PROBES
+            && self.candidate_probes <= self.candidate_probe_limit
+            && self.indexed_candidate_probe_limit == MAX_INDEXED_CANDIDATE_PROBES
+            && self.indexed_candidate_probes <= self.indexed_candidate_probe_limit
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryStats {
@@ -353,6 +380,10 @@ pub struct DiscoveryStats {
     pub expanded_relationships: u64,
     pub returned_nodes: u64,
     pub returned_edges: u64,
+    /// Separately versioned additional helper-candidate lookup work. Present
+    /// only with discovery/2; indexed candidate_probes retains its old meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_link_work: Option<DiscoveryCallLinkWork>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -373,6 +404,19 @@ pub struct DiscoveryQueryResponse {
     pub stats: DiscoveryStats,
     pub omissions: DiscoveryOmissions,
     pub truncated: bool,
+}
+
+impl DiscoveryQueryResponse {
+    /// Unknown major versions or contradictory work counters fail explicitly.
+    pub fn has_valid_work_contract(&self) -> bool {
+        match self.schema.as_str() {
+            DISCOVERY_QUERY_SCHEMA_V1 => self.stats.call_link_work.is_none(),
+            DISCOVERY_QUERY_SCHEMA_V2 => self.stats.call_link_work.as_ref().is_some_and(|work| {
+                work.is_coherent() && work.indexed_candidate_probes == self.stats.candidate_probes
+            }),
+            _ => false,
+        }
+    }
 }
 
 pub const DISCOVERY_RESULT_ENVELOPE_SCHEMA_V1: &str = "compass.query.discovery-result/1";
@@ -403,6 +447,9 @@ impl DiscoveryResultEnvelope {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.schema != DISCOVERY_RESULT_ENVELOPE_SCHEMA_V1 {
             return Err("unsupported discovery result envelope schema");
+        }
+        if !self.result.has_valid_work_contract() {
+            return Err("unsupported discovery schema or inconsistent work counters");
         }
         let Some(digest) = self.semantic_result_digest.strip_prefix("sha256:") else {
             return Err("invalid discovery semantic result digest");
@@ -852,6 +899,118 @@ mod discovery_contract_tests {
         assert_eq!(request.direction, DiscoveryDirection::Auto);
         assert_eq!(request.traversal, DiscoveryTraversal::Bfs);
         assert_eq!(request.limits, DiscoveryLimits::default());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod call_link_work_contract_tests {
+    use super::*;
+    use std::error::Error;
+
+    fn legacy() -> DiscoveryQueryResponse {
+        DiscoveryQueryResponse {
+            schema: DISCOVERY_QUERY_SCHEMA_V1.to_owned(),
+            question: "authored question".to_owned(),
+            selected_direction: DiscoveryDirection::Both,
+            direction_source: DiscoveryDirectionSource::Neutral,
+            relation_contexts: Vec::new(),
+            scope: Vec::new(),
+            traversal: DiscoveryTraversal::Bfs,
+            seeds: Vec::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            diagnostics: Vec::new(),
+            limits: DiscoveryLimits::default(),
+            stats: DiscoveryStats::default(),
+            omissions: DiscoveryOmissions::default(),
+            truncated: false,
+        }
+    }
+    fn metered() -> DiscoveryQueryResponse {
+        let mut response = legacy();
+        response.schema = DISCOVERY_QUERY_SCHEMA_V2.to_owned();
+        response.stats.candidate_probes = MAX_INDEXED_CANDIDATE_PROBES;
+        response.stats.call_link_work = Some(DiscoveryCallLinkWork {
+            schema: CALL_LINK_WORK_SCHEMA.to_owned(),
+            candidate_probes: MAX_CALL_LINK_CANDIDATE_PROBES,
+            candidate_probe_limit: MAX_CALL_LINK_CANDIDATE_PROBES,
+            indexed_candidate_probes: MAX_INDEXED_CANDIDATE_PROBES,
+            indexed_candidate_probe_limit: MAX_INDEXED_CANDIDATE_PROBES,
+        });
+        response
+    }
+
+    #[test]
+    fn old_discovery_omits_new_work_and_metered_discovery_round_trips_at_both_limits()
+    -> Result<(), Box<dyn Error>> {
+        let old = legacy();
+        assert!(old.has_valid_work_contract());
+        assert!(
+            serde_json::to_value(&old)?["stats"]
+                .get("callLinkWork")
+                .is_none()
+        );
+        let current = metered();
+        assert!(current.has_valid_work_contract());
+        let encoded = serde_json::to_vec(&current)?;
+        let restored: DiscoveryQueryResponse = serde_json::from_slice(&encoded)?;
+        assert_eq!(restored, current);
+        assert!(restored.has_valid_work_contract());
+        let envelope =
+            DiscoveryResultEnvelope::new(restored, format!("sha256:{}", "0".repeat(64)))?;
+        envelope.validate()?;
+        Ok(())
+    }
+
+    #[test]
+    fn result_envelope_rejects_unknown_or_contradictory_discovery_work_contracts()
+    -> Result<(), Box<dyn Error>> {
+        for failure in [
+            "missing",
+            "old_with_work",
+            "unknown_discovery",
+            "unknown_work",
+            "overcount",
+            "changed_limit",
+            "indexed_overcount",
+            "indexed_disagrees",
+        ] {
+            let mut response = metered();
+            match failure {
+                "missing" => response.stats.call_link_work = None,
+                "old_with_work" => response.schema = DISCOVERY_QUERY_SCHEMA_V1.to_owned(),
+                "unknown_discovery" => response.schema = "compass.query.discovery/3".to_owned(),
+                _ => {
+                    let work = response
+                        .stats
+                        .call_link_work
+                        .as_mut()
+                        .ok_or("authored work missing")?;
+                    match failure {
+                        "unknown_work" => work.schema = "compass.query.call-link-work/2".to_owned(),
+                        "overcount" => work.candidate_probes += 1,
+                        "changed_limit" => work.candidate_probe_limit += 1,
+                        "indexed_overcount" => {
+                            work.indexed_candidate_probes += 1;
+                            response.stats.candidate_probes += 1;
+                        }
+                        _ => work.indexed_candidate_probes -= 1,
+                    }
+                }
+            }
+            let restored: DiscoveryQueryResponse =
+                serde_json::from_slice(&serde_json::to_vec(&response)?)?;
+            assert!(!restored.has_valid_work_contract(), "{failure}");
+            assert!(
+                DiscoveryResultEnvelope::new(restored, format!("sha256:{}", "0".repeat(64)))
+                    .is_err(),
+                "{failure}"
+            );
+        }
+        let mut unknown_field = serde_json::to_value(metered())?;
+        unknown_field["stats"]["callLinkWork"]["unversionedGuess"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DiscoveryQueryResponse>(unknown_field).is_err());
         Ok(())
     }
 }

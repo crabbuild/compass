@@ -2220,10 +2220,31 @@ fn memory_condition_matches(
     }
 }
 
+fn row_blob<'a>(row: &'a rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'a [u8]> {
+    let value = row.get_ref(column)?;
+    let kind = value.data_type();
+    value
+        .as_blob()
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(column, kind, Box::new(error)))
+}
+
 fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
-    let key: Vec<u8> = row.get(0)?;
-    let value: Vec<u8> = row.get(1)?;
-    let digest_bytes: Vec<u8> = row.get(2)?;
+    project_entry(row, |key, value, version, digest| Entry {
+        key: key.to_vec(),
+        value: value.to_vec(),
+        version,
+        digest,
+    })
+}
+
+fn project_entry<T>(
+    row: &rusqlite::Row<'_>,
+    project: impl FnOnce(&[u8], &[u8], VersionToken, [u8; 32]) -> T,
+) -> rusqlite::Result<T> {
+    // Borrow row buffers until size, integrity and version checks pass.
+    let key = row_blob(row, 0)?;
+    let value = row_blob(row, 1)?;
+    let digest_bytes = row_blob(row, 2)?;
     let version: i64 = row.get(3)?;
     let stored_digest: [u8; 32] = digest_bytes.try_into().map_err(|_| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -2239,7 +2260,7 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             Box::new(std::io::Error::other("value exceeds portable store limit")),
         ));
     }
-    if stored_digest != digest(&value) {
+    if stored_digest != digest(value) {
         return Err(rusqlite::Error::FromSqlConversionFailure(
             2,
             rusqlite::types::Type::Blob,
@@ -2260,12 +2281,7 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             Box::new(std::io::Error::other("invalid key or version")),
         ));
     }
-    Ok(Entry {
-        key,
-        value,
-        version: VersionToken(version),
-        digest: stored_digest,
-    })
+    Ok(project(key, value, VersionToken(version), stored_digest))
 }
 
 fn digest(value: &[u8]) -> [u8; 32] {
@@ -2599,6 +2615,61 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sqlite_row_projection_checks_bounds_and_integrity_before_copying()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::{Entry, MAX_KEY_BYTES, MAX_VALUE_BYTES, digest, project_entry};
+        use rusqlite::params;
+        use std::cell::Cell;
+        let connection = Connection::open_in_memory()?;
+        for case in [
+            "exact",
+            "value_plus_one",
+            "key_plus_one",
+            "empty_key",
+            "bad_digest",
+            "bad_version",
+        ] {
+            let key = match case {
+                "key_plus_one" => vec![b'k'; MAX_KEY_BYTES + 1],
+                "empty_key" => Vec::new(),
+                _ => vec![b'k'; MAX_KEY_BYTES],
+            };
+            let value = vec![b'v'; MAX_VALUE_BYTES + usize::from(case == "value_plus_one")];
+            let mut expected = digest(&value);
+            if case == "bad_digest" {
+                expected[0] ^= 1;
+            }
+            let version = i64::from(case != "bad_version");
+            let copies = Cell::new(0);
+            let result = connection.query_row(
+                "SELECT ?1, ?2, ?3, ?4",
+                params![key, value, expected.as_slice(), version],
+                |row| {
+                    project_entry(row, |key, value, version, digest| {
+                        copies.set(copies.get() + 1);
+                        Entry {
+                            key: key.to_vec(),
+                            value: value.to_vec(),
+                            version,
+                            digest,
+                        }
+                    })
+                },
+            );
+            if case == "exact" {
+                let entry = result?;
+                assert_eq!(entry.key, key);
+                assert_eq!(entry.value, value);
+                assert_eq!(copies.get(), 1);
+            } else {
+                assert!(result.is_err(), "{case}");
+                assert_eq!(copies.get(), 0, "{case} reached the owned projection");
+            }
+        }
+        Ok(())
+    }
     use std::error::Error;
     use std::fs;
     use std::sync::Arc;

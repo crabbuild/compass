@@ -1,19 +1,24 @@
 //! A bounded candidate shortlist, separate from graph traversal ledgers.
 use std::collections::{BTreeMap, BTreeSet};
 
-use compass_model::code_graph::NodeKind;
-use compass_model::provenance::SourceAnchor;
+use compass_model::code_graph::{EdgeKind, NodeKind};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, ResolutionState, SourceAnchor,
+};
 use compass_model::query_contract::{
-    DiscoveryEdge, DiscoveryLimits, DiscoveryScope, QueryDiagnosticCode, QueryEvidence, QueryNode,
+    DiscoveryEdge, DiscoveryLimits, DiscoveryScope, QueryDiagnosticCode, QueryEvidence,
+    QueryEvidenceLayer, QueryNode,
 };
 use compass_query::{
-    RankedDiscoveryResponse, RankedExcerptKind, RankedSourceExcerpt, RelevanceBand,
+    RankedCallLink, RankedCallWork, RankedDiscoveryResponse, RankedExcerptKind,
+    RankedSourceExcerpt, RelevanceBand,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentCoverage, AgentEvidence, OutputError};
 
 pub const RANKED_QUERY_VIEW_SCHEMA: &str = "compass.query.ranked-view/4";
+pub const RANKED_QUERY_LINKED_VIEW_SCHEMA: &str = "compass.query.ranked-view/7";
 const CODE_RANKED_QUERY_VIEW_SCHEMA: &str = "compass.query.ranked-view/3";
 const COMMENT_RANKED_QUERY_VIEW_SCHEMA: &str = "compass.query.ranked-view/2";
 const LEGACY_RANKED_QUERY_VIEW_SCHEMA: &str = "compass.query.ranked-view/1";
@@ -22,6 +27,8 @@ const MAX_VIEW_BYTES: usize = 128 * 1024;
 const MAX_REASON_CHARS: usize = 240;
 const COMPACT_REASON_CHARS: usize = 160;
 const MAX_CONTEXT_EDGES: usize = 8;
+// Native linked occurrences retain 64 raw proofs plus one selected-site projection.
+const MAX_LINK_CONTEXT_PROOFS: usize = 65;
 const MAX_CONTEXT_NODES: usize = MAX_CONTEXT_EDGES * 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -40,6 +47,7 @@ pub enum RankedRetrievalKind {
     Signature,
     Document,
     SemanticLsa,
+    CallLink,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,6 +69,8 @@ pub struct RankedQueryCandidate {
     pub matched_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub excerpts: Vec<RankedSourceExcerpt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_link: Option<RankedCallLink>,
 }
 
 /// Witnessed relationships adjacent to displayed candidates. Relevance never
@@ -78,6 +88,8 @@ pub struct RankedQueryContext {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RankedQueryView {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_link_work: Option<RankedCallWork>,
     pub question: String,
     pub graph_identity: String,
     pub graph_digest: String,
@@ -109,6 +121,7 @@ impl RankedQueryView {
         if !matches!(
             header.schema.as_str(),
             RANKED_QUERY_VIEW_SCHEMA
+                | RANKED_QUERY_LINKED_VIEW_SCHEMA
                 | CODE_RANKED_QUERY_VIEW_SCHEMA
                 | COMMENT_RANKED_QUERY_VIEW_SCHEMA
                 | LEGACY_RANKED_QUERY_VIEW_SCHEMA
@@ -138,11 +151,25 @@ impl RankedQueryView {
         if !matches!(
             self.schema.as_str(),
             RANKED_QUERY_VIEW_SCHEMA
+                | RANKED_QUERY_LINKED_VIEW_SCHEMA
                 | CODE_RANKED_QUERY_VIEW_SCHEMA
                 | COMMENT_RANKED_QUERY_VIEW_SCHEMA
                 | LEGACY_RANKED_QUERY_VIEW_SCHEMA
         ) {
             return Err(invalid("unsupported ranked query view schema"));
+        }
+        if self.schema == RANKED_QUERY_LINKED_VIEW_SCHEMA {
+            if self
+                .call_link_work
+                .as_ref()
+                .is_none_or(|work| !work.is_coherent())
+            {
+                return Err(invalid(
+                    "ranked-view/7 requires coherent versioned call-link work",
+                ));
+            }
+        } else if self.call_link_work.is_some() {
+            return Err(invalid("call-link work requires ranked-view/7"));
         }
         if self.graph_identity.is_empty() || self.graph_digest.is_empty() {
             return Err(invalid(
@@ -156,6 +183,11 @@ impl RankedQueryView {
                 .is_some_and(|count| count < self.retained_count)
         {
             return Err(invalid("inconsistent ranked candidate counts"));
+        }
+        if self.context.as_ref().is_some_and(|context| {
+            context.nodes.len() > MAX_CONTEXT_NODES || context.edges.len() > MAX_CONTEXT_EDGES
+        }) {
+            return Err(invalid("ranked context exceeds its node or edge limit"));
         }
         let mut identities = BTreeSet::new();
         for (index, candidate) in self.candidates.iter().enumerate() {
@@ -182,6 +214,10 @@ impl RankedQueryView {
                     && !candidate.excerpts.is_empty())
                 || candidate.excerpts.iter().any(|quote| {
                     !quote.is_coherent()
+                        || (quote.kind == RankedExcerptKind::LinkedCallablePreview
+                            && (self.schema != RANKED_QUERY_LINKED_VIEW_SCHEMA
+                                || candidate.call_link.is_none()
+                                || !candidate.kind.is_callable()))
                         || (self.schema == COMMENT_RANKED_QUERY_VIEW_SCHEMA
                             && matches!(
                                 quote.kind,
@@ -195,6 +231,7 @@ impl RankedQueryView {
                                 || match quote.kind {
                                     RankedExcerptKind::CallableComment
                                     | RankedExcerptKind::CallableCode
+                                    | RankedExcerptKind::LinkedCallablePreview
                                     | RankedExcerptKind::NestedCallableCode => {
                                         quote.source.start_byte < source.start_byte
                                             || quote.source.end_byte > source.end_byte
@@ -228,9 +265,139 @@ impl RankedQueryView {
                 ));
             }
         }
+        // At most five four-hop paths. Borrow metadata instead of copying it;
+        // a reused compact identity must retain exactly one meaning per view.
+        let mut endpoints = BTreeMap::new();
+        let mut occurrences = BTreeMap::new();
+        for candidate in &self.candidates {
+            if let Some(link) = &candidate.call_link {
+                let root = self.candidates.iter().find(|root| root.id == link.root.id);
+                let terminal = link.hops.last().map(|hop| &hop.target);
+                if self.schema != RANKED_QUERY_LINKED_VIEW_SCHEMA
+                    || candidate.relevance != RelevanceBand::Low
+                    || candidate.name_match != RankedNameMatch::Approximate
+                    || !candidate
+                        .retrieval_kinds
+                        .contains(&RankedRetrievalKind::CallLink)
+                    || !link.is_coherent_for(&candidate.id)
+                    || link.hops.len() > self.limits.max_depth as usize
+                    || root.is_none_or(|root| {
+                        root.call_link.is_some()
+                            || root.rank >= candidate.rank
+                            || root.name != link.root.name
+                            || root.source.as_ref() != Some(&link.root.source)
+                    })
+                    || terminal.is_none_or(|target| {
+                        target.name != candidate.name
+                            || Some(&target.source) != candidate.source.as_ref()
+                    })
+                {
+                    return Err(invalid(
+                        "call-linked inspection leads require Low relevance, displayed root, exact endpoints and ranked-view/7",
+                    ));
+                }
+                for endpoint in
+                    std::iter::once(&link.root).chain(link.hops.iter().map(|hop| &hop.target))
+                {
+                    if endpoints
+                        .insert(endpoint.id.as_str(), endpoint)
+                        .is_some_and(|old| old != endpoint)
+                        || self.candidates.iter().any(|displayed| {
+                            displayed.id == endpoint.id
+                                && (displayed.name != endpoint.name
+                                    || displayed.source.as_ref() != Some(&endpoint.source))
+                        })
+                        || self.context.as_ref().is_some_and(|context| {
+                            context.nodes.iter().any(|displayed| {
+                                displayed.id == endpoint.id
+                                    && (displayed.qualified_name != endpoint.name
+                                        || displayed.source.as_ref() != Some(&endpoint.source))
+                            })
+                        })
+                    {
+                        return Err(invalid(
+                            "call-linked endpoint identity has contradictory metadata",
+                        ));
+                    }
+                }
+                for hop in &link.hops {
+                    if occurrences
+                        .insert(hop.edge_id.as_str(), hop)
+                        .is_some_and(|old| old != hop)
+                    {
+                        return Err(invalid(
+                            "call-linked occurrence identity has contradictory metadata",
+                        ));
+                    }
+                }
+            } else if candidate
+                .retrieval_kinds
+                .contains(&RankedRetrievalKind::CallLink)
+            {
+                return Err(invalid("call-link retrieval requires its witnessed path"));
+            }
+        }
+        let required_lookups = occurrences
+            .values()
+            .map(|hop| hop.source_id.as_str())
+            .collect::<BTreeSet<_>>()
+            .len() as u64;
+        if required_lookups > 0
+            && self
+                .call_link_work
+                .as_ref()
+                .is_none_or(|work| work.candidate_probes < required_lookups)
+        {
+            return Err(invalid(
+                "call-link work under-reports its retained source lookups",
+            ));
+        }
         if let Some(context) = &self.context {
-            if context.nodes.len() > MAX_CONTEXT_NODES || context.edges.len() > MAX_CONTEXT_EDGES {
-                return Err(invalid("ranked context exceeds its node or edge limit"));
+            if self.schema == RANKED_QUERY_LINKED_VIEW_SCHEMA {
+                let mut context_occurrences = BTreeSet::new();
+                for edge in &context.edges {
+                    let Some(id) = edge.id.as_deref() else {
+                        continue;
+                    };
+                    if !context_occurrences.insert(id) {
+                        return Err(invalid("linked context must have unique occurrence IDs"));
+                    }
+                    if let Some(hop) = occurrences.get(id)
+                        && (edge.source != hop.source_id
+                            || edge.target != hop.target.id
+                            || edge.kind != EdgeKind::Calls
+                            || edge.relationship_site.as_ref() != Some(&hop.site)
+                            || edge.occurrence_rule.as_ref().map(|rule| rule.as_str())
+                                != hop.occurrence_rule.as_deref()
+                            || edge.evidence.len() > MAX_LINK_CONTEXT_PROOFS
+                            || !edge.evidence.iter().any(|proof| {
+                                // A compact path retains one selected AST witness,
+                                // while context may contain other proofs as well.
+                                proof.layer == QueryEvidenceLayer::StructuralGraph
+                                    && proof.origin == EvidenceOrigin::Ast
+                                    && proof.confidence == EvidenceConfidence::Exact
+                                    && proof.extractor == hop.extractor
+                                    && proof.rule == hop.rule
+                                    && proof.anchor.as_ref() == Some(&hop.site)
+                                    && proof.resolution == ResolutionState::Exact
+                                    && proof.candidates.len() <= 1
+                                    && proof.candidates.iter().all(|candidate| {
+                                        candidate.node_id == hop.target.id
+                                            && candidate.confidence == EvidenceConfidence::Exact
+                                            && candidate.reason.len() <= 1024
+                                            && !candidate.reason.trim().is_empty()
+                                            && candidate.score.is_none_or(f64::is_finite)
+                                            && candidate.anchor.as_ref().is_none_or(|anchor| {
+                                                anchor.file.len() <= 4096 && anchor.is_valid()
+                                            })
+                                    })
+                            }))
+                    {
+                        return Err(invalid(
+                            "compact and context occurrence identities or selected AST witnesses disagree",
+                        ));
+                    }
+                }
             }
             let nodes = context
                 .nodes
@@ -284,6 +451,11 @@ pub fn build_ranked_query_view_with_context(
     graph_digest: &str,
     include_context: bool,
 ) -> Result<RankedQueryView, OutputError> {
+    if !response.discovery.has_valid_work_contract() {
+        return Err(invalid(
+            "unsupported discovery schema or inconsistent work counters",
+        ));
+    }
     if response.candidates.len() > compass_model::query_contract::MAX_DISCOVERY_NODES as usize {
         return Err(invalid(
             "ranked candidate input exceeds the discovery node limit",
@@ -300,6 +472,14 @@ pub fn build_ranked_query_view_with_context(
         {
             return Err(invalid(
                 "ranked source quotations exceed bounded input limits",
+            ));
+        }
+        if candidate.call_link.as_ref().is_some_and(|link| {
+            !link.is_coherent_for(&candidate.node.id)
+                || link.hops.len() > response.discovery.limits.max_depth as usize
+        }) {
+            return Err(invalid(
+                "ranked call link exceeds bounds or has an incoherent chain",
             ));
         }
         // A declaration can be reached through several passages. Its reasons
@@ -329,6 +509,9 @@ pub fn build_ranked_query_view_with_context(
                 _ => RankedRetrievalKind::Lexical,
             });
         }
+        if candidate.call_link.is_some() {
+            retrieval_kinds.insert(RankedRetrievalKind::CallLink);
+        }
         candidates.push(RankedQueryCandidate {
             rank: u32::try_from(candidates.len() + 1).unwrap_or(u32::MAX),
             id: candidate.node.id.clone(),
@@ -355,6 +538,7 @@ pub fn build_ranked_query_view_with_context(
             matched_terms: candidate.matched_terms.clone(),
             matched_fields: fields.clone(),
             excerpts: candidate.excerpts.clone(),
+            call_link: candidate.call_link.clone(),
         });
     }
     let retained_count = u64::try_from(seen.len()).unwrap_or(u64::MAX);
@@ -423,7 +607,13 @@ pub fn build_ranked_query_view_with_context(
         None
     };
     let view = RankedQueryView {
-        schema: RANKED_QUERY_VIEW_SCHEMA.to_owned(),
+        schema: if response.discovery.stats.call_link_work.is_some() {
+            RANKED_QUERY_LINKED_VIEW_SCHEMA
+        } else {
+            RANKED_QUERY_VIEW_SCHEMA
+        }
+        .to_owned(),
+        call_link_work: response.discovery.stats.call_link_work.clone(),
         question: response.discovery.question.clone(),
         graph_identity: graph_identity.to_owned(),
         graph_digest: graph_digest.to_owned(),
@@ -495,6 +685,15 @@ pub fn render_ranked_query_text(
             } else {
                 format!("Ranked candidates: {shown} shown; {total} eligible.\n")
             };
+            if let Some(work) = &view.call_link_work {
+                text.push_str(&format!(
+                    "Call-linked lookups: {}/{}; indexed recall probes: {}/{}.\n",
+                    work.candidate_probes,
+                    work.candidate_probe_limit,
+                    work.indexed_candidate_probes,
+                    work.indexed_candidate_probe_limit
+                ));
+            }
             for candidate in view.candidates.iter().take(shown) {
                 let excerpt_chars = if candidate.rank == 1 {
                     first_excerpt_chars
@@ -533,6 +732,27 @@ pub fn render_ranked_query_text(
                     candidate.kind.as_str(),
                     reasons
                 ));
+                if let Some(link) = &candidate.call_link {
+                    let names = std::iter::once(&link.root)
+                        .chain(link.hops.iter().map(|hop| &hop.target))
+                        .map(|endpoint| {
+                            scalar(
+                                endpoint
+                                    .name
+                                    .rsplit([':', '.'])
+                                    .find(|part| !part.is_empty())
+                                    .unwrap_or(&endpoint.name),
+                                64,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" → ");
+                    text.push_str(&format!(
+                        "   Call path (execution unverified): {names}; navigation hint {} → {}\n",
+                        scalar(&link.hint.requested, 128),
+                        scalar(&link.hint.spelling, 128)
+                    ));
+                }
                 for quote in candidate
                     .excerpts
                     .iter()
@@ -543,6 +763,8 @@ pub fn render_ranked_query_text(
                         match quote.kind {
                             RankedExcerptKind::CallableComment => "Comment",
                             RankedExcerptKind::CallableCode => "Code",
+                            RankedExcerptKind::LinkedCallablePreview =>
+                                "Helper code preview (behavior unverified)",
                             RankedExcerptKind::NestedCallableCode =>
                                 "Nested lexical code (execution unverified)",
                             RankedExcerptKind::AstDocumentation => "Documentation",
@@ -783,5 +1005,6 @@ fn retrieval_name(value: RankedRetrievalKind) -> &'static str {
         RankedRetrievalKind::Signature => "signature",
         RankedRetrievalKind::Document => "document",
         RankedRetrievalKind::SemanticLsa => "semantic_lsa",
+        RankedRetrievalKind::CallLink => "call_link",
     }
 }
