@@ -165,6 +165,13 @@ more detail. Source locations, relevance/identity/evidence labels, recall bounds
 and uncertainty remain visible. This changes text packing, not ranking or the
 JSON projection.
 
+Source quotations prefer bounded retained windows covering more distinct
+canonical requested terms, rather than always centering the first match.
+Repeated words do not increase that count; equal coverage keeps source order.
+Quoted bytes and coordinates remain exact. Known owned comment ranges do not
+supply code-window selection evidence. This changes displayed evidence, never
+candidate ranking or relevance, and does not establish the requested behavior.
+
 The shared text renderer reserves header, limits and refinement guidance inside
 the requested UTF-8 byte budget (approximately four bytes per token), drops
 whole candidate rows when needed, and fails if one candidate plus metadata

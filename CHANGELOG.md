@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Prefer retained source-quotation windows covering more distinct requested
+  terms, so an early generic match does not hide later question evidence.
+  Preserve exact UTF-8 source bytes, coordinates and quotation limits. Known
+  owned comments cannot supply code-window selection evidence. Candidate
+  ranking and relevance are unchanged; refresh disposable excerpt responses.
+
+- Restrict automatic deeper call context to High-relevance selected roots;
+  partial matches keep first-hop context. Explicit context inspection retains
+  witnessed paths without promoting their relevance. Refresh context responses.
+
 - Continue broad-query raw discovery context along exact source-witnessed calls
   within the requested depth, with explicit state, fan-out, frontier and output
   bounds. Count rejected adjacency records and lookahead against relationship

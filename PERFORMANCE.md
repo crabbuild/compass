@@ -1,9 +1,22 @@
 # Compass performance qualification
 
+## In-progress quotation window bounds
+
+Window selection tokenizes each already retained site of at most4096 bytes
+once, then visits at most two candidate starts per matching token using sliding
+term counters. Complete matching tokens count once per distinct canonical query
+term; known owned comment ranges are excluded from code-window matching.
+Output remains at most512 bytes/quote and two quotes/displayed owner. These
+finite source bounds are not a measured latency/RSS or query-quality claim;
+fresh real-repository qualification is still required.
+
 ## In-progress broad call-context bounds
 
 Raw broad automatic discovery retains first-hop neighbors, then may continue
 exact outgoing Calls within requested max_depth for non-incoming questions.
+Automatic continuation is restricted to High-relevance selected roots. Explicit
+context inspection can continue every selected root; candidate order and bands
+are unchanged. This avoids automatically amplifying partial lexical roots.
 Continuation expands at most32 callable states, decodes at most16 outgoing
 records plus one lookahead per state, and retains at most64 queued states.
 It performs at most32 owner fetches and512 target fetches in that phase;

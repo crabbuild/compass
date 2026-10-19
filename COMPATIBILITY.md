@@ -2752,7 +2752,13 @@ across changed package context. No release-promotion decision is updated.
 ## Bounded broad-query call context (development)
 
 Native broad automatic discovery can continue outgoing `Calls` beyond its
-existing first-hop neighbors, within `maxDepth`. Continuation requires exact
+existing first-hop neighbors, within `maxDepth`. Automatic discovery continues
+only from selected roots with `High` relevance under the existing whole-question
+ranker. Lower-relevance roots retain their first-hop context instead of amplifying
+a partial lexical match. Explicit `discover_ranked_with_context(..., true)` callers
+may inspect all selected roots' witnessed paths. The ordinal relevance band is
+not a calibrated probability or proof of requested behavior.
+Continuation requires exact
 source-owned AST evidence for the caller, target and call occurrence; references
 and inferred/heuristic relationships cannot establish another hop. Inferred
 incoming broad questions keep their first-hop context. Explicit structural
@@ -2764,7 +2770,7 @@ runtime behavior.
 Candidate admission, relevance, ranking and seed counts are unchanged. Raw
 discovery/1 and ranked-view/4 shapes remain unchanged; the optional ranked
 presentation still projects only its documented first-hop eight-edge context.
-The response-cache identity adds `ranked-call-context/1` to refresh disposable
+The response-cache identity adds `ranked-call-context/2` to refresh disposable
 answers. No published graph or historical realization is rewritten.
 
 Both initial and continuation adjacency reads count filtered records and bounded
@@ -2778,3 +2784,31 @@ These are work contracts, not comparative performance qualification.
 Expanded-relationship accounting counts full edge records. Store index-key scans
 and bucket-head comparisons have separate finite bounds and can exceed that
 count; it is not a physical I/O or latency limit.
+
+
+## Ranked quotation window selection (development)
+
+Retained source sites up to4096 bytes now select a window covering the most
+distinct canonical requested terms, counting each term once. Token-aligned and
+context starts are considered in deterministic source order; equal coverage
+keeps the earlier window. This scores terms, not independent behavior facts or
+probabilities. Synonym variants remain lexical alternatives. Complete matching
+tokens must fit; a clipped unrelated identifier prefix cannot justify a quote.
+
+The source is normalized once for original token spans and scanned with sliding
+term counters. Internal quotation priority retains complete original-site token
+membership through both action- and general-group sorting. A displayed clipped
+prefix/suffix cannot become a new match by re-tokenizing the displayed slice.
+This private metadata is discarded before the unchanged public quotation shape.
+Combining marks stay within raw token spans while matching uses shared Unicode
+normalization; displayed bytes are never normalized. Output remains an exact UTF-8 slice of the retained site, at most
+512 bytes, with adjusted byte/line/column anchors. Known owned comment ranges
+cannot supply code-window selection evidence, although original surrounding
+comment bytes may remain in the displayed quote. Existing comment masking in
+cross-quotation ranking remains. No current worktree source is read at query time.
+
+Only display evidence selection changes. Candidate admission, ordering and
+relevance, source ownership, graph facts, ranked-view/4 and ranker21 are unchanged.
+Disposable responses advance ranked-source-excerpts/4. No source rebuild or
+historical rewrite is required; no real-quality or latency qualification is
+established by these source bounds or synthetic controls.

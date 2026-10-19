@@ -44,6 +44,14 @@ const FIELD_PROBE_CEILING: u64 = MAX_INDEXED_CANDIDATE_PROBES - 24;
 // It is not additional confidence or evidence of execution.
 const IMPLEMENTATION_ACTION_PREFERENCE: f64 = 10_000.0;
 
+/// Automatic navigation must not amplify weak lexical roots. Explicit callers
+/// may inspect all witnessed paths without changing a candidate's relevance.
+#[derive(Clone, Copy)]
+pub(crate) enum CallContextRoots {
+    HighRelevance,
+    AllWitnessed,
+}
+
 fn is_retrieval_action(term: &str) -> bool {
     crate::ranking::canonical_predicate_token(term).is_some()
         || matches!(term, "encode" | "serialize")
@@ -967,7 +975,7 @@ impl CodeQueryEngine {
         bounded |= ownership.bounded;
         nodes.append(&mut ownership.nodes);
         let mut owned_passages = BTreeMap::<String, Vec<(SourceAnchor, BTreeSet<String>)>>::new();
-        let mut owned_excerpts = BTreeMap::<String, Vec<RankedSourceExcerpt>>::new();
+        let mut owned_excerpts = BTreeMap::<String, Vec<excerpts::SelectedExcerpt>>::new();
         let mut excerpt_terms = groups
             .iter()
             .filter(|group| !action_terms.contains(&group.0))
@@ -1192,7 +1200,7 @@ impl CodeQueryEngine {
                     && let Some(compass_model::code_graph::NodeDetails::Resource(details)) =
                         &passage.details
                     && let Some(text) = &details.content
-                    && let Some(excerpt) = excerpts::select(
+                    && let Some(excerpt) = excerpts::select_ranked(
                         RankedExcerptKind::AstDocumentation,
                         &anchor,
                         text,
@@ -1997,7 +2005,7 @@ impl CodeQueryEngine {
         // Only the displayed shortlist retains at most 1024 bytes per owner.
         for candidate in ranked.iter_mut().take(if retain_excerpts { 5 } else { 0 }) {
             check()?;
-            candidate.excerpts = owned_excerpts
+            let mut quotes = owned_excerpts
                 .remove(&candidate.node.id)
                 .unwrap_or_default();
             let owner = self
@@ -2008,28 +2016,29 @@ impl CodeQueryEngine {
                 // The owner was already checked against the pinned exact-AST
                 // declaration during scoring. Never read current source here.
                 for comment in &owner.comments {
-                    if let Some(excerpt) = excerpts::select(
+                    if let Some(excerpt) = excerpts::select_ranked(
                         RankedExcerptKind::CallableComment,
                         &comment.source,
                         &comment.text,
                         &quotation_terms,
                         512,
                     ) {
-                        candidate.excerpts.push(excerpt);
+                        quotes.push(excerpt);
                     }
                 }
                 if owner.omitted_code_windows > 0 {
                     candidate.reasons.push("Code inspection windows were omitted by extraction/publication quotas; retained text is not the complete implementation".to_owned());
                 }
                 for window in &owner.code_windows {
-                    if let Some(excerpt) = excerpts::select(
+                    if let Some(excerpt) = excerpts::select_code(
                         RankedExcerptKind::CallableCode,
                         &window.source,
                         &window.text,
                         &quotation_terms,
                         512,
+                        &owner.comments,
                     ) {
-                        candidate.excerpts.push(excerpt);
+                        quotes.push(excerpt);
                     }
                 }
                 if owner.omitted_nested_contexts > 0
@@ -2042,36 +2051,37 @@ impl CodeQueryEngine {
                 }
                 for context in &owner.nested_contexts {
                     for window in &context.code_windows {
-                        if let Some(mut excerpt) = excerpts::select(
+                        if let Some(mut excerpt) = excerpts::select_code(
                             RankedExcerptKind::NestedCallableCode,
                             &window.source,
                             &window.text,
                             &quotation_terms,
                             512,
+                            &owner.comments,
                         ) {
-                            excerpt.nested_scope = Some(context.source.clone());
-                            candidate.excerpts.push(excerpt);
+                            excerpt.excerpt.nested_scope = Some(context.source.clone());
+                            quotes.push(excerpt);
                         }
                     }
                 }
             }
-            candidate.excerpts.sort_by_cached_key(|quote| {
-                let text = excerpts::ranking_text(
-                    quote,
-                    owner.map_or(&[], |owner| owner.comments.as_slice()),
-                );
+            quotes.sort_by_cached_key(|quote| {
                 (
-                    std::cmp::Reverse(excerpts::coverage(&text, &quotation_actions)),
-                    std::cmp::Reverse(excerpts::coverage(&text, &quotation_groups)),
+                    std::cmp::Reverse(excerpts::coverage_terms(&quote.terms, &quotation_actions)),
+                    std::cmp::Reverse(excerpts::coverage_terms(&quote.terms, &quotation_groups)),
                     std::cmp::Reverse(matches!(
-                        quote.kind,
+                        quote.excerpt.kind,
                         RankedExcerptKind::CallableCode | RankedExcerptKind::NestedCallableCode
                     )),
-                    quote.source.clone(),
+                    quote.excerpt.source.clone(),
                 )
             });
-            candidate.excerpts.dedup();
-            candidate.excerpts.truncate(2);
+            quotes.dedup();
+            candidate.excerpts = quotes
+                .into_iter()
+                .take(2)
+                .map(|quote| quote.excerpt)
+                .collect();
         }
         Ok(Retrieval {
             ranked,
@@ -2394,7 +2404,13 @@ impl CodeQueryEngine {
         crate::discovery::validate_request(&request)?;
         let guard =
             crate::discovery::DiscoveryGuard::new(request.limits.timeout_ms, None, self.deadline);
-        self.discover_ranked_with_context_guarded(request, include_context, &guard, true)
+        self.discover_ranked_with_context_guarded(
+            request,
+            include_context,
+            &guard,
+            true,
+            CallContextRoots::AllWitnessed,
+        )
     }
 
     pub(crate) fn discover_ranked_with_context_guarded(
@@ -2403,6 +2419,7 @@ impl CodeQueryEngine {
         include_context: bool,
         guard: &crate::discovery::DiscoveryGuard<'_>,
         enforce_ranked_budget: bool,
+        call_roots: CallContextRoots,
     ) -> Result<RankedDiscoveryResponse, QueryError> {
         guard.check()?;
         let mut response =
@@ -2507,11 +2524,24 @@ impl CodeQueryEngine {
             }
         }
         if fielded && response.discovery.selected_direction != DiscoveryDirection::Incoming {
+            let continuation_seeds = response
+                .discovery
+                .seeds
+                .iter()
+                .filter(|seed| {
+                    matches!(call_roots, CallContextRoots::AllWitnessed)
+                        || response.candidates.iter().any(|candidate| {
+                            candidate.node.id == seed.node_id
+                                && candidate.relevance == RelevanceBand::High
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
             bounded |= call_context::Context {
                 scopes: &response.discovery.scope,
                 nodes: &mut nodes,
                 edges: &mut edges,
-                seeds: &response.discovery.seeds,
+                seeds: &continuation_seeds,
                 expanded: &mut expanded,
             }
             .extend(&backend, &request, &|| guard.check())?;

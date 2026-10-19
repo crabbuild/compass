@@ -558,3 +558,37 @@ fn inferred_incoming_broad_context_keeps_only_incoming_first_hop() -> Result<(),
     }
     Ok(())
 }
+
+#[test]
+fn automatic_continuation_does_not_amplify_a_partial_question_match() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph = graph(&directory.path().join("graph.json"))?;
+    for engine in engines(directory.path(), &graph)? {
+        let mut query = request(3);
+        query.question = "Where are protocol errors formatted for the filesystem?".to_owned();
+        let ranked = engine.discover_ranked(query.clone())?;
+        assert_eq!(ranked.candidates.len(), 1);
+        assert_eq!(
+            ranked.candidates[0].relevance,
+            compass_query::RelevanceBand::Low
+        );
+        let automatic = engine.discover(query.clone())?;
+        assert!(automatic.nodes.iter().any(|n| n.id == "entry"));
+        assert!(
+            !automatic.nodes.iter().any(|n| n.id == "leaf"),
+            "a partial question match must not amplify its downstream neighborhood automatically"
+        );
+        let explicit = engine.discover_ranked_with_context(query, true)?;
+        assert_eq!(explicit.candidates, ranked.candidates);
+        assert!(
+            explicit.discovery.nodes.iter().any(|n| n.id == "leaf"),
+            "explicit context inspection keeps exact witnessed paths available"
+        );
+        assert!(
+            explicit.discovery.stats.expanded_relationships
+                > automatic.stats.expanded_relationships
+        );
+    }
+    Ok(())
+}

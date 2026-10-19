@@ -419,7 +419,13 @@ impl CodeQueryEngine {
             && request.relation_contexts.is_empty()
         {
             let mut response = self
-                .discover_ranked_with_context_guarded(request, true, guard, false)?
+                .discover_ranked_with_context_guarded(
+                    request,
+                    true,
+                    guard,
+                    false,
+                    crate::broad::CallContextRoots::HighRelevance,
+                )?
                 .discovery;
             finish_response(guard, &mut response)?;
             return Ok(response);

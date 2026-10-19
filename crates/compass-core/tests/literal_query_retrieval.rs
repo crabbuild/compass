@@ -639,3 +639,111 @@ fn first_code_window_site_transition_matches_clean_publication() -> Result<(), B
 
     Ok(())
 }
+
+#[test]
+fn ranked_comment_excerpt_retains_later_question_evidence_on_both_backends()
+-> Result<(), Box<dyn Error>> {
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let phrase = "Reject malformed payload before decoding protocol frames.";
+    let source = format!(
+        "def opaque():\n    # protocol notices: {} {phrase}\n    return 0\n\ndef sibling():\n    return 1\n",
+        "protocol bookkeeping ".repeat(40),
+    );
+    fs::write(root.join("sample.py"), &source)?;
+    let built = build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+    let path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter()
+        .find(|n| n.kind.is_callable() && n.qualified_name == "sample.opaque")
+        .ok_or("missing target")?;
+    let mut previous = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine =
+            open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+        let ranked = engine.discover_ranked(request(
+            "Where are malformed protocol payloads rejected before decoding frames?",
+        ))?;
+        let candidate = ranked
+            .candidates
+            .iter()
+            .find(|c| c.node.id == target.id)
+            .ok_or("native comment owner missing")?;
+        let quote = candidate
+            .excerpts
+            .iter()
+            .find(|q| q.kind == RankedExcerptKind::CallableComment && q.text.contains(phrase))
+            .ok_or("later coherent comment passage missing from ranked answer")?;
+        assert!(quote.is_coherent());
+        assert_eq!(
+            source.get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+            Some(quote.text.as_str())
+        );
+        assert_eq!(quote.source.file, "sample.py");
+        let declaration = target.source.as_ref().ok_or("missing target source")?;
+        assert!(
+            declaration.start_byte <= quote.source.start_byte
+                && quote.source.end_byte <= declaration.end_byte
+        );
+        assert!(
+            ranked
+                .candidates
+                .iter()
+                .all(|c| c.node.qualified_name != "sample.sibling")
+        );
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &candidate.excerpts);
+        } else {
+            previous = Some(candidate.excerpts.clone());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn final_quotation_order_uses_complete_source_action_tokens() -> Result<(), Box<dyn Error>> {
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let source = format!(
+        "def opaque():\n    # payload {}readable\n    # Read payload.\n    return None\n",
+        " ".repeat(498),
+    );
+    fs::write(root.join("sample.py"), &source)?;
+    let built = build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+    let path = built.output_dir.join("graph.json");
+    let mut previous = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine =
+            open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+        let ranked = engine.discover_ranked(request("Where are payloads read?"))?;
+        let candidate = ranked
+            .candidates
+            .iter()
+            .find(|c| c.node.qualified_name == "sample.opaque")
+            .ok_or("missing source owner")?;
+        assert_eq!(candidate.excerpts.len(), 2);
+        assert!(
+            candidate.excerpts[0].text.contains("# Read payload."),
+            "a clipped readable prefix must not tie genuine read action evidence"
+        );
+        assert!(candidate.excerpts[1].text.ends_with("read"));
+        for quote in &candidate.excerpts {
+            assert_eq!(quote.kind, RankedExcerptKind::CallableComment);
+            assert!(quote.is_coherent());
+            assert_eq!(
+                source.get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+                Some(quote.text.as_str())
+            );
+        }
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &candidate.excerpts);
+        } else {
+            previous = Some(candidate.excerpts.clone());
+        }
+    }
+    Ok(())
+}

@@ -29,7 +29,10 @@ identity, including package-entry additions/removals. Standalone extraction
 without project context retains its legacy path-based behavior.
 
 The new binary also extends raw broad-query discovery context through exact
-outgoing calls within the requested depth. Source graph rebuilds are needed only
+outgoing calls within the requested depth, automatically from High-relevance
+selected roots. Partial lexical roots keep first-hop context. Explicit native
+context inspection can inspect every selected root's witnessed paths; this
+changes neither ranking nor relevance. Source graph rebuilds are needed only
 when the required relationships are missing; querying cannot invent them.
 Callees remain context and keep the lexical shortlist unchanged. Ranked-view/4's
 optional presentation retains its first-hop context contract. Adjacency work
