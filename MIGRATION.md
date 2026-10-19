@@ -1,12 +1,32 @@
 # Migrate from Graphify to Compass
 
-Current builds use `source-query/8-callable-comments` and AST cache 32. Run
+Current builds use `source-query/8-callable-comments` and AST cache 33. Run
 `compass update <root>` with the new binary to retain up to 64 callable comments
 instead of eight. Upgrade readers for profile 8; profiles 1–7 retain their original
 meaning and limits. Per-field byte/term and per-file/artifact limits still apply,
 so large callables can remain partial. Comments are inspection pointers rather
 than behavioral proof. Subsequent cache 31 notes describe earlier development
-changes; cache 32 is the current disposable extraction identity.
+changes; cache 33 is the current disposable extraction identity.
+
+Python producer 2 also corrects source-root module identity when no import roots
+are configured. Bare roots use repository-relative modules, independent of the
+checkout directory name. A regular root `__init__.py` or `__init__.pyi` retains
+the package namespace, including nested modules. Existing configured import
+roots keep precedence and competing roots remain ambiguous. Graph IDs and edges
+can change after rebuilding affected current graphs; historical realizations
+remain immutable. The new producer remains `Qualifying`, pending promotion.
+
+Run `compass update <root>` to rebuild current evidence. If extraction reports
+unavailable source-root package layout, fix linked/non-regular/unreadable package
+entries or declare import roots in `pyproject.toml`; package directory names must
+be valid Python identifiers. Default source identities retain non-identifier
+script/group names such as `billing-service/test-helper.py`; they do not claim
+runtime importability. Literal dots and percent signs inside components use
+`%2E` and `%25`, preserving the distinction from actual directory/module
+separators. Invalid absolute/traversing/non-normalized source paths still fail
+explicitly. The layout participates in disposable cache
+identity, including package-entry additions/removals. Standalone extraction
+without project context retains its legacy path-based behavior.
 
 The development export-proof repair adds `ecmascriptExportInventory` to root
 TypeScript/JavaScript file/module declarations under evidence/2. Upgrade strict

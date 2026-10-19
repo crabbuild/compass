@@ -2723,3 +2723,27 @@ can recover later source owners when the per-file scope quota was previously
 spent on keyword tokens. The change can affect source-field coverage and
 retrieval scores in quota-limited files; it does not change semantic graph
 records. AST cache24 rebuilds the affected disposable evidence.
+
+
+## Python default source-root identity (development)
+
+Python producer 2 is `Qualifying`. Project-aware extraction without configured
+Python import roots now derives module keys from verified root layout instead
+of incidental checkout names. Bare roots use relative module names; regular
+root `__init__.py`/`__init__.pyi` entries retain a valid package prefix for root
+and nested modules. Configured import roots retain their existing precedence
+and ambiguity. This is source identity, not a runtime `sys.path` guarantee.
+
+The two fixed package-entry metadata probes do not follow links. Unknown layout
+or an invalid package prefix fails explicitly with a recovery message when no
+configured roots apply. Non-identifier script/group paths such as
+`billing-service/test-helper.py` retain a deterministic relative source identity.
+Literal dots and percent signs within components are escaped as `%2E`/`%25`,
+so they cannot impersonate directory/module separators or each other. These
+source keys are not runtime importability certificates. Invalid absolute,
+traversing or non-normalized paths fail explicitly, without checkout fallback.
+Standalone extraction without project context retains
+the previous path fallback. Current affected IDs and edges can change on rebuild;
+immutable historical graphs, evidence/2 and graph-v1 shapes are unchanged.
+AST cache 33 and root-layout fingerprint component version2 prevent reuse
+across changed package context. No release-promotion decision is updated.

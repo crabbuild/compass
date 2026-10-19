@@ -500,11 +500,11 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.python",
             language: "python",
-            version: 1,
+            version: 2,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: PYTHON_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualified,
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
     RUBY_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {

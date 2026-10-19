@@ -763,6 +763,11 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
         Some((1, UniversalEvidenceQualification::Qualified))
     );
     assert_eq!(
+        UniversalEvidenceRegistry::pipeline("python")
+            .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
+        Some((2, UniversalEvidenceQualification::Qualifying))
+    );
+    assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
         Some(4)
     );

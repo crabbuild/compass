@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Derive unconfigured Python module names from verified source-root layout:
+  bare roots use relative modules; package roots retain their package prefix.
+  Checkout names no longer hide valid imported calls in bare roots. Retain
+  configured import-root precedence, ambiguity and exact call occurrences.
+  Retain source identities for script/group paths such as `billing-service`;
+  escape literal dots and percent signs inside components so they cannot
+  impersonate import separators. Package-entry links, non-regular metadata and
+  invalid package names fail explicitly when no configured roots apply. Python producer 2 remains
+  `Qualifying`; AST cache 33 and layout-bound fingerprints refresh current
+  evidence without rewriting historical graphs.
+
 - Retain up to 64 source-anchored comments per callable, allowing broad queries
   to find explanations beyond an eight-comment prefix. Keep independent field,
   file and artifact limits and explicit partial coverage. Source-query profile 8

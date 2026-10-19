@@ -376,9 +376,12 @@ supported pipelines.
 An established language keeps its direct implementation until its universal
 pipeline proves the transition is safe. C#, Dart, Go, Groovy, Java, JavaScript,
 Kotlin, PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript have completed
-the route switch and are `Qualified` under the checked-in universal-evidence
-promotion decision. Future languages still follow the same gate sequence
-independently.
+the route switch under the checked-in historical universal-evidence promotion
+decision. Changed development producer versions, including Python 2, remain
+`Qualifying` until separately promoted. Python 2 corrects project-aware default
+module identity using verified source-root package layout and a layout-bound
+cache fingerprint; configured import roots retain precedence. Future languages
+still follow the same gate sequence independently.
 
 ```text
 established extraction baseline

@@ -11,6 +11,9 @@ artifacts captured in the mounted qualification target for that decision.
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
 
+Python2 separately remains `Qualifying` for the project-aware default source-root
+identity repair described below. The historical promotion table retains Python1.
+
 ## In-progress leading documentation
 
 The development registry now marks Go2, Rust4 and TypeScript5 as `Qualifying`.
@@ -772,6 +775,22 @@ narrowing remains unsupported. In `factory()()`, only the named inner factory
 call is eligible for resolution; the unnamed returned callback cannot borrow
 the factory receiver's type as its target. Receiver inference keeps its bounded
 depth and does not select methods solely because their terminal names match.
+
+Project-aware Python producer 2 uses configured import roots when available.
+Without configured roots, a bare source root uses relative module keys; a regular
+root `__init__.py` or `__init__.pyi` retains the source package prefix, including
+nested modules. Checkout names do not become bare-root package names. Two fixed
+metadata probes distinguish bare/package/unknown layout without following links;
+unknown layout or an invalid package name fails with recovery instructions.
+Non-identifier script/group components retain deterministic source identity,
+without a runtime importability claim. Literal dots/percent signs within
+components are escaped as `%2E`/`%25` so distinct source paths cannot impersonate
+module separators or each other. Absolute/traversing/non-normalized paths fail
+explicitly rather than using checkout-name inference.
+Layout enters the version2 project fingerprint component and AST cache 33 refreshes disposable
+facts. Standalone extraction without project context retains its legacy path
+fallback. The changed producer remains `Qualifying`; this does not prove runtime
+import-path or dynamic dispatch completeness.
 
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to

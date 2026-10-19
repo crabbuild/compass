@@ -105,7 +105,7 @@ class Service(Parent):
     let snapshot = selected_snapshot(&batch);
 
     assert_eq!(snapshot["pipeline"]["id"], "compass.python");
-    assert_eq!(snapshot["pipeline"]["version"], 13);
+    assert_eq!(snapshot["pipeline"]["version"], 2);
     assert_eq!(
         snapshot["pipeline"]["schema"],
         "compass.languages.evidence/2"

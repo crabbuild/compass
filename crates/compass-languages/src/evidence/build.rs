@@ -1020,6 +1020,14 @@ pub(crate) fn extract_tree_evidence(
         }
         _ => {}
     }
+    if pipeline.producer.language == "python"
+        && project_evidence.is_some_and(crate::ProjectEvidence::python_default_layout_unavailable)
+    {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::InvalidPath,
+            "Python source-root package layout is unavailable; declare import roots in pyproject.toml or fix non-regular/unreadable package-entry metadata, then run compass update",
+        ));
+    }
     let python_module_keys = if pipeline.producer.language == "python" {
         project_evidence
             .map(|evidence| evidence.python_module_keys(source_file))
@@ -1027,6 +1035,15 @@ pub(crate) fn extract_tree_evidence(
     } else {
         Vec::new()
     };
+    if pipeline.producer.language == "python"
+        && python_module_keys.is_empty()
+        && project_evidence.is_some_and(|evidence| evidence.python_import_roots().is_empty())
+    {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::InvalidPath,
+            "Python source path has no supported default source identity; use a normalized repository-relative Python source path, then run compass update",
+        ));
+    }
     let unique_python_module =
         (python_module_keys.len() == 1).then(|| python_module_keys[0].clone());
     let mut state = DirectEvidenceState::new(
