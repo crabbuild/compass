@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add opt-in prospective developer graph-precision diagnostics with exact
+  conditional finite-population bounds. Preserve legacy formats and all existing
+  qualification gates; arithmetic does not establish design acceptance or quality.
+
 - Raise the Rustls minimum and locked dependency to 0.23.46 for upstream fixes
   RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349.
   Other dependency advisories remain tracked separately.

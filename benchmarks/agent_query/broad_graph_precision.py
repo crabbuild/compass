@@ -1,7 +1,9 @@
 """Reproducible emitted-edge sampling and retained-denominator diagnostics.
 
 Sampling does not authenticate source judgments or establish independent units.
-No population interval, precision NI decision or joint qualification is issued.
+Version1 issues no population interval. Prospective version2 adds exact bounds
+conditional on an accepted ideal sampling model and truthful labels; it does
+not accept that model or issue a precision NI/joint qualification decision.
 """
 from collections import Counter
 import hashlib
@@ -9,14 +11,17 @@ from pathlib import Path
 
 from benchmarks.agent_query import broad_graph_evidence as evidence
 from benchmarks.agent_query import broad_graph_statistics as statistics
+from benchmarks.agent_query import broad_graph_bounds as bounds
 from benchmarks.agent_query import broad_query_review as query
 from benchmarks.agent_query import runner, path_audit
 
 
 INPUT_SCHEMA = "compass.broad-graph-precision-input/1"
 DESIGN_SCHEMA = "compass.broad-graph-precision-design/1"
+DESIGN_SCHEMA_V2 = "compass.broad-graph-precision-design/2"
 REVIEW_SCHEMA = "compass.broad-graph-precision-reviews/1"
 RESULT_SCHEMA = "compass.broad-graph-precision-diagnostics/1"
+RESULT_SCHEMA_V2 = "compass.broad-graph-precision-diagnostics/2"
 SAMPLER = "sha256-counter-floyd/1"
 MAX_SAMPLED_EDGES = 65_536
 MAX_POPULATION_EDGES = 8_000_000
@@ -32,7 +37,8 @@ def support_hashes():
     return {"coverage." + key: value for key, value in evidence.support_hashes().items()} | {
         name: query.sha(query.read_bounded(Path(path), query.MAX_JSON_BYTES))
         for name, path in [("precision", __file__), ("runner", runner.__file__),
-                           ("pathAudit", path_audit.__file__)]}
+                           ("pathAudit", path_audit.__file__),
+                           ("populationBounds", bounds.__file__)]}
 
 
 def sample_indices(population, count, namespace, *, draw_budget=None):
@@ -103,9 +109,13 @@ def assess_graph_precision(manifest, root):
     coverage = evidence.assess_graph_coverage(coverage_input, root)
     registration = artifacts.document(coverage_input["registration"])
     capture = artifacts.document(coverage_input["capture"])
-    design = artifacts.document(manifest["design"])
-    evidence._fields(design, ("schema", "frozenAt", "coverageRegistrationSha256", "supportSha256", "sampler", "seed", "quotaPerGraph"), "precision design")
-    if design["schema"] != DESIGN_SCHEMA or design["sampler"] != SAMPLER or design["supportSha256"] != support_hashes():
+    design = query._object(artifacts.document(manifest["design"]), "precision design")
+    version2 = design.get("schema") == DESIGN_SCHEMA_V2
+    fields = ("schema", "frozenAt", "coverageRegistrationSha256", "supportSha256", "sampler", "seed", "quotaPerGraph")
+    evidence._fields(design, (*fields, "populationBoundsProfile") if version2 else fields, "precision design")
+    if (design["schema"] not in (DESIGN_SCHEMA, DESIGN_SCHEMA_V2)
+            or design["sampler"] != SAMPLER or design["supportSha256"] != support_hashes()
+            or (version2 and design["populationBoundsProfile"] != bounds.PROFILE)):
         raise ValueError("unsupported or changed graph precision sampling protocol")
     if design["coverageRegistrationSha256"] != coverage_input["registration"]["sha256"]:
         raise ValueError("precision design differs from frozen graph source registration")
@@ -212,6 +222,15 @@ def assess_graph_precision(manifest, root):
         by_tool[tool] = dict(overall=_view(selected_frames, selected_keys, labels),
             byRepository=by_repo, byRecordedRelation=by_kind,
             issueCounts=dict(sorted(issues[tool].items())))
+    conditional = None
+    if version2:
+        conditional = bounds.population_bounds([
+            dict(repository=frame["repository"], tool=frame["tool"],
+                 population=frame["population"], sampleSize=len(frame["sampleKeys"]),
+                 correct=sum(labels.get(key) == "correct" for key in frame["sampleKeys"]),
+                 incorrect=sum(labels.get(key) == "incorrect" for key in frame["sampleKeys"]),
+                 buildSuccessful=frame["buildSuccessful"])
+            for _key, frame in sorted(frames.items())])
     for source_root, file, digest in source_paths.values():
         path = (source_root / file).resolve()
         if source_root.resolve() != source_root or not path.is_relative_to(source_root):
@@ -222,7 +241,7 @@ def assess_graph_precision(manifest, root):
     artifacts.recheck()
     if design["supportSha256"] != support_hashes():
         raise ValueError("precision support changed during assessment")
-    return dict(schema=RESULT_SCHEMA, qualificationEstablished=False,
+    result = dict(schema=RESULT_SCHEMA_V2 if version2 else RESULT_SCHEMA, qualificationEstablished=False,
         coverage=coverage, precision=by_tool, samplePlan=[plan[key] for key in sorted(plan)],
         precisionComparisonInterval=None, sampling=dict(method=SAMPLER, quotaPerGraph=quota,
             seed=seed, selectedRecords=len(plan), randomDraws=draws[0]),
@@ -231,3 +250,8 @@ def assess_graph_precision(manifest, root):
             "Sample precision and a population-weighted point estimate are not population confidence bounds.",
             "Unselected and unreviewed records remain in population bounds; empty populations have undefined precision.",
             "Production qualification floors, prospective sampling/power acceptance and final joint eligibility remain required."])
+    if version2:
+        result["conditionalSamplingBounds"] = conditional
+        result["limitations"].append(
+            "Exact sampling bounds are conditional arithmetic, not an accepted sampling design, semantic review or certified precision interval.")
+    return result

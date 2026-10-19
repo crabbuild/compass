@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from benchmarks.agent_query import broad_graph_precision as precision
 from benchmarks.agent_query import broad_graph_statistics as statistics
+from benchmarks.agent_query import broad_graph_bounds as bounds
 from benchmarks.agent_query.tests.test_broad_graph_evidence import Fixture
 
 
@@ -78,6 +79,82 @@ class GraphPrecisionTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.fixture = PrecisionFixture(Path(directory.name))
+
+    def prospective_bounds(self):
+        self.fixture.design.update(schema=precision.DESIGN_SCHEMA_V2,
+                                  populationBoundsProfile=bounds.PROFILE)
+
+    def test_prospective_bounds_are_bound_to_new_design_and_remain_unqualified(self):
+        self.prospective_bounds()
+        self.fixture.label_all()
+        result = self.fixture.assess()
+        self.assertEqual(result["schema"], precision.RESULT_SCHEMA_V2)
+        conditional = result["conditionalSamplingBounds"]
+        self.assertEqual(conditional["difference"]["lower"], {"numerator": 0, "denominator": 1})
+        self.assertEqual(conditional["difference"]["upper"], {"numerator": 0, "denominator": 1})
+        self.assertFalse(conditional["registeredDesignAccepted"])
+        self.assertFalse(conditional["qualificationEstablished"])
+        self.assertFalse(result["qualificationEstablished"])
+        self.assertIsNone(result["precisionComparisonInterval"])
+        self.assertIn("populationBounds", self.fixture.design["supportSha256"])
+
+    def test_unknown_bounds_profile_and_major_are_rejected(self):
+        self.prospective_bounds()
+        self.fixture.design["populationBoundsProfile"] = "future/99"
+        with self.assertRaises(ValueError):
+            self.fixture.assess()
+        self.fixture.design["schema"] = "compass.broad-graph-precision-design/99"
+        with self.assertRaises(ValueError):
+            self.fixture.assess()
+
+    def test_legacy_result_shape_never_gains_conditional_fields(self):
+        result = self.fixture.assess()
+        self.assertEqual(result["schema"], precision.RESULT_SCHEMA)
+        self.assertNotIn("conditionalSamplingBounds", result)
+
+    def test_nonobject_design_rejects_without_attribute_error(self):
+        manifest = self.fixture.publish_input()
+        for value in [[], None, 17]:
+            manifest["design"] = self.fixture.coverage.put("bad-design.json", value)
+            with self.assertRaises(ValueError):
+                precision.assess_graph_precision(manifest, self.fixture.coverage.root)
+
+    def test_legacy_design_rejects_unannounced_new_profile(self):
+        self.fixture.design["populationBoundsProfile"] = bounds.PROFILE
+        with self.assertRaises(ValueError):
+            self.fixture.assess()
+
+    def test_bound_support_is_rechecked_after_arithmetic(self):
+        self.prospective_bounds()
+        original_bounds, original_hashes = bounds.population_bounds, precision.support_hashes
+        changed = [False]
+
+        def compute(frames):
+            result = original_bounds(frames)
+            changed[0] = True
+            return result
+
+        def hashes():
+            result = original_hashes()
+            if changed[0]:
+                result["populationBounds"] = "0" * 64
+            return result
+
+        with patch.object(bounds, "population_bounds", side_effect=compute), \
+                patch.object(precision, "support_hashes", side_effect=hashes), \
+                self.assertRaisesRegex(ValueError, "support changed"):
+            self.fixture.assess()
+
+    def test_prospective_unknowns_and_arithmetic_limit_do_not_become_empty(self):
+        self.prospective_bounds()
+        self.fixture.enlarge("compass", 10)
+        self.fixture.design["quotaPerGraph"] = 2
+        result = self.fixture.assess()
+        self.assertEqual(result["conditionalSamplingBounds"]["tools"]["compass"]["upper"],
+                         {"numerator": 1, "denominator": 1})
+        self.fixture.label_all()
+        with patch.object(bounds, "MAX_ARITHMETIC_WORK", 0), self.assertRaisesRegex(ValueError, "work limit"):
+            self.fixture.assess()
 
     def test_missing_reviews_keep_full_sample_denominator(self):
         result = self.fixture.assess()

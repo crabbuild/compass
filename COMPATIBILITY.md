@@ -1,5 +1,26 @@
 # Compass compatibility
 
+## Prospective developer graph-precision bounds
+
+The opt-in developer precision design `compass.broad-graph-precision-design/2`
+requires `populationBoundsProfile = "exact-hypergeometric-bonferroni/1"` and
+emits `compass.broad-graph-precision-diagnostics/2`. Its added
+`conditionalSamplingBounds` record uses
+`compass.broad-graph-conditional-bounds/1`; endpoints are explicit rational
+numerator/denominator pairs. Bounds are conditional on ideal uniform sampling
+without replacement and truthful labels, not proof that those assumptions hold.
+Design acceptance, semantic truth, independence and qualification remain false.
+Existing certified-interval fields remain null; no noninferiority or joint
+qualification decision is introduced.
+
+Design1/diagnostics1 retain their existing shape and meanings. Unknown majors or
+bounds profiles fail explicitly. Both design versions bind the complete current
+support-code hashes before capture and recheck them after assessment. Verify old
+immutable experiments with their retained frozen code; never rewrite their design
+or apply this new profile after observing outputs. This developer-only addition
+does not change Compass's native runtime, graph/source formats or query ranking,
+authorize any capture/reviewer, or weaken existing numeric qualification gates.
+
 ## Callable comment recall
 
 Current updates publish `source-query/8-callable-comments` and rebuild disposable

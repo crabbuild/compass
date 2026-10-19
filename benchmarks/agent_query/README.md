@@ -51,6 +51,38 @@ decision or qualification is issued. Existing production precision/sample
 floors remain separate requirements. Run synthetic controls with
 `python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_precision`.
 
+Prospective precision design2 additionally requires
+`populationBoundsProfile: "exact-hypergeometric-bonferroni/1"` and emits
+diagnostics2 with `conditionalSamplingBounds`. Design1 retains diagnostics1 and
+its original null interval fields. The new arithmetic inverts finite-population
+hypergeometric tails with integer counts, allocating a shared1/20 error allowance
+across the two tails of all nonempty tool/repository frames. It sums population-count bounds,
+then forms a simultaneous candidate-minus-comparator bound. Rational endpoints
+avoid floating-point rounding; unreviewed labels widen the bounds, and failed
+builds withhold a tool's entire interval. Empty populations remain undefined.
+This follows the test-inversion approach described in
+[A Note on Confidence Intervals for Proportions in Finite Populations](https://doi.org/10.1080/00031305.1987.10475484).
+
+These are conditional calculations under ideal uniform sampling without
+replacement and truthful labelled records. The hash sampler's reproducibility
+does not prove that randomization model, semantic correctness or reviewer
+independence. The design must be frozen before capture and bind the bounds
+module's hash; existing frozen experiments cannot be retrofitted. No new capture
+or evaluator is authorized by this feature. Design acceptance and qualification
+remain false, and `populationConfidenceInterval`/`precisionComparisonInterval`
+remain null: conditional arithmetic is not a certified inferential or joint
+decision. Per-recorded-relation confidence bounds are not issued. No original
+production, power or noninferiority threshold changes.
+
+The calculation retains the 64-frame/8-million-record/65,536-sampled-record
+limits and at most4096 sampled records per graph. It charges combination factors and
+summation terms before arithmetic against a shared8,192,000-work ceiling; this
+is a logical work count, not a CPU-time or RSS measurement. Limits reject the
+whole calculation. Run the exact small-population coverage and integration
+controls with `python3 -m unittest
+benchmarks.agent_query.tests.test_broad_graph_bounds
+benchmarks.agent_query.tests.test_broad_graph_precision`.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
