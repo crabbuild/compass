@@ -80,14 +80,17 @@ class Fixture:
         item["graphSha256"] = ref["sha256"]
         item["edges"] = [dict(index=0, sha256=evidence.canonical_sha256(self.graphs[tool]["edges"][0]))]
 
-    def assess(self):
+    def publish_input(self):
         registration = self.put("registration.json", self.registration)
         self.capture["registrationSha256"] = registration["sha256"]
         capture = self.put("capture.json", self.capture)
         self.reviews["captureSha256"] = capture["sha256"]
         manifest = dict(schema=evidence.INPUT_SCHEMA, registration=registration, capture=capture,
             reviews=self.put("reviews.json", self.reviews), sourceRoots=dict(sample=str(self.source)))
-        return evidence.assess_graph_coverage(manifest, self.root)
+        return manifest
+
+    def assess(self):
+        return evidence.assess_graph_coverage(self.publish_input(), self.root)
 
 
 class GraphEvidenceTests(unittest.TestCase):

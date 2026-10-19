@@ -36,6 +36,21 @@ reports `qualificationEstablished=false`; precision, power and final joint
 eligibility are still required. Its controls use synthetic files only:
 `python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_evidence`.
 
+`broad_graph_precision.assess_graph_precision` adds both tools' emitted-edge
+sampling and precision diagnostics. A separate design freezes the quota, seed
+and versioned SHA-256-counter/Floyd sampling method before collection. The
+sample is recomputed from the exact graph bytes; labels cannot add records
+outside it. Unknown labels remain in the sample denominator, and unselected
+records remain in the identified population bounds. Empty populations have
+undefined precision. Sample precision, a population-size-weighted point
+estimate, and whole-population census precision are separate fields. Recorded
+relation strata remain visible even when unsampled. Source witnesses and exact
+record hashes bind judgments to evidence; they do not authenticate truth or
+independence. No population confidence interval, precision noninferiority
+decision or qualification is issued. Existing production precision/sample
+floors remain separate requirements. Run synthetic controls with
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_precision`.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
