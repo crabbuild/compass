@@ -747,3 +747,84 @@ fn final_quotation_order_uses_complete_source_action_tokens() -> Result<(), Box<
     }
     Ok(())
 }
+
+#[test]
+fn broad_comparative_spellings_are_tentative_and_keep_literal_topics() -> Result<(), Box<dyn Error>>
+{
+    for (word, variant) in [
+        ("fast", "fastest"),
+        ("large", "largest"),
+        ("slow", "slower"),
+    ] {
+        let d = tempfile::tempdir()?;
+        let root = d.path().join("repo");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("sample.rs"),
+            format!(
+                "fn opaque() {{ /* Format the {variant} payloads. */ }}\nfn unrelated() {{ /* Format unrelated invoices. */ }}\n"
+            ),
+        )?;
+        let built =
+            build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+        let path = built.output_dir.join("graph.json");
+        let graph = GraphDocument::load(&path)?;
+        let target = graph
+            .nodes
+            .iter()
+            .find(|n| {
+                n.kind.is_callable() && n.qualified_name.rsplit([':', '.']).next() == Some("opaque")
+            })
+            .ok_or("missing source owner")?;
+        let mut previous = None;
+        for mode in [EngineSelection::Json, EngineSelection::Store] {
+            let engine =
+                open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+            let question = format!("Where are {word} payloads formatted?");
+            let answer = engine.discover_ranked(request(&question))?;
+            let candidate = answer
+                .candidates
+                .iter()
+                .find(|c| c.node.id == target.id)
+                .ok_or("comparative source lead missing")?;
+            assert!(
+                candidate.matched_terms.iter().any(|t| t == word),
+                "{word}: {candidate:?}"
+            );
+            assert_eq!(candidate.relevance, RelevanceBand::Low);
+            assert!(
+                candidate
+                    .reasons
+                    .iter()
+                    .any(|r| r.contains("Vocabulary fallback") && r.contains(variant))
+            );
+            assert!(
+                answer
+                    .candidates
+                    .iter()
+                    .all(|c| c.node.name.trim_end_matches("()") != "unrelated")
+            );
+            assert!(
+                engine
+                    .discover_ranked(request(&format!("Where are `{word}` payloads formatted?")))?
+                    .candidates
+                    .iter()
+                    .all(|c| c.node.id != target.id)
+            );
+            assert!(
+                engine
+                    .discover_ranked(request(&format!(
+                        "Where are {word} LunarRover payloads formatted?"
+                    )))?
+                    .candidates
+                    .is_empty()
+            );
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &answer.candidates);
+            } else {
+                previous = Some(answer.candidates);
+            }
+        }
+    }
+    Ok(())
+}

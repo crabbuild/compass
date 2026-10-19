@@ -165,6 +165,13 @@ more detail. Source locations, relevance/identity/evidence labels, recall bounds
 and uncertainty remain visible. This changes text packing, not ranking or the
 JSON projection.
 
+Broad ordinary-word retrieval can suggest corpus-supported forward spellings,
+for example `fast -> fastest`. These mappings are inspection alternatives and
+keep dependent candidates Low with no implementation preference. Nonsemantic
+hints require a separate literal topic; an independently positive optional LSA
+score keeps the existing semantic exception. The mapping does not establish
+comparison semantics or requested behavior. Explicit identities remain literal.
+
 Source quotations prefer bounded retained windows covering more distinct
 canonical requested terms, rather than always centering the first match.
 Repeated words do not increase that count; equal coverage keeps source order.

@@ -33,7 +33,7 @@ impl ResponseCache {
         digest.update(graph.as_bytes());
         digest.update(env!("CARGO_PKG_VERSION").as_bytes());
         digest.update(crate::QUERY_PLANNER_PROFILE_V2.as_bytes());
-        digest.update(crate::QUERY_RANKER_PROFILE_V21.as_bytes());
+        digest.update(crate::QUERY_RANKER_PROFILE_V22.as_bytes());
         digest.update(b"compound-identifier/2");
         digest.update(b"unindexed-vocabulary/1");
         // Literal metadata must not launder hinted local-operation fields.

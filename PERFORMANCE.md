@@ -1,5 +1,13 @@
 # Compass performance qualification
 
+## In-progress forward-spelling bounds
+
+At most32 canonical broad-query concepts generate two forward spellings each,
+with at most64 additional bounded statistics lookups. Only supported spellings
+enter existing posting and candidate quotas. These lookups are separate from
+candidate-record counters; this is not a measured latency, precision or RSS
+claim. Global source/index formats and their bounds are unchanged.
+
 ## In-progress quotation window bounds
 
 Window selection tokenizes each already retained site of at most4096 bytes

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Recognize bounded, corpus-supported forward spellings in broad questions,
+  retaining literal topic guards, explicit identity and Low/unverified mapping
+  disclosure. Keep canonical query groups separate and refresh ranker responses.
+
 - Prefer retained source-quotation windows covering more distinct requested
   terms, so an early generic match does not hide later question evidence.
   Preserve exact UTF-8 source bytes, coordinates and quotation limits. Known

@@ -2623,3 +2623,88 @@ fn generic_facets_cannot_replace_subject_evidence_but_facet_listings_remain_vali
     );
     Ok(())
 }
+
+#[test]
+fn optional_semantics_keeps_spelling_hints_low_without_a_literal_topic()
+-> Result<(), Box<dyn std::error::Error>> {
+    use compass_query::RelevanceBand;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    support::write_graph(&path)?;
+    let mut graph = GraphDocument::load(&path)?;
+    graph.nodes = vec![
+        support::node(
+            "target",
+            NodeKind::Function,
+            "formatFastest",
+            "fixture.formatFastest",
+        ),
+        support::node(
+            "bridge",
+            NodeKind::Class,
+            "formatRequests",
+            "fixture.formatRequests",
+        ),
+        support::node(
+            "other",
+            NodeKind::Function,
+            "invoicePayment",
+            "fixture.invoicePayment",
+        ),
+    ];
+    graph.links.clear();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let json = open(&path, None, &directory.path().join("json-cache"))?;
+    let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+    let query = request("Where are fast requests formatted?");
+    let mut previous = None;
+    for mut engine in [json, stored] {
+        let literal = engine.discover_ranked(query.clone())?;
+        assert!(literal.candidates.iter().all(|c| c.node.id != "target"));
+        engine.set_semantic_search(true);
+        let semantic = engine.discover_ranked(query.clone())?;
+        let candidate = semantic
+            .candidates
+            .iter()
+            .find(|c| c.node.id == "target")
+            .ok_or_else(|| {
+                format!(
+                    "optional semantic source lead missing: {semantic:?}; trace={:?}",
+                    engine.trace_ranked(query.clone(), "target")
+                )
+            })?;
+        assert!(candidate.matched_fields.iter().any(|f| f == "semantic_lsa"));
+        assert!(!candidate.matched_terms.iter().any(|t| t == "request"));
+        assert_eq!(candidate.relevance, RelevanceBand::Low);
+        assert!(
+            candidate
+                .reasons
+                .iter()
+                .any(|r| r.contains("fast -> fastest"))
+        );
+        assert!(
+            candidate
+                .reasons
+                .iter()
+                .all(|r| !r.contains("inspection preference"))
+        );
+        assert_eq!(
+            semantic.candidates,
+            engine.discover_ranked(query.clone())?.candidates
+        );
+        engine.set_semantic_search(false);
+        assert_eq!(
+            literal.candidates,
+            engine.discover_ranked(query.clone())?.candidates
+        );
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &semantic.candidates);
+        } else {
+            previous = Some(semantic.candidates);
+        }
+    }
+    Ok(())
+}

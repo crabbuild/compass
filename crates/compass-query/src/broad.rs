@@ -384,6 +384,29 @@ fn alternatives(term: &str) -> Vec<String> {
         .collect()
 }
 
+// Forward spellings are recall hints, not adjective/behavior equivalence.
+// Keep literal identifiers untouched and never reverse-strip an unknown word.
+fn comparative_spellings(terms: &[String]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut variants = BTreeMap::<String, BTreeSet<String>>::new();
+    for word in terms {
+        if !(4..=32).contains(&word.len()) || !word.bytes().all(|b| b.is_ascii_lowercase()) {
+            continue;
+        }
+        let suffixes = if word.ends_with('e') {
+            ["r", "st"]
+        } else {
+            ["er", "est"]
+        };
+        let group = variants.entry(word.clone()).or_default();
+        for suffix in suffixes {
+            group.insert(compass_model::canonical_code_token(format!(
+                "{word}{suffix}"
+            )));
+        }
+    }
+    variants
+}
+
 fn plural_acronym_stem(word: &str) -> Option<&str> {
     let stem = word.strip_suffix('s')?;
     (stem.len() >= 2 && stem.bytes().all(|byte| byte.is_ascii_uppercase())).then_some(stem)
@@ -763,6 +786,7 @@ impl CodeQueryEngine {
             .any(|raw| !possible_noun_spelling(raw));
         let noun_subject_requested =
             !possible_nouns.is_empty() && (!action_terms.is_empty() || separate_predicate);
+        let comparative_variants = comparative_spellings(&original_terms);
         let mut groups = Vec::new();
         let mut vocabulary_fallbacks = BTreeMap::<String, (Vec<String>, Vec<String>)>::new();
         let mut literal_supported_terms = BTreeSet::new();
@@ -796,12 +820,26 @@ impl CodeQueryEngine {
             // explicit identities and unknown statistics stay literal.
             let candidate_aliases = crate::concepts::code_abbreviation_alternatives(&term)
                 .iter()
-                .chain(crate::concepts::operation_vocabulary_alternatives(&term))
+                .copied()
+                .chain(
+                    crate::concepts::operation_vocabulary_alternatives(&term)
+                        .iter()
+                        .copied(),
+                )
                 .chain(if df == 0 {
-                    crate::concepts::unindexed_vocabulary_alternatives(&term).iter()
+                    crate::concepts::unindexed_vocabulary_alternatives(&term)
+                        .iter()
+                        .copied()
                 } else {
-                    [].iter()
-                });
+                    [].iter().copied()
+                })
+                .chain(
+                    comparative_variants
+                        .get(&term)
+                        .into_iter()
+                        .flatten()
+                        .map(String::as_str),
+                );
             if !group_legacy
                 && !wants_documents
                 && named_contexts.is_empty()
@@ -816,7 +854,7 @@ impl CodeQueryEngine {
                         Some((n, frequency)) if frequency > 0 => {
                             count = n.max(1);
                             alias_df = alias_df.max(frequency);
-                            aliases.push((*alias).to_owned());
+                            aliases.push(alias.to_owned());
                         }
                         Some(_) => {}
                         None => group_legacy = true,
@@ -1654,6 +1692,9 @@ impl CodeQueryEngine {
                 matched_fields.extend(fields);
             }
             let semantic_score = semantic.get(&node.id).copied().unwrap_or(0.0);
+            // Nonsemantic vocabulary hints need a separate literal topic.
+            // The existing opt-in semantic channel can independently nominate
+            // a candidate; hint dependency still forces Low and no preference.
             if vocabulary_needed && !literal_topic && semantic_score == 0.0 {
                 if let Some(mut details) = trace {
                     details.filter_reason = Some(RankedFilterReason::MissingSubjectEvidence);
@@ -2602,5 +2643,67 @@ impl CodeQueryEngine {
             bounded: retrieval.bounded,
             target_details: retrieval.target_details,
         })
+    }
+}
+
+#[cfg(test)]
+mod comparative_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_once_concepts_do_not_share_spelling_groups() {
+        let booking = compass_model::canonical_code_token("bookings".to_owned());
+        assert_eq!(booking, "booking");
+        let expected = BTreeMap::from([
+            (
+                "book".to_owned(),
+                BTreeSet::from(["booker".to_owned(), "bookest".to_owned()]),
+            ),
+            (
+                booking.clone(),
+                BTreeSet::from(["bookinger".to_owned(), "bookingest".to_owned()]),
+            ),
+        ]);
+        for input in [
+            vec!["book".to_owned(), booking.clone()],
+            vec![booking.clone(), "book".to_owned()],
+        ] {
+            assert_eq!(comparative_spellings(&input), expected);
+        }
+        assert_eq!(comparative_spellings(&[booking]).len(), 1);
+    }
+
+    #[test]
+    fn spelling_generation_retains_fixed_per_concept_and_byte_bounds() {
+        for (word, count) in [
+            ("big".to_owned(), 0),
+            ("fast".to_owned(), 2),
+            ("a".repeat(32), 2),
+            ("a".repeat(33), 0),
+            ("Fast".to_owned(), 0),
+            ("fast2".to_owned(), 0),
+            ("café".to_owned(), 0),
+        ] {
+            assert_eq!(
+                comparative_spellings(&[word])
+                    .values()
+                    .map(BTreeSet::len)
+                    .sum::<usize>(),
+                count
+            );
+        }
+        let terms = (0..32)
+            .map(|at| {
+                format!(
+                    "word{}{}",
+                    char::from(b'a' + at / 26),
+                    char::from(b'a' + at % 26)
+                )
+            })
+            .collect::<Vec<_>>();
+        let generated = comparative_spellings(&terms);
+        assert_eq!(generated.len(), 32);
+        assert!(generated.values().all(|v| v.len() <= 2));
+        assert_eq!(generated.values().map(BTreeSet::len).sum::<usize>(), 64);
     }
 }

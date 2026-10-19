@@ -2812,3 +2812,29 @@ relevance, source ownership, graph facts, ranked-view/4 and ranker21 are unchang
 Disposable responses advance ranked-source-excerpts/4. No source rebuild or
 historical rewrite is required; no real-quality or latency qualification is
 established by these source bounds or synthetic controls.
+
+## Broad forward-spelling inspection (development)
+
+`query-ranker/22-forward-spellings` adds at most two forward spelling hints per
+canonical content concept: `r`/`st` after a final `e`, otherwise `er`/`est`.
+Only lower-ASCII concepts of4..32bytes participate; at most32 concepts generate
+64 statistical lookups. This is a bounded lexical hint, not an adjective
+classifier or a complete English morphology rule. Unknown words are never
+reverse-stripped, and global/historical token normalization is unchanged.
+Already canonical concept keys remain distinct, including non-fixed-point
+spellings such as `book` and `booking`.
+
+Only corpus-supported alternatives enter the existing vocabulary channel.
+Explicit identifiers, named context, documentation intent and unknown statistics
+retain their literal-only policy. Without optional semantics, a dependent hint
+requires separate literal owner-topic evidence. An independently positive opt-in
+LSA score retains the existing semantic admission exception. In either case,
+hint-dependent candidates remain Low, disclose their mapping, and receive no
+implementation or compound preference; lexical resemblance establishes no
+comparison condition or behavior. Exact identity retains its higher tier.
+
+Graph/source ownership, ambiguity, scopes, historical profiles and public JSON
+shapes are unchanged. Ranker22 refreshes disposable responses without a source
+rebuild; graph omissions still require an update. Candidate record limits remain
+in force. Statistical lookups are bounded separately and are not included in
+candidate-record counters or a physical I/O/latency guarantee.
