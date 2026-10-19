@@ -329,6 +329,14 @@ fn validate_fact(
 ) -> Result<(), EvidenceError> {
     match fact {
         Fact::Declaration(fact) => {
+            if fact.member_inventory_complete.is_some()
+                && (fact.language != "rust" || fact.kind != "trait")
+            {
+                return Err(invalid_fact(
+                    &fact.id,
+                    "member inventory completeness requires a Rust trait",
+                ));
+            }
             validate_language(&fact.id, &fact.language, pipeline_language)?;
             validate_range(&fact.range, &fact.id, fact.kind == "file")?;
             require_capability(&fact.id, LanguageCapability::Declarations, capabilities)?;
@@ -599,6 +607,70 @@ fn validate_fact(
                     .as_deref()
                     .and_then(|id| occurrences.get(id));
                 match hierarchy {
+                    HierarchyConstraint::RustGenericBounds {
+                        parameter_declaration_id,
+                        trait_qualified_names,
+                        ..
+                    } => {
+                        if fact.language != "rust"
+                            || !matches!(
+                                fact.relation,
+                                CandidateRelation::Calls | CandidateRelation::Tests
+                            )
+                            || occurrence.is_none_or(|occurrence| {
+                                occurrence.role != SemanticRole::Call
+                                    || occurrence.qualifier.is_none()
+                            })
+                            || fact.binding_id.is_some()
+                            || fact.constraints.qualified_name.is_some()
+                            || fact.constraints.exact_target_declaration_id.is_some()
+                            || fact.constraints.allow_external
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust generic bounds require an unselected receiver call",
+                            ));
+                        }
+                        require_reference(
+                            &fact.id,
+                            "Rust generic parameter",
+                            parameter_declaration_id,
+                            declarations,
+                        )?;
+                        let parameter = declarations[parameter_declaration_id.as_str()];
+                        if parameter.language != "rust"
+                            || parameter.kind != "parameter"
+                            || parameter.namespace != Some(SymbolNamespace::Type)
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust generic receiver requires an exact type parameter",
+                            ));
+                        }
+                        if trait_qualified_names.len() > 64
+                            || trait_qualified_names
+                                .iter()
+                                .any(|name| name.len() > limits.callable_type_bytes)
+                        {
+                            return Err(EvidenceError::new(
+                                EvidenceErrorCode::ResourceLimit,
+                                format!(
+                                    "candidate {:?} exceeds Rust bound identity limits",
+                                    fact.id
+                                ),
+                            ));
+                        }
+                        if trait_qualified_names.iter().any(String::is_empty)
+                            || trait_qualified_names
+                                .windows(2)
+                                .any(|pair| pair[0] >= pair[1])
+                        {
+                            return Err(invalid_fact(
+                                &fact.id,
+                                "Rust bound identities must be nonempty, unique and sorted",
+                            ));
+                        }
+                    }
                     HierarchyConstraint::DirectBase { .. }
                         if !matches!(
                             fact.relation,

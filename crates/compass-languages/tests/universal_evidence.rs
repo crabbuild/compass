@@ -56,6 +56,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             parameter_count: None,
             parameter_types: Vec::new(),
             direct_bases_complete: false,
+            member_inventory_complete: None,
             variadic: false,
             signature_hash: None,
             implementation_hash: None,
@@ -604,6 +605,99 @@ fn first_fact_error_is_independent_of_input_order() {
 }
 
 #[test]
+fn rust_generic_bound_constraints_round_trip_and_reject_invalid_contracts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let extraction = compass_languages::Engine::default().extract_source(
+        std::path::Path::new("src/lib.rs"),
+        b"trait Build { fn get(&self); } fn make<T: Build>(value: &T) { value.get(); }",
+    )?;
+    let batch = extraction.semantic_evidence.ok_or("missing evidence")?;
+    let at = batch
+        .candidates
+        .iter()
+        .position(|candidate| {
+            matches!(
+                candidate.constraints.hierarchy,
+                Some(HierarchyConstraint::RustGenericBounds { .. })
+            )
+        })
+        .ok_or("missing bound evidence")?;
+    validate_evidence(&batch, EvidenceLimits::default())?;
+    let encoded = serde_json::to_vec(&batch)?;
+    assert_eq!(
+        serde_json::from_slice::<SemanticEvidenceBatch>(&encoded)?,
+        batch
+    );
+    let mut invalid = batch.clone();
+    if let Some(HierarchyConstraint::RustGenericBounds {
+        parameter_declaration_id,
+        ..
+    }) = invalid.candidates[at].constraints.hierarchy.as_mut()
+    {
+        *parameter_declaration_id = "missing".to_owned();
+    }
+    assert_code(&invalid, EvidenceErrorCode::MissingReference);
+    let mut invalid = batch.clone();
+    let parameter = match &invalid.candidates[at].constraints.hierarchy {
+        Some(HierarchyConstraint::RustGenericBounds {
+            parameter_declaration_id,
+            ..
+        }) => parameter_declaration_id.clone(),
+        _ => return Err("missing bound constraint".into()),
+    };
+    invalid
+        .declarations
+        .iter_mut()
+        .find(|declaration| declaration.id == parameter)
+        .ok_or("missing parameter")?
+        .namespace = Some(compass_languages::SymbolNamespace::Value);
+    assert_code(&invalid, EvidenceErrorCode::InvalidFact);
+    let mut invalid = batch.clone();
+    invalid.candidates[at].constraints.qualified_name = Some("crate::Build::get".to_owned());
+    assert_code(&invalid, EvidenceErrorCode::InvalidFact);
+    for (count, accepted) in [(64, true), (65, false)] {
+        let mut changed = batch.clone();
+        if let Some(HierarchyConstraint::RustGenericBounds {
+            trait_qualified_names,
+            ..
+        }) = changed.candidates[at].constraints.hierarchy.as_mut()
+        {
+            *trait_qualified_names = (0..count)
+                .map(|index| format!("crate::Trait{index:03}"))
+                .collect();
+        }
+        if accepted {
+            validate_evidence(&changed, EvidenceLimits::default())?;
+        } else {
+            assert_code(&changed, EvidenceErrorCode::ResourceLimit);
+        }
+    }
+    let mut invalid = batch.clone();
+    if let Some(HierarchyConstraint::RustGenericBounds {
+        trait_qualified_names,
+        ..
+    }) = invalid.candidates[at].constraints.hierarchy.as_mut()
+    {
+        trait_qualified_names.push(trait_qualified_names[0].clone());
+    }
+    assert_code(&invalid, EvidenceErrorCode::InvalidFact);
+    let mut invalid = batch;
+    if let Some(HierarchyConstraint::RustGenericBounds {
+        trait_qualified_names,
+        ..
+    }) = invalid.candidates[at].constraints.hierarchy.as_mut()
+    {
+        trait_qualified_names[0] = "x".repeat(1025);
+    }
+    assert_code(&invalid, EvidenceErrorCode::ResourceLimit);
+    let mut encoded = serde_json::to_value(&invalid)?;
+    encoded["candidates"][at]["constraints"]["hierarchy"]["kind"] =
+        serde_json::json!("future_rust_dispatch");
+    assert!(serde_json::from_value::<SemanticEvidenceBatch>(encoded).is_err());
+    Ok(())
+}
+
+#[test]
 fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     UniversalEvidenceRegistry::validate().expect("production registry must be valid");
     let pipelines = UniversalEvidenceRegistry::pipelines();
@@ -665,7 +759,7 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
-        Some(3)
+        Some(4)
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")

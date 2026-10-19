@@ -91,6 +91,7 @@ pub enum ResolutionRule {
     ClosedWorldReceiverDispatch,
     IncompleteHierarchyReceiverDispatch,
     RustAssociatedType,
+    RustGenericBoundDispatch,
     ExactSourceInventory,
     QualifiedExternal,
 }

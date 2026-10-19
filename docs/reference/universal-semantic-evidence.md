@@ -13,7 +13,7 @@ mode, terminal-name fallback, or runtime dependency on Graphify.
 
 ## In-progress leading documentation
 
-The development registry now marks Go2, Rust3 and TypeScript4 as `Qualifying`.
+The development registry now marks Go2, Rust4 and TypeScript4 as `Qualifying`.
 They emit optional `DeclarationFact.documentation` metadata under evidence/2:
 an AST attachment kind, exact source range and raw UTF-8 comment text. The first
 slice supports one contiguous leading group on supported named declarations;
@@ -50,6 +50,46 @@ declaration anchors are retained instead of being lost before a constructor writ
 AST-cache20 rebuilds current disposable facts. The extraction/5 ID seed and
 evidence/2 wire shape are unchanged, and the approved historical promotion
 record below is not updated by these development checks.
+
+## In-progress Rust struct-literal references
+
+Rust4 emits a `TypeReference`/`References` candidate at each nominal literal
+path, using the enclosing declaration and existing bounded path/binding rules.
+Structs, struct-like enum variants and type aliases are eligible targets.
+Concrete impl `Self` uses the source-proven receiver; direct generic literals anchor the nominal
+name while qualified paths retain their exact source slice. Repeated literals
+retain separate occurrences. Literals do not establish constructor calls,
+field reads/writes or a runtime implementation. Parser recovery, nonconcrete
+trait `Self` and ambiguous targets cannot supply invented edges. Conflicting imports preserve an
+unresolved occurrence and `ambiguous-struct-literal-type` diagnostic; file-wide
+module/package fallback cannot select a type in an unrelated nested module.
+The producer uses a separate nominal scope index with distinct block scopes
+and exact local declaration identities. Block imports and aliases remain
+visible throughout their own block without leaking to sibling or outer blocks;
+impl receiver proof follows the same lexical chain. Block scopes retain the
+enclosing declaration owner and use the existing scope budget. Initializer
+blocks receive their own scopes during collection. Nominal sets retain exact
+declaration IDs; repeated same-named Rust graph nodes are disambiguated by
+source span, including on one line. Retained receiver types carry their original
+owner and source position through field/index access and derived bindings,
+rather than being requalified at a later use. Generic method inference checks
+parameter identity before inheriting bounds; local nominal/import shadows stop
+lookup. Bounds retain declaration scope and source position, including where
+clauses and impls, without copying container bounds by parameter spelling.
+Field inference instead maps the receiver's positional arguments onto exact
+defining parameter IDs, retaining separate field and argument origins through
+nested and indexed access. Maps admit at most64 entries/arguments and16
+substitution steps; incomplete/unsupported arguments retain the uninstantiated
+field origin and cannot inherit a caller's same-spelled parameter.
+Simple nominal receiver aliases follow exact declarations for at most16 steps;
+cycles and aliases requiring compound/generic substitution remain unresolved. Lookup stops at module boundaries,
+and leaves unproven nominal paths as `unresolved-struct-literal-type` occurrences
+with no guessed target. Generic impl parameters cannot supply an outer namesake
+as a concrete Self receiver. Literal recovery checks use the literal range, not
+the remainder of its source line. AST cache29
+refreshes disposable facts; graph v1's shape remains unchanged. Evidence/2 adds
+the typed generic-bound constraint described under Evidence contract. This
+producer remains `Qualifying`; the historical release decision below is unchanged.
 
 ## In-progress callable initializer definition ranges
 
@@ -113,6 +153,37 @@ not read/write or runtime-alias conclusions. Disposable AST cache version 13
 invalidates older extraction facts.
 
 ## Evidence contract
+
+Rust4 generic receiver calls use the additive evidence/2 hierarchy constraint
+`rust_generic_bounds` (`parameter_declaration_id`, `trait_qualified_names`,
+`bounds_complete`). It names one exact Rust type-namespace parameter, retains
+its complete sorted/unique bound identities, and excludes a simultaneous exact
+target, qualified target or receiver binding. There are at most64 bound names,
+each limited by the evidence callable-type byte budget (1024 by default).
+Incomplete origin/syntax evidence cannot establish that a competing bound is
+absent. The project resolver unions all source-backed trait/supertrait methods
+within its lookup budget and resolves only one distinct declaration. Missing
+or non-trait inventories stay unresolved; multiple methods stay ambiguous,
+including duplicates and mixed local/imported bounds. Repeated occurrences keep
+separate anchors. The successful rule is `rust-generic-bound-dispatch`.
+Readers of new batches must support this closed variant; older strict readers
+reject it rather than silently discarding the constraint. Historical batches
+retain their original meaning and graph v1 retains its shape.
+
+Rust trait `DeclarationFact.memberInventoryComplete` is independent of
+`directBasesComplete`: only explicit `true` proves the emitted direct member
+set complete. Trait-body macros, unsupported member syntax and unmodeled
+attributes (including on enclosing declarations) keep it false. Missing legacy
+metadata is unknown. Builtin documentation/lint attributes are a finite allowed
+set; namespaced lookalikes are not builtin proof. Every trait in a generic
+receiver's lineage needs this coverage before absence can be used. Const and
+lifetime parameters remain shadow barriers without becoming type witnesses.
+Fact-digest profile2 binds completeness and declaration namespace so updates
+cannot reuse a graph under changed semantic evidence.
+Attribute coverage is memoized by AST node; each trait checks at most64
+ancestors using those summaries. The per-file inventory budget is200000
+visits. Exhaustion returns `ResourceLimit` rather than certifying an inspected
+prefix. AST cache29 excludes earlier development cache28 facts from reuse.
 
 The serialized evidence schema is `compass.languages.evidence/2`. The
 extraction cache identity is `compass.languages.extraction/5`; changing either

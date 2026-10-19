@@ -93,7 +93,7 @@ fn rust_outer_documentation_follows_ast_markers_and_attributes() -> Result<(), B
             expected,
             DeclarationDocumentationKind::RustOuter,
         )?;
-        assert_eq!(batch.pipeline.version, 3);
+        assert_eq!(batch.pipeline.version, 4);
         assert_eq!(
             batch.pipeline.qualification,
             UniversalEvidenceQualification::Qualifying

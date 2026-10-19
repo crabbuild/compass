@@ -1,9 +1,33 @@
 # Migrate from Graphify to Compass
 
+Rust development producer4 records nominal type references from struct literals,
+including concrete impl `Self` and struct-like enum variants. Run
+`compass update <root>` with the new binary to rebuild disposable AST cache29.
+Literal contacts are references, not constructor calls or field read/write
+claims. Ambiguous/unproven targets remain unresolved. Historical graphs are
+immutable, and Rust4 remains `Qualifying`; no release promotion is implied.
+Repeated same-named Rust declarations now use source spans to distinguish their
+current graph IDs. Resolve affected node IDs again after updating; historical
+realizations retain their original IDs. Block imports cannot escape their
+lexical scope or rebind parameter annotations used for receiver inference.
+Explicitly deferred receivers across languages now remain unresolved rather than
+being rewired by a unique terminal method name. Rebuild current graphs to remove
+those guessed targets; historical graphs retain their original contents.
+Generic Rust receiver calls now defer their complete trait-bound set to the
+project resolver. Ambiguous local/imported bounds no longer produce a guessed
+source call. Update evidence consumers to understand the additive evidence/2
+`rust_generic_bounds` constraint before reading newly extracted batches; older
+strict consumers reject it. Current generic type-parameter fact identities
+include the type namespace. Resolve affected identities again after updating.
+New Rust traits carry `memberInventoryComplete` separately from base coverage.
+Readers must preserve it; missing/false metadata cannot justify an empty member
+set. Trait-body macros and unsupported attributes keep generic dispatch
+unresolved. Current fact-digest profile2 refreshes automatically during update.
+
 Current updates use `source-query/7-literal-seeded-code`. Whole raw string
 literals can now seed bounded callable-owned code windows without another
 identifier. Parameter bindings remain separate from generic occurrences. Run
-`compass update <root>` with the new binary; AST cache27 refreshes automatically.
+`compass update <root>` with the new binary; AST cache29 refreshes automatically.
 If publication reports older retained extraction, run
 `compass update <root> --force`. Older binaries reject profile7 and must be
 upgraded. Readers preserve profiles1–6 with their original lexical/statistical
@@ -39,7 +63,7 @@ code candidates with explicit translations and separate literal context. No
 manual cache deletion, graph rebuild or source/index schema migration is needed
 for this query-only change. Exact-symbol commands retain their contracts.
 
-Current updates rebuild AST cache27 and retain callable-body evidence for direct
+Current updates rebuild AST cache29 and retain callable-body evidence for direct
 TypeScript/TSX variable initializers. Their source ranges now cover the complete
 definition; original binding identity and AST provenance stay distinct. Older
 `source-query/1-ast-callable-lexemes` artifacts remain readable and historical

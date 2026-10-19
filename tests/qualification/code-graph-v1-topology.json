@@ -19,8 +19,8 @@
     "maximums": {
       "communities": 240,
       "connectedComponents": 237,
-      "exactConnectedComponents": 528,
-      "exactIsolatedNodes": 389,
+      "exactConnectedComponents": 529,
+      "exactIsolatedNodes": 390,
       "exactSelfLoops": 0,
       "isolatedNodes": 100,
       "selfLoops": 0,

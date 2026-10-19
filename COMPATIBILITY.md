@@ -1,8 +1,95 @@
 # Compass compatibility
 
+## Rust struct-literal references
+
+Rust development producer4 emits a type-reference occurrence for the nominal
+path of a struct or struct-like enum-variant literal. The shared resolver selects
+source-backed struct, enum-member or type-alias declarations; repeated literals
+retain separate source anchors and enclosing declaration owners. Direct generic
+literals anchor their nominal name; qualified paths retain their exact source
+slice. Concrete impl `Self`
+paths use the proven receiver; nonconcrete trait `Self`, parser recovery and
+ambiguous targets do not invent a declaration. Conflicting imports retain an
+unresolved occurrence with an `ambiguous-struct-literal-type` diagnostic. The
+file-wide module/package name bucket cannot supply a literal target from an
+unrelated nested module. Nominal scope lookup is separate from value-parameter
+aliases and stops at Rust module boundaries. Each Rust block has its own lexical
+scope while occurrences keep their enclosing declaration owner. Block-local
+imports and type aliases are visible throughout that block, including before
+the item statement, and cannot supply targets to sibling or outer blocks.
+Same-named block aliases retain distinct exact declaration identities. Impl
+receiver proof uses the same lexical scope chain. Initializer blocks are
+collected before their imports can reach an enclosing scope. Retained receiver
+types keep their declaration/inference context and source position across
+parameters, typed lets, aliases, fields and indexed elements; a use-site import
+cannot rebind an earlier annotation. Generic method lookup first identifies
+the actual parameter at that origin, stopping at nominal/import shadows. Each
+trait bound retains its own declaration context, including where clauses and
+impl parameters; a later import cannot rebind it. Container bounds are not
+copied onto same-spelled impl parameters. Field inference maps actual receiver
+arguments to exact defining parameter IDs, preserving each argument's origin
+through nested and indexed fields. Mappings admit at most64 arguments/bindings
+and16 substitution steps; unsupported token forms or incomplete arguments keep
+the uninstantiated field origin, without guessing a caller's same-named type. Simple nominal receiver aliases follow
+their defining contexts for at most16 steps; cycles, compound/generic aliases
+requiring substitution and unproven bounds remain unresolved. Repeated
+same-named Rust declarations use source spans to distinguish current graph IDs,
+including on one line. Unproven nominal paths retain an
+unresolved occurrence with an `unresolved-struct-literal-type` diagnostic; generic
+impl receivers cannot inherit an unrelated outer type. Literal-local recovery
+checks exclude overlapping syntax errors without extending to the line tail.
+Literals create `references`,
+not constructor `calls`, and do not add field read/write claims.
+
+Explicitly deferred receiver nodes, in every language, are excluded from legacy
+terminal-name stub rewrites. An unresolved invocation retains its placeholder,
+source occurrence and inferred/deferred provenance instead of becoming a call
+to a source method whose name happens to be unique. Existing published graphs
+are unchanged; update with the new binary to apply the correction.
+An external Rust callee such as `actix_web::web::get` keeps its own inferred
+identity and call-site anchor when a local `near_matches::get` also exists.
+The exact-only topology view counts that source-less callee as isolated; the
+synthetic fixture bounds account for that distinct node. A native regression
+also preserves the genuine local call and reversed-input equivalence.
+
+AST cache29 rebuilds disposable extraction facts. Run `compass update <root>`
+with the new binary; existing immutable graphs and historical producer versions
+are unchanged. Rust4 remains `Qualifying` pending independent qualification;
+the approved release promotion record is unchanged. Graph v1's shape,
+source-query profile7 and query-ranker21 stay unchanged. Evidence/2 adds the
+typed constraint described below.
+
+Rust generic receiver calls now carry a typed `rust_generic_bounds` hierarchy
+constraint under evidence/2: the exact type-parameter declaration ID, sorted
+unique trait identities (at most64, each at most1024 bytes under default evidence
+limits), and a completeness flag. Type parameters explicitly use the type
+namespace. The producer does not select a method from its per-file inventory.
+The shared resolver checks all source-backed bounds and supertraits as an
+unordered union. Only one unique method from a complete inventory resolves;
+missing/non-trait bounds remain unresolved, and competing or duplicate methods
+remain ambiguous. Successful edges carry `rust-generic-bound-dispatch`
+provenance. Existing resolver lookup budgets apply to traits and members.
+Rust trait declarations separately carry optional `memberInventoryComplete`.
+Only explicit `true` certifies the direct member inventory; missing or false
+metadata cannot prove absence. Unexpanded trait-body macros, unsupported
+member syntax and unmodeled attributes on the trait or enclosing syntax leave
+it incomplete. The finite supported documentation/lint attributes do not alter
+members. Direct-base coverage remains a separate fact. Const/lifetime generics
+remain shadow barriers and cannot witness a type-parameter constraint.
+Attribute summaries are cached per AST node and reused across at most64
+ancestors per trait. Inventory checks share a200000-visit budget per file;
+exhaustion returns a typed resource error, never a complete prefix. AST cache29
+also excludes prior development cache28 facts from current reuse.
+Incremental fact-digest profile2 includes this metadata and declaration
+namespace, automatically invalidating prior disposable digest state.
+Readers must understand this additive evidence/2 variant; older strict readers
+reject it explicitly and must upgrade. Graph v1's shape is unchanged, but its
+current edges and provenance can change. Immutable historical evidence keeps
+its original meaning. Rust4/cache29 identify this development producer change.
+
 ## Literal-seeded code evidence
 
-Current updates publish `source-query/7-literal-seeded-code` with AST cache27.
+Current updates publish `source-query/7-literal-seeded-code` with AST cache29.
 A string literal can seed a code window even when its callable has no other
 identifier occurrence. The producer considers the whole literal and at most
 eight enclosing AST nodes, retaining only safe complete source slices of at
@@ -35,7 +122,7 @@ leads must disclose missing context; text occurrence does not prove behavior.
 
 Profiles1–6 retain their original capabilities and document frequencies,
 including code vocabulary in5–6 and parameter roles in6. Unknown profiles fail
-explicitly. Update with the new binary for literal-only recall; cache27 refreshes
+explicitly. Update with the new binary for literal-only recall; cache29 refreshes
 disposable extraction state, while immutable historical artifacts remain
 unchanged. Ranker21 and ranked JSON4 remain current; the source-artifact digest
 separates responses for changed evidence. No query-time source reads, graph
@@ -111,7 +198,7 @@ rejects any source-evidence/inventory disagreement.
 
 Profiles1–5 keep their original payload and search/statistical meaning, including
 profile5 code vocabulary. They supply no parameter-role provenance. Older
-readers reject profile6 explicitly. AST cache27 refreshes disposable extraction
+readers reject profile6 explicitly. AST cache29 refreshes disposable extraction
 state on `compass update <root>`; use `compass update <root> --force` if current
 publication reports an older retained extraction. Historical realizations stay
 immutable. The developer collector accepts profiles1–7; freeze new actors and
@@ -130,7 +217,7 @@ is not proof of behavior. Exact/qualified identities and graph facts are unchang
 Immutable profiles 1–4 keep their original identifier/comment-only retrieval and
 document-frequency meaning. Older readers reject profile 5 explicitly. Run
 `compass update <root>` with the new binary for current code vocabulary; no
-historical realization is rewritten. AST cache27 refreshes disposable per-file
+historical realization is rewritten. AST cache29 refreshes disposable per-file
 profile metadata. Channel-completeness behavior introduced by
 `query-ranker/18-channel-completeness` remains supported by the current ranker
 described above.
@@ -257,7 +344,7 @@ Nested inspection was introduced by `source-query/4-nested-callable-context`;
 current evidence also supports profiles5–7. Ranked JSON uses
 `compass.query.ranked-view/4`. Readers retain source profiles1–6 and ranked
 views1–3 with their original meanings; older readers reject new versions.
-AST cache24 introduced the native scope metadata; current cache27 refreshes
+AST cache24 introduced the native scope metadata; current cache29 refreshes
 disposable metadata automatically.
 
 An already retrieved callable can expose `nested_callable_code` quotations from
@@ -575,7 +662,7 @@ comparative quality and release qualification remain unproven.
 
 ## Leading documentation evidence (development)
 
-Rust3, Go2 and TypeScript4 producers are `Qualifying` pending a new source audit
+Rust4, Go2 and TypeScript4 producers are `Qualifying` pending a new source audit
 and release promotion decision. Their optional `DeclarationFact.documentation`
 field under evidence/2 carries one exact leading AST comment group. Rust source
 consumers constructing `DeclarationFact` literals must initialize `documentation`

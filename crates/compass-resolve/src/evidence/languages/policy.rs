@@ -49,23 +49,31 @@ impl LanguagePolicyKind {
             Self::TypeScript => db.resolve_typescript_import_candidate(language, candidate),
             Self::CSharp => db.resolve_csharp_candidate(language, candidate),
             Self::Php => db.resolve_php_candidate(language, candidate),
-            Self::Rust => {
-                let HierarchyConstraint::RustAssociatedType {
+            Self::Rust => match candidate.constraints.hierarchy.as_ref()? {
+                HierarchyConstraint::RustAssociatedType {
                     receiver_declaration_id,
                     receiver_qualified_name,
                     trait_qualified_name,
-                } = candidate.constraints.hierarchy.as_ref()?
-                else {
-                    return None;
-                };
-                Some(db.resolve_rust_associated_type(
+                } => Some(db.resolve_rust_associated_type(
                     language,
                     receiver_declaration_id,
                     receiver_qualified_name,
                     trait_qualified_name,
                     candidate,
-                ))
-            }
+                )),
+                HierarchyConstraint::RustGenericBounds {
+                    parameter_declaration_id,
+                    trait_qualified_names,
+                    bounds_complete,
+                } => Some(db.resolve_rust_generic_bounds(
+                    language,
+                    parameter_declaration_id,
+                    trait_qualified_names,
+                    *bounds_complete,
+                    candidate,
+                )),
+                _ => None,
+            },
             Self::Java => db
                 .resolve_java_field_receiver(candidate)
                 .or_else(|| db.resolve_java_same_package_builtin_collision(candidate)),

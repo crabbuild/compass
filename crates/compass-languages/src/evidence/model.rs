@@ -258,6 +258,10 @@ pub struct DeclarationFact {
     /// Whether all direct base types for this declaration were parsed and emitted.
     #[serde(default, skip_serializing_if = "is_false")]
     pub direct_bases_complete: bool,
+    /// Complete direct member inventory, independently of base-list coverage.
+    /// Rust traits with unexpanded member syntax cannot establish absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_inventory_complete: Option<bool>,
     /// Whether the final source-level parameter accepts a variable arity.
     #[serde(default)]
     pub variadic: bool,
@@ -384,6 +388,13 @@ pub struct ResolutionConstraint {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HierarchyConstraint {
+    /// Unordered Rust trait bounds for one exact generic parameter. Missing
+    /// bound evidence must not be treated as an empty competing method set.
+    RustGenericBounds {
+        parameter_declaration_id: String,
+        trait_qualified_names: Vec<String>,
+        bounds_complete: bool,
+    },
     /// One ordered direct-base occurrence. `base_set_complete` describes the
     /// complete source-level base list for the owning declaration.
     DirectBase { base_set_complete: bool },

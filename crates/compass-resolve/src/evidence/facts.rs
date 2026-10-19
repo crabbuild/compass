@@ -205,6 +205,11 @@ struct CompactConstraint {
 }
 
 enum CompactHierarchy {
+    RustGenericBounds {
+        parameter_declaration_id: StringSlot,
+        trait_qualified_names: Vec<StringSlot>,
+        bounds_complete: bool,
+    },
     DirectBase {
         base_set_complete: bool,
     },
@@ -430,6 +435,18 @@ impl CompactHierarchy {
         strings: &mut StringPoolBuilder,
     ) -> Result<Self, String> {
         Ok(match hierarchy {
+            HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id,
+                trait_qualified_names,
+                bounds_complete,
+            } => Self::RustGenericBounds {
+                parameter_declaration_id: strings.intern(parameter_declaration_id)?,
+                trait_qualified_names: trait_qualified_names
+                    .into_iter()
+                    .map(|name| strings.intern(name))
+                    .collect::<Result<_, _>>()?,
+                bounds_complete,
+            },
             HierarchyConstraint::DirectBase { base_set_complete } => {
                 Self::DirectBase { base_set_complete }
             }
@@ -454,6 +471,18 @@ impl CompactHierarchy {
 
     fn inflate(&self, table: &CandidateTable) -> HierarchyConstraint {
         match self {
+            Self::RustGenericBounds {
+                parameter_declaration_id,
+                trait_qualified_names,
+                bounds_complete,
+            } => HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id: table.string(*parameter_declaration_id).to_owned(),
+                trait_qualified_names: trait_qualified_names
+                    .iter()
+                    .map(|name| table.string(*name).to_owned())
+                    .collect(),
+                bounds_complete: *bounds_complete,
+            },
             Self::DirectBase { base_set_complete } => HierarchyConstraint::DirectBase {
                 base_set_complete: *base_set_complete,
             },

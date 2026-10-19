@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
@@ -18,12 +19,15 @@ use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate
 
 mod java_fields;
 mod python_receivers;
+#[cfg(test)]
+mod rust_literals_tests;
 
 // Go selector attribution can cross a closure, a multi-return call, and a
 // range expression before reaching the receiver type. Keep that traversal
 // bounded, but allow the real-world chain without falling back to an
 // unresolved method.
 const GO_TYPE_INFERENCE_DEPTH_LIMIT: usize = 16;
+const RUST_TRAIT_MEMBER_SCAN_BUDGET: usize = 200_000;
 
 /// Bounded direct-construction API shared by hard-cut language producers.
 pub struct EvidenceBuilder {
@@ -40,6 +44,7 @@ struct DeclarationMetadata {
     parameter_count: Option<u32>,
     parameter_types: Vec<String>,
     direct_bases_complete: bool,
+    member_inventory_complete: Option<bool>,
     variadic: bool,
     signature_hash: Option<String>,
     implementation_hash: Option<String>,
@@ -375,6 +380,7 @@ impl EvidenceBuilder {
             parameter_count: metadata.parameter_count,
             parameter_types: metadata.parameter_types,
             direct_bases_complete: metadata.direct_bases_complete,
+            member_inventory_complete: metadata.member_inventory_complete,
             variadic: metadata.variadic,
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
@@ -714,6 +720,17 @@ impl EvidenceBuilder {
             .collect::<Vec<_>>();
         let hierarchy_identity = match constraints.hierarchy.as_ref() {
             None => String::new(),
+            Some(HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id,
+                trait_qualified_names,
+                bounds_complete,
+            }) => format!(
+                "rust_generic_bounds:{parameter_declaration_id}:{bounds_complete}:{}",
+                trait_qualified_names
+                    .iter()
+                    .map(|name| format!("{}:{name}", name.len()))
+                    .collect::<String>()
+            ),
             Some(HierarchyConstraint::DirectBase { base_set_complete }) => {
                 format!("direct_base:{base_set_complete}")
             }
@@ -1057,11 +1074,18 @@ struct RustImplContext {
     type_qualified_name: String,
     trait_qualified_name: Option<String>,
     owner_declaration_id: Option<String>,
+    receiver_scope_proven: bool,
+    receiver_source_type: Option<RustSourceType>,
+}
+
+struct RustNominalTarget {
+    qualified_name: String,
+    declaration_id: Option<String>,
 }
 
 #[derive(Clone)]
 struct RustValueTypeVersion {
-    raw: Option<String>,
+    source_type: Option<RustSourceType>,
     active_range: std::ops::Range<usize>,
     shadows_alias: bool,
 }
@@ -1073,6 +1097,7 @@ struct RustSourceType {
     raw: String,
     owner: DeclarationContext,
     source_start: usize,
+    substitutions: BTreeMap<String, Arc<RustSourceType>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1108,14 +1133,25 @@ struct DirectEvidenceState<'source> {
     python_mutated_receiver_members: HashSet<(String, String)>,
     python_call_result_binding_ids: HashMap<(String, String, usize), String>,
     rust_containers: HashMap<usize, DeclarationContext>,
+    rust_blocks: HashMap<usize, DeclarationContext>,
+    rust_module_scope_ids: HashSet<String>,
+    rust_nominal_targets: HashMap<String, HashMap<String, BTreeSet<String>>>,
+    rust_nominal_declarations: HashMap<String, DeclarationContext>,
+    rust_nominal_alias_types: HashMap<String, RustSourceType>,
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
     rust_types_by_name: HashMap<String, Vec<DeclarationContext>>,
     rust_type_parameters_by_qualified_name: HashMap<String, DeclarationContext>,
+    rust_type_parameter_order: HashMap<String, Vec<String>>,
     rust_associated_types_by_scope: HashMap<String, HashMap<String, Vec<DeclarationContext>>>,
     rust_associated_types_by_qualified_name: HashMap<String, Vec<DeclarationContext>>,
-    rust_trait_methods: HashMap<(String, String), Vec<String>>,
-    rust_generic_bounds: HashMap<String, HashMap<String, Vec<String>>>,
+    rust_trait_attribute_coverage: HashMap<usize, bool>,
+    rust_trait_member_scan_remaining: usize,
+    #[cfg(test)]
+    rust_trait_member_scan_visits: std::cell::Cell<usize>,
+    rust_incomplete_generic_bounds: BTreeSet<(String, String)>,
+    rust_type_parameter_ids: BTreeSet<String>,
+    rust_generic_bounds: HashMap<String, HashMap<String, Vec<RustSourceType>>>,
     rust_receiver_methods: HashMap<(String, String), Vec<String>>,
     rust_receiver_traits: HashMap<String, Vec<String>>,
     rust_typed_receivers: HashSet<(String, String)>,
@@ -1204,13 +1240,24 @@ impl<'source> DirectEvidenceState<'source> {
             python_mutated_receiver_members: HashSet::new(),
             python_call_result_binding_ids: HashMap::new(),
             rust_containers: HashMap::new(),
+            rust_blocks: HashMap::new(),
+            rust_module_scope_ids: HashSet::new(),
+            rust_nominal_targets: HashMap::new(),
+            rust_nominal_declarations: HashMap::new(),
+            rust_nominal_alias_types: HashMap::new(),
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
             rust_types_by_name: HashMap::new(),
             rust_type_parameters_by_qualified_name: HashMap::new(),
+            rust_type_parameter_order: HashMap::new(),
             rust_associated_types_by_scope: HashMap::new(),
             rust_associated_types_by_qualified_name: HashMap::new(),
-            rust_trait_methods: HashMap::new(),
+            rust_trait_attribute_coverage: HashMap::new(),
+            rust_trait_member_scan_remaining: RUST_TRAIT_MEMBER_SCAN_BUDGET,
+            #[cfg(test)]
+            rust_trait_member_scan_visits: std::cell::Cell::new(0),
+            rust_incomplete_generic_bounds: BTreeSet::new(),
+            rust_type_parameter_ids: BTreeSet::new(),
             rust_generic_bounds: HashMap::new(),
             rust_receiver_methods: HashMap::new(),
             rust_receiver_traits: HashMap::new(),
@@ -1303,6 +1350,7 @@ impl<'source> DirectEvidenceState<'source> {
             parameter_count: None,
             parameter_types: Vec::new(),
             direct_bases_complete: false,
+            member_inventory_complete: None,
             variadic: false,
             signature_hash: Some(evidence_ast_hash(
                 node,
@@ -4225,7 +4273,7 @@ impl<'source> DirectEvidenceState<'source> {
     ) -> Result<(), EvidenceError> {
         if matches!(
             node.kind(),
-            "function_item" | "function_signature_item" | "impl_item"
+            "function_item" | "function_signature_item" | "impl_item" | "block"
         ) {
             return Ok(());
         }
@@ -4253,7 +4301,13 @@ impl<'source> DirectEvidenceState<'source> {
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        if matches!(node.kind(), "function_item" | "function_signature_item") {
+        if matches!(
+            node.kind(),
+            "function_item" | "function_signature_item" | "block"
+        ) {
+            return Ok(());
+        }
+        if self.rust_containers.contains_key(&node.id()) {
             return Ok(());
         }
         if let Some(kind) = rust_container_kind(node.kind()) {
@@ -4271,6 +4325,8 @@ impl<'source> DirectEvidenceState<'source> {
             metadata.documentation = self.builder.leading_documentation(node, self.source)?;
             if kind == "trait" {
                 metadata.direct_bases_complete = !self.overlaps_parser_error(node);
+                metadata.member_inventory_complete =
+                    Some(self.rust_trait_member_inventory_complete(node)?);
             }
             let fact_id = self.builder.declare_with_metadata(
                 kind,
@@ -4300,13 +4356,24 @@ impl<'source> DirectEvidenceState<'source> {
                 enclosing_type_qualified_name: matches!(kind, "trait" | "struct" | "enum")
                     .then_some(qualified_name.clone()),
             };
-            self.collect_rust_generic_bounds_in_scope(node, &context.scope_id);
+            self.collect_rust_generic_bounds_in_scope(node, &context);
             self.add_ownership(owner, &context)?;
             self.local_targets
                 .entry(owner.scope_id.clone())
                 .or_default()
                 .insert(name.clone(), qualified_name.clone());
             self.rust_containers.insert(node.id(), context.clone());
+            self.rust_nominal_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .entry(context.name.clone())
+                .or_default()
+                .insert(context.fact_id.clone());
+            self.rust_nominal_declarations
+                .insert(context.fact_id.clone(), context.clone());
+            if kind == "module" {
+                self.rust_module_scope_ids.insert(context.scope_id.clone());
+            }
             self.declarations.insert(node.id(), context.clone());
             self.add_rust_type_parameters(node, &context)?;
             if matches!(kind, "trait" | "struct" | "enum") {
@@ -4357,6 +4424,47 @@ impl<'source> DirectEvidenceState<'source> {
             return Ok(());
         }
         match node.kind() {
+            "block" => {
+                // Blocks retain their enclosing declaration owner but have
+                // distinct lexical scopes. Rust items are visible throughout
+                // their block, including before the item statement.
+                let scope_id = self.builder.open_scope(
+                    "block",
+                    Some(&owner.fact_id),
+                    Some(&owner.scope_id),
+                    range_for_node(self.source_file, node),
+                )?;
+                self.scope_parents
+                    .insert(scope_id.clone(), owner.scope_id.clone());
+                let block = DeclarationContext {
+                    scope_id,
+                    ..owner.clone()
+                };
+                self.rust_blocks.insert(node.id(), block.clone());
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    self.collect_rust_containers(child, &block)?;
+                }
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    self.collect_rust_module_imports(child, &block)?;
+                }
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    if child.kind() == "type_item" {
+                        self.add_rust_named_declaration(child, &block, "type_alias")?;
+                    } else if child.kind() == "use_declaration"
+                        && self.rust_import_nodes.insert(child.id())
+                    {
+                        self.add_rust_use(child, &block)?;
+                    }
+                }
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    self.collect_rust_declarations(child, &block, active_impl)?;
+                }
+                return Ok(());
+            }
             "impl_item" => {
                 self.add_rust_impl(node, owner)?;
                 return Ok(());
@@ -4367,14 +4475,14 @@ impl<'source> DirectEvidenceState<'source> {
                     self.declarations.get(&node.id()).cloned(),
                     node.child_by_field_name("body"),
                 ) {
-                    let mut cursor = body.walk();
-                    for child in body.children(&mut cursor).filter(|child| child.is_named()) {
-                        self.collect_rust_declarations(child, &callable, None)?;
-                    }
+                    self.collect_rust_declarations(body, &callable, None)?;
                 }
                 return Ok(());
             }
             "type_item" | "associated_type" => {
+                if self.declarations.contains_key(&node.id()) {
+                    return Ok(());
+                }
                 if active_impl.is_some()
                     || owner.kind == "trait"
                     || node.kind() == "associated_type"
@@ -4466,6 +4574,33 @@ impl<'source> DirectEvidenceState<'source> {
             .entry(owner.scope_id.clone())
             .or_default()
             .insert(name, qualified_name);
+        if kind == "type_alias" {
+            self.rust_nominal_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .entry(context.name.clone())
+                .or_default()
+                .insert(context.fact_id.clone());
+            self.rust_nominal_declarations
+                .insert(context.fact_id.clone(), context.clone());
+        }
+        if kind == "type_alias"
+            && node.kind() == "type_item"
+            && node.child_by_field_name("type_parameters").is_none()
+            && !self.overlaps_parser_error(node)
+            && let Some(target) = node.child_by_field_name("type")
+            && matches!(target.kind(), "type_identifier" | "scoped_type_identifier")
+        {
+            self.rust_nominal_alias_types.insert(
+                context.fact_id.clone(),
+                RustSourceType {
+                    raw: self.text(target),
+                    owner: owner.clone(),
+                    source_start: target.start_byte(),
+                    substitutions: BTreeMap::new(),
+                },
+            );
+        }
         self.declarations.insert(node.id(), context.clone());
         self.add_rust_type_parameters(node, &context)?;
         Ok(Some(context))
@@ -4561,12 +4696,6 @@ impl<'source> DirectEvidenceState<'source> {
                 .or_else(|| owner.enclosing_type_qualified_name.clone()),
         };
         self.collect_rust_generic_bounds(node, &context);
-        if owner.kind == "trait" {
-            self.rust_trait_methods
-                .entry((owner.qualified_name.clone(), name.clone()))
-                .or_default()
-                .push(qualified_name.clone());
-        }
         if let Some(implementation) = active_impl {
             if let Some(type_owner) = implementation
                 .owner_declaration_id
@@ -4651,7 +4780,7 @@ impl<'source> DirectEvidenceState<'source> {
                 make_id(&[&self.module_or_package, &qualified_name]),
                 parameter,
             );
-            let fact_id = self.builder.declare_with_metadata(
+            let fact_id = self.builder.declare_with_metadata_and_namespace(
                 "parameter",
                 &graph_node_id,
                 &name,
@@ -4659,8 +4788,12 @@ impl<'source> DirectEvidenceState<'source> {
                 Some(&self.module_or_package),
                 Some(&owner.scope_id),
                 range_for_node(self.source_file, name_node),
+                (parameter.kind() == "type_parameter").then_some(SymbolNamespace::Type),
                 self.declaration_metadata(parameter),
             )?;
+            if parameter.kind() == "type_parameter" {
+                self.rust_type_parameter_ids.insert(fact_id.clone());
+            }
             let context = DeclarationContext {
                 fact_id,
                 scope_id: owner.scope_id.clone(),
@@ -4677,16 +4810,32 @@ impl<'source> DirectEvidenceState<'source> {
                 .insert(name, qualified_name.clone());
             self.rust_type_parameters_by_qualified_name
                 .insert(qualified_name, context.clone());
+            self.rust_nominal_targets
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .entry(context.name.clone())
+                .or_default()
+                .insert(context.fact_id.clone());
+            self.rust_nominal_declarations
+                .insert(context.fact_id.clone(), context.clone());
+            self.rust_type_parameter_order
+                .entry(owner.scope_id.clone())
+                .or_default()
+                .push(context.fact_id.clone());
             self.declarations.insert(parameter.id(), context);
         }
         Ok(())
     }
 
     fn collect_rust_generic_bounds(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
-        self.collect_rust_generic_bounds_in_scope(callable, &owner.scope_id);
+        self.collect_rust_generic_bounds_in_scope(callable, owner);
     }
 
-    fn collect_rust_generic_bounds_in_scope(&mut self, declaration: Node<'_>, scope_id: &str) {
+    fn collect_rust_generic_bounds_in_scope(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) {
         if let Some(parameters) = declaration.child_by_field_name("type_parameters") {
             let mut parameter_cursor = parameters.walk();
             for parameter in parameters
@@ -4702,7 +4851,10 @@ impl<'source> DirectEvidenceState<'source> {
                 }
                 let mut bounds = Vec::new();
                 if let Some(bound_nodes) = parameter.child_by_field_name("bounds") {
-                    self.collect_rust_trait_bound_paths(bound_nodes, &mut bounds);
+                    if !self.collect_rust_trait_bound_paths(bound_nodes, owner, &mut bounds) {
+                        self.rust_incomplete_generic_bounds
+                            .insert((owner.scope_id.clone(), name.clone()));
+                    }
                 } else {
                     // Keep compatibility with older Rust grammars that exposed
                     // bounds as `trait_bound` descendants instead of a
@@ -4712,7 +4864,12 @@ impl<'source> DirectEvidenceState<'source> {
                         if descendant.kind() == "trait_bound"
                             && let Some(bound) = rust_trait_bound_path(&self.text(descendant))
                         {
-                            bounds.push(bound);
+                            bounds.push(RustSourceType {
+                                raw: bound,
+                                owner: owner.clone(),
+                                source_start: descendant.start_byte(),
+                                substitutions: BTreeMap::new(),
+                            });
                         }
                         let mut cursor = descendant.walk();
                         pending.extend(
@@ -4722,7 +4879,7 @@ impl<'source> DirectEvidenceState<'source> {
                         );
                     }
                 }
-                self.record_rust_generic_bounds(scope_id, &name, bounds);
+                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
             }
         }
 
@@ -4747,28 +4904,55 @@ impl<'source> DirectEvidenceState<'source> {
                     continue;
                 };
                 let mut bounds = Vec::new();
-                self.collect_rust_trait_bound_paths(bound_nodes, &mut bounds);
-                self.record_rust_generic_bounds(scope_id, &name, bounds);
+                if !self.collect_rust_trait_bound_paths(bound_nodes, owner, &mut bounds) {
+                    self.rust_incomplete_generic_bounds
+                        .insert((owner.scope_id.clone(), name.clone()));
+                }
+                self.record_rust_generic_bounds(&owner.scope_id, &name, bounds);
             }
         }
     }
 
-    fn collect_rust_trait_bound_paths(&self, node: Node<'_>, output: &mut Vec<String>) {
+    fn collect_rust_trait_bound_paths(
+        &self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+        output: &mut Vec<RustSourceType>,
+    ) -> bool {
+        if node.has_error() || node.is_missing() {
+            return false;
+        }
         if matches!(node.kind(), "trait_bound" | "higher_ranked_trait_bound")
             || rust_is_type_node(node.kind())
         {
-            if let Some(bound) = rust_trait_bound_path(&self.text(node)) {
-                output.push(bound);
-            }
-            return;
+            let Some(bound) = rust_trait_bound_path(&self.text(node)) else {
+                return false;
+            };
+            output.push(RustSourceType {
+                raw: bound,
+                owner: owner.clone(),
+                source_start: node.start_byte(),
+                substitutions: BTreeMap::new(),
+            });
+            return true;
+        }
+        if matches!(node.kind(), "lifetime" | "line_comment" | "block_comment") {
+            return true;
         }
         let mut cursor = node.walk();
+        let mut complete = node.kind() == "trait_bounds";
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            self.collect_rust_trait_bound_paths(child, output);
+            complete &= self.collect_rust_trait_bound_paths(child, owner, output);
         }
+        complete
     }
 
-    fn record_rust_generic_bounds(&mut self, scope_id: &str, name: &str, bounds: Vec<String>) {
+    fn record_rust_generic_bounds(
+        &mut self,
+        scope_id: &str,
+        name: &str,
+        bounds: Vec<RustSourceType>,
+    ) {
         if name.is_empty() || bounds.is_empty() {
             return;
         }
@@ -4779,8 +4963,18 @@ impl<'source> DirectEvidenceState<'source> {
             .entry(name.to_owned())
             .or_default();
         entry.extend(bounds);
-        entry.sort_unstable();
-        entry.dedup();
+        entry.sort_by(|left, right| {
+            (&left.raw, &left.owner.scope_id, left.source_start).cmp(&(
+                &right.raw,
+                &right.owner.scope_id,
+                right.source_start,
+            ))
+        });
+        entry.dedup_by(|left, right| {
+            left.raw == right.raw
+                && left.owner.scope_id == right.owner.scope_id
+                && left.source_start == right.source_start
+        });
     }
 
     fn collect_rust_parameter_bindings(
@@ -4928,10 +5122,42 @@ impl<'source> DirectEvidenceState<'source> {
             return Ok(());
         };
         let type_name = self.text(type_node);
-        let type_context = self.rust_type_context(owner, &type_name).cloned();
-        let type_qualified_name = type_context.as_ref().map_or_else(
+        let nominal = rust_nominal_type_path(&type_name);
+        let generic_receiver = nominal.as_deref().is_some_and(|nominal| {
+            let (head, _) = split_qualified_head(nominal);
+            node.child_by_field_name("type_parameters")
+                .is_some_and(|parameters| {
+                    let mut cursor = parameters.walk();
+                    parameters.named_children(&mut cursor).any(|parameter| {
+                        parameter.kind() == "type_parameter"
+                            && rust_generic_parameter_name(parameter)
+                                .is_some_and(|name| self.text(name) == head)
+                    })
+                })
+        });
+        let scoped_target = (!generic_receiver)
+            .then(|| {
+                nominal
+                    .as_deref()
+                    .and_then(|nominal| self.rust_scoped_nominal_target(owner, nominal))
+            })
+            .flatten();
+        let type_context = scoped_target.as_ref().and_then(|target| {
+            if let Some(id) = target.declaration_id.as_ref() {
+                return self.rust_nominal_declarations.get(id).cloned();
+            }
+            let leaf = rust_path_leaf(&target.qualified_name);
+            let mut contexts = self
+                .rust_types_by_name
+                .get(leaf)?
+                .iter()
+                .filter(|context| context.qualified_name == target.qualified_name);
+            let context = contexts.next()?;
+            contexts.next().is_none().then(|| context.clone())
+        });
+        let type_qualified_name = scoped_target.as_ref().map_or_else(
             || rust_qualify_local_path(&owner.qualified_name, &type_name),
-            |context| context.qualified_name.clone(),
+            |target| target.qualified_name.clone(),
         );
         let trait_node = node.child_by_field_name("trait");
         let trait_name = trait_node.map(|value| self.text(value));
@@ -4951,23 +5177,14 @@ impl<'source> DirectEvidenceState<'source> {
         )?;
         self.scope_parents
             .insert(scope_id.clone(), owner.scope_id.clone());
-        let implementation = RustImplContext {
+        let mut implementation = RustImplContext {
             scope_id,
             type_qualified_name,
             trait_qualified_name: trait_qualified_name.clone(),
             owner_declaration_id: type_context.as_ref().map(|context| context.fact_id.clone()),
+            receiver_scope_proven: scoped_target.is_some(),
+            receiver_source_type: None,
         };
-        self.collect_rust_generic_bounds_in_scope(node, &implementation.scope_id);
-        if let Some(type_context) = type_context.as_ref()
-            && let Some(bounds) = self
-                .rust_generic_bounds
-                .get(&type_context.scope_id)
-                .cloned()
-        {
-            for (name, bounds) in bounds {
-                self.record_rust_generic_bounds(&implementation.scope_id, &name, bounds);
-            }
-        }
         if let Some(trait_qualified_name) = trait_qualified_name.as_ref() {
             let receiver = type_context.as_ref().map_or_else(
                 || {
@@ -5002,7 +5219,14 @@ impl<'source> DirectEvidenceState<'source> {
                 .map_or_else(|| owner.kind.clone(), |context| context.kind.clone()),
             enclosing_type_qualified_name: Some(implementation.type_qualified_name.clone()),
         };
+        implementation.receiver_source_type = Some(RustSourceType {
+            raw: type_name.clone(),
+            owner: implementation_owner.clone(),
+            source_start: type_node.start_byte(),
+            substitutions: BTreeMap::new(),
+        });
         self.add_rust_type_parameters(node, &implementation_owner)?;
+        self.collect_rust_generic_bounds_in_scope(node, &implementation_owner);
         let generic_type_qualified_name = rust_nominal_type_path(&type_name)
             .map(|name| format!("{}::<{name}>", implementation_owner.qualified_name));
         let generic_type_context = generic_type_qualified_name
@@ -5070,6 +5294,124 @@ impl<'source> DirectEvidenceState<'source> {
         Ok(())
     }
 
+    fn rust_nominal_import_is_ambiguous(&self, owner: &DeclarationContext, name: &str) -> bool {
+        let mut scope = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope else {
+                return false;
+            };
+            if self
+                .import_bindings
+                .get(current)
+                .is_some_and(|bindings| bindings.contains_key(name))
+            {
+                return self
+                    .ambiguous_bindings
+                    .contains(&(current.to_owned(), name.to_owned()));
+            }
+            if self
+                .rust_nominal_targets
+                .get(current)
+                .is_some_and(|targets| targets.contains_key(name))
+                || self.rust_module_scope_ids.contains(current)
+                || self
+                    .file
+                    .as_ref()
+                    .is_some_and(|file| file.scope_id == current)
+            {
+                return false;
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
+        }
+        false
+    }
+
+    fn rust_scoped_nominal_target(
+        &self,
+        owner: &DeclarationContext,
+        nominal: &str,
+    ) -> Option<RustNominalTarget> {
+        let (head, suffix) = split_qualified_head(nominal);
+        let mut scope = Some(owner.scope_id.as_str());
+        let mut reached_module = false;
+        for _ in 0..64 {
+            let current = scope?;
+            if self
+                .ambiguous_bindings
+                .contains(&(current.to_owned(), head.to_owned()))
+            {
+                return None;
+            }
+            let local_targets = self
+                .rust_nominal_targets
+                .get(current)
+                .and_then(|targets| targets.get(head));
+            let local_nominal = match local_targets {
+                Some(targets) if targets.len() == 1 => {
+                    self.rust_nominal_declarations.get(targets.first()?)
+                }
+                Some(_) => return None,
+                None => None,
+            };
+            if local_nominal.is_some_and(|target| target.kind == "parameter") {
+                return None;
+            }
+            if let Some(versions) = self
+                .import_bindings
+                .get(current)
+                .and_then(|bindings| bindings.get(head))
+            {
+                let binding = versions.last()?;
+                if local_nominal.is_some_and(|local| local.qualified_name != binding.target)
+                    || versions
+                        .iter()
+                        .any(|version| version.target != binding.target)
+                {
+                    return None;
+                }
+                return Some(RustNominalTarget {
+                    qualified_name: suffix.map_or_else(
+                        || binding.target.clone(),
+                        |suffix| rust_join_qualified(&binding.target, suffix),
+                    ),
+                    declaration_id: suffix
+                        .is_none()
+                        .then(|| local_nominal.map(|target| target.fact_id.clone()))
+                        .flatten(),
+                });
+            }
+            if let Some(target) = local_nominal {
+                return Some(RustNominalTarget {
+                    qualified_name: suffix.map_or_else(
+                        || target.qualified_name.clone(),
+                        |suffix| rust_join_qualified(&target.qualified_name, suffix),
+                    ),
+                    declaration_id: suffix.is_none().then(|| target.fact_id.clone()),
+                });
+            }
+            // Child modules do not inherit unqualified imports or types.
+            // Blocks ascend through their actual lexical parents.
+            if self.rust_module_scope_ids.contains(current)
+                || self
+                    .file
+                    .as_ref()
+                    .is_some_and(|file| file.scope_id == current)
+            {
+                reached_module = true;
+                break;
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
+        }
+        if !reached_module {
+            return None;
+        }
+        nominal.contains("::").then(|| RustNominalTarget {
+            qualified_name: self
+                .rust_canonical_import_target(&self.rust_enclosing_module(owner), nominal),
+            declaration_id: None,
+        })
+    }
+
     fn rust_type_context(
         &self,
         owner: &DeclarationContext,
@@ -5092,7 +5434,7 @@ impl<'source> DirectEvidenceState<'source> {
         &mut self,
         scope_id: &str,
         name: &str,
-        raw: Option<String>,
+        source_type: Option<RustSourceType>,
         active_range: std::ops::Range<usize>,
         shadows_alias: bool,
     ) {
@@ -5105,21 +5447,10 @@ impl<'source> DirectEvidenceState<'source> {
             .entry(name.to_owned())
             .or_default()
             .push(RustValueTypeVersion {
-                raw,
+                source_type,
                 active_range,
                 shadows_alias,
             });
-    }
-
-    fn rust_value_type_for<'a>(
-        &'a self,
-        owner: &DeclarationContext,
-        name: &str,
-        use_start: usize,
-        use_node: Option<Node<'_>>,
-    ) -> Option<&'a str> {
-        self.rust_value_binding_for(owner, name, use_start, use_node)
-            .and_then(|version| version.raw.as_deref())
     }
 
     fn rust_value_binding_for<'a>(
@@ -5175,14 +5506,156 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id
     }
 
-    fn rust_indexed_type_name(&self, receiver: &RustSourceType) -> Option<String> {
-        let nominal = rust_nominal_type_path(rust_indexable_type(&receiver.raw)?)?;
-        if self
-            .visible_import_binding_is_ambiguous(&receiver.owner, qualified_binding_head(&nominal))
-        {
+    fn rust_unshadowed_prelude_type(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+    ) -> Option<String> {
+        if !self.rust_standard_prelude_enabled {
             return None;
         }
-        rust_qualify_evidence_path(self, &receiver.owner, &nominal, receiver.source_start)
+        let qualified = match name {
+            "Box" => "std::boxed::Box",
+            "Option" => "std::option::Option",
+            "Result" => "std::result::Result",
+            "Vec" => "std::vec::Vec",
+            _ => return None,
+        };
+        let mut scope = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope?;
+            if self
+                .rust_nominal_targets
+                .get(current)
+                .is_some_and(|targets| targets.contains_key(name))
+                || self.import_bindings.get(current).is_some_and(|bindings| {
+                    bindings.contains_key(name) || bindings.contains_key("*")
+                })
+            {
+                return None;
+            }
+            if self.rust_module_scope_ids.contains(current)
+                || self
+                    .file
+                    .as_ref()
+                    .is_some_and(|file| file.scope_id == current)
+            {
+                return Some(qualified.to_owned());
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
+        }
+        None
+    }
+
+    fn rust_instantiated_receiver(
+        &self,
+        receiver: &RustSourceType,
+        nominal: &str,
+    ) -> Option<(RustSourceType, String)> {
+        let mut current = receiver.clone();
+        let mut nominal = nominal.to_owned();
+        let mut visited = BTreeSet::new();
+        for step in 0..=16 {
+            let Some(parameter) = self.rust_generic_parameter_at_origin(&current.owner, &nominal)
+            else {
+                return Some((current, nominal));
+            };
+            let Some(argument) = current.substitutions.get(&parameter.fact_id) else {
+                return Some((current, nominal));
+            };
+            if step == 16 || !visited.insert(parameter.fact_id.clone()) {
+                return None;
+            }
+            current = argument.as_ref().clone();
+            nominal = rust_nominal_type_path(rust_indexable_type(&current.raw)?)?;
+        }
+        None
+    }
+
+    fn rust_instantiated_field_type(
+        &self,
+        receiver: &RustSourceType,
+        field_type: &RustSourceType,
+    ) -> Option<RustSourceType> {
+        let mut field_type = field_type.clone();
+        let Some(parameters) = self
+            .rust_type_parameter_order
+            .get(&field_type.owner.scope_id)
+        else {
+            return Some(field_type);
+        };
+        if parameters.is_empty() {
+            return Some(field_type);
+        }
+        if self.rust_indexed_type_name(receiver)? != field_type.owner.qualified_name {
+            return None;
+        }
+        if parameters.len() > 64 {
+            return Some(field_type);
+        }
+        let Some(arguments) =
+            rust_indexable_type(&receiver.raw).and_then(rust_receiver_type_arguments)
+        else {
+            // The declared field type is still valid evidence. Without a
+            // complete argument mapping, keep its original generic identity.
+            return Some(field_type);
+        };
+        if parameters.len() != arguments.len() {
+            return Some(field_type);
+        }
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            if !field_type.substitutions.contains_key(parameter)
+                && field_type.substitutions.len() == 64
+            {
+                return None;
+            }
+            field_type.substitutions.insert(
+                parameter.clone(),
+                Arc::new(RustSourceType {
+                    raw: argument.to_owned(),
+                    owner: receiver.owner.clone(),
+                    source_start: receiver.source_start,
+                    substitutions: receiver.substitutions.clone(),
+                }),
+            );
+        }
+        Some(field_type)
+    }
+
+    fn rust_nominal_receiver_name(
+        &self,
+        receiver: &RustSourceType,
+        nominal: &str,
+    ) -> Option<String> {
+        let (instantiated, mut nominal) = self.rust_instantiated_receiver(receiver, nominal)?;
+        let mut owner = &instantiated.owner;
+        let mut aliases = BTreeSet::new();
+        for _ in 0..16 {
+            let Some(target) = self.rust_scoped_nominal_target(owner, &nominal) else {
+                return self.rust_unshadowed_prelude_type(owner, &nominal);
+            };
+            if let Some(id) = target.declaration_id.as_deref()
+                && self
+                    .rust_nominal_declarations
+                    .get(id)
+                    .is_some_and(|declaration| declaration.kind == "type_alias")
+            {
+                if !aliases.insert(id.to_owned()) {
+                    return None;
+                }
+                let alias = self.rust_nominal_alias_types.get(id)?;
+                owner = &alias.owner;
+                nominal = alias.raw.clone();
+                continue;
+            }
+            return Some(target.qualified_name);
+        }
+        None
+    }
+
+    fn rust_indexed_type_name(&self, receiver: &RustSourceType) -> Option<String> {
+        let nominal = rust_nominal_type_path(rust_indexable_type(&receiver.raw)?)?;
+        self.rust_nominal_receiver_name(receiver, &nominal)
     }
 
     // Bounded source types for indexed method receivers and field accesses.
@@ -5198,18 +5671,21 @@ impl<'source> DirectEvidenceState<'source> {
             return None;
         }
         match node.kind() {
-            "self" => Some(RustSourceType {
-                raw: rust_callable_owner(owner)?.to_owned(),
-                owner: owner.clone(),
-                source_start: node.start_byte(),
-            }),
-            "identifier" => Some(RustSourceType {
-                raw: self
-                    .rust_value_type_for(owner, &self.text(node), node.start_byte(), Some(node))?
-                    .to_owned(),
-                owner: owner.clone(),
-                source_start: node.start_byte(),
-            }),
+            "self" => self
+                .rust_impl_for_node(node)
+                .and_then(|implementation| implementation.receiver_source_type.clone())
+                .or_else(|| {
+                    Some(RustSourceType {
+                        raw: rust_callable_owner(owner)?.to_owned(),
+                        owner: owner.clone(),
+                        source_start: node.start_byte(),
+                        substitutions: BTreeMap::new(),
+                    })
+                }),
+            "identifier" => self
+                .rust_value_binding_for(owner, &self.text(node), node.start_byte(), Some(node))?
+                .source_type
+                .clone(),
             "parenthesized_expression" => {
                 self.rust_indexed_receiver_type(owner, node.named_child(0)?, budget)
             }
@@ -5242,7 +5718,7 @@ impl<'source> DirectEvidenceState<'source> {
                         .get(&qualified)
                         .and_then(|fields| fields.get(&field))
                     {
-                        return Some(field_type.clone());
+                        return self.rust_instantiated_field_type(&receiver, field_type);
                     }
                     if !rust_source_proven_deref_wrapper(&qualified) {
                         return None;
@@ -5329,6 +5805,67 @@ impl<'source> DirectEvidenceState<'source> {
             })
     }
 
+    fn rust_field_receiver_source_type(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+        use_node: Node<'_>,
+    ) -> Option<RustSourceType> {
+        let mut fields = qualifier.split('.');
+        let first = fields.next()?.trim();
+        let mut current = if first == "self" {
+            self.rust_impl_for_node(use_node)
+                .and_then(|implementation| implementation.receiver_source_type.clone())
+                .or_else(|| {
+                    Some(RustSourceType {
+                        raw: rust_callable_owner(owner)?.to_owned(),
+                        owner: owner.clone(),
+                        source_start: use_start,
+                        substitutions: BTreeMap::new(),
+                    })
+                })?
+        } else {
+            self.rust_value_binding_for(owner, first, use_start, Some(use_node))?
+                .source_type
+                .clone()?
+        };
+        for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
+            current = self.rust_field_source_type_for_access(&current, field)?;
+        }
+        Some(current)
+    }
+
+    fn rust_field_source_type_for_access(
+        &self,
+        receiver: &RustSourceType,
+        field: &str,
+    ) -> Option<RustSourceType> {
+        let mut current = receiver.clone();
+        for _ in 0..16 {
+            let qualified = self.rust_indexed_type_name(&current)?;
+            if self
+                .rust_ambiguous_field_types
+                .contains(&(qualified.clone(), field.to_owned()))
+            {
+                return None;
+            }
+            if let Some(field_type) = self
+                .rust_field_types
+                .get(&qualified)
+                .and_then(|fields| fields.get(field))
+            {
+                return self.rust_instantiated_field_type(&current, field_type);
+            }
+            if !rust_source_proven_deref_wrapper(&qualified) {
+                return None;
+            }
+            current.raw =
+                rust_single_generic_type_argument(rust_indexable_type(&current.raw)?)?.to_owned();
+        }
+        None
+    }
+
     fn rust_field_receiver_type(
         &self,
         owner: &DeclarationContext,
@@ -5336,80 +5873,21 @@ impl<'source> DirectEvidenceState<'source> {
         use_start: usize,
         use_node: Node<'_>,
     ) -> Option<String> {
-        let mut fields = qualifier.split('.');
-        let first = fields.next()?.trim();
-        let mut current = if first == "self" {
-            rust_callable_owner(owner)?.to_owned()
-        } else {
-            self.rust_value_type_for(owner, first, use_start, Some(use_node))?
-                .to_owned()
-        };
-        for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
-            current = self.rust_field_type_for_access(owner, &current, field, use_start)?;
-        }
-        let nominal = rust_nominal_type_path(&current)?;
+        let receiver =
+            self.rust_field_receiver_source_type(owner, qualifier, use_start, use_node)?;
+        let nominal = rust_nominal_type_path(&receiver.raw)?;
         if rust_primitive_type(&nominal) {
             Some(nominal)
         } else {
-            rust_qualify_evidence_path(self, owner, &nominal, use_start)
+            self.rust_nominal_receiver_name(&receiver, &nominal)
         }
-    }
-
-    fn rust_field_receiver_nominal_type(
-        &self,
-        owner: &DeclarationContext,
-        qualifier: &str,
-        use_start: usize,
-        use_node: Node<'_>,
-    ) -> Option<String> {
-        let mut fields = qualifier.split('.');
-        let first = fields.next()?.trim();
-        let mut current = if first == "self" {
-            rust_callable_owner(owner)?.to_owned()
-        } else {
-            self.rust_value_type_for(owner, first, use_start, Some(use_node))?
-                .to_owned()
-        };
-        for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
-            current = self.rust_field_type_for_access(owner, &current, field, use_start)?;
-        }
-        rust_nominal_type_path(&current)
-    }
-
-    fn rust_field_type_for_access(
-        &self,
-        owner: &DeclarationContext,
-        raw_receiver: &str,
-        field: &str,
-        use_start: usize,
-    ) -> Option<String> {
-        let mut raw_receiver = raw_receiver.trim();
-        for _ in 0..16 {
-            let nominal = rust_nominal_type_path(raw_receiver)?;
-            let qualified = if rust_primitive_type(&nominal) {
-                nominal
-            } else {
-                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
-            };
-            if let Some(field_type) = self
-                .rust_field_types
-                .get(&qualified)
-                .and_then(|fields| fields.get(field))
-            {
-                return Some(field_type.raw.clone());
-            }
-            if !rust_source_proven_deref_wrapper(&qualified) {
-                return None;
-            }
-            raw_receiver = rust_single_generic_type_argument(raw_receiver)?;
-        }
-        None
     }
 
     fn collect_rust_parameter_value_types(
         &mut self,
         parameters: Node<'_>,
         scope_id: &str,
+        owner: &DeclarationContext,
         shadows_alias: bool,
     ) {
         let mut cursor = parameters.walk();
@@ -5423,7 +5901,12 @@ impl<'source> DirectEvidenceState<'source> {
             let raw = parameter
                 .child_by_field_name("type")
                 .filter(|_| rust_pattern_binds_whole_value(pattern))
-                .map(|type_node| self.text(type_node));
+                .map(|type_node| RustSourceType {
+                    raw: self.text(type_node),
+                    owner: owner.clone(),
+                    source_start: type_node.start_byte(),
+                    substitutions: BTreeMap::new(),
+                });
             let mut names = Vec::new();
             collect_rust_pattern_names(pattern, &mut names, self.source);
             for name in names {
@@ -5441,7 +5924,7 @@ impl<'source> DirectEvidenceState<'source> {
     fn collect_rust_value_types(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
         let scope_id = owner.scope_id.clone();
         if let Some(parameters) = callable.child_by_field_name("parameters") {
-            self.collect_rust_parameter_value_types(parameters, &scope_id, false);
+            self.collect_rust_parameter_value_types(parameters, &scope_id, owner, false);
         }
         let Some(body) = callable.child_by_field_name("body") else {
             return;
@@ -5459,6 +5942,12 @@ impl<'source> DirectEvidenceState<'source> {
         if matches!(node.kind(), "function_item" | "function_signature_item") {
             return;
         }
+        let active = self
+            .rust_blocks
+            .get(&node.id())
+            .cloned()
+            .unwrap_or_else(|| owner.clone());
+        let owner = &active;
         let scope_id = if !root && rust_is_lexical_scope_node(node.kind()) {
             self.ensure_rust_lexical_scope(node, parent_scope)
         } else {
@@ -5484,7 +5973,7 @@ impl<'source> DirectEvidenceState<'source> {
                     );
                 }
             } else {
-                self.collect_rust_parameter_value_types(parameters, &scope_id, true);
+                self.collect_rust_parameter_value_types(parameters, &scope_id, owner, true);
             }
         }
         if node.kind() == "let_declaration"
@@ -5495,11 +5984,18 @@ impl<'source> DirectEvidenceState<'source> {
                     node.child_by_field_name("type")
                         .map(|type_node| {
                             let declared = self.text(type_node);
-                            node.child_by_field_name("value")
+                            let raw = node
+                                .child_by_field_name("value")
                                 .and_then(|value| {
                                     self.rust_collected_result_vec_type(owner, type_node, value)
                                 })
-                                .unwrap_or(declared)
+                                .unwrap_or(declared);
+                            RustSourceType {
+                                raw,
+                                owner: owner.clone(),
+                                source_start: type_node.start_byte(),
+                                substitutions: BTreeMap::new(),
+                            }
                         })
                         .or_else(|| {
                             node.child_by_field_name("value")
@@ -5716,7 +6212,7 @@ impl<'source> DirectEvidenceState<'source> {
         arm: Node<'_>,
         owner: &DeclarationContext,
         pattern: Node<'_>,
-    ) -> Option<String> {
+    ) -> Option<RustSourceType> {
         let match_expression = arm.parent()?.parent()?;
         if match_expression.kind() != "match_expression" {
             return None;
@@ -5725,17 +6221,12 @@ impl<'source> DirectEvidenceState<'source> {
         if scrutinee.kind() != "identifier" {
             return None;
         }
-        let raw = self.rust_value_type_for(
-            owner,
-            &self.text(scrutinee),
-            scrutinee.start_byte(),
-            Some(scrutinee),
-        )?;
-        let result = rust_nominal_type_path(raw)?;
-        if !self.rust_standard_result_type(owner, &result, scrutinee.start_byte()) {
+        let mut source_type = self.rust_indexed_receiver_type(owner, scrutinee, 16)?;
+        let result = rust_nominal_type_path(&source_type.raw)?;
+        if !self.rust_standard_result_type(&source_type.owner, &result, source_type.source_start) {
             return None;
         }
-        let inner = rust_single_generic_type_argument(raw)?;
+        let inner = rust_single_generic_type_argument(&source_type.raw)?;
         let wrapper = pattern.named_child(0)?;
         if wrapper.kind() != "tuple_struct_pattern"
             || self.text(wrapper.child_by_field_name("type")?) != "Ok"
@@ -5752,8 +6243,9 @@ impl<'source> DirectEvidenceState<'source> {
         {
             return None;
         }
-        self.rust_standard_vec_element(owner, inner, scrutinee.start_byte())?;
-        Some(inner.to_owned())
+        self.rust_standard_vec_element(&source_type.owner, inner, source_type.source_start)?;
+        source_type.raw = inner.to_owned();
+        Some(source_type)
     }
 
     fn rust_for_element_type(
@@ -5761,7 +6253,7 @@ impl<'source> DirectEvidenceState<'source> {
         loop_node: Node<'_>,
         owner: &DeclarationContext,
         pattern: Node<'_>,
-    ) -> Option<String> {
+    ) -> Option<RustSourceType> {
         if !rust_pattern_binds_whole_value(pattern) {
             return None;
         }
@@ -5773,21 +6265,24 @@ impl<'source> DirectEvidenceState<'source> {
         if binding.kind() != "identifier" {
             return None;
         }
-        let raw = self.rust_value_type_for(
-            owner,
-            &self.text(binding),
-            binding.start_byte(),
-            Some(binding),
+        let mut source_type = self.rust_indexed_receiver_type(owner, binding, 16)?;
+        let element = self.rust_standard_vec_element(
+            &source_type.owner,
+            &source_type.raw,
+            source_type.source_start,
         )?;
-        let element = self.rust_standard_vec_element(owner, raw, binding.start_byte())?;
-        (element != "_").then(|| element.to_owned())
+        if element == "_" {
+            return None;
+        }
+        source_type.raw = element.to_owned();
+        Some(source_type)
     }
 
     fn rust_map_closure_element_type(
         &self,
         closure: Node<'_>,
         owner: &DeclarationContext,
-    ) -> Option<String> {
+    ) -> Option<RustSourceType> {
         let arguments = closure.parent()?;
         if arguments.kind() != "arguments" || arguments.named_child_count() != 1 {
             return None;
@@ -5812,22 +6307,26 @@ impl<'source> DirectEvidenceState<'source> {
         {
             return None;
         }
-        let source = self.rust_indexed_receiver_type(
+        let mut source = self.rust_indexed_receiver_type(
             owner,
             iterator_function.child_by_field_name("value")?,
             16,
         )?;
         let element =
             self.rust_standard_vec_element(&source.owner, &source.raw, source.source_start)?;
-        (element != "_").then(|| element.to_owned())
+        if element == "_" {
+            return None;
+        }
+        source.raw = element.to_owned();
+        Some(source)
     }
 
     fn rust_inferred_value_type(
         &self,
         value: Node<'_>,
         owner: &DeclarationContext,
-    ) -> Option<String> {
-        match value.kind() {
+    ) -> Option<RustSourceType> {
+        let raw = match value.kind() {
             "call_expression" => {
                 let function = value.child_by_field_name("function")?;
                 let function = if function.kind() == "generic_function" {
@@ -5836,16 +6335,28 @@ impl<'source> DirectEvidenceState<'source> {
                     function
                 };
                 let raw = self.text(function);
-                split_qualified(&raw).0.map(str::to_owned)
+                split_qualified(&raw).0?.to_owned()
             }
-            "struct_expression" => value
-                .child_by_field_name("name")
-                .map(|name| self.text(name)),
-            "identifier" => self
-                .rust_value_type_for(owner, &self.text(value), value.start_byte(), Some(value))
-                .map(str::to_owned),
-            _ => None,
-        }
+            "struct_expression" => self.text(value.child_by_field_name("name")?),
+            "identifier" => {
+                return self
+                    .rust_value_binding_for(
+                        owner,
+                        &self.text(value),
+                        value.start_byte(),
+                        Some(value),
+                    )?
+                    .source_type
+                    .clone();
+            }
+            _ => return None,
+        };
+        Some(RustSourceType {
+            raw,
+            owner: owner.clone(),
+            source_start: value.start_byte(),
+            substitutions: BTreeMap::new(),
+        })
     }
 
     fn rust_enclosing_module(&self, owner: &DeclarationContext) -> String {
@@ -5952,6 +6463,7 @@ impl<'source> DirectEvidenceState<'source> {
                 raw,
                 owner: owner.clone(),
                 source_start: type_node.start_byte(),
+                substitutions: BTreeMap::new(),
             },
         );
     }
@@ -6056,12 +6568,21 @@ impl<'source> DirectEvidenceState<'source> {
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
-        let active = self
-            .declarations
+        let mut active = self
+            .rust_blocks
             .get(&node.id())
-            .filter(|context| matches!(context.kind.as_str(), "module" | "function" | "method"))
+            .or_else(|| self.declarations.get(&node.id()))
             .cloned()
             .unwrap_or_else(|| owner.clone());
+        if node.kind() == "block" && !self.rust_blocks.contains_key(&node.id()) {
+            self.collect_rust_declarations(node, &active, None)?;
+            active = self.rust_blocks.get(&node.id()).cloned().ok_or_else(|| {
+                EvidenceError::new(
+                    EvidenceErrorCode::InvalidFact,
+                    "Rust block has no lexical scope",
+                )
+            })?;
+        }
         if node.kind() == "use_declaration" {
             if self.rust_import_nodes.insert(node.id()) {
                 self.add_rust_use(node, &active)?;
@@ -6184,8 +6705,9 @@ impl<'source> DirectEvidenceState<'source> {
         root: bool,
     ) -> Result<(), EvidenceError> {
         let active = self
-            .declarations
+            .rust_blocks
             .get(&node.id())
+            .or_else(|| self.declarations.get(&node.id()))
             .cloned()
             .unwrap_or_else(|| owner.clone());
         if self.declarations.contains_key(&node.id()) {
@@ -6194,6 +6716,7 @@ impl<'source> DirectEvidenceState<'source> {
         match node.kind() {
             "use_declaration" => return Ok(()),
             "call_expression" => self.add_rust_call(node, &active)?,
+            "struct_expression" => self.add_rust_struct_literal(node, &active)?,
             "field_expression" => self.add_rust_field_access(node, &active)?,
             "macro_invocation" => self.add_rust_macro_invocation(node, &active)?,
             _ => {}
@@ -6209,6 +6732,120 @@ impl<'source> DirectEvidenceState<'source> {
             self.walk_rust_evidence(child, &active, false)?;
         }
         Ok(())
+    }
+
+    fn add_rust_struct_literal(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if node.has_error()
+            || node.is_missing()
+            || self.parser_error_ranges.iter().any(|(start, end)| {
+                if start == end {
+                    node.start_byte() <= *start && *start < node.end_byte()
+                } else {
+                    *start < node.end_byte() && node.start_byte() < *end
+                }
+            })
+        {
+            return Ok(());
+        }
+        let Some(name) = node.child_by_field_name("name") else {
+            return Ok(());
+        };
+        // The nominal path is a reference, not a constructor call. Separate
+        // a direct argument list; qualified paths keep their exact source slice.
+        let name = if matches!(name.kind(), "generic_type" | "generic_type_with_turbofish") {
+            let Some(nominal) = name.child_by_field_name("type") else {
+                return Ok(());
+            };
+            nominal
+        } else {
+            name
+        };
+        let raw = self.text(name);
+        let normalized = rust_normalize_path(&raw);
+        let (binding_name, _) = split_qualified_head(&normalized);
+        if self.rust_nominal_import_is_ambiguous(owner, binding_name) {
+            let (qualifier, spelling) = split_qualified(&raw);
+            let occurrence = self.builder.occur_with_context(
+                SemanticRole::TypeReference,
+                &owner.fact_id,
+                spelling,
+                qualifier,
+                Some(&owner.scope_id),
+                Some("rust-struct-literal"),
+                range_for_node(self.source_file, name),
+            )?;
+            return self.builder.diagnose(
+                "ambiguous-struct-literal-type",
+                Some(&occurrence),
+                Some(range_for_node(self.source_file, name)),
+                "Struct literal type import is ambiguous; no target was selected",
+            );
+        }
+        let kinds = vec![
+            "struct".to_owned(),
+            "enum_member".to_owned(),
+            "type_alias".to_owned(),
+        ];
+        if raw == "Self" || raw.starts_with("Self::") {
+            let Some(receiver) = self
+                .rust_concrete_callable_receiver(owner)
+                .filter(|receiver| {
+                    self.rust_impl_for_node(node).is_some_and(|implementation| {
+                        implementation.receiver_scope_proven
+                            && implementation.type_qualified_name == *receiver
+                    })
+                })
+            else {
+                return Ok(());
+            };
+            let qualified = raw
+                .strip_prefix("Self::")
+                .map_or(receiver.clone(), |suffix| {
+                    rust_join_qualified(&receiver, suffix)
+                });
+            return self.add_rust_occurrence_candidate(
+                SemanticRole::TypeReference,
+                CandidateRelation::References,
+                owner,
+                name,
+                Some(&qualified),
+                kinds,
+                false,
+                Some("rust-struct-literal"),
+            );
+        }
+        let Some(target) = self.rust_scoped_nominal_target(owner, &normalized) else {
+            let (qualifier, spelling) = split_qualified(&raw);
+            let occurrence = self.builder.occur_with_context(
+                SemanticRole::TypeReference,
+                &owner.fact_id,
+                spelling,
+                qualifier,
+                Some(&owner.scope_id),
+                Some("rust-struct-literal"),
+                range_for_node(self.source_file, name),
+            )?;
+            return self.builder.diagnose(
+                "unresolved-struct-literal-type",
+                Some(&occurrence),
+                Some(range_for_node(self.source_file, name)),
+                "Struct literal type lacks a scoped nominal target; no target was selected",
+            );
+        };
+        self.add_rust_occurrence_candidate(
+            SemanticRole::TypeReference,
+            CandidateRelation::References,
+            owner,
+            name,
+            Some(&target.qualified_name),
+            kinds,
+            false,
+            Some("rust-struct-literal"),
+        )
     }
 
     fn add_rust_declaration_references(
@@ -6542,7 +7179,17 @@ impl<'source> DirectEvidenceState<'source> {
         } else {
             qualified_name
         };
-        let binding = call_result_binding.or(fallback_binding);
+        let generic_bounds = self.rust_call_generic_bounds(owner, qualifier, function);
+        let qualified_name = if generic_bounds.is_some() {
+            None
+        } else {
+            qualified_name
+        };
+        let binding = if generic_bounds.is_some() {
+            None
+        } else {
+            call_result_binding.or(fallback_binding)
+        };
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Call,
             &owner.fact_id,
@@ -6571,7 +7218,7 @@ impl<'source> DirectEvidenceState<'source> {
                 "method".to_owned(),
                 "struct".to_owned(),
             ],
-            hierarchy: None,
+            hierarchy: generic_bounds,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                 ((wildcard_bound && wildcard_external_target_is_explicit)
                     || (!wildcard_bound && !qualifier.is_some_and(rust_deferred_owner)))
@@ -6661,27 +7308,14 @@ impl<'source> DirectEvidenceState<'source> {
         {
             return Some(rust_join_qualified(&target, spelling));
         }
-        let generic_receiver_type = self
-            .rust_value_type_for(
+        let generic_receiver = self
+            .rust_value_binding_for(
                 owner,
                 qualified_binding_head(qualifier),
                 use_start,
                 Some(use_node),
             )
-            .and_then(rust_nominal_type_path);
-        if let Some(receiver_type) = generic_receiver_type.as_deref()
-            && let Some(method) =
-                self.rust_generic_receiver_method_target(owner, receiver_type, spelling, use_start)
-        {
-            return Some(method);
-        }
-        if let Some(receiver_type) =
-            self.rust_field_receiver_nominal_type(owner, qualifier, use_start, use_node)
-            && let Some(method) =
-                self.rust_generic_receiver_method_target(owner, &receiver_type, spelling, use_start)
-        {
-            return Some(method);
-        }
+            .and_then(|version| version.source_type.as_ref());
         if let Some(receiver_type) =
             self.rust_field_receiver_type(owner, qualifier, use_start, use_node)
         {
@@ -6689,9 +7323,14 @@ impl<'source> DirectEvidenceState<'source> {
                 .rust_receiver_method_target(&receiver_type, spelling)
                 .or_else(|| Some(rust_join_qualified(&receiver_type, spelling)));
         }
-        if let Some(nominal_type) = generic_receiver_type
-            && let Some(receiver_type) =
-                rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
+        if let Some(receiver) = generic_receiver
+            && let Some(nominal_type) = rust_nominal_type_path(&receiver.raw)
+            && let Some(receiver_type) = rust_qualify_evidence_path(
+                self,
+                &receiver.owner,
+                &nominal_type,
+                receiver.source_start,
+            )
         {
             return Some(rust_join_qualified(&receiver_type, spelling));
         }
@@ -6895,61 +7534,217 @@ impl<'source> DirectEvidenceState<'source> {
         Ok(Some(binding))
     }
 
-    fn rust_generic_receiver_method_target(
+    fn rust_generic_parameter_at_origin(
         &self,
         owner: &DeclarationContext,
-        receiver_type: &str,
-        method: &str,
-        use_start: usize,
-    ) -> Option<String> {
-        let mut bounds = Vec::new();
-        let mut scope_id = Some(owner.scope_id.as_str());
-        for _ in 0..64 {
-            let Some(current) = scope_id else {
-                break;
-            };
-            if let Some(values) = self
-                .rust_generic_bounds
-                .get(current)
-                .and_then(|values| values.get(receiver_type))
-            {
-                bounds.extend(
-                    values.iter().filter_map(|bound| {
-                        rust_qualify_evidence_path(self, owner, bound, use_start)
-                    }),
-                );
-                break;
-            }
-            scope_id = self.scope_parents.get(current).map(String::as_str);
-        }
-        bounds.sort_unstable();
-        bounds.dedup();
-        if bounds.is_empty() {
+        name: &str,
+    ) -> Option<&DeclarationContext> {
+        if name.contains("::") {
             return None;
         }
-
-        let mut targets = bounds
-            .iter()
-            .filter_map(|bound| {
-                self.rust_trait_methods
-                    .get(&(bound.clone(), method.to_owned()))
-                    .and_then(|methods| {
-                        let [target] = methods.as_slice() else {
-                            return None;
-                        };
-                        Some(target.clone())
-                    })
-            })
-            .collect::<Vec<_>>();
-        targets.sort_unstable();
-        targets.dedup();
-        if targets.len() == 1 {
-            return targets.pop();
-        }
-        if bounds.len() == 1 {
-            return Some(rust_join_qualified(&bounds[0], method));
+        let mut scope = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let current = scope?;
+            if self
+                .import_bindings
+                .get(current)
+                .is_some_and(|bindings| bindings.contains_key(name))
+            {
+                return None;
+            }
+            if let Some(targets) = self
+                .rust_nominal_targets
+                .get(current)
+                .and_then(|targets| targets.get(name))
+            {
+                if targets.len() != 1 {
+                    return None;
+                }
+                let declaration = self.rust_nominal_declarations.get(targets.first()?)?;
+                return (declaration.kind == "parameter"
+                    && self.rust_type_parameter_ids.contains(&declaration.fact_id))
+                .then_some(declaration);
+            }
+            if self.rust_module_scope_ids.contains(current)
+                || self
+                    .file
+                    .as_ref()
+                    .is_some_and(|file| file.scope_id == current)
+            {
+                return None;
+            }
+            scope = self.scope_parents.get(current).map(String::as_str);
         }
         None
+    }
+
+    fn rust_record_trait_member_visit(&mut self) -> Result<(), EvidenceError> {
+        self.rust_trait_member_scan_remaining = self
+            .rust_trait_member_scan_remaining
+            .checked_sub(1)
+            .ok_or_else(|| {
+                EvidenceError::new(
+                    EvidenceErrorCode::ResourceLimit,
+                    "Rust trait member inventory scan budget exhausted",
+                )
+            })?;
+        #[cfg(test)]
+        self.rust_trait_member_scan_visits
+            .set(self.rust_trait_member_scan_visits.get() + 1);
+        Ok(())
+    }
+
+    fn rust_trait_attributes_complete(&mut self, node: Node<'_>) -> Result<bool, EvidenceError> {
+        if let Some(complete) = self.rust_trait_attribute_coverage.get(&node.id()) {
+            return Ok(*complete);
+        }
+        let mut complete = true;
+        let mut previous = node.prev_named_sibling();
+        while let Some(attribute) = previous {
+            self.rust_record_trait_member_visit()?;
+            match attribute.kind() {
+                "attribute_item" | "inner_attribute_item"
+                    if !rust_member_attribute_safe(attribute, self.source) =>
+                {
+                    complete = false;
+                    break;
+                }
+                "attribute_item" | "inner_attribute_item" | "line_comment" | "block_comment" => {}
+                _ => break,
+            }
+            previous = attribute.prev_named_sibling();
+        }
+        if complete {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                self.rust_record_trait_member_visit()?;
+                if (child.kind() == "inner_attribute_item"
+                    || (child.kind() == "attribute_item"
+                        && !matches!(node.kind(), "source_file" | "declaration_list" | "block")))
+                    && !rust_member_attribute_safe(child, self.source)
+                {
+                    complete = false;
+                    break;
+                }
+            }
+        }
+        self.rust_trait_attribute_coverage
+            .insert(node.id(), complete);
+        Ok(complete)
+    }
+
+    fn rust_trait_member_inventory_complete(
+        &mut self,
+        declaration: Node<'_>,
+    ) -> Result<bool, EvidenceError> {
+        if declaration.has_error() {
+            return Ok(false);
+        }
+        let mut ancestor = Some(declaration);
+        let mut reached_root = false;
+        for _ in 0..64 {
+            let Some(node) = ancestor else {
+                reached_root = true;
+                break;
+            };
+            self.rust_record_trait_member_visit()?;
+            if !self.rust_trait_attributes_complete(node)? {
+                return Ok(false);
+            }
+            ancestor = node.parent();
+            if ancestor.is_none() {
+                reached_root = true;
+                break;
+            }
+        }
+        if !reached_root {
+            return Ok(false);
+        }
+        let Some(body) = declaration.child_by_field_name("body") else {
+            return Ok(false);
+        };
+        let mut cursor = body.walk();
+        for node in body.children(&mut cursor) {
+            self.rust_record_trait_member_visit()?;
+            if !node.is_named() {
+                continue;
+            }
+            let complete = match node.kind() {
+                "function_item"
+                | "function_signature_item"
+                | "associated_type"
+                | "type_item"
+                | "const_item" => self.rust_trait_attributes_complete(node)?,
+                "line_comment" | "block_comment" | "empty_statement" => true,
+                "attribute_item" | "inner_attribute_item" => {
+                    rust_member_attribute_safe(node, self.source)
+                }
+                // No token tree or unmodeled syntax proves member absence.
+                _ => false,
+            };
+            if !complete {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn rust_call_generic_bounds(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: Option<&str>,
+        function: Node<'_>,
+    ) -> Option<HierarchyConstraint> {
+        if function.kind() != "field_expression" {
+            return None;
+        }
+        let value = function.child_by_field_name("value")?;
+        let receiver = if rust_receiver_contains_index(value) {
+            self.rust_indexed_receiver_type(owner, value, 32)?
+        } else {
+            self.rust_field_receiver_source_type(
+                owner,
+                qualifier?,
+                function.start_byte(),
+                function,
+            )?
+        };
+        let nominal = rust_nominal_type_path(&receiver.raw)?;
+        let (receiver, nominal) = self.rust_instantiated_receiver(&receiver, &nominal)?;
+        let parameter = self.rust_generic_parameter_at_origin(&receiver.owner, &nominal)?;
+        let declared_bounds = self
+            .rust_generic_bounds
+            .get(&parameter.scope_id)
+            .and_then(|bounds| bounds.get(&parameter.name));
+        let mut bounds = BTreeSet::new();
+        let mut complete = !self
+            .rust_incomplete_generic_bounds
+            .contains(&(parameter.scope_id.clone(), parameter.name.clone()));
+        for bound in declared_bounds.into_iter().flatten() {
+            if bounds.len() == 64 {
+                complete = false;
+                break;
+            }
+            let Some(target) = self.rust_scoped_nominal_target(&bound.owner, &bound.raw) else {
+                complete = false;
+                continue;
+            };
+            if let Some(id) = target.declaration_id.as_deref()
+                && self
+                    .rust_nominal_declarations
+                    .get(id)
+                    .is_none_or(|declaration| declaration.kind != "trait")
+            {
+                complete = false;
+                continue;
+            }
+            bounds.insert(target.qualified_name);
+        }
+        Some(HierarchyConstraint::RustGenericBounds {
+            parameter_declaration_id: parameter.fact_id.clone(),
+            trait_qualified_names: bounds.into_iter().collect(),
+            bounds_complete: complete,
+        })
     }
 
     fn rust_receiver_method_target(&self, receiver: &str, method: &str) -> Option<String> {
@@ -7289,11 +8084,15 @@ impl<'source> DirectEvidenceState<'source> {
         roots.sort_unstable();
         let mut receivers = Vec::new();
         for root in roots {
-            let mut current = root;
+            let mut current = RustSourceType {
+                raw: root,
+                owner: owner.clone(),
+                source_start: use_start,
+                substitutions: BTreeMap::new(),
+            };
             let mut complete = true;
             for field in &fields {
-                let Some(next) = self.rust_field_type_for_access(owner, &current, field, use_start)
-                else {
+                let Some(next) = self.rust_field_source_type_for_access(&current, field) else {
                     complete = false;
                     break;
                 };
@@ -7302,13 +8101,13 @@ impl<'source> DirectEvidenceState<'source> {
             if !complete {
                 continue;
             }
-            let Some(nominal) = rust_nominal_type_path(&current) else {
+            let Some(nominal) = rust_nominal_type_path(&current.raw) else {
                 continue;
             };
             let receiver = if rust_primitive_type(&nominal) {
                 nominal
             } else if let Some(receiver) =
-                rust_qualify_evidence_path(self, owner, &nominal, use_start)
+                rust_qualify_evidence_path(self, &current.owner, &nominal, current.source_start)
             {
                 receiver
             } else {
@@ -7389,10 +8188,27 @@ impl<'source> DirectEvidenceState<'source> {
             return Ok(());
         }
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        let binding = self
-            .binding_for_occurrence(owner, binding_name, node.start_byte(), true)
-            .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
-            .cloned();
+        let binding = (context != Some("rust-struct-literal"))
+            .then(|| {
+                self.binding_for_occurrence(owner, binding_name, node.start_byte(), true)
+                    .or_else(|| self.rust_wildcard_binding(owner, node.start_byte()))
+                    .cloned()
+            })
+            .flatten();
+        let literal_target = (context == Some("rust-struct-literal"))
+            .then(|| {
+                if raw == "Self" {
+                    return self
+                        .rust_impl_for_node(node)
+                        .and_then(|implementation| implementation.owner_declaration_id.clone());
+                }
+                let nominal = rust_nominal_type_path(&raw)?;
+                let target = self.rust_scoped_nominal_target(owner, &nominal)?;
+                (Some(target.qualified_name.as_str()) == qualified_name)
+                    .then_some(target.declaration_id)
+                    .flatten()
+            })
+            .flatten();
         let exact_type_parameter = qualified_name
             .and_then(|qualified| self.rust_type_parameters_by_qualified_name.get(qualified))
             .map(|parameter| parameter.fact_id.clone());
@@ -7438,6 +8254,16 @@ impl<'source> DirectEvidenceState<'source> {
             context,
             range_for_node(self.source_file, node),
         )?;
+        // Literal targets already carry bounded nominal scope/import proof.
+        // Disable generic lexical and file-wide fallback: value aliases and
+        // unrelated names must not override that qualified target.
+        let module_or_package = (context != Some("rust-struct-literal"))
+            .then(|| {
+                qualified_name
+                    .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
+                    .or_else(|| Some(self.module_or_package.clone()))
+            })
+            .flatten();
         self.builder.relate(
             relation,
             &owner.fact_id,
@@ -7445,12 +8271,12 @@ impl<'source> DirectEvidenceState<'source> {
             binding.as_deref(),
             spelling,
             ResolutionConstraint {
-                exact_target_declaration_id: exact_type_parameter.or(exact_associated_type),
+                exact_target_declaration_id: literal_target
+                    .or(exact_type_parameter)
+                    .or(exact_associated_type),
                 exact_language: Some(self.language.to_owned()),
-                module_or_package: qualified_name
-                    .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
-                    .or_else(|| Some(self.module_or_package.clone())),
-                scope_id: Some(owner.scope_id.clone()),
+                module_or_package,
+                scope_id: (context != Some("rust-struct-literal")).then(|| owner.scope_id.clone()),
                 qualified_name: qualified_name.map(str::to_owned),
                 argument_count: None,
                 argument_types: Vec::new(),
@@ -9863,6 +10689,16 @@ impl<'source> DirectEvidenceState<'source> {
         if self.graph_ids.insert(base.clone()) {
             return base;
         }
+        if self.language == "rust" {
+            let unique = make_id(&[
+                &base,
+                "declaration",
+                &node.start_byte().to_string(),
+                &node.end_byte().to_string(),
+            ]);
+            self.graph_ids.insert(unique.clone());
+            return unique;
+        }
         let unique = make_id(&[
             &base,
             "overload",
@@ -10504,6 +11340,61 @@ fn rust_single_generic_type_argument(raw: &str) -> Option<&str> {
     (!argument.is_empty()).then_some(argument)
 }
 
+fn rust_receiver_type_arguments(raw: &str) -> Option<Vec<&str>> {
+    if raw.contains(['\"', '\'', '{', '}']) {
+        return None;
+    }
+    let open = raw.find('<')?;
+    let inner = raw.get(open + 1..)?.strip_suffix('>')?;
+    let mut output = Vec::new();
+    let mut nesting = Vec::new();
+    let mut start = 0;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '<' | '(' | '[' => {
+                if nesting.len() == 64 {
+                    return None;
+                }
+                nesting.push(character);
+            }
+            '>' if index > 0 && inner.as_bytes().get(index - 1) == Some(&b'-') => {}
+            '>' | ')' | ']' => {
+                let expected = match character {
+                    '>' => '<',
+                    ')' => '(',
+                    _ => '[',
+                };
+                if nesting.pop() != Some(expected) {
+                    return None;
+                }
+            }
+            ',' if nesting.is_empty() => {
+                if output.len() == 64 {
+                    return None;
+                }
+                let argument = inner.get(start..index)?.trim();
+                if argument.is_empty() {
+                    return None;
+                }
+                output.push(argument);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if !nesting.is_empty() {
+        return None;
+    }
+    let last = inner.get(start..)?.trim();
+    if !last.is_empty() {
+        if output.len() == 64 {
+            return None;
+        }
+        output.push(last);
+    }
+    (!output.is_empty()).then_some(output)
+}
+
 fn rust_source_proven_deref_wrapper(qualified: &str) -> bool {
     matches!(
         qualified,
@@ -10639,6 +11530,30 @@ fn rust_outer_nominal_return_node(mut node: Node<'_>) -> Option<Node<'_>> {
         }
     }
     None
+}
+
+fn rust_member_attribute_safe(attribute: Node<'_>, source: &[u8]) -> bool {
+    let Ok(raw) = std::str::from_utf8(&source[attribute.start_byte()..attribute.end_byte()]) else {
+        return false;
+    };
+    let spelling = raw
+        .trim()
+        .strip_prefix('#')
+        .unwrap_or_default()
+        .trim_start_matches('!')
+        .trim()
+        .strip_prefix('[')
+        .unwrap_or_default()
+        .trim();
+    let name = spelling
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .next()
+        .unwrap_or_default();
+    !spelling[name.len()..].trim_start().starts_with("::")
+        && matches!(
+            name,
+            "doc" | "allow" | "warn" | "deny" | "forbid" | "deprecated" | "must_use"
+        )
 }
 
 fn rust_trait_bound_path(raw: &str) -> Option<String> {

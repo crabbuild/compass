@@ -311,6 +311,7 @@ pub(super) const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
             "incomplete-hierarchy-receiver-dispatch"
         }
         ResolutionRule::RustAssociatedType => "rust-associated-type",
+        ResolutionRule::RustGenericBoundDispatch => "rust-generic-bound-dispatch",
         ResolutionRule::ExactSourceInventory => "exact-source-inventory",
         ResolutionRule::QualifiedExternal => "qualified-external",
     }

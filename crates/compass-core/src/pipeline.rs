@@ -202,7 +202,7 @@ pub enum BuildPurpose {
 const OUTPUT_STATS_FILE: &str = "output-stats.json";
 const AST_FACT_DIGESTS_FILE: &str = "ast-fact-digests.json";
 const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
-const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/1";
+const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/2";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
@@ -975,6 +975,9 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
         map.serialize_entry("kind", &declaration.kind)?;
         map.serialize_entry("name", &declaration.name)?;
         map.serialize_entry("qualifiedName", &declaration.qualified_name)?;
+        if let Some(namespace) = declaration.namespace {
+            map.serialize_entry("namespace", &namespace)?;
+        }
         if let Some(value) = &declaration.module_or_package {
             map.serialize_entry("moduleOrPackage", value)?;
         }
@@ -992,6 +995,9 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
         }
         if declaration.direct_bases_complete {
             map.serialize_entry("directBasesComplete", &true)?;
+        }
+        if let Some(complete) = declaration.member_inventory_complete {
+            map.serialize_entry("memberInventoryComplete", &complete)?;
         }
         map.serialize_entry("variadic", &declaration.variadic)?;
         // Leading comments are outside declaration/body hashes. Retain their
@@ -9467,6 +9473,41 @@ mod tests {
             original_digest,
             extraction_fact_digest(&extract(original_source)?)?
         );
+        Ok(())
+    }
+
+    #[test]
+    fn trait_member_completeness_and_namespace_change_fact_digests() -> Result<(), Box<dyn Error>> {
+        let original = Engine::default().extract_source(
+            Path::new("src/lib.rs"),
+            b"trait Build { fn get(&self); } fn make<T: Build>(value: &T) { value.get(); }",
+        )?;
+        let original_digest = extraction_fact_digest(&original)?;
+        for complete in [None, Some(false)] {
+            let mut changed = original.clone();
+            changed
+                .semantic_evidence
+                .as_mut()
+                .ok_or("missing evidence")?
+                .declarations
+                .iter_mut()
+                .find(|declaration| declaration.kind == "trait")
+                .ok_or("missing trait")?
+                .member_inventory_complete = complete;
+            assert_ne!(original_digest, extraction_fact_digest(&changed)?);
+        }
+        let mut changed = original.clone();
+        changed
+            .semantic_evidence
+            .as_mut()
+            .ok_or("missing evidence")?
+            .declarations
+            .iter_mut()
+            .find(|declaration| declaration.name == "T")
+            .ok_or("missing parameter")?
+            .namespace = Some(compass_languages::SymbolNamespace::Value);
+        assert_ne!(original_digest, extraction_fact_digest(&changed)?);
+        assert_eq!(original_digest, extraction_fact_digest(&original)?);
         Ok(())
     }
 

@@ -259,6 +259,13 @@ fn compact_low_inference_evidence(batches: &mut [SemanticEvidenceBatch]) -> usiz
             {
                 required_details.insert(receiver_declaration_id.clone());
             }
+            if let Some(HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id,
+                ..
+            }) = &candidate.constraints.hierarchy
+            {
+                required_details.insert(parameter_declaration_id.clone());
+            }
         }
     }
     for binding in batches

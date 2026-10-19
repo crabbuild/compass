@@ -508,7 +508,10 @@ fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<
     let mut duplicate = evidence
         .scopes
         .iter()
-        .find(|scope| scope.owner_declaration_id.as_deref() == Some(declaration_id.as_str()))
+        .find(|scope| {
+            scope.kind == "callable"
+                && scope.owner_declaration_id.as_deref() == Some(declaration_id.as_str())
+        })
         .cloned()
         .ok_or("missing run scope")?;
     duplicate.id = "scope:duplicate-run".to_owned();

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Retain nominal type-reference occurrences for Rust struct and struct-like
+  enum-variant literals, with exact owners/source anchors and shared conservative
+  cross-file resolution. Support concrete impl `Self`, aliases and generic
+  nominal paths without inventing constructor calls or field access semantics.
+  Keep block-local imports, aliases and impl receivers in their actual lexical
+  scope, preserving distinct declarations for same-named block aliases.
+  Distinguish repeated same-line declarations by source span and retain receiver
+  type provenance across body imports, field/index access and local bindings.
+  Keep generic parameter identity and trait-bound declaration context through
+  local shadows; follow bounded simple receiver aliases without guessing.
+  Preserve explicitly deferred receiver nodes across languages instead of
+  rewriting them to a uniquely named but unproven source method.
+  Resolve complete generic trait-bound sets and supertraits project-wide,
+  preserving mixed local/imported ambiguity and exact source occurrences.
+  Add typed `rust_generic_bounds` evidence/2 constraints and
+  `rust-generic-bound-dispatch` provenance; older strict evidence readers must
+  upgrade. Bound substitution chains to16 steps and merged maps to64 entries.
+  Require explicit trait-member inventory completeness across the full bound
+  hierarchy; macros and unmodeled transformations cannot prove method absence.
+  Keep non-type generics out of type-receiver constraints. Incremental digest
+  profile2 includes completeness and namespace evidence.
+  Rust development producer4 remains `Qualifying`; AST cache29 refreshes
+  disposable facts; historical realizations and the graph v1 shape stay unchanged.
+
 - Reject mixed incremental source-evidence reuse when code was clipped or its aggregate capacity may be exhausted; recover through the complete cached/fresh path.
 - Retrieve bounded literal-only callable vocabulary in Python, Rust, Go and
   TypeScript/TSX without an identifier seed. Preserve exact raw source slices,

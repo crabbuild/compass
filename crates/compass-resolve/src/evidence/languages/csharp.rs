@@ -26,7 +26,11 @@ impl ResolutionDb<'_> {
                 *strategy,
                 candidate,
             )),
-            Some(HierarchyConstraint::RustAssociatedType { .. }) | None => None,
+            Some(
+                HierarchyConstraint::RustAssociatedType { .. }
+                | HierarchyConstraint::RustGenericBounds { .. },
+            )
+            | None => None,
         }
     }
 

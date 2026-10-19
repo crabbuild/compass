@@ -51,6 +51,7 @@ fn external_call_batch() -> SemanticEvidenceBatch {
             parameter_count: None,
             parameter_types: Vec::new(),
             direct_bases_complete: false,
+            member_inventory_complete: None,
             variadic: false,
             signature_hash: None,
             implementation_hash: None,
