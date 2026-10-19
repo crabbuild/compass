@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Continue broad-query raw discovery context along exact source-witnessed calls
+  within the requested depth, with explicit state, fan-out, frontier and output
+  bounds. Count rejected adjacency records and lookahead against relationship
+  work limits. Related callees remain inspection context; candidate ranking and
+  relevance are unchanged. Refresh disposable responses with a new context epoch.
+
 - Derive unconfigured Python module names from verified source-root layout:
   bare roots use relative modules; package roots retain their package prefix.
   Checkout names no longer hide valid imported calls in bare roots. Retain

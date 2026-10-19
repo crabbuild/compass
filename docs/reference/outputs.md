@@ -172,6 +172,13 @@ cannot fit. Ranked views are bounded to 128 KiB; oversized machine projections
 fail intact. This view uses no discovery cursor and does not change default
 raw schemas or cursor semantics.
 
+Native raw broad-query discovery can additionally retain exact outgoing call
+paths within the requested depth. These callees are source-witnessed inspection
+context; they do not become ranked candidates or inherit relevance from callers.
+State, adjacency-work, frontier and node/edge bounds remain explicit. Raw
+context continuation does not change the ranked presentation's first-hop scope
+below.
+
 `--include-context` / MCP `include_context: true` adds an optional `context`
 object after the shortlist. It contains at most eight one-hop witnessed edges
 and sixteen endpoint nodes, preserving edge direction, occurrence IDs, source

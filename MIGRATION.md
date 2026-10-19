@@ -28,6 +28,15 @@ explicitly. The layout participates in disposable cache
 identity, including package-entry additions/removals. Standalone extraction
 without project context retains its legacy path-based behavior.
 
+The new binary also extends raw broad-query discovery context through exact
+outgoing calls within the requested depth. Source graph rebuilds are needed only
+when the required relationships are missing; querying cannot invent them.
+Callees remain context and keep the lexical shortlist unchanged. Ranked-view/4's
+optional presentation retains its first-hop context contract. Adjacency work
+limits now include filtered records and lookahead, so very small work budgets
+can return fewer edges with an explicit truncation diagnostic. Disposable
+responses refresh automatically; raw schemas and historical graphs are unchanged.
+
 The development export-proof repair adds `ecmascriptExportInventory` to root
 TypeScript/JavaScript file/module declarations under evidence/2. Upgrade strict
 readers for its explicit version1/complete contract; missing metadata stays

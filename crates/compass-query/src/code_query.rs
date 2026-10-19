@@ -1101,6 +1101,22 @@ impl PinnedDiscoveryBackend<'_> {
         }
     }
 
+    pub(crate) fn incident_bounded_counted(
+        &self,
+        node: &str,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool, usize), QueryError> {
+        // Read before heuristic filtering so hidden/rejected records and the
+        // bounded lookahead still consume the caller's work allowance.
+        let (mut edges, truncated) = self.incident_bounded(node, true, limit)?;
+        let examined = edges.len().saturating_add(usize::from(truncated));
+        if !include_heuristic {
+            edges.retain(|edge| !is_heuristic(edge));
+        }
+        Ok((edges, truncated, examined))
+    }
+
     pub(crate) fn incident_bounded(
         &self,
         node: &str,

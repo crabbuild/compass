@@ -43,6 +43,7 @@ impl ResponseCache {
         // Projection epoch: old cached responses
         // must not silently omit retained ranked source quotations.
         digest.update(b"ranked-source-excerpts/3");
+        digest.update(b"ranked-call-context/1");
         // Historical local-store responses may lack documentation omissions.
         digest.update(b"graph-diagnostic-projection/1");
         if let Some(program) = program {

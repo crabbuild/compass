@@ -127,10 +127,7 @@ fn operation_hints_preserve_fresh_source_dependency_bands() -> Result<(), Box<dy
             .as_array()
             .ok_or("missing candidates")?;
         let mut fields = None;
-        for name in [
-            "session_values.get",
-            "session_values.ordinary",
-        ] {
+        for name in ["session_values.get", "session_values.ordinary"] {
             let candidate = candidates
                 .iter()
                 .find(|row| row["name"] == name)
@@ -245,12 +242,10 @@ fn operation_words_recall_fresh_native_owners_with_json_store_parity() -> Result
                 .ok_or_else(|| format!("missing {translation} owner in first five: {answer}"))?;
             assert_eq!(target["relevance"], "low");
             if question == "Where are session values read?" {
-                for row in candidates.iter().filter(|row| {
-                    matches!(
-                        row["name"].as_str(),
-                        Some("read.get" | "prose.get")
-                    )
-                }) {
+                for row in candidates
+                    .iter()
+                    .filter(|row| matches!(row["name"].as_str(), Some("read.get" | "prose.get")))
+                {
                     assert!(
                         !row["reasons"].to_string().contains("inspection preference"),
                         "mixed weak-literal operation promotion: {row}"

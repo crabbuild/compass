@@ -50,7 +50,10 @@ pub(super) fn exact_ast(node: &NodeRecord) -> bool {
         })
 }
 
-fn verified_site<'a>(owner: &NodeRecord, edge: &'a EdgeRecord) -> Option<&'a SourceAnchor> {
+pub(super) fn verified_site<'a>(
+    owner: &NodeRecord,
+    edge: &'a EdgeRecord,
+) -> Option<&'a SourceAnchor> {
     let (Some(source), Some(site)) = (&owner.source, &edge.relationship_site) else {
         return None;
     };

@@ -29,6 +29,7 @@ use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 
 mod excerpts;
 pub use excerpts::{RankedExcerptKind, RankedSourceExcerpt};
+mod call_context;
 mod compounds;
 mod ownership;
 mod relationships;
@@ -2382,7 +2383,8 @@ impl CodeQueryEngine {
         Ok(response)
     }
 
-    /// Optional witnessed one-hop context. Candidate rank is unaffected by
+    /// Optional witnessed context, continuing exact outgoing calls within the
+    /// requested depth. Candidate rank is unaffected by
     /// adjacency degree and no context node becomes an implementation answer.
     pub fn discover_ranked_with_context(
         &self,
@@ -2410,19 +2412,22 @@ impl CodeQueryEngine {
             return Ok(response);
         }
         let backend = self.backend.pin_discovery()?;
-        let context_roots = if self.is_fielded_question(&request.question)?
+        let fielded = self.is_fielded_question(&request.question)?
             && request.direction == DiscoveryDirection::Auto
-            && request.relation_contexts.is_empty()
-        {
-            response
-                .candidates
-                .iter()
-                .take(5)
-                .map(|candidate| candidate.node.clone())
-                .collect::<Vec<_>>()
-        } else {
-            response.discovery.nodes.clone()
-        };
+            && request.relation_contexts.is_empty();
+        // Structural discovery already owns its full neighborhood and work
+        // meter. Optional presentation must not spend a second allowance or
+        // replace the recorded cost with another traversal's counter.
+        if !fielded {
+            guard.check()?;
+            return Ok(response);
+        }
+        let context_roots = response
+            .candidates
+            .iter()
+            .take(5)
+            .map(|candidate| candidate.node.clone())
+            .collect::<Vec<_>>();
         let mut nodes = context_roots
             .into_iter()
             .map(|node| (node.id.clone(), node))
@@ -2443,7 +2448,7 @@ impl CodeQueryEngine {
         let per_seed =
             (request.limits.max_edges as usize / response.discovery.seeds.len().max(1)).max(1);
         let mut bounded = false;
-        let mut expanded = 0_u64;
+        let mut expanded = response.discovery.stats.expanded_relationships;
         for seed in &response.discovery.seeds {
             guard.check()?;
             let remaining_work = request
@@ -2454,12 +2459,12 @@ impl CodeQueryEngine {
                 bounded = true;
                 break;
             }
-            let (incident, limited) = backend.incident_bounded(
+            let (incident, limited, examined) = backend.incident_bounded_counted(
                 &seed.node_id,
                 request.include_heuristic,
-                per_seed.min(remaining_work as usize),
+                per_seed.min(remaining_work.saturating_sub(1) as usize),
             )?;
-            expanded = expanded.saturating_add(incident.len() as u64);
+            expanded = expanded.saturating_add(examined as u64);
             bounded |= limited;
             for edge in incident {
                 guard.check()?;
@@ -2501,6 +2506,16 @@ impl CodeQueryEngine {
                 edges.insert(edge.id.clone(), crate::discovery::discovery_edge(&edge));
             }
         }
+        if fielded && response.discovery.selected_direction != DiscoveryDirection::Incoming {
+            bounded |= call_context::Context {
+                scopes: &response.discovery.scope,
+                nodes: &mut nodes,
+                edges: &mut edges,
+                seeds: &response.discovery.seeds,
+                expanded: &mut expanded,
+            }
+            .extend(&backend, &request, &|| guard.check())?;
+        }
         response.discovery.nodes = nodes.into_values().collect();
         response.discovery.edges = edges.into_values().collect();
         response.discovery.stats.returned_nodes = response.discovery.nodes.len() as u64;
@@ -2509,7 +2524,7 @@ impl CodeQueryEngine {
         response.discovery.stats.visited_nodes = response.discovery.nodes.len() as u64;
         response.discovery.truncated |= bounded;
         if bounded {
-            response.discovery.diagnostics.push(QueryDiagnostic { code: QueryDiagnosticCode::BoundedTruncation, message: "One-hop ranked context reached a node/edge bound; shortlist ranking is unchanged".to_owned(), node_id: None, path: None });
+            response.discovery.diagnostics.push(QueryDiagnostic { code: QueryDiagnosticCode::BoundedTruncation, message: "Ranked context reached a node, edge or work bound; shortlist ranking is unchanged".to_owned(), node_id: None, path: None });
         }
         guard.check()?;
         if enforce_ranked_budget {

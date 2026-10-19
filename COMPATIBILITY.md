@@ -2747,3 +2747,34 @@ the previous path fallback. Current affected IDs and edges can change on rebuild
 immutable historical graphs, evidence/2 and graph-v1 shapes are unchanged.
 AST cache 33 and root-layout fingerprint component version2 prevent reuse
 across changed package context. No release-promotion decision is updated.
+
+
+## Bounded broad-query call context (development)
+
+Native broad automatic discovery can continue outgoing `Calls` beyond its
+existing first-hop neighbors, within `maxDepth`. Continuation requires exact
+source-owned AST evidence for the caller, target and call occurrence; references
+and inferred/heuristic relationships cannot establish another hop. Inferred
+incoming broad questions keep their first-hop context. Explicit structural
+requests retain the neighborhood already computed by structural discovery,
+including its existing work count; optional context does not traverse them a
+second time. Every context path remains a source relationship, not proof of
+runtime behavior.
+
+Candidate admission, relevance, ranking and seed counts are unchanged. Raw
+discovery/1 and ranked-view/4 shapes remain unchanged; the optional ranked
+presentation still projects only its documented first-hop eight-edge context.
+The response-cache identity adds `ranked-call-context/1` to refresh disposable
+answers. No published graph or historical realization is rewritten.
+
+Both initial and continuation adjacency reads count filtered records and bounded
+lookahead against `maxExpandedRelationships`. A tight work budget can therefore
+retain fewer edges than before; truncation remains explicit. Continuation is
+also bounded to32 expanded states,16 outgoing records plus one charged lookahead
+per state and64 queued states,
+subject to the request's existing node/edge/scope/deadline/cancellation limits.
+These are work contracts, not comparative performance qualification.
+
+Expanded-relationship accounting counts full edge records. Store index-key scans
+and bucket-head comparisons have separate finite bounds and can exceed that
+count; it is not a physical I/O or latency limit.

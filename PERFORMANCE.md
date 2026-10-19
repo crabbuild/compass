@@ -1,5 +1,30 @@
 # Compass performance qualification
 
+## In-progress broad call-context bounds
+
+Raw broad automatic discovery retains first-hop neighbors, then may continue
+exact outgoing Calls within requested max_depth for non-incoming questions.
+Continuation expands at most32 callable states, decodes at most16 outgoing
+records plus one lookahead per state, and retains at most64 queued states.
+It performs at most32 owner fetches and512 target fetches in that phase;
+node/edge response limits can stop it earlier. BFS/DFS retain bounded best-depth
+state so cycles cannot grow depth, while a shorter path may revisit a state.
+
+Raw examined records, including heuristic/rejected records and lookahead,
+consume the same max_expanded_relationships allowance as first-hop context.
+This meter counts full edge records; bounded per-kind index-key scans and
+bucket-head comparisons can exceed it. It is not a physical I/O ceiling.
+Scope checks, cancellation and deadlines remain active. Candidate recall keeps
+its separate existing indexed-probe/read ceilings; continuation cannot promote
+context nodes into candidates or improve their relevance labels. Ranker21 and
+ranked-view4 are unchanged; a context epoch invalidates disposable responses.
+
+These limits and synthetic controls do not establish real-corpus latency/RSS,
+query-quality gains, non-regression or a win over another tool. The original
+fresh frozen independent graph/query and cost/performance qualification remains
+required. Earlier one-hop measurements do not qualify this continuation.
+
+
 ## In-progress typed export traversal bounds
 
 Typed TypeScript receiver analysis shares its16384 work units with export
