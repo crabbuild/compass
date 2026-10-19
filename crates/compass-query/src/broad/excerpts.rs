@@ -318,6 +318,27 @@ pub(crate) fn coverage_terms(terms: &BTreeSet<String>, groups: &[Vec<String>]) -
         .count()
 }
 
+/// Corpus statistics remain optional: zero/unknown frequency cannot make a
+/// retained but unindexed word look maximally distinctive.
+pub(crate) struct QueryTermGroup<'a> {
+    pub variants: &'a [String],
+    pub document_frequency: Option<u64>,
+}
+
+/// Smallest known positive corpus frequency among complete original-site
+/// matches. This is quotation salience only, never a relevance probability.
+pub(crate) fn rarest_document_frequency(
+    terms: &BTreeSet<String>,
+    groups: &[QueryTermGroup<'_>],
+) -> u64 {
+    groups
+        .iter()
+        .filter(|group| group.variants.iter().any(|variant| terms.contains(variant)))
+        .filter_map(|group| group.document_frequency.filter(|frequency| *frequency > 0))
+        .min()
+        .unwrap_or(u64::MAX)
+}
+
 /// A retained code window can contain comments. Do not credit their terms as
 /// code evidence when choosing between the exact comment and its enclosing
 /// window. This scoring copy never replaces the displayed source quotation.
@@ -784,5 +805,67 @@ mod tests {
         assert_eq!(ranking_text(&quote, &comments), "handle payload");
         assert_eq!(coverage(&ranking_text(&quote, &comments), &groups), 2);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod salience_tests {
+    use super::*;
+
+    #[test]
+    fn rarity_uses_complete_matching_groups_and_only_positive_known_frequencies() {
+        let uncommon = vec!["uncommon".to_owned()];
+        let common = vec!["search".to_owned(), "term".to_owned()];
+        let unknown = vec!["absent".to_owned()];
+        let zero = vec!["unindexed".to_owned()];
+        let groups = [
+            QueryTermGroup {
+                variants: &uncommon,
+                document_frequency: Some(1),
+            },
+            QueryTermGroup {
+                variants: &common,
+                document_frequency: Some(200),
+            },
+            QueryTermGroup {
+                variants: &unknown,
+                document_frequency: None,
+            },
+            QueryTermGroup {
+                variants: &zero,
+                document_frequency: Some(0),
+            },
+        ];
+        let set = |values: &[&str]| {
+            values
+                .iter()
+                .map(|v| (*v).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            rarest_document_frequency(&set(&["search", "term"]), &groups),
+            200
+        );
+        assert_eq!(rarest_document_frequency(&set(&["uncommon"]), &groups), 1);
+        assert_eq!(
+            rarest_document_frequency(&set(&["absent", "unindexed"]), &groups),
+            u64::MAX
+        );
+        assert_eq!(
+            rarest_document_frequency(&set(&["uncommonly"]), &groups),
+            u64::MAX
+        );
+        assert_eq!(
+            rarest_document_frequency(&set(&["search", "absent", "unindexed"]), &groups),
+            200
+        );
+        let legacy = [QueryTermGroup {
+            variants: &uncommon,
+            document_frequency: None,
+        }];
+        assert_eq!(
+            rarest_document_frequency(&set(&["uncommon"]), &legacy),
+            u64::MAX
+        );
     }
 }

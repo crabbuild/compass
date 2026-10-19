@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prefer distinctive source quotations after requested-action coverage, using
+  existing corpus statistics while preserving exact anchors, ownership, token
+  boundaries and candidate relevance. Refresh disposable quotation responses.
+
 - Recognize bounded, corpus-supported forward spellings in broad questions,
   retaining literal topic guards, explicit identity and Low/unverified mapping
   disclosure. Keep canonical query groups separate and refresh ranker responses.

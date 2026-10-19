@@ -2838,3 +2838,20 @@ shapes are unchanged. Ranker22 refreshes disposable responses without a source
 rebuild; graph omissions still require an update. Candidate record limits remain
 in force. Statistical lookups are bounded separately and are not included in
 candidate-record counters or a physical I/O/latency guarantee.
+
+## Distinctive retained quotation ordering (development)
+
+Disposable responses advance to `ranked-source-excerpts/5`. Across each owner's
+retained quotations, complete original-token action coverage remains first.
+The next key is the smallest known positive document frequency among matched
+query groups, followed by total concept coverage and existing code/source
+ordering. Statistics reuse existing bounded retrieval groups; no new corpus
+lookup is performed. Unknown, zero and legacy frequencies receive no rarity
+preference, preserving prior ordering when all statistics are unavailable.
+
+Known owned comments remain masked out of code priority. A clipped prefix
+cannot invent a term; exact source bytes/coordinates, the two-quote cap and
+512-byte quote limit remain unchanged. This is display salience, not relevance,
+behavioral evidence or a confidence probability. Candidate admission/order,
+graph facts, ranker22, ranked JSON4 and context epoch2 are unchanged. No source
+rebuild or historical rewrite is required solely for quotation ordering.

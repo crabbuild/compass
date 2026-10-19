@@ -828,3 +828,85 @@ fn broad_comparative_spellings_are_tentative_and_keep_literal_topics() -> Result
     }
     Ok(())
 }
+
+#[test]
+fn distinctive_topic_comment_precedes_generic_signature_quotations() -> Result<(), Box<dyn Error>> {
+    let d = tempfile::tempdir()?;
+    let root = d.path().join("repo");
+    fs::create_dir(&root)?;
+    let source = concat!(
+        "fn opaque(search_terms: SearchTerms) {\n",
+        "    // Uncommon identifiers receive isolated quotas.\n",
+        "    // Read search terms with stable ordering.\n",
+        "    let result = search_terms;\n",
+        "}\n",
+        "fn ordinary_read_search_terms(search_terms: SearchTerms) {}\n",
+        "fn other_read_search_terms(search_terms: SearchTerms) {}\n",
+    );
+    fs::write(root.join("sample.rs"), source)?;
+    let built = build_local_graph(&options(&root, &d.path().join("out"), GraphStorage::Sqlite))?;
+    let path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter()
+        .find(|n| {
+            n.kind.is_callable() && n.qualified_name.rsplit([':', '.']).next() == Some("opaque")
+        })
+        .ok_or("missing source owner")?;
+    let mut previous = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine =
+            open_with_engine(&path, None, &d.path().join(format!("cache-{mode:?}")), mode)?;
+        let ranked = engine.discover_ranked(request("Where are uncommon search terms?"))?;
+        let candidate = ranked
+            .candidates
+            .iter()
+            .find(|c| c.node.id == target.id)
+            .ok_or("missing candidate")?;
+        let first = candidate
+            .excerpts
+            .first()
+            .ok_or("missing source quotation")?;
+        assert_eq!(
+            first.kind,
+            RankedExcerptKind::CallableComment,
+            "{mode:?}: {candidate:?}"
+        );
+        assert!(
+            first
+                .text
+                .contains("Uncommon identifiers receive isolated quotas.")
+        );
+        for quote in &candidate.excerpts {
+            assert!(quote.is_coherent());
+            assert_eq!(
+                source
+                    .as_bytes()
+                    .get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+                Some(quote.text.as_bytes())
+            );
+        }
+        let action_ranked =
+            engine.discover_ranked(request("Where are uncommon search terms read?"))?;
+        let action_candidate = action_ranked
+            .candidates
+            .iter()
+            .find(|c| c.node.id == target.id)
+            .ok_or("missing action candidate")?;
+        let action_first = action_candidate
+            .excerpts
+            .first()
+            .ok_or("missing action quotation")?;
+        assert!(
+            action_first.text.contains("Read search terms"),
+            "an explicit action precedes rarer topic-only comments: {action_candidate:?}"
+        );
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &candidate.excerpts);
+        } else {
+            previous = Some(candidate.excerpts.clone());
+        }
+    }
+    Ok(())
+}

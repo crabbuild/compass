@@ -174,7 +174,12 @@ comparison semantics or requested behavior. Explicit identities remain literal.
 
 Source quotations prefer bounded retained windows covering more distinct
 canonical requested terms, rather than always centering the first match.
-Repeated words do not increase that count; equal coverage keeps source order.
+Repeated words do not increase that count; equal window coverage keeps source
+order. Across retained quotations, action-concept coverage takes precedence,
+then the smallest known positive document frequency of a matched query group,
+then total concept coverage and the existing code/source tie-breaks. Unknown or
+zero frequencies receive no rarity preference. This can surface a distinctive
+comment before a generic signature; rarity is not confidence or behavior proof.
 Quoted bytes and coordinates remain exact. Known owned comment ranges do not
 supply code-window selection evidence. This changes displayed evidence, never
 candidate ranking or relevance, and does not establish the requested behavior.

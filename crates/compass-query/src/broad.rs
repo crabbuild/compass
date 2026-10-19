@@ -2033,6 +2033,13 @@ impl CodeQueryEngine {
             .iter()
             .map(|group| group.1.clone())
             .collect::<Vec<_>>();
+        let quotation_statistics = groups
+            .iter()
+            .map(|(_, variants, _, frequency)| excerpts::QueryTermGroup {
+                variants,
+                document_frequency: (!legacy).then_some(*frequency),
+            })
+            .collect::<Vec<_>>();
         let quotation_actions = groups
             .iter()
             .filter(|group| action_terms.contains(&group.0))
@@ -2109,6 +2116,7 @@ impl CodeQueryEngine {
             quotes.sort_by_cached_key(|quote| {
                 (
                     std::cmp::Reverse(excerpts::coverage_terms(&quote.terms, &quotation_actions)),
+                    excerpts::rarest_document_frequency(&quote.terms, &quotation_statistics),
                     std::cmp::Reverse(excerpts::coverage_terms(&quote.terms, &quotation_groups)),
                     std::cmp::Reverse(matches!(
                         quote.excerpt.kind,

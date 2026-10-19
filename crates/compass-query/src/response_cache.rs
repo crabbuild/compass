@@ -42,7 +42,7 @@ impl ResponseCache {
         digest.update(b"single-operation-context/1");
         // Projection epoch: old cached responses
         // must not silently omit retained ranked source quotations.
-        digest.update(b"ranked-source-excerpts/4");
+        digest.update(b"ranked-source-excerpts/5");
         digest.update(b"ranked-call-context/2");
         // Historical local-store responses may lack documentation omissions.
         digest.update(b"graph-diagnostic-projection/1");

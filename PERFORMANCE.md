@@ -14,6 +14,9 @@ Window selection tokenizes each already retained site of at most4096 bytes
 once, then visits at most two candidate starts per matching token using sliding
 term counters. Complete matching tokens count once per distinct canonical query
 term; known owned comment ranges are excluded from code-window matching.
+Cross-quotation salience reuses at most32 existing query groups with no added
+statistics reads. Known positive group frequencies rank distinctive passages
+after action coverage; unknown/zero frequencies supply no rarity preference.
 Output remains at most512 bytes/quote and two quotes/displayed owner. These
 finite source bounds are not a measured latency/RSS or query-quality claim;
 fresh real-repository qualification is still required.
