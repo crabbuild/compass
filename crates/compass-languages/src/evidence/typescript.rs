@@ -5,7 +5,16 @@
 //! both languages here; qualification callers use the same entry point so
 //! there is no shadow implementation to drift from the shipped graph path.
 
+use super::model::{
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_BYTES, MAX_TYPESCRIPT_TYPE_ARGUMENT_REFERENCE_BYTES,
+};
 use std::borrow::Cow;
+use std::cell::Cell;
+
+mod exports;
+mod inventories;
+mod origins;
+use origins::{BaseTypeOrigins, TypeOrigin};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -14,8 +23,10 @@ use tree_sitter::Node;
 
 use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
 use super::model::{
-    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, ResolutionConstraint,
-    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint,
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_ARITY, MAX_TYPESCRIPT_TYPE_ARGUMENT_DEPTH,
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_NODES, ResolutionConstraint, SemanticEvidenceBatch, SemanticRole,
+    SymbolNamespace, TypeScriptTypeArgument, TypeScriptTypeArguments,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
 use crate::{UniversalEvidenceRegistry, make_id};
@@ -25,6 +36,7 @@ const MAX_INLINE_OBJECT_PROPERTIES: usize = 256;
 const MAX_TYPE_SHAPE_DEPTH: u32 = 32;
 const MAX_TYPE_SHAPE_BYTES: usize = 16 * 1024;
 const MAX_IMPORT_TYPE_QUERIES: usize = 256;
+const MAX_TYPE_ORIGIN_WORK: usize = 200_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Namespace {
@@ -89,6 +101,7 @@ struct ImportInfo {
     namespace: Namespace,
     type_only: bool,
     callable_namespace: bool,
+    type_arguments: Option<TypeScriptTypeArguments>,
 }
 
 /// A source-backed TypeScript `import("...")` or `typeof import("...")`
@@ -143,6 +156,9 @@ struct ReceiverTarget {
     /// source parameter order and is intentionally shallow; unresolved or
     /// ambiguous instantiations carry `None`.
     type_arguments: Option<Vec<String>>,
+    type_origins: Option<Vec<TypeOrigin>>,
+    type_origin: Option<TypeOrigin>,
+    index_owner: Option<String>,
 }
 
 #[derive(Clone)]
@@ -190,6 +206,7 @@ struct CandidateState<'source, 'tree> {
     scope_parents: HashMap<String, Option<String>>,
     scope_owners: HashMap<String, String>,
     scope_kinds: HashMap<String, String>,
+    member_scopes_by_owner: Option<HashMap<String, Option<String>>>,
     declarations: HashMap<String, DeclarationInfo>,
     definition_start_bytes: HashMap<String, u64>,
     declarations_by_scope: HashMap<String, Vec<String>>,
@@ -203,7 +220,7 @@ struct CandidateState<'source, 'tree> {
     /// structural assignability fallback.
     type_alias_union_targets: HashMap<String, Vec<String>>,
     property_literal_values: HashMap<String, String>,
-    index_value_types: HashMap<String, String>,
+    index_value_types: HashMap<String, TypeOrigin>,
     import_bindings: HashMap<String, HashMap<String, ImportInfo>>,
     variable_types: HashMap<String, String>,
     /// Source-order receiver facts for simple local assignments.  A fact is
@@ -287,7 +304,10 @@ struct CandidateState<'source, 'tree> {
     implements_targets: HashMap<String, Vec<ReceiverTarget>>,
     /// Source-proven bindings from a derived class's base type parameters to
     /// the concrete type arguments used in its `extends` clause.
-    base_type_bindings: HashMap<String, HashMap<String, String>>,
+    base_type_bindings: HashMap<String, BaseTypeOrigins>,
+    type_origin_depth: Cell<u32>,
+    type_origin_work: Cell<usize>,
+    type_origin_work_exhausted: Cell<bool>,
     parser_recovered: bool,
     declaration_name_nodes: HashSet<usize>,
     preorder_nodes: Vec<(Node<'tree>, usize)>,
@@ -304,6 +324,24 @@ pub(crate) fn emit_tree_evidence(
     source: &[u8],
     root: Node<'_>,
     dialect: &str,
+) -> Result<SemanticEvidenceBatch, EvidenceError> {
+    emit_tree_evidence_with_type_origin_budget(
+        path,
+        source_file,
+        source,
+        root,
+        dialect,
+        MAX_TYPE_ORIGIN_WORK,
+    )
+}
+
+fn emit_tree_evidence_with_type_origin_budget(
+    path: &Path,
+    source_file: &str,
+    source: &[u8],
+    root: Node<'_>,
+    dialect: &str,
+    type_origin_work: usize,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
     let language = match dialect {
         "typescript" | "tsx" => "typescript",
@@ -349,7 +387,23 @@ pub(crate) fn emit_tree_evidence(
     )?;
     let root_scope = builder.open_scope("module", Some(&file_declaration), None, file_range)?;
     if root.end_byte() == root.start_byte() {
-        return builder.finish();
+        let mut batch = builder.finish()?;
+        if language == "typescript" {
+            batch.typescript_merge_inventory_complete = Some(true);
+            batch.typescript_merge_inventory_version =
+                Some(super::TYPESCRIPT_MERGE_INVENTORY_VERSION);
+        }
+        batch
+            .declarations
+            .iter_mut()
+            .filter(|fact| fact.scope_id.is_none())
+            .for_each(|fact| {
+                fact.ecmascript_export_inventory = Some(super::EcmaScriptExportInventory {
+                    version: super::ECMASCRIPT_EXPORT_INVENTORY_VERSION,
+                    complete: true,
+                });
+            });
+        return Ok(batch);
     }
     let parser_recovered = root.has_error();
     let mut state = CandidateState {
@@ -363,6 +417,7 @@ pub(crate) fn emit_tree_evidence(
         scope_parents: HashMap::from([(root_scope.clone(), None)]),
         scope_owners: HashMap::from([(root_scope.clone(), file_declaration)]),
         scope_kinds: HashMap::from([(root_scope.clone(), "module".to_owned())]),
+        member_scopes_by_owner: None,
         declarations: HashMap::new(),
         definition_start_bytes: HashMap::new(),
         declarations_by_scope: HashMap::new(),
@@ -399,6 +454,9 @@ pub(crate) fn emit_tree_evidence(
         base_targets: HashMap::new(),
         implements_targets: HashMap::new(),
         base_type_bindings: HashMap::new(),
+        type_origin_depth: Cell::new(0),
+        type_origin_work: Cell::new(type_origin_work),
+        type_origin_work_exhausted: Cell::new(false),
         parser_recovered,
         declaration_name_nodes: HashSet::new(),
         preorder_nodes: Vec::new(),
@@ -413,6 +471,7 @@ pub(crate) fn emit_tree_evidence(
     profile_candidate_pass(source_file, "constructor hints", &mut profile_started);
     state.collect_declarations(root, root_scope, module_name, 0)?;
     profile_candidate_pass(source_file, "declarations", &mut profile_started);
+    state.index_member_scopes();
     // Imports are lexically hoisted by ECMAScript/TypeScript.  Materialize
     // their bindings before receiver inference so a later declaration such
     // as `const client = new ImportedClient()` can use the imported class
@@ -443,11 +502,32 @@ pub(crate) fn emit_tree_evidence(
             "parser recovered from malformed ECMAScript source; emitted evidence remains source-bounded",
         )?;
     }
+    if state.type_origin_work_exhausted.get() {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::ResourceLimit,
+            "ECMAScript type-origin resolution exceeded its work or argument-proof limits",
+        ));
+    }
+    let (merge_inventory_complete, merge_dependencies) = state.merge_inventory(root)?;
+    let inventories = state.nominal_inventories(root, &scoped_preorder)?;
+    let export_inventory = state.export_inventory(root)?;
     let definition_start_bytes = state.definition_start_bytes;
     let mut batch = state.builder.finish()?;
+    batch.typescript_merge_inventory_complete = merge_inventory_complete;
+    batch.typescript_merge_inventory_version =
+        (language == "typescript").then_some(super::TYPESCRIPT_MERGE_INVENTORY_VERSION);
+    batch.typescript_merge_dependencies = merge_dependencies;
     for declaration in &mut batch.declarations {
+        if declaration.scope_id.is_none() {
+            declaration.ecmascript_export_inventory = Some(export_inventory);
+        }
         declaration.definition_start_byte = definition_start_bytes.get(&declaration.id).copied();
+        if let Some((members_complete, bases_complete)) = inventories.get(&declaration.id) {
+            declaration.member_inventory_complete = Some(*members_complete);
+            declaration.direct_bases_complete = *bases_complete;
+        }
     }
+    super::validate::validate_evidence(&batch, EvidenceLimits::default())?;
     Ok(batch)
 }
 
@@ -1526,8 +1606,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             "type_alias" | "interface" | "parameter" | "variable" | "property"
         ) && let Some(value_type) = index_value_type(node, self.source)
         {
-            self.index_value_types
-                .insert(declaration.qualified_name.clone(), value_type);
+            self.index_value_types.insert(
+                declaration.id.clone(),
+                TypeOrigin::new(&declaration.scope_id, &value_type),
+            );
         }
         if !generic_parameters.is_empty() {
             self.generic_parameters_by_declaration
@@ -1719,6 +1801,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                     import: None,
                                     scope_id: self.member_scope_for_declaration(&declaration),
                                     type_arguments: None,
+                                    type_origins: None,
+                                    type_origin: None,
+                                    index_owner: None,
                                 })
                             }
                             Resolution::Import(import) => Some(ReceiverTarget {
@@ -1726,6 +1811,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: Some(import),
                                 scope_id: None,
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             }),
                             _ => None,
                         };
@@ -1736,17 +1824,19 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 && let Some(order) = self
                                     .generic_parameter_order_by_declaration
                                     .get(&base_declaration_id)
+                                && !order.is_empty()
+                                && arguments.len() <= MAX_INLINE_OBJECT_PROPERTIES
                             {
-                                let bindings = order
-                                    .iter()
-                                    .zip(arguments)
-                                    .map(|(name, argument)| {
-                                        (name.clone(), strip_type_arguments(&argument).to_owned())
-                                    })
-                                    .collect::<HashMap<_, _>>();
-                                if !bindings.is_empty() {
-                                    self.base_type_bindings.insert(class_name.clone(), bindings);
-                                }
+                                self.base_type_bindings.insert(
+                                    class_name.clone(),
+                                    BaseTypeOrigins {
+                                        declaration_id: base_declaration_id,
+                                        arguments: arguments
+                                            .iter()
+                                            .map(|argument| TypeOrigin::new(&scope_id, argument))
+                                            .collect(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -1774,6 +1864,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: self.member_scope_for_declaration(&declaration),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             })
                         }
                         Resolution::Import(import) => Some(ReceiverTarget {
@@ -1781,6 +1874,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             import: Some(import),
                             scope_id: None,
                             type_arguments: None,
+                            type_origins: None,
+                            type_origin: None,
+                            index_owner: None,
                         }),
                         _ => None,
                     };
@@ -2338,6 +2434,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         import: None,
                         scope_id: Some(variable.scope_id),
                         type_arguments: None,
+                        type_origins: None,
+                        type_origin: None,
+                        index_owner: None,
                     });
                 }
                 return None;
@@ -2390,6 +2489,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             import: None,
             scope_id: Some(variable.scope_id),
             type_arguments: None,
+            type_origins: None,
+            type_origin: None,
+            index_owner: None,
         })
     }
 
@@ -3405,8 +3507,10 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .insert(variable_id, property_types);
         }
         if let Some(index_value) = index_value_type(object_type, self.source) {
-            self.index_value_types
-                .insert(variable.qualified_name.clone(), index_value);
+            self.index_value_types.insert(
+                variable.id.clone(),
+                TypeOrigin::new(&variable.scope_id, &index_value),
+            );
         }
     }
 
@@ -3958,22 +4062,25 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         if !self.emitted_facts.insert(key) {
             return Ok(());
         }
-        let (binding_id, exact_target, qualified_name, module, target_kind) = match resolution {
-            Resolution::Local(declaration) => (
-                None,
-                Some(declaration.id),
-                Some(declaration.qualified_name),
-                Some(self.source_file.to_owned()),
-                declaration.kind,
-            ),
-            Resolution::Import(import) => (
-                Some(import.binding_id),
-                None,
-                Some(import.target),
-                Some(import.module),
-                "external".to_owned(),
-            ),
-        };
+        let (binding_id, exact_target, qualified_name, module, target_kind, type_arguments) =
+            match resolution {
+                Resolution::Local(declaration) => (
+                    None,
+                    Some(declaration.id),
+                    Some(declaration.qualified_name),
+                    Some(self.source_file.to_owned()),
+                    declaration.kind,
+                    None,
+                ),
+                Resolution::Import(import) => (
+                    Some(import.binding_id),
+                    None,
+                    Some(import.target),
+                    Some(import.module),
+                    "external".to_owned(),
+                    import.type_arguments,
+                ),
+            };
         let allow_external = target_kind == "external"
             && qualified_name
                 .as_deref()
@@ -3988,6 +4095,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             range_for_node(self.source_file, node),
         )?;
         let mut constraints = ResolutionConstraint {
+            typescript_type_arguments: type_arguments,
             exact_target_declaration_id: exact_target,
             exact_language: Some(self.language.to_owned()),
             module_or_package: module,
@@ -4422,6 +4530,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             namespace,
                             type_only: binding.type_only,
                             callable_namespace: false,
+                            type_arguments: None,
                         },
                     );
             }
@@ -4546,6 +4655,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     namespace: Namespace::Both,
                     type_only: false,
                     callable_namespace: true,
+                    type_arguments: None,
                 },
             );
         let occurrence_id = self.builder.occur_with_context(
@@ -4863,6 +4973,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         let mut specifiers = Vec::new();
         collect_nodes_of_kind(clause, "export_specifier", &mut specifiers);
         for specifier in specifiers {
+            // String export names need an explicit unescaping/name contract.
+            // Do not turn their local identifier into an exported alias.
+            if first_named_child_kind(specifier, "string").is_some() {
+                continue;
+            }
             let identifiers = direct_identifier_children(specifier, self.source);
             let Some(local) = identifiers.first() else {
                 continue;
@@ -4874,6 +4989,33 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 .trim_start()
                 .starts_with("type ");
             let Some(resolution) = self.resolve_name(scope_id, &name, Namespace::Both) else {
+                // Retain the explicit name before failed target selection can
+                // erase it and expose a same-named star export. Raw local text
+                // is an obligation, never an invented module/declaration ID.
+                self.builder.bind_with_identity(
+                    BindingKind::Reexport,
+                    &exported_name,
+                    &name,
+                    None,
+                    Some(scope_id),
+                    Some(if type_only {
+                        SymbolNamespace::Type
+                    } else {
+                        SymbolNamespace::ValueAndType
+                    }),
+                    type_only,
+                    range_for_node(self.source_file, exported),
+                )?;
+                self.emit_export_declaration(
+                    scope_id,
+                    &exported_name,
+                    exported,
+                    if type_only {
+                        Namespace::Type
+                    } else {
+                        Namespace::Both
+                    },
+                )?;
                 continue;
             };
             let owner = self.owner_for_scope(scope_id);
@@ -5844,6 +5986,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     namespace,
                     type_only,
                     callable_namespace: imported_name == "*" && context == "require",
+                    type_arguments: None,
                 },
             );
         let owner = self.owner_for_scope(scope_id);
@@ -6319,6 +6462,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: self.member_scope_for_declaration(declaration),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             })
                         }
                         Resolution::Import(import) => Some(ReceiverTarget {
@@ -6326,6 +6472,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             import: Some(import.clone()),
                             scope_id: None,
                             type_arguments: None,
+                            type_origins: None,
+                            type_origin: None,
+                            index_owner: None,
                         }),
                         _ => None,
                     };
@@ -8040,6 +8189,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             namespace: Namespace::Value,
             type_only: import.type_only,
             callable_namespace: false,
+            type_arguments: import.type_arguments,
         }))
     }
 
@@ -8375,6 +8525,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 namespace: Namespace::Type,
                 type_only: import.type_only,
                 callable_namespace: false,
+                type_arguments: import.type_arguments,
             })),
         }
     }
@@ -8878,6 +9029,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: self.member_scope_for_declaration(&declaration),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
 
@@ -8887,6 +9041,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: Some(declaration.scope_id.clone()),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
 
@@ -8896,15 +9053,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         // cache still proves the value type at this binding;
                         // preserve the binding identity so a later dynamic
                         // subscript can resolve only that source-proven value.
-                        if self
-                            .index_value_types
-                            .contains_key(&declaration.qualified_name)
-                        {
+                        if self.index_value_types.contains_key(&declaration.id) {
                             return Some(ReceiverTarget {
                                 qualified_name: declaration.qualified_name.clone(),
                                 import: None,
                                 scope_id: Some(declaration.scope_id.clone()),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: Some(declaration.id.clone()),
                             });
                         }
 
@@ -8916,6 +9073,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: Some(declaration.scope_id.clone()),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
 
@@ -8964,11 +9124,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         // here keeps imported receivers attached to their
                         // binding identity so cross-file member evidence can
                         // resolve against the imported type's declarations.
-                        if let Some(type_name) = declaration.declared_type_name.as_deref()
-                            && let Some(receiver) =
-                                self.resolve_declared_type_receiver(scope_id, type_name)
-                        {
-                            return Some(receiver);
+                        if let Some(type_name) = declaration.declared_type_name.as_deref() {
+                            return self
+                                .resolve_declared_type_receiver(&declaration.scope_id, type_name);
                         }
 
                         if let Some(qualified_name) = self.variable_types.get(&declaration.id) {
@@ -8981,6 +9139,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: receiver_scope,
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
 
@@ -8992,6 +9153,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: self.member_scope_for_declaration(source),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
 
@@ -9005,6 +9169,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                                 import: None,
                                 scope_id: Some(declaration.scope_id),
                                 type_arguments: None,
+                                type_origins: None,
+                                type_origin: None,
+                                index_owner: None,
                             });
                         }
                         None
@@ -9014,6 +9181,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         import: Some(import),
                         scope_id: None,
                         type_arguments: None,
+                        type_origins: None,
+                        type_origin: None,
+                        index_owner: None,
                     }),
                     None => None,
                 }
@@ -9042,6 +9212,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             import: None,
                             scope_id: self.member_scope_for_declaration(&declaration),
                             type_arguments: None,
+                            type_origins: None,
+                            type_origin: None,
+                            index_owner: None,
                         })
                     }
                     Resolution::Local(declaration) if declaration.kind == "function" => {
@@ -9054,6 +9227,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                             // the exact qualified-name proof below.
                             scope_id: Some(declaration.scope_id.clone()),
                             type_arguments: None,
+                            type_origins: None,
+                            type_origin: None,
+                            index_owner: None,
                         })
                     }
                     Resolution::Import(import) => Some(ReceiverTarget {
@@ -9061,6 +9237,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         import: Some(import),
                         scope_id: None,
                         type_arguments: None,
+                        type_origins: None,
+                        type_origin: None,
+                        index_owner: None,
                     }),
                     _ => None,
                 }
@@ -9153,6 +9332,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         import: nested.import,
                         scope_id: nested.scope_id,
                         type_arguments: None,
+                        type_origins: None,
+                        type_origin: None,
+                        index_owner: None,
                     });
                 }
                 let property_name = member_property_name(self.source, property)?;
@@ -9178,6 +9360,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: nested.import,
                     scope_id: nested.scope_id,
                     type_arguments: nested.type_arguments,
+                    type_origins: nested.type_origins,
+                    type_origin: nested.type_origin,
+                    index_owner: None,
                 };
                 Some(
                     self.typed_member_receiver(scope_id, receiver.clone())
@@ -9263,6 +9448,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 import: Some(import.clone()),
                 scope_id: None,
                 type_arguments: None,
+                type_origins: None,
+                type_origin: None,
+                index_owner: None,
             });
         }
         let Resolution::Local(declaration) = resolution else {
@@ -9383,7 +9571,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// left unresolved).
     fn typed_member_receiver(
         &self,
-        scope_id: &str,
+        _scope_id: &str,
         receiver: ReceiverTarget,
     ) -> Option<ReceiverTarget> {
         if receiver.import.is_some() {
@@ -9408,64 +9596,18 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             }
             _ => return None,
         };
-        let type_name = declaration.declared_type_name.as_deref()?;
-        let type_name = receiver
-            .qualified_name
-            .rsplit_once('.')
-            .and_then(|(base, _)| self.base_type_bindings.get(base))
-            .and_then(|bindings| bindings.get(type_name))
-            .cloned()
-            .or_else(|| self.receiver_type_argument(&receiver, type_name))
-            .unwrap_or_else(|| type_name.to_owned());
-        self.resolve_declared_type_receiver(scope_id, &type_name)
-            .or_else(|| self.resolve_declared_type_receiver(&declaration.scope_id, &type_name))
-    }
-
-    /// Substitute one member's generic type parameter from the concrete type
-    /// arguments carried by its receiver. This only accepts a unique local
-    /// nominal declaration with a bounded parameter order; overloaded or
-    /// merged declarations remain unresolved.
-    fn receiver_type_argument(&self, receiver: &ReceiverTarget, type_name: &str) -> Option<String> {
-        let arguments = receiver.type_arguments.as_ref()?;
-        let (base, _) = receiver.qualified_name.rsplit_once('.')?;
-        let ids = self.declarations_by_qualified.get(base)?;
-        let candidates = ids
-            .iter()
-            .filter_map(|id| self.declarations.get(id))
-            .filter_map(|declaration| {
-                self.generic_parameter_order_by_declaration
-                    .get(&declaration.id)
-                    .map(|order| (declaration, order))
-            })
-            .collect::<Vec<_>>();
-        let [(_declaration, order)] = candidates.as_slice() else {
-            return None;
-        };
-        let substituted = substitute_candidate_type_parameters(type_name, order, arguments, 0);
-        (substituted != type_name
-            && !substituted.is_empty()
-            && substituted.len() <= MAX_TYPE_SHAPE_BYTES)
-            .then_some(substituted)
+        let origin = self.member_type_origin(&receiver, &declaration, true)?;
+        self.resolve_type_origin_receiver(origin)
     }
 
     fn member_value_receiver(
         &self,
-        scope_id: &str,
+        _scope_id: &str,
         receiver: &ReceiverTarget,
         declaration: &DeclarationInfo,
     ) -> Option<ReceiverTarget> {
-        let type_name = declaration.declared_type_name.as_deref()?;
-        let type_name = receiver
-            .qualified_name
-            .rsplit_once('.')
-            .and_then(|(base, _)| self.base_type_bindings.get(base))
-            .or_else(|| self.base_type_bindings.get(&receiver.qualified_name))
-            .and_then(|bindings| bindings.get(type_name))
-            .cloned()
-            .or_else(|| self.receiver_type_argument(receiver, type_name))
-            .unwrap_or_else(|| type_name.to_owned());
-        self.resolve_declared_type_receiver(scope_id, &type_name)
-            .or_else(|| self.resolve_declared_type_receiver(&declaration.scope_id, &type_name))
+        let origin = self.member_type_origin(receiver, declaration, false)?;
+        self.resolve_type_origin_receiver(origin)
     }
 
     fn index_value_receiver(
@@ -9478,14 +9620,41 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return None;
         }
         if let Some(value_type) = typescript_structural_index_value(&receiver.qualified_name) {
-            return self.resolve_declared_type_receiver(scope_id, value_type);
+            let origin = receiver.type_origin.as_ref().map_or_else(
+                || TypeOrigin::new(scope_id, value_type),
+                |origin| origin.with_spelling(value_type),
+            );
+            return self.resolve_type_origin_receiver(origin);
         }
-        let type_name = self
-            .index_value_types
-            .get(&receiver.qualified_name)
-            .cloned()
-            .or_else(|| indexed_sequence_element_type_name(&receiver.qualified_name, index))?;
-        self.resolve_declared_type_receiver(scope_id, &type_name)
+        let owner_id = receiver.index_owner.as_deref().or_else(|| {
+            let id = self.scope_owners.get(receiver.scope_id.as_ref()?)?;
+            self.declarations
+                .get(id)
+                .filter(|owner| owner.qualified_name == receiver.qualified_name)
+                .map(|_| id.as_str())
+        });
+        if let Some((owner_id, origin)) =
+            owner_id.and_then(|id| self.index_value_types.get(id).map(|origin| (id, origin)))
+        {
+            let owner = self.declarations.get(owner_id)?;
+            let origin = if matches!(owner.kind.as_str(), "class" | "interface" | "type_alias") {
+                self.instantiated_type_origin(
+                    owner,
+                    &origin.spelling,
+                    receiver.type_origins.as_deref().unwrap_or(&[]),
+                    origin,
+                )?
+            } else {
+                origin.clone()
+            };
+            return self.resolve_type_origin_receiver(origin);
+        }
+        let type_name = indexed_sequence_element_type_name(&receiver.qualified_name, index)?;
+        let origin = receiver.type_origin.as_ref().map_or_else(
+            || TypeOrigin::new(scope_id, &type_name),
+            |origin| origin.with_spelling(&type_name),
+        );
+        self.resolve_type_origin_receiver(origin)
     }
 
     /// Select a conditional-type branch only when the source proves one
@@ -9495,7 +9664,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// a receiver, so those cases remain unresolved.
     fn conditional_type_branch(
         &self,
-        scope_id: &str,
+        origin: &TypeOrigin,
         check: &str,
         expected: &str,
         when_true: &str,
@@ -9518,17 +9687,18 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         };
         let check = check.trim();
         let matches_expected = if expected == "unknown" {
-            let receiver = self.resolve_declared_type_receiver(scope_id, check)?;
+            let receiver = self.resolve_type_origin_receiver(origin.with_spelling(check))?;
             receiver.import.is_none()
         } else if expected == "object" {
-            let receiver = self.resolve_declared_type_receiver(scope_id, check)?;
+            let receiver = self.resolve_type_origin_receiver(origin.with_spelling(check))?;
             receiver.import.is_none() && is_object_like_type(check)
         } else {
             if conditional_type_parts(expected).is_some() {
                 return None;
             }
-            let check_receiver = self.resolve_declared_type_receiver(scope_id, check)?;
-            let expected_receiver = self.resolve_declared_type_receiver(scope_id, expected)?;
+            let check_receiver = self.resolve_type_origin_receiver(origin.with_spelling(check))?;
+            let expected_receiver =
+                self.resolve_type_origin_receiver(origin.with_spelling(expected))?;
             if check_receiver.import.is_some() || expected_receiver.import.is_some() {
                 return None;
             }
@@ -9536,7 +9706,7 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 &check_receiver.qualified_name,
                 &expected_receiver.qualified_name,
             ) || self.source_type_assignable(
-                scope_id,
+                &origin.scope_id,
                 &expected_receiver.qualified_name,
                 &check_receiver.qualified_name,
             )
@@ -9556,13 +9726,45 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         scope_id: &str,
         type_name: &str,
     ) -> Option<ReceiverTarget> {
-        let mut current = type_name.trim().to_owned();
+        self.resolve_type_origin_receiver(TypeOrigin::new(scope_id, type_name))
+    }
+
+    fn charge_type_origin_work(&self) -> bool {
+        let Some(remaining) = self.type_origin_work.get().checked_sub(1) else {
+            self.type_origin_work_exhausted.set(true);
+            return false;
+        };
+        self.type_origin_work.set(remaining);
+        true
+    }
+
+    fn resolve_type_origin_receiver(&self, origin: TypeOrigin) -> Option<ReceiverTarget> {
+        let depth = self.type_origin_depth.get();
+        if depth >= MAX_TYPE_SHAPE_DEPTH {
+            return None;
+        }
+        self.type_origin_depth.set(depth + 1);
+        let result = self.resolve_type_origin_receiver_inner(origin);
+        self.type_origin_depth.set(depth);
+        result
+    }
+
+    fn resolve_type_origin_receiver_inner(&self, mut origin: TypeOrigin) -> Option<ReceiverTarget> {
         let mut seen = HashSet::new();
         for _ in 0..=MAX_TYPE_SHAPE_DEPTH {
-            let normalized = current.trim();
+            if !self.charge_type_origin_work() {
+                return None;
+            }
+            let scope_id = origin.scope_id.as_str();
+            let normalized = origin.spelling.trim();
             if normalized.is_empty()
+                || is_non_nominal_union_member(normalized)
                 || normalized.len() > MAX_TYPE_SHAPE_BYTES
-                || !seen.insert(normalized.to_owned())
+                || !seen.insert((
+                    origin.scope_id.clone(),
+                    normalized.to_owned(),
+                    origin.context_identity(),
+                ))
             {
                 return None;
             }
@@ -9571,12 +9773,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 // resolver used by nominal index signatures before retaining
                 // the structural marker. This prevents primitive, external,
                 // or ambiguous value shapes from becoming member targets.
-                self.resolve_declared_type_receiver(scope_id, &value_type)?;
+                self.resolve_type_origin_receiver(origin.with_spelling(&value_type))?;
                 return Some(ReceiverTarget {
                     qualified_name: typescript_structural_index_receiver(&value_type),
                     import: None,
                     scope_id: None,
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: Some(origin.clone()),
+                    index_owner: None,
                 });
             }
             if indexed_sequence_element_type_name(normalized, None).is_some()
@@ -9587,10 +9792,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: None,
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: Some(origin.clone()),
+                    index_owner: None,
                 });
             }
             if let Some((base, property)) = indexed_type_parts(normalized) {
-                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
+                let base_receiver =
+                    self.resolve_type_origin_receiver(origin.with_spelling(base))?;
                 // A compiler-selected indexed access can be projected from a
                 // local nominal declaration when the key is a literal and
                 // exactly one source member owns it. Imported and computed
@@ -9616,15 +9825,19 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: self.member_scope_for_declaration(declaration),
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: Some(origin.clone()),
+                    index_owner: None,
                 });
             }
             if let Some((utility, base, arguments)) = utility_type_parts(normalized)
                 && matches!(utility, "Pick" | "Omit")
             {
-                let base_receiver = self.resolve_declared_type_receiver(scope_id, base)?;
+                let base_receiver =
+                    self.resolve_type_origin_receiver(origin.with_spelling(base))?;
                 let keys = arguments
                     .get(1)
-                    .and_then(|keys| self.utility_key_names(scope_id, &base_receiver, keys))?;
+                    .and_then(|keys| self.utility_key_names(&origin, &base_receiver, keys))?;
                 if keys.len() > MAX_INLINE_OBJECT_PROPERTIES
                     || keys
                         .iter()
@@ -9649,53 +9862,101 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: base_receiver.scope_id,
                     type_arguments: base_receiver.type_arguments,
+                    type_origins: base_receiver.type_origins,
+                    type_origin: Some(origin.clone()),
+                    index_owner: None,
                 });
             }
             if let Some((check, expected, when_true, when_false)) =
                 conditional_type_parts(normalized)
             {
                 let branch =
-                    self.conditional_type_branch(scope_id, check, expected, when_true, when_false)?;
-                current.clear();
-                current.push_str(&branch);
+                    self.conditional_type_branch(&origin, check, expected, when_true, when_false)?;
+                origin = origin.with_spelling(&branch);
                 continue;
             }
             if let Some(unwrapped) = candidate_utility_receiver_type(normalized) {
-                current = unwrapped;
+                origin = origin.with_spelling(&unwrapped);
                 continue;
             }
             let (lookup_name, type_arguments) = generic_type_parts(normalized)
                 .map(|(base, arguments)| (base.to_owned(), Some(arguments)))
                 .unwrap_or_else(|| (normalized.to_owned(), None));
-            let type_arguments =
-                type_arguments.map(|arguments| self.canonical_type_arguments(scope_id, &arguments));
+            if type_arguments
+                .as_ref()
+                .is_some_and(|arguments| arguments.len() > MAX_INLINE_OBJECT_PROPERTIES)
+            {
+                return None;
+            }
+            let type_origins = type_arguments.map(|arguments| {
+                arguments
+                    .iter()
+                    .map(|argument| origin.with_spelling(argument))
+                    .collect::<Vec<_>>()
+            });
+            let type_arguments = type_origins.as_ref().map(|arguments| {
+                arguments
+                    .iter()
+                    .map(|argument| {
+                        self.resolve_type_origin_receiver(argument.clone())
+                            .map(|receiver| {
+                                typescript_receiver_with_type_arguments(
+                                    &receiver.qualified_name,
+                                    receiver.type_arguments.as_deref(),
+                                )
+                            })
+                            .unwrap_or_else(|| argument.spelling.clone())
+                    })
+                    .collect::<Vec<_>>()
+            });
             let resolution = self
-                .resolve_name(scope_id, &lookup_name, Namespace::Both)
+                .resolve_name(scope_id, &lookup_name, Namespace::Type)
                 .or_else(|| self.resolve_qualified_type_name(&lookup_name))?;
             match resolution {
-                Resolution::Import(import) => {
+                Resolution::Import(mut import) => {
+                    if let Some(origins) = type_origins.as_deref() {
+                        let mut remaining = MAX_TYPESCRIPT_TYPE_ARGUMENT_NODES;
+                        let mut remaining_bytes = MAX_TYPESCRIPT_TYPE_ARGUMENT_BYTES;
+                        self.charge_type_argument_text(&import.binding_id, &mut remaining_bytes)?;
+                        let arguments = self.type_argument_evidence_list(
+                            origins,
+                            0,
+                            &mut remaining,
+                            &mut remaining_bytes,
+                        )?;
+                        import.type_arguments = Some(TypeScriptTypeArguments {
+                            version: 1,
+                            owner_binding_id: import.binding_id.clone(),
+                            arguments,
+                        });
+                    }
                     return Some(ReceiverTarget {
                         qualified_name: import_target_without_namespace(&import.target),
                         import: Some(import),
                         scope_id: None,
                         type_arguments,
+                        type_origins,
+                        type_origin: Some(origin.clone()),
+                        index_owner: None,
                     });
                 }
                 Resolution::Local(declaration) if declaration.kind == "type_alias" => {
                     if let Some(alias_target) = declaration.declared_type_name.as_deref() {
-                        let alias_target = self.substitute_type_alias_target(
+                        origin = self.instantiated_type_origin(
                             &declaration,
                             alias_target,
-                            type_arguments.as_deref().unwrap_or(&[]),
-                        );
-                        current.clear();
-                        current.push_str(&alias_target);
+                            type_origins.as_deref().unwrap_or(&[]),
+                            &origin,
+                        )?;
                     } else {
                         return Some(ReceiverTarget {
                             qualified_name: declaration.qualified_name.clone(),
                             import: None,
                             scope_id: self.member_scope_for_declaration(&declaration),
                             type_arguments,
+                            type_origins,
+                            type_origin: Some(origin.clone()),
+                            index_owner: None,
                         });
                     }
                 }
@@ -9710,17 +9971,24 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         import: None,
                         scope_id: self.member_scope_for_declaration(&declaration),
                         type_arguments,
+                        type_origins,
+                        type_origin: Some(origin.clone()),
+                        index_owner: None,
                     });
                 }
                 Resolution::Local(declaration) if declaration.kind == "type_parameter" => {
+                    if let Some(argument) = origin.substituted_parameter(&declaration.id).ok()? {
+                        origin = argument;
+                        continue;
+                    }
                     let owner = self.scope_owners.get(&declaration.scope_id)?;
                     let constraint = self
                         .generic_parameters_by_declaration
                         .get(owner)
                         .and_then(|parameters| parameters.get(&declaration.name))
                         .and_then(|constraint| constraint.as_deref())?;
-                    current.clear();
-                    current.push_str(constraint);
+                    origin = origin.with_spelling(constraint);
+                    origin.scope_id.clone_from(&declaration.scope_id);
                 }
                 _ => return None,
             }
@@ -9735,15 +10003,17 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
     /// evaluate arbitrary structural or imported key spaces.
     fn utility_key_names(
         &self,
-        scope_id: &str,
+        origin: &TypeOrigin,
         base_receiver: &ReceiverTarget,
         keys: &str,
     ) -> Option<HashSet<String>> {
+        let origin = self.substituted_type_argument_origin(origin.with_spelling(keys))?;
+        let keys = origin.spelling.as_str();
         if let Some(keys) = type_literal_names(keys) {
             return Some(keys);
         }
         let key_base = keyof_type_base(keys)?;
-        let key_receiver = self.resolve_declared_type_receiver(scope_id, key_base)?;
+        let key_receiver = self.resolve_type_origin_receiver(origin.with_spelling(key_base))?;
         if key_receiver.import.is_some()
             || base_receiver.import.is_some()
             || key_receiver.qualified_name != base_receiver.qualified_name
@@ -9778,21 +10048,6 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             return None;
         };
         Some(Resolution::Local(declaration.clone()))
-    }
-
-    fn substitute_type_alias_target(
-        &self,
-        declaration: &DeclarationInfo,
-        target: &str,
-        arguments: &[String],
-    ) -> String {
-        let Some(parameters) = self
-            .generic_parameter_order_by_declaration
-            .get(&declaration.id)
-        else {
-            return target.to_owned();
-        };
-        substitute_candidate_type_parameters(target, parameters, arguments, 0)
     }
 
     /// Canonicalize direct generic arguments when the source proves an
@@ -9886,7 +10141,27 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
+    fn index_member_scopes(&mut self) {
+        let mut index = HashMap::<String, Option<String>>::new();
+        for (scope, owner) in &self.scope_owners {
+            let Some(declaration) = self.declarations.get(owner) else {
+                continue;
+            };
+            if self.scope_parents.get(scope).and_then(Option::as_ref) == Some(&declaration.scope_id)
+            {
+                index
+                    .entry(owner.clone())
+                    .and_modify(|value| *value = None)
+                    .or_insert_with(|| Some(scope.clone()));
+            }
+        }
+        self.member_scopes_by_owner = Some(index);
+    }
+
     fn scope_for_owner_declaration(&self, declaration_id: &str) -> Option<String> {
+        if let Some(index) = &self.member_scopes_by_owner {
+            return index.get(declaration_id).cloned().flatten();
+        }
         let declaration = self.declarations.get(declaration_id)?;
         // Nested blocks and callable types inherit this owner as well. Only
         // the directly owned child of the declaration's binding scope is its
@@ -9970,6 +10245,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: self.member_scope_for_declaration(declaration),
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: None,
+                    index_owner: None,
                 });
             }
             if let Some(owner) = self.scope_owners.get(&scope)
@@ -9982,6 +10260,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: self.member_scope_for_declaration(declaration),
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: None,
+                    index_owner: None,
                 });
             }
             if let Some(receiver) = self.this_receivers.get(&scope) {
@@ -9990,6 +10271,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     import: None,
                     scope_id: self.scope_for_qualified_nominal(receiver),
                     type_arguments: None,
+                    type_origins: None,
+                    type_origin: None,
+                    index_owner: None,
                 });
             }
             current = self.scope_parents.get(&scope).cloned().flatten();
@@ -12315,6 +12599,25 @@ fn collect_import_bindings<'tree>(
         let mut specifiers = Vec::new();
         collect_nodes_of_kind(clause, "export_specifier", &mut specifiers);
         for specifier in specifiers {
+            // The JavaScript grammar can expose `default` as an unnamed
+            // token while TypeScript exposes an identifier. Grammar fields
+            // preserve the imported name independently of the alias in both.
+            if let Some(imported) = specifier.child_by_field_name("name") {
+                let local = specifier.child_by_field_name("alias").unwrap_or(imported);
+                if imported.kind() == "string" || local.kind() == "string" {
+                    continue;
+                }
+                output.push(ImportBinding {
+                    local_name: node_text(source, local),
+                    imported_name: node_text(source, imported),
+                    anchor: local,
+                    type_only: statement_type_only
+                        || node_text(source, specifier)
+                            .trim_start()
+                            .starts_with("type "),
+                });
+                continue;
+            }
             let identifiers = direct_identifier_children(specifier, source);
             if let Some(imported) = identifiers.first().copied() {
                 let local = identifiers.get(1).copied().unwrap_or(imported);

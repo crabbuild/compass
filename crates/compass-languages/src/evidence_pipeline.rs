@@ -470,7 +470,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.javascript",
             language: "javascript",
-            version: 3,
+            version: 4,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVASCRIPT_CAPABILITIES,
         },
@@ -523,7 +523,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.typescript",
             language: "typescript",
-            version: 4,
+            version: 5,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: TYPESCRIPT_CAPABILITIES,
         },

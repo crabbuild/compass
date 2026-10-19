@@ -1,3 +1,4 @@
+use super::model::{MAX_TYPESCRIPT_TYPE_ARGUMENT_DEPTH, TypeScriptTypeArgument};
 use std::collections::BTreeSet;
 use std::path::{Component, Path};
 
@@ -102,6 +103,56 @@ pub fn validate_evidence(
         ));
     }
 
+    if batch.typescript_merge_inventory_complete.is_some()
+        && batch.pipeline.language != "typescript"
+    {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::InvalidFact,
+            "TypeScript merge inventory requires a TypeScript evidence batch",
+        ));
+    }
+    if let Some(version) = batch.typescript_merge_inventory_version {
+        if version != super::TYPESCRIPT_MERGE_INVENTORY_VERSION {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "unsupported TypeScript merge inventory version",
+            ));
+        }
+        if batch.pipeline.language != "typescript" {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "TypeScript merge inventory version requires a TypeScript batch",
+            ));
+        }
+    }
+    super::TypeScriptMergeDependencyUsage::for_dependencies(&batch.typescript_merge_dependencies)?;
+    if !batch.typescript_merge_dependencies.is_empty() && batch.pipeline.language != "typescript" {
+        return Err(EvidenceError::new(
+            EvidenceErrorCode::InvalidFact,
+            "TypeScript merge dependencies require a TypeScript batch",
+        ));
+    }
+    let merge_sources = batch
+        .declarations
+        .iter()
+        .filter(|fact| fact.scope_id.is_none() && matches!(fact.kind.as_str(), "file" | "module"))
+        .map(|fact| (fact.range.source_file.as_str(), &fact.range))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for dependency in &batch.typescript_merge_dependencies {
+        validate_range(&dependency.range, "TypeScript merge dependency", false)?;
+        if merge_sources
+            .get(dependency.range.source_file.as_str())
+            .is_none_or(|range| {
+                range.start_byte > dependency.range.start_byte
+                    || range.end_byte < dependency.range.end_byte
+            })
+        {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::InvalidFact,
+                "TypeScript merge dependency must be anchored in its batch source file",
+            ));
+        }
+    }
     let mut ids = Vec::with_capacity(
         batch.declarations.len()
             + batch.scopes.len()
@@ -265,6 +316,7 @@ fn validate_limits(
             format!("{name} count {count} exceeds limit {limit}"),
         ));
     }
+    super::TypeScriptArgumentUsage::for_batch(batch)?;
     let mut documentation_bytes = 0_usize;
     for documentation in batch
         .declarations
@@ -329,12 +381,31 @@ fn validate_fact(
 ) -> Result<(), EvidenceError> {
     match fact {
         Fact::Declaration(fact) => {
+            if let Some(inventory) = fact.ecmascript_export_inventory {
+                if inventory.version != super::ECMASCRIPT_EXPORT_INVENTORY_VERSION {
+                    return Err(invalid_fact(
+                        &fact.id,
+                        "unsupported ECMAScript export inventory version",
+                    ));
+                }
+                if !matches!(fact.language.as_str(), "typescript" | "javascript")
+                    || fact.scope_id.is_some()
+                    || !matches!(fact.kind.as_str(), "file" | "module")
+                {
+                    return Err(invalid_fact(
+                        &fact.id,
+                        "ECMAScript export inventory requires a root ECMAScript file/module",
+                    ));
+                }
+            }
             if fact.member_inventory_complete.is_some()
-                && (fact.language != "rust" || fact.kind != "trait")
+                && !((fact.language == "rust" && fact.kind == "trait")
+                    || (fact.language == "typescript"
+                        && matches!(fact.kind.as_str(), "class" | "interface")))
             {
                 return Err(invalid_fact(
                     &fact.id,
-                    "member inventory completeness requires a Rust trait",
+                    "member inventory completeness requires a Rust trait or TypeScript class/interface",
                 ));
             }
             validate_language(&fact.id, &fact.language, pipeline_language)?;
@@ -373,6 +444,7 @@ fn validate_fact(
                         )
                         | ("php", "class" | "interface" | "trait" | "enum")
                         | ("rust", "trait")
+                        | ("typescript", "class" | "interface")
                 )
             {
                 return Err(invalid_fact(
@@ -596,6 +668,7 @@ fn validate_fact(
                     ),
                 ));
             }
+            validate_typescript_arguments(fact, declarations, bindings, occurrences, limits)?;
             if let Some(hierarchy) = fact.constraints.hierarchy.as_ref() {
                 require_capability(
                     &fact.id,
@@ -1083,4 +1156,149 @@ fn invalid_fact(id: &str, detail: &str) -> EvidenceError {
         EvidenceErrorCode::InvalidFact,
         format!("fact {id:?} {detail}"),
     )
+}
+
+/// The wire tree names facts in this source batch. Project target selection is
+/// deliberately deferred to the resolver; qualified text is never that proof.
+fn validate_typescript_arguments(
+    candidate: &RelationshipCandidate,
+    declarations: &AHashMap<&str, &DeclarationFact>,
+    bindings: &AHashMap<&str, &BindingFact>,
+    occurrences: &AHashMap<&str, &OccurrenceFact>,
+    limits: EvidenceLimits,
+) -> Result<(), EvidenceError> {
+    let Some(proof) = &candidate.constraints.typescript_type_arguments else {
+        return Ok(());
+    };
+    let id = &candidate.id;
+    if proof.version != 1 {
+        return Err(invalid_fact(
+            id,
+            "unsupported TypeScript type argument proof version",
+        ));
+    }
+    if !matches!(candidate.language.as_str(), "typescript" | "javascript")
+        || !matches!(
+            candidate.relation,
+            CandidateRelation::Calls
+                | CandidateRelation::IndirectCalls
+                | CandidateRelation::AccessesMember
+        )
+        || candidate.binding_id.as_deref() != Some(proof.owner_binding_id.as_str())
+        || candidate.constraints.exact_target_declaration_id.is_some()
+    {
+        return Err(invalid_fact(
+            id,
+            "TypeScript arguments require an imported member occurrence",
+        ));
+    }
+    let source = candidate
+        .occurrence_id
+        .as_deref()
+        .and_then(|id| occurrences.get(id))
+        .ok_or_else(|| invalid_fact(id, "type arguments require an occurrence"))?;
+    let check_binding = |binding_id: &str| -> Result<(), EvidenceError> {
+        if binding_id.len() > limits.callable_type_bytes {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                "type argument binding ID exceeds byte limit",
+            ));
+        }
+        require_reference(id, "type argument import binding", binding_id, bindings)?;
+        let binding = bindings[binding_id];
+        if binding.language != candidate.language
+            || binding.range.source_file != source.range.source_file
+            || !matches!(
+                binding.kind,
+                super::model::BindingKind::Import | super::model::BindingKind::ImportAlias
+            )
+            || !binding.namespace.is_some_and(|namespace| {
+                matches!(
+                    namespace,
+                    SymbolNamespace::Type
+                        | SymbolNamespace::ValueAndType
+                        | SymbolNamespace::Namespace
+                )
+            })
+            || binding.scope_id.is_none()
+        {
+            return Err(invalid_fact(
+                id,
+                "type argument requires a source-scoped type import",
+            ));
+        }
+        Ok(())
+    };
+    check_binding(&proof.owner_binding_id)?;
+    let mut pending = proof.arguments.iter().collect::<Vec<_>>();
+    while let Some(argument) = pending.pop() {
+        match argument {
+            TypeScriptTypeArgument::Source {
+                declaration_id,
+                arguments,
+            } => {
+                if declaration_id.len() > limits.callable_type_bytes {
+                    return Err(EvidenceError::new(
+                        EvidenceErrorCode::ResourceLimit,
+                        "type argument declaration ID exceeds byte limit",
+                    ));
+                }
+                require_reference(
+                    id,
+                    "type argument declaration",
+                    declaration_id,
+                    declarations,
+                )?;
+                let declaration = declarations[declaration_id.as_str()];
+                if declaration.language != candidate.language
+                    || declaration.range.source_file != source.range.source_file
+                    || !matches!(
+                        declaration.kind.as_str(),
+                        "class" | "interface" | "enum" | "type_alias"
+                    )
+                    || !declaration.namespace.is_some_and(|namespace| {
+                        matches!(
+                            namespace,
+                            SymbolNamespace::Type | SymbolNamespace::ValueAndType
+                        )
+                    })
+                    || declaration.scope_id.is_none()
+                {
+                    return Err(invalid_fact(
+                        id,
+                        "type argument requires an exact nominal declaration",
+                    ));
+                }
+                pending.extend(arguments);
+            }
+            TypeScriptTypeArgument::Import {
+                binding_id,
+                member_path,
+                arguments,
+            } => {
+                check_binding(binding_id)?;
+                if member_path.len() > MAX_TYPESCRIPT_TYPE_ARGUMENT_DEPTH {
+                    return Err(EvidenceError::new(
+                        EvidenceErrorCode::ResourceLimit,
+                        "type argument import path exceeds depth limit",
+                    ));
+                }
+                if member_path.iter().any(|part| {
+                    part.is_empty()
+                        || part.len() > limits.callable_type_bytes
+                        || !part.chars().all(|character| {
+                            character.is_alphanumeric() || matches!(character, '_' | '$')
+                        })
+                }) {
+                    return Err(invalid_fact(
+                        id,
+                        "type argument import path must contain bounded identifier segments",
+                    ));
+                }
+                pending.extend(arguments);
+            }
+            TypeScriptTypeArgument::Unknown => {}
+        }
+    }
+    Ok(())
 }

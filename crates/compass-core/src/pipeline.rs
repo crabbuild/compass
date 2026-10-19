@@ -202,7 +202,7 @@ pub enum BuildPurpose {
 const OUTPUT_STATS_FILE: &str = "output-stats.json";
 const AST_FACT_DIGESTS_FILE: &str = "ast-fact-digests.json";
 const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
-const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/2";
+const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/4";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
@@ -999,6 +999,9 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
         if let Some(complete) = declaration.member_inventory_complete {
             map.serialize_entry("memberInventoryComplete", &complete)?;
         }
+        if let Some(inventory) = declaration.ecmascript_export_inventory {
+            map.serialize_entry("ecmascriptExportInventory", &inventory)?;
+        }
         map.serialize_entry("variadic", &declaration.variadic)?;
         // Leading comments are outside declaration/body hashes. Retain their
         // text and ranges so equal-length doc edits cannot reuse stale prose.
@@ -1194,6 +1197,9 @@ impl Serialize for FactDigestResolutionConstraint<'_, '_> {
         if let Some(value) = &constraint.hierarchy {
             map.serialize_entry("hierarchy", value)?;
         }
+        if let Some(value) = &constraint.typescript_type_arguments {
+            map.serialize_entry("typescriptTypeArguments", value)?;
+        }
         map.serialize_entry("allowExternal", &constraint.allow_external)?;
         map.end()
     }
@@ -1275,8 +1281,29 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
                 .then_with(|| left.spelling.cmp(&right.spelling))
                 .then_with(|| left.role.cmp(&right.role))
         });
-        let mut candidates = self.batch.candidates.iter().collect::<Vec<_>>();
-        candidates.sort_by(|left, right| {
+        // Borrow the typed key once per candidate. Its tree already has
+        // canonical ordered fields/variants and bounded proof size; sorting
+        // neither serializes nor copies proof strings inside comparisons.
+        let mut candidates = self
+            .batch
+            .candidates
+            .iter()
+            .map(|candidate| {
+                let proof = candidate
+                    .constraints
+                    .typescript_type_arguments
+                    .as_ref()
+                    .map(|proof| {
+                        (
+                            proof.version,
+                            proof.owner_binding_id.as_str(),
+                            proof.arguments.as_slice(),
+                        )
+                    });
+                (candidate, proof)
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|(left, left_proof), (right, right_proof)| {
             context
                 .declaration_key(&left.source_declaration_id)
                 .cmp(&context.declaration_key(&right.source_declaration_id))
@@ -1323,9 +1350,37 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
                         .allowed_target_kinds
                         .cmp(&right.constraints.allowed_target_kinds)
                 })
+                .then_with(|| left_proof.cmp(right_proof))
         });
-        let mut map = serializer.serialize_map(Some(7))?;
+        let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("pipeline", &self.batch.pipeline)?;
+        if let Some(version) = self.batch.typescript_merge_inventory_version {
+            map.serialize_entry("typescriptMergeInventoryVersion", &version)?;
+        }
+        if let Some(complete) = self.batch.typescript_merge_inventory_complete {
+            map.serialize_entry("typescriptMergeInventoryComplete", &complete)?;
+        }
+        if !self.batch.typescript_merge_dependencies.is_empty() {
+            let mut dependencies = self
+                .batch
+                .typescript_merge_dependencies
+                .iter()
+                .collect::<Vec<_>>();
+            dependencies.sort_unstable_by(|left, right| {
+                left.range
+                    .source_file
+                    .cmp(&right.range.source_file)
+                    .then_with(|| left.range.start_byte.cmp(&right.range.start_byte))
+                    .then_with(|| left.range.end_byte.cmp(&right.range.end_byte))
+                    .then_with(|| left.range.start_line.cmp(&right.range.start_line))
+                    .then_with(|| left.range.start_column.cmp(&right.range.start_column))
+                    .then_with(|| left.range.end_line.cmp(&right.range.end_line))
+                    .then_with(|| left.range.end_column.cmp(&right.range.end_column))
+                    .then_with(|| left.kind.cmp(&right.kind))
+                    .then_with(|| left.specifier.cmp(&right.specifier))
+            });
+            map.serialize_entry("typescriptMergeDependencies", &dependencies)?;
+        }
         map.serialize_entry(
             "declarations",
             &FactDigestDeclarations {
@@ -1367,7 +1422,7 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
             "candidates",
             &candidates
                 .iter()
-                .map(|candidate| FactDigestCandidate {
+                .map(|(candidate, _)| FactDigestCandidate {
                     candidate,
                     context: &context,
                 })
@@ -9508,6 +9563,183 @@ mod tests {
             .namespace = Some(compass_languages::SymbolNamespace::Value);
         assert_ne!(original_digest, extraction_fact_digest(&changed)?);
         assert_eq!(original_digest, extraction_fact_digest(&original)?);
+        Ok(())
+    }
+
+    #[test]
+    fn typescript_inventory_and_argument_proofs_change_fact_digests() -> Result<(), Box<dyn Error>>
+    {
+        let original = Engine::default().extract_source(
+            Path::new("main.ts"),
+            b"import type { Holder } from './provider'; class Good { lookup() {} } function read(value: Holder<Good>) { value.field.lookup(); }",
+        )?;
+        let baseline = extraction_fact_digest(&original)?;
+        for case in 0..8 {
+            let mut changed = original.clone();
+            let batch = changed
+                .semantic_evidence
+                .as_mut()
+                .ok_or("missing TypeScript evidence")?;
+            assert_eq!(batch.typescript_merge_inventory_complete, Some(true));
+            match case {
+                0 => batch.typescript_merge_inventory_complete = None,
+                1 => batch.typescript_merge_inventory_complete = Some(false),
+                2 => {
+                    batch
+                        .declarations
+                        .iter_mut()
+                        .find(|fact| fact.name == "Good" && fact.kind == "class")
+                        .ok_or("missing class inventory")?
+                        .member_inventory_complete = Some(false)
+                }
+                5 => batch.typescript_merge_inventory_version = None,
+                6 | 7 => {
+                    let source = batch
+                        .declarations
+                        .iter_mut()
+                        .find(|fact| fact.scope_id.is_none())
+                        .ok_or("missing source root")?;
+                    if case == 6 {
+                        source.ecmascript_export_inventory = None;
+                    } else {
+                        source
+                            .ecmascript_export_inventory
+                            .as_mut()
+                            .ok_or("missing export census")?
+                            .complete = false;
+                    }
+                }
+                _ => {
+                    let constraint = &mut batch
+                        .candidates
+                        .iter_mut()
+                        .find(|candidate| candidate.constraints.typescript_type_arguments.is_some())
+                        .ok_or("missing typed argument proof")?
+                        .constraints;
+                    if case == 3 {
+                        constraint.typescript_type_arguments = None;
+                    } else {
+                        constraint
+                            .typescript_type_arguments
+                            .as_mut()
+                            .ok_or("missing proof")?
+                            .arguments = vec![compass_languages::TypeScriptTypeArgument::Unknown];
+                    }
+                }
+            }
+            assert_ne!(baseline, extraction_fact_digest(&changed)?, "case {case}");
+        }
+        assert_eq!(baseline, extraction_fact_digest(&original)?);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_dependency_fact_digest_is_order_independent_and_sensitive()
+    -> Result<(), Box<dyn Error>> {
+        let original = Engine::default().extract_source(
+            Path::new("main.ts"),
+            b"import './a'; import './b'; export {};",
+        )?;
+        let baseline = extraction_fact_digest(&original)?;
+        let mut reordered = original.clone();
+        reordered
+            .semantic_evidence
+            .as_mut()
+            .ok_or("missing evidence")?
+            .typescript_merge_dependencies
+            .reverse();
+        assert_eq!(extraction_fact_digest(&reordered)?, baseline);
+        for case in 0..3 {
+            let mut changed = original.clone();
+            let dependencies = &mut changed
+                .semantic_evidence
+                .as_mut()
+                .ok_or("missing evidence")?
+                .typescript_merge_dependencies;
+            match case {
+                0 => dependencies[0].specifier = "./other".to_owned(),
+                1 => {
+                    dependencies[0].kind =
+                        compass_languages::TypeScriptMergeDependencyKind::ReferenceTypes
+                }
+                _ => dependencies[0].range.start_column += 1,
+            }
+            assert_ne!(extraction_fact_digest(&changed)?, baseline);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typed_argument_proof_order_does_not_change_fact_digests() -> Result<(), Box<dyn Error>> {
+        use compass_languages::{
+            EvidenceLimits, TypeScriptTypeArgument as Argument, validate_evidence,
+        };
+        let mut extraction = Engine::default().extract_source(
+            Path::new("main.ts"),
+            b"import type { Holder } from './provider'; class Good { lookup() {} } function read(value: Holder<Good>) { value.field.lookup(); }",
+        )?;
+        let batch = extraction
+            .semantic_evidence
+            .as_mut()
+            .ok_or("missing TypeScript evidence")?;
+        let original = batch
+            .candidates
+            .iter()
+            .find(|candidate| candidate.constraints.typescript_type_arguments.is_some())
+            .ok_or("missing candidate")?
+            .clone();
+        let proof = original
+            .constraints
+            .typescript_type_arguments
+            .clone()
+            .ok_or("missing proof")?;
+        let mut candidates = Vec::new();
+        for (index, arguments) in [
+            None,
+            Some(Vec::new()),
+            Some(vec![Argument::Unknown]),
+            Some(proof.arguments.clone()),
+            Some(vec![Argument::Import {
+                binding_id: proof.owner_binding_id.clone(),
+                member_path: Vec::new(),
+                arguments: Vec::new(),
+            }]),
+            Some(vec![Argument::Import {
+                binding_id: proof.owner_binding_id.clone(),
+                member_path: Vec::new(),
+                arguments: proof.arguments.clone(),
+            }]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut candidate = original.clone();
+            candidate.id = format!("candidate:typed-order-{index}");
+            candidate.constraints.typescript_type_arguments =
+                arguments.map(|arguments| compass_languages::TypeScriptTypeArguments {
+                    arguments,
+                    ..proof.clone()
+                });
+            candidates.push(candidate);
+        }
+        batch.candidates = candidates;
+        validate_evidence(batch, EvidenceLimits::default())?;
+        let expected = extraction_fact_digest(&extraction)?;
+        for shift in 0..6 {
+            for reverse in [false, true] {
+                let mut permutation = extraction.clone();
+                let batch = permutation
+                    .semantic_evidence
+                    .as_mut()
+                    .ok_or("missing evidence")?;
+                batch.candidates.rotate_left(shift);
+                if reverse {
+                    batch.candidates.reverse();
+                }
+                validate_evidence(batch, EvidenceLimits::default())?;
+                assert_eq!(expected, extraction_fact_digest(&permutation)?);
+            }
+        }
         Ok(())
     }
 

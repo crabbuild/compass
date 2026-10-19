@@ -230,6 +230,7 @@ impl<'source> State<'source> {
                     argument_types: Vec::new(),
                     allowed_target_kinds: kotlin_import_target_kinds(),
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: true,
                 },
             )?;
@@ -803,6 +804,7 @@ impl<'source> State<'source> {
                     argument_types: Vec::new(),
                     allowed_target_kinds: vec!["annotation_type".to_owned(), "class".to_owned()],
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: true,
                 },
             )?;
@@ -911,6 +913,7 @@ impl<'source> State<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: kotlin_type_target_kinds(),
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         )?;
@@ -970,6 +973,7 @@ impl<'source> State<'source> {
                     hierarchy: Some(HierarchyConstraint::DirectBase {
                         base_set_complete: complete,
                     }),
+                    typescript_type_arguments: None,
                     allow_external: true,
                 },
             )?;
@@ -1078,6 +1082,7 @@ impl<'source> State<'source> {
                         strategy: ReceiverDispatchStrategy::C3FromReceiver,
                     }
                 }),
+                typescript_type_arguments: None,
                 allow_external: construction || binding.is_some() || receiver_type.is_some(),
             },
         )?;
@@ -1123,6 +1128,7 @@ impl<'source> State<'source> {
                     receiver_qualified_name: receiver_type,
                     strategy: ReceiverDispatchStrategy::C3FromReceiver,
                 }),
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         )?;
@@ -1303,6 +1309,7 @@ impl<'source> State<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: Vec::new(),
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: false,
             },
         )?;

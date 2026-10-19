@@ -43,8 +43,25 @@ fn next_edge_materialization_batch<T>(values: &mut impl Iterator<Item = T>) -> O
 }
 
 impl UniversalResolutionIndex {
-    pub fn materialize(&self, nodes: &mut Vec<NodeRecord>, edges: &mut Vec<EdgeRecord>) {
-        self.materialize_inner(nodes, edges, ResolutionAdmission::Max, false);
+    /// Project declarations and supported relationships, reporting any analysis
+    /// limits that omitted relationships. A nonzero omission count means the
+    /// output is degraded; callers must preserve that status when publishing it.
+    /// Existing node attributes can be updated, so this is a reporting API, not
+    /// a transactional all-or-nothing operation.
+    pub fn materialize(
+        &self,
+        nodes: &mut Vec<NodeRecord>,
+        edges: &mut Vec<EdgeRecord>,
+    ) -> UniversalMaterializationReport {
+        UniversalMaterializationReport {
+            omitted_candidates: self.materialize_inner_with_declarations(
+                nodes,
+                edges,
+                ResolutionAdmission::Max,
+                false,
+                true,
+            ),
+        }
     }
 
     pub(crate) fn materialize_relationships_at_inference(
@@ -52,24 +69,8 @@ impl UniversalResolutionIndex {
         nodes: &mut Vec<NodeRecord>,
         edges: &mut Vec<EdgeRecord>,
         admission: ResolutionAdmission,
-    ) {
-        self.materialize_inner_with_declarations(nodes, edges, admission, true, false);
-    }
-
-    fn materialize_inner(
-        &self,
-        nodes: &mut Vec<NodeRecord>,
-        edges: &mut Vec<EdgeRecord>,
-        admission: ResolutionAdmission,
-        release_resolution_indexes: bool,
-    ) {
-        self.materialize_inner_with_declarations(
-            nodes,
-            edges,
-            admission,
-            release_resolution_indexes,
-            true,
-        );
+    ) -> usize {
+        self.materialize_inner_with_declarations(nodes, edges, admission, true, false)
     }
 
     fn materialize_inner_with_declarations(
@@ -79,7 +80,7 @@ impl UniversalResolutionIndex {
         admission: ResolutionAdmission,
         release_resolution_indexes: bool,
         project_declarations: bool,
-    ) {
+    ) -> usize {
         let mut profile_started = Instant::now();
         let graph_ids = materialized_declaration_ids(self.facts.declarations.values());
         if project_declarations {
@@ -191,13 +192,19 @@ impl UniversalResolutionIndex {
                     && candidate.relation == CandidateRelation::Tests
                     && !matches!(
                         decision,
-                        ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved
+                        ResolutionDecision::Ambiguous { .. }
+                            | ResolutionDecision::ResourceLimit { .. }
+                            | ResolutionDecision::Unresolved
                     ))
                 .then(|| graph_ids.get(&candidate.source_declaration_id).cloned())
                 .flatten();
                 let allow_primary = decision_is_needed(&candidate, &decision, admission);
                 let allow_possible = admission.admits_source_backed_inference()
-                    && !matches!(decision, ResolutionDecision::Ambiguous { .. });
+                    && !matches!(
+                        decision,
+                        ResolutionDecision::Ambiguous { .. }
+                            | ResolutionDecision::ResourceLimit { .. }
+                    );
                 let aliased_tests = self.low_test_aliases.get(candidate_id);
                 let mut decisions = Vec::with_capacity(
                     1 + usize::from(allow_possible) + aliased_tests.map_or(0, Vec::len),
@@ -209,7 +216,9 @@ impl UniversalResolutionIndex {
                     let test_decision = db.resolve_candidate(&test_candidate, admission);
                     if !matches!(
                         test_decision,
-                        ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved
+                        ResolutionDecision::Ambiguous { .. }
+                            | ResolutionDecision::ResourceLimit { .. }
+                            | ResolutionDecision::Unresolved
                     ) {
                         test_source_id = graph_ids
                             .get(&test_candidate.source_declaration_id)
@@ -264,6 +273,10 @@ impl UniversalResolutionIndex {
             }
             decisions.append(&mut batch);
         }
+        let resource_limited = decisions
+            .iter()
+            .filter(|pending| matches!(pending.decision, ResolutionDecision::ResourceLimit { .. }))
+            .count();
         if admission == ResolutionAdmission::Low {
             mark_test_roles(nodes, &test_source_ids);
         }
@@ -388,7 +401,9 @@ impl UniversalResolutionIndex {
                         emit_edge: admission.admits_deferred_receiver(),
                     })
                 }
-                ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => None,
+                ResolutionDecision::Ambiguous { .. }
+                | ResolutionDecision::ResourceLimit { .. }
+                | ResolutionDecision::Unresolved => None,
             })
             .collect::<Vec<_>>()
             .into_iter()
@@ -685,6 +700,7 @@ impl UniversalResolutionIndex {
             edges.extend(materialized);
         }
         profile_internal("universal edge materialization", &mut profile_started);
+        resource_limited
     }
 }
 
@@ -813,6 +829,7 @@ fn decision_is_needed(
             admission.admits_qualified_external() || candidate.binding_id.is_some()
         }
         ResolutionDecision::DeferredReceiver { .. } => admission.admits_deferred_receiver(),
+        ResolutionDecision::ResourceLimit { .. } => true,
         ResolutionDecision::Ambiguous { .. } | ResolutionDecision::Unresolved => false,
     }
 }

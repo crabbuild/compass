@@ -1,5 +1,174 @@
 # Compass compatibility
 
+## In-progress TypeScript terminal inventories
+
+Development TypeScript5 / JavaScript4 and AST cache31 replace the prior
+disposable producer/cache identities. They remain `Qualifying`; historical
+realizations and the approved release-promotion record are unchanged. Run
+`compass update <root>` with the new binary to rebuild current facts.
+
+The optional `typescriptMergeInventoryVersion` is1 for the supported complete
+observed-load census contract. Merge absence requires this exact version and
+`typescriptMergeInventoryComplete=true` in every TypeScript input. Older
+missing-version facts remain readable but cannot certify absence, even when
+an old boolean is true or the producer version is changed. Unknown present
+versions fail validation explicitly. This capability is separate from producer
+and cache identities; no default upgrades an absent legacy census. Profile3
+fact digests include the optional version distinctly.
+
+TypeScript class/interface facts can now carry `memberInventoryComplete` under
+evidence/2. The bounded producer certifies supported direct members only after
+matching their exact retained declaration anchors and primary member scope.
+Certificates require an explicit ECMAScript module and no parser recovery,
+heritage, constructors, computed/escaped member names, decorators,
+ambient/namespace ancestors or unsupported nominal syntax. Other retained
+nominals carry false. The accepted shape has an explicitly empty complete
+base set. Inventory work shares the200000-step type-origin budget; exhaustion
+returns a resource error without a successful partial batch.
+
+The optional batch field `typescriptMergeInventoryComplete` certifies an original
+AST walk, independently of declaration projection. Nonempty scripts, parser
+recovery, ambient declarations and namespaces cannot certify the absence of
+augmentation. Missing/false metadata in any TypeScript input, or a TypeScript
+source in the graph inventory without a corresponding certified batch, prevents the project
+consumer from relying on a closed merged-type inventory. The syntax
+walk charges each visited/frontier node before retention and enforces depth512.
+
+The typed project consumer unwraps intrinsic `Promise`/`PromiseLike` layers
+individually in definition scope. A terminal `Awaited` value retains a nominal
+identity only after expanding its exact actual/alias proof to a uniquely bound
+TypeScript class/interface with complete project merge inventory, both nominal
+certificates, no bases and no `then` member. Missing certificates, merged types,
+inherited or unknown members and custom thenable result semantics are not
+certified by this rule. Unsupported cases remain unresolved. This does not
+prove runtime promise behavior or introduce a TypeScript compiler dependency.
+
+Older strict readers and validators restricted to Rust trait inventories must
+upgrade before reading these TypeScript facts. Incremental fact-digest profile4
+includes the batch certificate and typed
+argument proof trees, including explicit Unknown/absent differences. Exact proof
+IDs can conservatively invalidate fact-neutral reuse when scope identities
+change; correctness takes priority over that optimization. TypeScript5,
+JavaScript4 and AST cache31 bind the combined development extraction changes;
+no release promotion or historical rewrite is implied.
+
+The in-progress `typescriptMergeDependencies` census records typed module,
+reference-path and reference-types loads with source anchors. Static imports,
+re-exports, import-equals and literal import/require calls participate even when
+an ordinary symbol import would be unused. Supported triple-slash directives
+are recorded even in comment-only files. Unsupported directives, escaped names
+or specifiers, nonliteral loads and parser recovery prevent certification.
+Every observed load must reach supplied certified TypeScript source before
+merge absence is used. Reference paths require the exact normalized source;
+relative modules use exact owning project targets or bounded source candidates
+with valid TypeScript source/declaration substitution within distinct extension
+families. This is a bounded source profile, not compiler-wide resolution parity. Unavailable, invalid or
+unknown source identities poison coverage across all resolution contexts and
+cannot fall back to a lexical source. Literal census removes exactly the matching
+outer delimiter and preserves interior quote/backtick characters. Bare
+modules and reference-types require explicit project resolution metadata;
+a same-spelled file is insufficient.
+The optional owning edge attribute `typescript_source_load` is a version1
+`TypeScriptSourceLoadProof` containing the exact typed census dependency,
+including every source-range coordinate. It binds a resolved target to one
+observed load. Reference-types require this mode/occurrence-specific proof;
+unanchored legacy module edges cannot satisfy them. A legacy module mapping
+can cover only one matching module occurrence; repeated import/require loads
+require their own proofs. Invalid/unknown versions fail explicitly and payloads
+are inspected by reference before allocation. Cross-load proof matching shares
+an explicit1048576-step limit. Missing owning reference-types resolution remains
+unsupported; the census alone does not materialize a type package or invent
+this proof. Source-load proof production/qualification is not claimed here.
+The ordinary module-symbol index excludes reference-path/reference-types proof
+edges; introducing type-package coverage must not add symbol-import targets.
+Complete known alternatives can coexist; unknown source identities and targets
+still prevent absence proof. A supplied augmenting or transitively
+incomplete source also prevents the proof. Ordinary direct member lookup does
+not require this merge-absence certificate.
+
+The census is limited before retention to4096 entries and1MiB of copied
+specifier/source text per batch,1024 bytes per specifier and4096 per source
+path. Project accounting checks65536 entries and16MiB before borrowed batch
+cloning or owned indexing. Limit failures remain explicit. Profile4 digests
+include every dependency field and ignore vector input order. Strict older
+readers must upgrade for this new optional vector. Dependency closure review,
+complete bounded export traversal and independent qualification remain open;
+the combined development patch is not ready for release.
+
+Project typed-argument accounting counts repeated proof copies, Unknown nodes
+and UTF-8 owner/reference/path bytes, including owners of present empty proofs.
+It limits a resolver input to2000000 nodes and128MiB of copied proof text before
+borrowed batch cloning or owned index retention, using the same per-batch
+accounting as evidence validation. Aggregate auxiliary overflow takes the
+existing explicit degraded exact-only partition path: declarations and eligible
+exact relationships survive, omitted candidates are counted, and proof/load
+payloads and merge certificates are discarded before partial indexing. Invalid
+per-file payloads remain errors and cannot be hidden by an earlier aggregate
+overflow. No new CLI or serialized limit configuration is introduced.
+
+## In-progress typed TypeScript export traversal
+
+Root TypeScript/JavaScript file/module declarations can carry optional
+`ecmascriptExportInventory: {version: 1, complete: bool}` under evidence/2.
+The producer checks original top-level export syntax against retained root
+bindings on the shared200000-step source-work budget. Unresolved local export
+names remain explicit binding obligations before target selection. Recovery,
+non-module scripts, ambient/namespace exports, export assignments, unsupported
+string-name/destructured export forms, and omitted projections cannot certify
+completeness. Complete describes retained syntax, not available targets.
+Missing/false legacy metadata cannot certify an empty star branch or a unique
+typed import, independently of the separate merge-absence certificate. Mixed
+complete/incomplete roots for one physical source remain incomplete. Unknown
+present versions and certificates on other languages or nested declarations
+fail validation. Strict older evidence readers must upgrade. Fact-digest
+profile4 includes this state; AST cache31 refreshes disposable facts. Current
+TypeScript5/JavaScript4 development identities remain unpromoted.
+
+Typed receiver proofs now retain per-binding export obligations and full target
+source file identities before the ordinary module view can flatten alternatives.
+An unavailable owning project target remains unknown across contexts and orders;
+a same-stem file or directory index cannot replace that target. Without owning
+metadata, the bounded native profile considers supported relative file/declaration
+substitutions in file-before-directory order. Bare packages and custom suffixes
+require owning project metadata. This profile does not claim compiler-wide
+package/configuration or runtime-loader parity.
+
+Only explicit top-level export bindings supply public named imports. A private
+same-named declaration, including a declaration exported only inside a namespace,
+cannot become a public file export. Explicit local/named exports take precedence
+over stars for that name. Missing named targets remain unknown rather than falling
+back to a star. A known empty supplied source differs from an unavailable source.
+
+The typed root and nested argument import paths share fallible export traversal
+with the receiver's16384-step work meter. Distinct traversal states are bounded
+by the existing per-lookup candidate limit (default256), and depth is at most64.
+Raw alternatives are checked before filtering. Repeated states are discovered
+once per walk. Bounded fixed-point propagation computes each state’s export
+closure on the same meter, then verifies every required physical target and
+independent star-binding group before selecting a result. Empty/nonempty
+alternatives within one binding remain unknown; a separate known-empty star
+branch can be valid absence.
+Limits stay explicit and cannot yield a usable partial winner or legacy fallback.
+Namespace reexports that need an unmodeled namespace value/visibility transition
+remain unknown; namespace imports of explicitly named exports remain supported.
+These controls do not qualify the overall TypeScript consumer or a release.
+
+## Universal materialization status
+
+The Rust `UniversalResolutionIndex::materialize` API now returns a must-use
+`UniversalMaterializationReport` instead of `()`. Its `omitted_candidates`
+counts explicit resource-limit decisions whose relationships were not
+projected. Callers must inspect this count and preserve degraded status when
+publishing partial output. This is a reporting operation: it can append graph
+records and update existing declaration attributes before returning the report.
+It does not provide transactional rollback. There is no silent void wrapper.
+Zero resource omissions does not certify semantic completeness: ambiguous and
+unsupported source constructs still remain unresolved. The application build
+path continues to expose resource omissions through its existing degraded
+resolution report and `universal_resolution_partial` graph diagnostic.
+Rust callers that used the old return type, including function pointers, must
+update. No graph JSON or serialized report schema changes solely for this API.
+
 ## Rust struct-literal references
 
 Rust development producer4 emits a type-reference occurrence for the nominal
@@ -52,7 +221,7 @@ The exact-only topology view counts that source-less callee as isolated; the
 synthetic fixture bounds account for that distinct node. A native regression
 also preserves the genuine local call and reversed-input equivalence.
 
-AST cache29 rebuilds disposable extraction facts. Run `compass update <root>`
+AST cache31 rebuilds disposable extraction facts. Run `compass update <root>`
 with the new binary; existing immutable graphs and historical producer versions
 are unchanged. Rust4 remains `Qualifying` pending independent qualification;
 the approved release promotion record is unchanged. Graph v1's shape,
@@ -89,7 +258,7 @@ its original meaning. Rust4/cache29 identify this development producer change.
 
 ## Literal-seeded code evidence
 
-Current updates publish `source-query/7-literal-seeded-code` with AST cache29.
+Current updates publish `source-query/7-literal-seeded-code` with AST cache31.
 A string literal can seed a code window even when its callable has no other
 identifier occurrence. The producer considers the whole literal and at most
 eight enclosing AST nodes, retaining only safe complete source slices of at
@@ -122,7 +291,7 @@ leads must disclose missing context; text occurrence does not prove behavior.
 
 Profiles1–6 retain their original capabilities and document frequencies,
 including code vocabulary in5–6 and parameter roles in6. Unknown profiles fail
-explicitly. Update with the new binary for literal-only recall; cache29 refreshes
+explicitly. Update with the new binary for literal-only recall; cache31 refreshes
 disposable extraction state, while immutable historical artifacts remain
 unchanged. Ranker21 and ranked JSON4 remain current; the source-artifact digest
 separates responses for changed evidence. No query-time source reads, graph
@@ -198,7 +367,7 @@ rejects any source-evidence/inventory disagreement.
 
 Profiles1–5 keep their original payload and search/statistical meaning, including
 profile5 code vocabulary. They supply no parameter-role provenance. Older
-readers reject profile6 explicitly. AST cache29 refreshes disposable extraction
+readers reject profile6 explicitly. AST cache31 refreshes disposable extraction
 state on `compass update <root>`; use `compass update <root> --force` if current
 publication reports an older retained extraction. Historical realizations stay
 immutable. The developer collector accepts profiles1–7; freeze new actors and
@@ -217,7 +386,7 @@ is not proof of behavior. Exact/qualified identities and graph facts are unchang
 Immutable profiles 1–4 keep their original identifier/comment-only retrieval and
 document-frequency meaning. Older readers reject profile 5 explicitly. Run
 `compass update <root>` with the new binary for current code vocabulary; no
-historical realization is rewritten. AST cache29 refreshes disposable per-file
+historical realization is rewritten. AST cache31 refreshes disposable per-file
 profile metadata. Channel-completeness behavior introduced by
 `query-ranker/18-channel-completeness` remains supported by the current ranker
 described above.
@@ -344,7 +513,7 @@ Nested inspection was introduced by `source-query/4-nested-callable-context`;
 current evidence also supports profiles5–7. Ranked JSON uses
 `compass.query.ranked-view/4`. Readers retain source profiles1–6 and ranked
 views1–3 with their original meanings; older readers reject new versions.
-AST cache24 introduced the native scope metadata; current cache29 refreshes
+AST cache24 introduced the native scope metadata; current cache31 refreshes
 disposable metadata automatically.
 
 An already retrieved callable can expose `nested_callable_code` quotations from

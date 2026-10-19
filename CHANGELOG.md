@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+- Preserve unresolved local export names before target resolution and require a
+  version1 source export census for typed imports and known-empty star branches.
+  Keep recovered, unsupported and legacy export surfaces unknown. Validate the
+  new optional root evidence and include it in fact-digest profile4; AST cache31
+  refreshes current disposable facts. Independent qualification is pending.
+
+- In development, make typed TypeScript receiver imports traverse export
+  obligations before selecting a target. Preserve exact target files and unknown
+  branches, enforce public export visibility and explicit-export precedence,
+  and charge bounded shared/cyclic export graphs to the receiver work budget.
+  Unsupported namespace transitions remain unresolved; qualification is pending.
+
+- Bound aggregate TypeScript argument proofs before cloning or index retention.
+  Count repeated nodes and UTF-8 text with shared per-file validation rules.
+  On valid aggregate overflow, preserve declarations and eligible exact
+  relationships through explicit degraded partitioning and omission counts;
+  reject invalid per-file payloads before projecting partial results.
+
+- Bind TypeScript merge-absence evidence to explicit census capability version1.
+  Missing legacy metadata cannot certify absence, even with an old true flag;
+  unknown present versions are errors. TypeScript5 / JavaScript4 and AST cache31
+  rebuild current disposable facts without changing historical realizations or
+  promoting development producers. Profile4 digests include the capability.
+
+- In development, require bounded observed TypeScript module/reference load
+  coverage before preserving nominal identity through `Awaited`; missing or
+  augmenting dependencies remain unresolved. Canonical fact digests include
+  the new typed source-load census. Bind optional owning load proofs to exact
+  kind and occurrence; keep type-package evidence out of ordinary module-symbol
+  lookup. Combined-patch review and gates are pending.
+
+- Preserve source/type identity through supported TypeScript `Awaited` wrappers
+  using explicit bounded nominal inventories and project merge certificates.
+  Keep unsupported thenables and incomplete/merged types unresolved. Extend
+  evidence/2 with TypeScript class/interface inventory metadata and optional
+  batch merge coverage; strict readers must upgrade. Fact-digest profile3
+  includes the new certificate and typed argument proofs. Combined TypeScript
+  producer/cache identities are TypeScript5 / JavaScript4 / AST cache31;
+  independent qualification remains pending.
+
+- Return a must-use omission report from the Rust universal materialization
+  API so analysis limits cannot silently discard their completeness status.
+  Rust integrations must consume the report and preserve degraded status for
+  partial output; node/edge buffer updates are not transactional.
+
 - Retain nominal type-reference occurrences for Rust struct and struct-like
   enum-variant literals, with exact owners/source anchors and shared conservative
   cross-file resolution. Support concrete impl `Self`, aliases and generic

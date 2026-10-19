@@ -2,6 +2,72 @@
 
 use super::*;
 
+mod typescript_exports;
+pub(in crate::evidence) use typescript_exports::typescript_typed_export_indices;
+
+/// Read bounded proof fields by reference. Do not clone/deserialise arbitrary
+/// provider JSON before checking its shape, text bounds and major version.
+pub(in crate::evidence) fn typescript_source_load_proof_payload(
+    value: &Value,
+) -> Result<&Map<String, Value>, String> {
+    let invalid = || "invalid TypeScript source-load proof".to_owned();
+    let proof = value
+        .as_object()
+        .filter(|value| value.len() == 2)
+        .ok_or_else(invalid)?;
+    match proof.get("version").and_then(Value::as_u64) {
+        Some(1) => {}
+        Some(_) => return Err("unsupported TypeScript source-load proof version".to_owned()),
+        None => return Err(invalid()),
+    }
+    let dependency = proof
+        .get("dependency")
+        .and_then(Value::as_object)
+        .filter(|value| value.len() == 3)
+        .ok_or_else(invalid)?;
+    if !matches!(
+        dependency.get("kind").and_then(Value::as_str),
+        Some("module" | "reference_path" | "reference_types")
+    ) {
+        return Err(invalid());
+    }
+    let specifier = dependency
+        .get("specifier")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid)?;
+    if specifier.is_empty()
+        || specifier.len() > compass_languages::MAX_TYPESCRIPT_MERGE_DEPENDENCY_SPECIFIER_BYTES
+        || specifier.contains(['\\', '\0'])
+    {
+        return Err(invalid());
+    }
+    let range = dependency
+        .get("range")
+        .and_then(Value::as_object)
+        .filter(|value| value.len() == 7)
+        .ok_or_else(invalid)?;
+    if range
+        .get("sourceFile")
+        .and_then(Value::as_str)
+        .is_none_or(|source| source.is_empty() || source.len() > 4_096)
+    {
+        return Err(invalid());
+    }
+    for field in [
+        "startByte",
+        "endByte",
+        "startLine",
+        "endLine",
+        "startColumn",
+        "endColumn",
+    ] {
+        if range.get(field).and_then(Value::as_u64).is_none() {
+            return Err(invalid());
+        }
+    }
+    Ok(dependency)
+}
+
 pub(super) struct ProjectContext {
     pub(super) root: std::path::PathBuf,
     pub(super) python_project_modules: PythonProjectModuleIndex,
@@ -226,6 +292,14 @@ pub(in crate::evidence) fn typescript_project_module_index(
     for edge in edges {
         if edge.attributes.get("relation").and_then(Value::as_str) != Some("imports_from") {
             continue;
+        }
+        if let Some(proof) = edge.attributes.get(TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE) {
+            let dependency = typescript_source_load_proof_payload(proof)?;
+            // A type-package directive is not an ordinary module import;
+            // introducing its proof must not change symbol-import targets.
+            if dependency.get("kind").and_then(Value::as_str) != Some("module") {
+                continue;
+            }
         }
         let module = edge.string("module");
         if module.is_empty() || module.len() > 4_096 || module.contains(['\\', '\0']) {

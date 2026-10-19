@@ -31,8 +31,10 @@ pub(crate) use projection::is_replaced_relation;
 pub(crate) use projection::leading_documentation_diagnostics;
 
 pub use api::{
-    ResolutionDecision, ResolutionEvidence, ResolutionRule, UNIVERSAL_RESOLUTION_REPORT_EXTENSION,
-    UniversalResolutionCounts, UniversalResolutionLimits, UniversalResolutionReport,
+    ResolutionDecision, ResolutionEvidence, ResolutionRule, TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE,
+    TypeScriptSourceLoadProof, UNIVERSAL_RESOLUTION_REPORT_EXTENSION,
+    UniversalMaterializationReport, UniversalResolutionCounts, UniversalResolutionLimits,
+    UniversalResolutionReport,
 };
 pub(crate) use partition::materialize_bounded_owned;
 
@@ -108,6 +110,16 @@ struct TypeScriptReexportTarget {
     module: String,
     exported: String,
 }
+
+/// Alternatives for one exact import/reexport binding. Independent export
+/// bindings remain separate obligations, including unavailable project targets.
+#[derive(Default)]
+struct TypeScriptBindingSources {
+    sources: Vec<String>,
+    unavailable: bool,
+}
+
+type TypeScriptReexportBindings = AHashMap<(String, String, String), Vec<String>>;
 
 #[derive(Clone, Debug)]
 struct TypeScriptMemberPath {

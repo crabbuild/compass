@@ -201,6 +201,7 @@ struct CompactConstraint {
     argument_types: Vec<Option<StringSlot>>,
     allowed_target_kinds: Vec<StringSlot>,
     hierarchy: Option<CompactHierarchy>,
+    typescript_type_arguments: Option<compass_languages::TypeScriptTypeArguments>,
     allow_external: bool,
 }
 
@@ -390,6 +391,7 @@ impl CompactConstraint {
                 .hierarchy
                 .map(|hierarchy| CompactHierarchy::new(hierarchy, strings))
                 .transpose()?,
+            typescript_type_arguments: constraint.typescript_type_arguments,
             allow_external: constraint.allow_external,
         })
     }
@@ -424,6 +426,7 @@ impl CompactConstraint {
                 .hierarchy
                 .as_ref()
                 .map(|hierarchy| hierarchy.inflate(table)),
+            typescript_type_arguments: self.typescript_type_arguments.clone(),
             allow_external: self.allow_external,
         }
     }
@@ -624,6 +627,29 @@ mod tests {
     }
 
     #[test]
+    fn candidate_table_preserves_absent_empty_and_unknown_argument_proofs() -> Result<(), String> {
+        let proof = compass_languages::TypeScriptTypeArguments {
+            version: 1,
+            owner_binding_id: "binding:root".to_owned(),
+            arguments: Vec::new(),
+        };
+        for arguments in [
+            None,
+            Some(proof.clone()),
+            Some(compass_languages::TypeScriptTypeArguments {
+                arguments: vec![compass_languages::TypeScriptTypeArgument::Unknown],
+                ..proof
+            }),
+        ] {
+            let mut candidate = candidate_with_id("candidate:proof-state");
+            candidate.constraints.typescript_type_arguments = arguments;
+            let table = CandidateTable::from_values(vec![candidate.clone()])?;
+            assert_eq!(table.get(&candidate.id), Some(candidate));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn candidate_table_round_trips_every_compacted_field() -> Result<(), String> {
         let candidate = RelationshipCandidate {
             id: "candidate:1".to_owned(),
@@ -645,6 +671,18 @@ mod tests {
                 hierarchy: Some(HierarchyConstraint::ReceiverDispatch {
                     receiver_qualified_name: "crate::Receiver".to_owned(),
                     strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+                }),
+                typescript_type_arguments: Some(compass_languages::TypeScriptTypeArguments {
+                    version: 1,
+                    owner_binding_id: "binding:root".to_owned(),
+                    arguments: vec![compass_languages::TypeScriptTypeArgument::Import {
+                        binding_id: "binding:argument".to_owned(),
+                        member_path: vec!["Nested".to_owned()],
+                        arguments: vec![compass_languages::TypeScriptTypeArgument::Source {
+                            declaration_id: "declaration:argument".to_owned(),
+                            arguments: vec![compass_languages::TypeScriptTypeArgument::Unknown],
+                        }],
+                    }],
                 }),
                 allow_external: true,
             },

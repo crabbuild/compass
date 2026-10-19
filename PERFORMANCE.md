@@ -1,5 +1,24 @@
 # Compass performance qualification
 
+## In-progress typed export traversal bounds
+
+Typed TypeScript receiver analysis shares its16384 work units with export
+traversal. Every binding/presence/index probe, raw candidate and frontier
+retention spends work. Each walk discovers at most the configured per-lookup
+candidate count (default256) of distinct(language,source-file,export) states;
+export depth is bounded at64. Duplicate DAG/cycle states do not expand again,
+but reaching an existing state still spends the edge/probe work. Bounded
+fixed-point passes and slot propagation also spend this meter before each
+retention; per-state results are checked before any owning alternative is
+discarded. An unfinished
+walk returns an explicit resource decision before target selection. Complete
+per-binding source alternatives are prepared during index construction; queries
+consume them without scanning the entire project module map.
+
+These are development resource contracts. Focused synthetic boundary controls
+and prior native baselines do not establish current real-corpus latency/RSS or
+comparative performance; the original fresh qualification remains required.
+
 ## Literal-seeded evidence bounds
 
 Profile7 considers a literal's whole subtree and at most eight ancestors.
@@ -1646,3 +1665,11 @@ can recover later source owners when the per-file scope quota was previously
 spent on keyword tokens. The change can affect source-field coverage and
 retrieval scores in quota-limited files; it does not change semantic graph
 records. AST cache24 rebuilds the affected disposable evidence.
+
+
+The in-progress ECMAScript export census checks top-level syntax and retained
+root bindings on the shared200000-step source-work budget. Its optional root
+certificate has fixed size; no new export-name vector is cloned or retained.
+Typed resolution requires a current complete census per visited source, and
+aggregate fallback discards certificates when it discards binding evidence.
+This is a resource contract, not measured real-repository cost or quality.

@@ -13,7 +13,7 @@ mode, terminal-name fallback, or runtime dependency on Graphify.
 
 ## In-progress leading documentation
 
-The development registry now marks Go2, Rust4 and TypeScript4 as `Qualifying`.
+The development registry now marks Go2, Rust4 and TypeScript5 as `Qualifying`.
 They emit optional `DeclarationFact.documentation` metadata under evidence/2:
 an AST attachment kind, exact source range and raw UTF-8 comment text. The first
 slice supports one contiguous leading group on supported named declarations;
@@ -37,9 +37,95 @@ Extraction/5 and AST-cache20 invalidate prior disposable facts. The existing
 release-promotion record and its strong matching test remain unchanged pending
 a new source audit and reviewed decision.
 
+## In-progress source export inventories
+
+Root TypeScript/JavaScript file/module facts optionally carry
+`ecmascriptExportInventory` with version1 and explicit completeness. The native
+producer checks original top-level export syntax against exact retained root
+bindings, including unresolved local-name obligations. A supplied file alone
+cannot prove an empty export surface. Parser recovery, non-module scripts,
+ambient/namespace exports, export assignment and unsupported export projections
+leave the census incomplete. Supported explicit local/named exports still take
+precedence over unrelated stars. Unsupported string export names and
+exported destructuring remain conservative unknowns. This certificate is
+independent of project merge absence and of target availability.
+
+The consumer requires the current complete certificate at every visited export
+source; missing legacy metadata or any incomplete duplicate source prevents a
+unique typed result. Invalid versions/owners fail evidence validation. No new
+unbounded text/vector payload is introduced; census indexing and AST probes use
+the source's shared200000-step work limit. Fact-digest profile4 includes the
+certificate and AST cache31 invalidates disposable old facts. Strict older
+readers must upgrade. Source review, native gates and qualification remain
+separate requirements.
+
 ## In-progress primary ECMAScript member scopes
 
-JavaScript3 and TypeScript4 are `Qualifying` for a shared receiver-scope
+The in-progress TypeScript receiver patch also emits optional
+`memberInventoryComplete` on class/interface facts. True certifies a supported,
+fully retained direct inventory in an explicit ECMAScript module, matched by
+exact declaration anchors and primary member scope. Recovery, heritage,
+constructors, computed/escaped names, decorators, ambient/namespace ancestors
+and unsupported syntax prevent certification. Accepted shapes have a complete
+empty direct-base set. Work shares the200000-step type-origin budget and fails
+the batch explicitly on exhaustion. Rust trait semantics remain unchanged.
+
+The optional `typescriptMergeInventoryVersion=1` capability binds the complete
+census contract independently of producer identity. Merge absence additionally
+requires this version in every TypeScript batch; missing legacy versions remain
+readable but unknown, including old true complete flags. Unknown present versions
+are explicit validation errors. TypeScript5 / JavaScript4 and AST cache31
+invalidate disposable current extraction state. Profile4 digests include the
+version; historical realizations and release qualification remain unchanged.
+
+A separate optional batch `typescriptMergeInventoryComplete` flag requires a
+bounded original-AST walk with no recovery, ambient declarations or namespaces.
+Nonempty scripts cannot certify it. Every TypeScript batch must explicitly
+certify this inventory before the project consumer relies on merge absence;
+missing metadata or an uncertified TypeScript source in the graph inventory is
+unknown. Syntax traversal charges visits/frontier retention
+and enforces depth512 within the shared work budget.
+
+The development batch also carries `typescriptMergeDependencies`: typed module,
+reference-path and reference-types loads with exact source anchors. The original
+AST census covers literal imports/re-exports/import-equals/require and dynamic
+imports, plus supported triple-slash references. Nonliteral, escaped or
+unsupported load syntax cannot certify completeness. Loaded sources must be
+supplied and certified; known missing or augmenting dependencies prevent merge
+absence. Reference paths match exact normalized sources. Module coverage consumes
+raw owning project edges, retaining unknown alternatives across contexts before
+ordinary lookup can filter them. Invalid/missing targets cannot fall back;
+relative source candidates retain extension families and literal quote identity.
+Bare modules and
+reference-types need explicit project resolution metadata. Optional
+`typescript_source_load` edge metadata uses `TypeScriptSourceLoadProof` version1,
+with an exact typed dependency and source range, to bind target resolution to
+one observed occurrence. A module mapping cannot satisfy a same-spelled
+reference-types directive. Legacy module edges cover only a single observed
+module load; repeated loads need exact occurrence proofs. Missing reference-types
+owning resolution remains unsupported; no automatic type-package loader or
+compiler-backed proof producer is claimed. Unknown versions are errors; the
+borrowed payload reader enforces shape/text limits, and cross-load matching
+shares1048576 proof steps. Direct members
+independent of `Awaited` remain available without this stronger proof.
+Pre-retention limits are4096 loads and1MiB copied text per batch,1024 bytes per
+specifier and4096 per source path; project limits are65536 loads and16MiB,
+checked before borrowed clone or owned indexing. Resource errors are explicit.
+Profile4 digests include the census in canonical field order. Independent
+closure review and complete combined-patch verification remain pending.
+
+The typed `Awaited` consumer checks every intrinsic Promise/PromiseLike wrapper
+in its definition scope. Terminal nominal preservation additionally requires
+exact actual/alias expansion to one TypeScript class/interface, complete project
+merge inventory, complete direct member inventory and empty base list, no
+lexical merge and no `then` member. Custom thenable result semantics and
+missing/unsupported proof remain unresolved. Older strict readers/validators
+must upgrade. Fact-digest profile4 includes the batch certificate and exact
+typed argument proof trees; raw proof identity changes may conservatively reduce
+fact-neutral reuse. Producer/cache integration is TypeScript5 / JavaScript4 /
+AST cache31; qualification for the combined development patch remains pending.
+
+JavaScript4 and TypeScript5 are `Qualifying` for a shared receiver-scope
 correction. A member scope must be the unique owned child directly below its
 declaration's binding scope. Nested blocks and callable-type scopes may share
 the owner but cannot be selected by the lexical order of their hashed IDs.
@@ -93,7 +179,7 @@ producer remains `Qualifying`; the historical release decision below is unchange
 
 ## In-progress callable initializer definition ranges
 
-JavaScript3 and TypeScript4 also retain the full definition range of a direct
+JavaScript4 and TypeScript5 also retain the full definition range of a direct
 variable-bound function. The binding declaration keeps its original name anchor
 for identity and provenance. An extended definition requires one directly owned
 function scope whose parent is the binding scope; inherited callbacks and
@@ -530,6 +616,16 @@ resolver path. `UniversalEvidenceRegistry::validate()` must then pass.
 
 ## Resolution
 
+The Rust `UniversalResolutionIndex::materialize` method returns a must-use
+`UniversalMaterializationReport`. Its `omitted_candidates` counts resource-limit
+decisions that could not project relationships. Preserve degraded status when
+that count is nonzero; the method may already have changed both output buffers
+and does not roll them back. Ambiguity and unsupported source constructs remain
+unresolved independently of this count, so zero omissions is not a claim of
+complete semantic analysis. Application builds propagate these resource
+omissions through the existing resolution report and
+`universal_resolution_partial` graph diagnostic.
+
 `UniversalResolutionIndex` validates and merges batches, bounds every index,
 sorts candidate identities, and applies this order:
 
@@ -548,6 +644,16 @@ relationship. This compaction is deterministic and preserves every detail
 used as a relationship source, exact target, binding target, or hierarchy
 constraint.
 
+Project auxiliary quotas are2000000 TypeScript argument nodes and128MiB of
+owner/reference/path UTF-8 text, counting repeated copies and present empty
+proof owners, plus65536 observed loads and16MiB of their copied text. Shared
+per-batch accounting runs before borrowed batch cloning and owned index
+retention. Every batch must still satisfy its own hard limits even after an
+aggregate quota is exceeded. The bounded collection API routes valid aggregate
+overflow to the exact-only fallback below and discards unused proof/load
+payloads and merge certificates before partial indexing; direct index
+constructors return an explicit limit error.
+
 When aggregate evidence still exceeds one resolver envelope, Compass projects
 all retained source declarations before building resolution indexes, then
 packs source files into deterministic bounded partitions. Partitioned
@@ -564,6 +670,30 @@ diagnostic `universal_resolution_partial` with bounded counts and a reason.
 The build command reports the exact relationship omission count and exits
 nonzero so automation cannot mistake partial collection resolution for a
 complete graph. Low-profile compaction alone is informational and successful.
+
+For typed TypeScript receiver imports, the export proof retains each binding
+obligation and exact target source separately from the ordinary display/module
+index. Both root and nested actual imports use a shared fallible proof before
+uniqueness. Only top-level explicit export bindings populate public named
+exports; local/named exports take precedence over stars. An unavailable explicit
+or star obligation is unknown, while a supplied empty source can establish an
+empty branch. Physical sources such as `foo.ts` and `foo/index.ts` are distinct.
+The native relative fallback has a bounded source/declaration substitution
+profile; packages/custom suffixes need owning resolution metadata. Namespace
+reexports requiring an unmodeled visibility-preserving namespace transition
+remain unknown. This is not compiler/runtime parity or language promotion.
+
+Each export walk globally discovers bounded(source-file,language,export) states,
+with depth64 and the existing per-lookup cardinality cap. Work is charged on the
+same16384-unit meter as receiver transitions, before raw alternatives/frontier
+retention. Reaching a repeated state does not expand it again; the entire pending
+graph must finish before a slot set can authorize uniqueness. Fixed-point
+propagation computes per-state closures on the same meter, preserving cycles and
+required target alternatives. An empty/nonempty pair of physical targets within
+one binding is unknown; an independently empty star branch can be known absence.
+Unknown/Limit never
+falls back to legacy display-spelling lookup. The batch census and merge-absence
+rules remain separate from the ability to identify an explicit direct export.
 
 Explicit bindings precede lexical lookup because a source import is direct
 use-site evidence and must shadow a same-named enclosing declaration. A

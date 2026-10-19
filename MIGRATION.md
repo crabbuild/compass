@@ -1,8 +1,61 @@
 # Migrate from Graphify to Compass
 
+The development export-proof repair adds `ecmascriptExportInventory` to root
+TypeScript/JavaScript file/module declarations under evidence/2. Upgrade strict
+readers for its explicit version1/complete contract; missing metadata stays
+unknown. Unresolved explicit exports must retain their names and cannot fall
+through to a star target. Run `compass update <root>` with the new binary:
+AST cache31 and fact-digest profile4 rebuild disposable current state without
+rewriting historical realizations. These certificates do not promote producers
+or qualify comparative quality.
+
+The in-progress TypeScript evidence patch adds optional
+`typescriptMergeDependencies` under evidence/2. Strict readers must upgrade.
+The vector distinguishes module, reference-path and reference-types loads and
+retains exact source ranges. Missing dependency coverage prevents merge-absence
+proof, while unsupported load syntax leaves the batch uncertified. Disposable
+fact-digest profile4 includes the census and its explicit version1 capability.
+TypeScript5 / JavaScript4 and AST cache31 refresh current extraction identities.
+Run `compass update <root>` with the new binary. Missing census-version metadata
+remains legacy/unknown even if an old complete boolean is true. Unknown present
+versions are errors; current readers must not infer capability from producer
+version alone.
+
+Owning project integrations can represent a precise load resolution with the
+optional `typescript_source_load` edge attribute (`TypeScriptSourceLoadProof`,
+version1). It contains the exact typed census dependency and source range;
+target source remains on the existing edge inventory/`target_file` interface.
+Upgrade readers before consuming these edges: reference-types evidence cannot
+be downgraded to an ordinary module import. Generic module mappings do not
+certify type-package directives or distinguish repeated load occurrences.
+Absent owning reference-types evidence remains unsupported; no new compiler or
+automatic type-package loader is required or claimed.
+
+
+Development evidence consumers must allow `memberInventoryComplete` on
+TypeScript class/interface facts as well as Rust traits, and understand the
+optional batch `typescriptMergeInventoryComplete` certificate. Missing/false
+certificates cannot establish member or augmentation absence. TypeScript
+`Awaited` terminal identity requires explicit bounded nominal/project proof;
+unsupported thenable or merged types can remain unresolved. Update strict
+readers/validators before consuming these facts. Fact-digest profile3 refreshes
+disposable digest state automatically and includes merge certificates and exact
+typed proof trees and the explicit census capability version. Producer/cache
+integration is TypeScript5 / JavaScript4 / AST cache31; this is not a promotion
+decision and does not rewrite historical realizations.
+
+Rust integrations calling `UniversalResolutionIndex::materialize` must now
+consume its `UniversalMaterializationReport` return value. Check
+`omitted_candidates` before publishing the mutated node/edge buffers: a nonzero
+count means resource limits prevented relationships from being projected and
+the output must be labeled degraded. The operation does not roll back those
+buffers. Update callbacks/function pointers previously expecting `()` as well.
+The normal Compass build path already propagates this state through its graph
+diagnostics. A zero count does not establish that all source semantics resolved.
+
 Rust development producer4 records nominal type references from struct literals,
 including concrete impl `Self` and struct-like enum variants. Run
-`compass update <root>` with the new binary to rebuild disposable AST cache29.
+`compass update <root>` with the new binary to rebuild disposable AST cache31.
 Literal contacts are references, not constructor calls or field read/write
 claims. Ambiguous/unproven targets remain unresolved. Historical graphs are
 immutable, and Rust4 remains `Qualifying`; no release promotion is implied.
@@ -22,12 +75,12 @@ include the type namespace. Resolve affected identities again after updating.
 New Rust traits carry `memberInventoryComplete` separately from base coverage.
 Readers must preserve it; missing/false metadata cannot justify an empty member
 set. Trait-body macros and unsupported attributes keep generic dispatch
-unresolved. Current fact-digest profile2 refreshes automatically during update.
+unresolved. Current fact-digest profile4 refreshes automatically during update.
 
 Current updates use `source-query/7-literal-seeded-code`. Whole raw string
 literals can now seed bounded callable-owned code windows without another
 identifier. Parameter bindings remain separate from generic occurrences. Run
-`compass update <root>` with the new binary; AST cache29 refreshes automatically.
+`compass update <root>` with the new binary; AST cache31 refreshes automatically.
 If publication reports older retained extraction, run
 `compass update <root> --force`. Older binaries reject profile7 and must be
 upgraded. Readers preserve profiles1–6 with their original lexical/statistical
@@ -63,12 +116,12 @@ code candidates with explicit translations and separate literal context. No
 manual cache deletion, graph rebuild or source/index schema migration is needed
 for this query-only change. Exact-symbol commands retain their contracts.
 
-Current updates rebuild AST cache29 and retain callable-body evidence for direct
+Current updates rebuild AST cache31 and retain callable-body evidence for direct
 TypeScript/TSX variable initializers. Their source ranges now cover the complete
 definition; original binding identity and AST provenance stay distinct. Older
 `source-query/1-ast-callable-lexemes` artifacts remain readable and historical
 realizations are unchanged. New artifacts use profile7; older binaries must be
-upgraded to read that projection. JavaScript3 and TypeScript4 remain `Qualifying`
+upgraded to read that projection. JavaScript4 and TypeScript5 remain `Qualifying`
 pending source audit and release promotion.
 
 Compass uses its own executable, output directory, environment variable, and
@@ -194,7 +247,7 @@ this query-only channel when existing relationship postings are available.
 
 Run `compass update <root>` to rebuild JavaScript/TypeScript current graphs with
 structurally selected member scopes. AST cache24 discards older disposable
-entries automatically. JavaScript3 and TypeScript4 remain development producers
+entries automatically. JavaScript4 and TypeScript5 remain development producers
 marked `Qualifying`; their updated identities do not alter the approved historical
 promotion record. Evidence/2, graph/1 and historical realizations retain their
 existing contracts.

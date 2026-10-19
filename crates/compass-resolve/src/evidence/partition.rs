@@ -11,6 +11,7 @@ use compass_languages::{
 
 use crate::ResolutionAdmission;
 
+use super::budget::{AuxiliaryLimitError, AuxiliaryLimits};
 use super::{
     UniversalResolutionCounts, UniversalResolutionIndex, UniversalResolutionLimits,
     UniversalResolutionReport,
@@ -25,12 +26,35 @@ const LOW_DETAIL_DECLARATION_KINDS: &[&str] = &[
 ];
 
 pub(crate) fn materialize_bounded_owned(
+    batches: Vec<SemanticEvidenceBatch>,
+    project_edges: &[EdgeRecord],
+    root: &Path,
+    limits: UniversalResolutionLimits,
+    admission: ResolutionAdmission,
+    prevalidated: bool,
+    output: (&mut Vec<NodeRecord>, &mut Vec<EdgeRecord>),
+) -> UniversalResolutionReport {
+    materialize_with_auxiliary_limits(
+        batches,
+        project_edges,
+        root,
+        limits,
+        admission,
+        prevalidated,
+        AuxiliaryLimits::default(),
+        output,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn materialize_with_auxiliary_limits(
     mut batches: Vec<SemanticEvidenceBatch>,
     project_edges: &[EdgeRecord],
     root: &Path,
     limits: UniversalResolutionLimits,
     admission: ResolutionAdmission,
     prevalidated: bool,
+    auxiliary_limits: AuxiliaryLimits,
     output: (&mut Vec<NodeRecord>, &mut Vec<EdgeRecord>),
 ) -> UniversalResolutionReport {
     let (nodes, edges) = output;
@@ -48,11 +72,27 @@ pub(crate) fn materialize_bounded_owned(
             ..UniversalResolutionReport::default()
         };
     }
-    let compacted_declarations = if admission == ResolutionAdmission::Low {
-        compact_low_inference_evidence(&mut batches)
-    } else {
-        0
+    let auxiliary_error = match auxiliary_limits.check(&batches) {
+        Ok(()) => None,
+        Err(error @ AuxiliaryLimitError::Aggregate { .. }) => Some(error.to_string()),
+        Err(error @ AuxiliaryLimitError::InvalidBatch(_)) => {
+            return UniversalResolutionReport {
+                degraded: true,
+                failed_partitions: 1,
+                omitted_candidates: input.candidates,
+                input,
+                retained: input,
+                reason: Some(error.to_string()),
+                ..UniversalResolutionReport::default()
+            };
+        }
     };
+    let compacted_declarations =
+        if admission == ResolutionAdmission::Low && auxiliary_error.is_none() {
+            compact_low_inference_evidence(&mut batches)
+        } else {
+            0
+        };
     let retained = evidence_counts(&batches);
 
     // Declaration projection is independent from project-wide target selection.
@@ -66,7 +106,7 @@ pub(crate) fn materialize_bounded_owned(
     }
     drop(graph_ids);
 
-    if retained.fits(limits) {
+    if retained.fits(limits) && auxiliary_error.is_none() {
         let candidate_count = retained.candidates;
         let index = if prevalidated {
             UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned_at_inference(
@@ -88,8 +128,11 @@ pub(crate) fn materialize_bounded_owned(
         };
         return match index {
             Ok(index) => {
-                index.materialize_relationships_at_inference(nodes, edges, admission);
+                let limited = index.materialize_relationships_at_inference(nodes, edges, admission);
                 UniversalResolutionReport {
+                    degraded: limited > 0,
+                    omitted_candidates: limited,
+                    reason: (limited > 0).then(|| "TypeScript receiver analysis exceeded its per-query work, depth, or candidate limits".to_owned()),
                     partitions: 1,
                     compacted_declarations,
                     input,
@@ -117,6 +160,18 @@ pub(crate) fn materialize_bounded_owned(
         batch
             .candidates
             .retain(|candidate| candidate.constraints.exact_target_declaration_id.is_some());
+        // Exact-target projection does not inspect typed arguments or source
+        // closure. Drop those payloads before constructing any partial index;
+        // an aggregate quota failure must still preserve proven local edges.
+        for candidate in &mut batch.candidates {
+            candidate.constraints.typescript_type_arguments = None;
+        }
+        for declaration in &mut batch.declarations {
+            declaration.ecmascript_export_inventory = None;
+        }
+        batch.typescript_merge_dependencies.clear();
+        batch.typescript_merge_inventory_complete = None;
+        batch.typescript_merge_inventory_version = None;
         omitted_candidates =
             omitted_candidates.saturating_add(before.saturating_sub(batch.candidates.len()));
         let retained_occurrences = batch
@@ -141,7 +196,7 @@ pub(crate) fn materialize_bounded_owned(
         omitted_candidates,
         input,
         retained,
-        reason: Some(format!(
+        reason: Some(auxiliary_error.unwrap_or_else(|| format!(
             "aggregate universal evidence exceeds one bounded resolver: declarations {}>{}, bindings {}>{}, occurrences {}>{}, candidates {}>{}, scopes {}>{}",
             retained.declarations,
             limits.declarations,
@@ -153,7 +208,7 @@ pub(crate) fn materialize_bounded_owned(
             limits.candidates,
             retained.scopes,
             limits.candidates,
-        )),
+        ))),
         ..UniversalResolutionReport::default()
     };
 
@@ -200,7 +255,10 @@ pub(crate) fn materialize_bounded_owned(
         report.partitions = report.partitions.saturating_add(1);
         match index {
             Ok(index) => {
-                index.materialize_relationships_at_inference(nodes, edges, partition_admission);
+                let limited =
+                    index.materialize_relationships_at_inference(nodes, edges, partition_admission);
+                report.omitted_candidates = report.omitted_candidates.saturating_add(limited);
+                report.degraded |= limited > 0;
             }
             Err(error) => {
                 report.failed_partitions = report.failed_partitions.saturating_add(1);
@@ -240,6 +298,25 @@ fn validate_batches_for_projection(batches: &[SemanticEvidenceBatch]) -> Result<
 fn compact_low_inference_evidence(batches: &mut [SemanticEvidenceBatch]) -> usize {
     let mut required_details = AHashSet::<String>::new();
     let mut used_bindings = AHashSet::<String>::new();
+    // Typed imports select provider fields and parameters only after project
+    // resolution. Source-batch spellings cannot prove foreign fields unused.
+    if batches
+        .iter()
+        .flat_map(|batch| &batch.candidates)
+        .any(|candidate| candidate.constraints.typescript_type_arguments.is_some())
+    {
+        required_details.extend(
+            batches
+                .iter()
+                .flat_map(|batch| &batch.declarations)
+                .filter(|declaration| {
+                    matches!(declaration.language.as_str(), "typescript" | "javascript")
+                        && matches!(declaration.kind.as_str(), "property" | "type_parameter")
+                })
+                .map(|declaration| declaration.id.clone()),
+        );
+    }
+
     for candidate in batches.iter().flat_map(|batch| &batch.candidates) {
         if !matches!(
             candidate.relation,
@@ -251,6 +328,30 @@ fn compact_low_inference_evidence(batches: &mut [SemanticEvidenceBatch]) -> usiz
             }
             if let Some(binding) = &candidate.binding_id {
                 used_bindings.insert(binding.clone());
+            }
+            if let Some(proof) = &candidate.constraints.typescript_type_arguments {
+                used_bindings.insert(proof.owner_binding_id.clone());
+                let mut pending = proof.arguments.iter().collect::<Vec<_>>();
+                while let Some(argument) = pending.pop() {
+                    match argument {
+                        compass_languages::TypeScriptTypeArgument::Source {
+                            declaration_id,
+                            arguments,
+                        } => {
+                            required_details.insert(declaration_id.clone());
+                            pending.extend(arguments);
+                        }
+                        compass_languages::TypeScriptTypeArgument::Import {
+                            binding_id,
+                            arguments,
+                            ..
+                        } => {
+                            used_bindings.insert(binding_id.clone());
+                            pending.extend(arguments);
+                        }
+                        compass_languages::TypeScriptTypeArgument::Unknown => {}
+                    }
+                }
             }
             if let Some(HierarchyConstraint::RustAssociatedType {
                 receiver_declaration_id,
@@ -457,6 +558,282 @@ mod tests {
     use super::*;
 
     #[test]
+    fn low_compaction_keeps_foreign_fields_and_unused_generic_parameter_identities()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let mut batches = Vec::new();
+        for (file, source) in [
+            (
+                "provider.ts",
+                "class Good { lookup() {} } export interface Holder<T> { fixed: Good }",
+            ),
+            (
+                "main.ts",
+                "import type { Holder } from './provider'; import type { Remote } from './missing'; class Owner { holder: Holder<Remote>; read() { this.holder.fixed.lookup(); } }",
+            ),
+        ] {
+            let path = root.path().join(file);
+            std::fs::write(&path, source)?;
+            batches.push(Engine::default().extract_source_universal_evidence(
+                &path,
+                file,
+                source.as_bytes(),
+            )?);
+        }
+        let expected_details = batches
+            .iter()
+            .flat_map(|batch| &batch.declarations)
+            .filter(|declaration| {
+                declaration.range.source_file == "provider.ts"
+                    && matches!(declaration.kind.as_str(), "property" | "type_parameter")
+            })
+            .map(|declaration| declaration.id.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(expected_details.len(), 2);
+        compact_low_inference_evidence(&mut batches);
+        validate_batches_for_projection(&batches)?;
+        let retained = batches
+            .iter()
+            .flat_map(|batch| &batch.declarations)
+            .map(|declaration| declaration.id.clone())
+            .collect::<BTreeSet<_>>();
+        assert!(expected_details.is_subset(&retained));
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        let report = materialize_bounded_owned(
+            batches,
+            &[],
+            root.path(),
+            UniversalResolutionLimits::default(),
+            ResolutionAdmission::Low,
+            false,
+            (&mut nodes, &mut edges),
+        );
+        assert!(!report.degraded, "{report:?}");
+        let target = nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == "provider.Good.lookup")
+            .ok_or("missing provider method")?;
+        assert!(edges.iter().any(|edge| edge.target == target.id
+            && edge.string("relation") == "calls"
+            && edge.string("source_file") == "main.ts"));
+        Ok(())
+    }
+
+    #[test]
+    fn auxiliary_overflow_preserves_exact_calls_and_reports_typed_omissions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let mut batches = Vec::new();
+        for (file, source) in [
+            ("provider.ts", "export interface Holder<T> { field: T }"),
+            (
+                "main.ts",
+                "import type { Holder } from './provider'; class Good { lookup() {} } function local() {} export function read(value: Holder<Good>) { local(); value.field.lookup(); }",
+            ),
+        ] {
+            let path = root.path().join(file);
+            std::fs::write(&path, source)?;
+            batches.push(Engine::default().extract_source_universal_evidence(
+                &path,
+                file,
+                source.as_bytes(),
+            )?);
+        }
+        let materialize = |input: Vec<SemanticEvidenceBatch>, quota, admission, prevalidated| {
+            let mut nodes = Vec::new();
+            let mut edges = Vec::new();
+            let report = materialize_with_auxiliary_limits(
+                input,
+                &[],
+                root.path(),
+                UniversalResolutionLimits::default(),
+                admission,
+                prevalidated,
+                quota,
+                (&mut nodes, &mut edges),
+            );
+            (report, nodes, edges)
+        };
+        let baseline = materialize(
+            batches.clone(),
+            AuxiliaryLimits::default(),
+            ResolutionAdmission::Max,
+            false,
+        );
+        assert!(!baseline.0.degraded, "{:?}", baseline.0);
+        let local = baseline
+            .1
+            .iter()
+            .find(|node| node.string("qualified_name") == "main.local")
+            .ok_or("missing local")?;
+        let lookup = baseline
+            .1
+            .iter()
+            .find(|node| node.string("qualified_name") == "main.Good.lookup")
+            .ok_or("missing lookup")?;
+        let exact_call = baseline
+            .2
+            .iter()
+            .find(|edge| edge.target == local.id && edge.string("relation") == "calls")
+            .ok_or("missing exact call")?;
+        assert!(
+            baseline
+                .2
+                .iter()
+                .any(|edge| edge.target == lookup.id && edge.string("relation") == "calls")
+        );
+        let expected_omitted = batches
+            .iter()
+            .flat_map(|batch| &batch.candidates)
+            .filter(|candidate| candidate.constraints.exact_target_declaration_id.is_none())
+            .count();
+        assert!(expected_omitted > 0);
+        for quota in [
+            AuxiliaryLimits {
+                type_nodes: 0,
+                ..AuxiliaryLimits::default()
+            },
+            AuxiliaryLimits {
+                type_bytes: 0,
+                ..AuxiliaryLimits::default()
+            },
+            AuxiliaryLimits {
+                merge_dependencies: 0,
+                ..AuxiliaryLimits::default()
+            },
+            AuxiliaryLimits {
+                merge_bytes: 0,
+                ..AuxiliaryLimits::default()
+            },
+        ] {
+            for admission in [ResolutionAdmission::Low, ResolutionAdmission::Max] {
+                for prevalidated in [false, true] {
+                    let forward = materialize(batches.clone(), quota, admission, prevalidated);
+                    let reverse = materialize(
+                        batches.iter().rev().cloned().collect(),
+                        quota,
+                        admission,
+                        prevalidated,
+                    );
+                    assert_eq!(forward, reverse);
+                    assert!(
+                        forward.0.degraded && forward.0.partitioned,
+                        "{:?}",
+                        forward.0
+                    );
+                    assert_eq!(forward.0.failed_partitions, 0, "{:?}", forward.0);
+                    assert_eq!(forward.0.omitted_candidates, expected_omitted);
+                    assert!(forward.0.reason.as_deref().is_some_and(|reason| reason.contains("universal aggregate TypeScript")));
+                    assert!(
+                        forward.2.contains(exact_call),
+                        "exact call lost: {:?}",
+                        forward.2
+                    );
+                    assert!(
+                        !forward
+                            .2
+                            .iter()
+                            .any(|edge| edge.target == lookup.id
+                                && edge.string("relation") == "calls")
+                    );
+                    assert_eq!(
+                        forward
+                            .1
+                            .iter()
+                            .map(|node| &node.id)
+                            .collect::<BTreeSet<_>>(),
+                        baseline
+                            .1
+                            .iter()
+                            .map(|node| &node.id)
+                            .collect::<BTreeSet<_>>(),
+                    );
+                }
+            }
+        }
+        // Invalid per-file payloads cannot be laundered through the partial
+        // path, including callers that already validated ordinary facts.
+        let proof = batches
+            .iter_mut()
+            .flat_map(|batch| &mut batch.candidates)
+            .find_map(|candidate| candidate.constraints.typescript_type_arguments.as_mut())
+            .ok_or("missing proof")?;
+        proof.owner_binding_id = "x".repeat(1_025);
+        for prevalidated in [false, true] {
+            let invalid = materialize(
+                batches.clone(),
+                AuxiliaryLimits {
+                    type_nodes: 0,
+                    ..AuxiliaryLimits::default()
+                },
+                ResolutionAdmission::Max,
+                prevalidated,
+            );
+            assert!(invalid.0.degraded);
+            assert_eq!(invalid.0.failed_partitions, 1);
+            assert!(invalid.1.is_empty() && invalid.2.is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typed_arguments_survive_low_compaction_and_are_omitted_on_partition_overflow()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = b"import type { Holder, Remote } from './provider'; class Good {} class Owner { holder: Holder<Remote<Good>>; read() { this.holder.field.lookup(); } }";
+        let batch = Engine::default().extract_source_universal_evidence(
+            Path::new("main.ts"),
+            "main.ts",
+            source,
+        )?;
+        let expected = batch
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                candidate
+                    .constraints
+                    .typescript_type_arguments
+                    .as_ref()
+                    .map(|proof| (candidate.id.clone(), proof.clone()))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert!(!expected.is_empty());
+        let mut batches = vec![batch];
+        compact_low_inference_evidence(&mut batches);
+        validate_batches_for_projection(&batches)?;
+        let retained = batches
+            .iter()
+            .flat_map(|batch| &batch.candidates)
+            .filter_map(|candidate| {
+                candidate
+                    .constraints
+                    .typescript_type_arguments
+                    .as_ref()
+                    .map(|proof| (candidate.id.clone(), proof.clone()))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(retained, expected);
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        let report = materialize_bounded_owned(
+            batches,
+            &[],
+            Path::new("."),
+            UniversalResolutionLimits {
+                candidates: 1,
+                ..UniversalResolutionLimits::default()
+            },
+            ResolutionAdmission::Low,
+            false,
+            (&mut nodes, &mut edges),
+        );
+        assert!(report.degraded && report.partitioned);
+        assert!(report.omitted_candidates >= expected.len());
+        assert!(!edges.iter().any(|edge| edge.string("relation") == "calls"));
+        Ok(())
+    }
+
+    #[test]
     fn low_compaction_drops_unreferenced_detail_declarations()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut extraction = Engine::default().extract_source(
@@ -642,7 +1019,8 @@ mod tests {
         )?;
         let mut direct_nodes = inventory.clone();
         let mut direct_edges = Vec::new();
-        direct.materialize(&mut direct_nodes, &mut direct_edges);
+        let direct_report = direct.materialize(&mut direct_nodes, &mut direct_edges);
+        assert_eq!(direct_report.omitted_candidates, 0);
         let mut bounded_nodes = inventory;
         let mut bounded_edges = Vec::new();
 

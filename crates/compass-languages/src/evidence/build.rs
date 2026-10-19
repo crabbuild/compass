@@ -21,6 +21,8 @@ mod java_fields;
 mod python_receivers;
 #[cfg(test)]
 mod rust_literals_tests;
+#[cfg(test)]
+mod typescript_arguments_tests;
 
 // Go selector attribution can cross a closure, a multi-return call, and a
 // range expression before reaching the receiver type. Keep that traversal
@@ -35,6 +37,8 @@ pub struct EvidenceBuilder {
     source_file: String,
     limits: EvidenceLimits,
     documentation_bytes: usize,
+    argument_usage: super::type_arguments::TypeScriptArgumentUsage,
+    argument_error: Option<EvidenceError>,
     documentation_omission_reported: bool,
 }
 
@@ -73,6 +77,9 @@ impl EvidenceBuilder {
     ) -> Self {
         Self {
             batch: SemanticEvidenceBatch {
+                typescript_merge_inventory_complete: None,
+                typescript_merge_inventory_version: None,
+                typescript_merge_dependencies: Vec::new(),
                 pipeline: UniversalEvidenceIdentity {
                     id: pipeline.producer.id.to_owned(),
                     language: pipeline.producer.language.to_owned(),
@@ -93,6 +100,8 @@ impl EvidenceBuilder {
             source_file: source_file.into(),
             limits,
             documentation_bytes: 0,
+            argument_usage: super::type_arguments::TypeScriptArgumentUsage::default(),
+            argument_error: None,
             documentation_omission_reported: false,
         }
     }
@@ -381,6 +390,7 @@ impl EvidenceBuilder {
             parameter_types: metadata.parameter_types,
             direct_bases_complete: metadata.direct_bases_complete,
             member_inventory_complete: metadata.member_inventory_complete,
+            ecmascript_export_inventory: None,
             variadic: metadata.variadic,
             signature_hash: metadata.signature_hash,
             implementation_hash: metadata.implementation_hash,
@@ -702,6 +712,21 @@ impl EvidenceBuilder {
             self.batch.candidates.len(),
             self.limits.candidates,
         )?;
+        // Reserve before identity encoding or retention. Reused/duplicate proof
+        // copies consume the quota too, even if finish later deduplicates them.
+        let argument_usage = constraints
+            .typescript_type_arguments
+            .as_ref()
+            .map(super::type_arguments::TypeScriptArgumentUsage::for_proof)
+            .transpose()
+            .and_then(|usage| self.argument_usage.retaining(usage.unwrap_or_default()));
+        let argument_usage = match argument_usage {
+            Ok(usage) => usage,
+            Err(error) => {
+                self.argument_error = Some(error.clone());
+                return Err(error);
+            }
+        };
         constraints.allowed_target_kinds.sort_unstable();
         constraints.allowed_target_kinds.dedup();
         let argument_count_identity = constraints
@@ -752,6 +777,20 @@ impl EvidenceBuilder {
                 "rust_associated_type:{receiver_declaration_id}:{receiver_qualified_name}:{trait_qualified_name}"
             ),
         };
+        let argument_proof_identity = constraints
+            .typescript_type_arguments
+            .as_ref()
+            .map(|proof| {
+                serde_json::to_vec(proof)
+                    .map(|bytes| hex_sha256_digest(&Sha256::digest(bytes)))
+                    .map_err(|_| {
+                        EvidenceError::new(
+                            EvidenceErrorCode::InvalidFact,
+                            "cannot encode TypeScript argument proof identity",
+                        )
+                    })
+            })
+            .transpose()?;
         let mut identity = vec![
             candidate_relation_name(relation),
             source_declaration_id,
@@ -769,6 +808,10 @@ impl EvidenceBuilder {
             argument_count_identity.as_str(),
             hierarchy_identity.as_str(),
         ];
+        if let Some(proof_identity) = argument_proof_identity.as_deref() {
+            identity.push("typescript_type_arguments_v1");
+            identity.push(proof_identity);
+        }
         if !argument_type_identities.is_empty() {
             identity.push("argument_types");
             identity.extend(argument_type_identities.iter().map(String::as_str));
@@ -780,6 +823,7 @@ impl EvidenceBuilder {
             "internal_only"
         });
         let id = self.stable_id("candidate", &identity);
+        self.argument_usage = argument_usage;
         self.batch.candidates.push(RelationshipCandidate {
             id: id.clone(),
             language: self.batch.pipeline.language.clone(),
@@ -824,7 +868,14 @@ impl EvidenceBuilder {
         Ok(())
     }
 
+    pub(super) fn binding_facts(&self) -> &[BindingFact] {
+        &self.batch.bindings
+    }
+
     pub fn finish(mut self) -> Result<SemanticEvidenceBatch, EvidenceError> {
+        if let Some(error) = self.argument_error.take() {
+            return Err(error);
+        }
         self.batch.pipeline.capabilities.sort_unstable();
         self.batch.pipeline.capabilities.dedup();
         self.batch
@@ -1544,6 +1595,7 @@ impl<'source> DirectEvidenceState<'source> {
                     argument_types: Vec::new(),
                     allowed_target_kinds: vec!["function".to_owned()],
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: false,
                 },
             )?;
@@ -1729,6 +1781,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["class".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: false,
             },
         )?;
@@ -2300,6 +2353,7 @@ impl<'source> DirectEvidenceState<'source> {
                     "variable".to_owned(),
                 ],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -2496,6 +2550,7 @@ impl<'source> DirectEvidenceState<'source> {
                     "package".to_owned(),
                 ],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         )?;
@@ -2589,6 +2644,7 @@ impl<'source> DirectEvidenceState<'source> {
                     vec!["file".to_owned(), "module".to_owned(), "package".to_owned()]
                 },
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         )?;
@@ -2878,6 +2934,7 @@ impl<'source> DirectEvidenceState<'source> {
                     argument_types: Vec::new(),
                     allowed_target_kinds: target_kinds_for_relation(relation),
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: exact_target_declaration_id.is_none(),
                 },
             )?;
@@ -3139,6 +3196,7 @@ impl<'source> DirectEvidenceState<'source> {
                     "field".to_owned(),
                 ],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         )?;
@@ -3348,6 +3406,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec![kind.to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: false,
             },
         )?;
@@ -3847,6 +3906,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: kinds.into_iter().map(str::to_owned).collect(),
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -3906,6 +3966,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types,
                 allowed_target_kinds: vec!["method".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: receiver_type.is_some(),
             },
         )?;
@@ -3974,6 +4035,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types,
                 allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: enclosing_receiver.is_none(),
             },
         )?;
@@ -6691,6 +6753,7 @@ impl<'source> DirectEvidenceState<'source> {
                         "macro".to_owned(),
                     ],
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: !rust_identity_is_internal(&self.module_or_package, &target),
                 },
             )?;
@@ -7219,6 +7282,7 @@ impl<'source> DirectEvidenceState<'source> {
                 "struct".to_owned(),
             ],
             hierarchy: generic_bounds,
+            typescript_type_arguments: None,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                 ((wildcard_bound && wildcard_external_target_is_explicit)
                     || (!wildcard_bound && !qualifier.is_some_and(rust_deferred_owner)))
@@ -7874,6 +7938,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["macro".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                     !rust_identity_is_internal(&self.module_or_package, qualified)
                 }),
@@ -8040,6 +8105,7 @@ impl<'source> DirectEvidenceState<'source> {
                 "struct".to_owned(),
             ],
             hierarchy: None,
+            typescript_type_arguments: None,
             allow_external: qualified_name.as_deref().is_some_and(|qualified| {
                 !rust_identity_is_internal(&self.module_or_package, qualified)
             }),
@@ -8282,6 +8348,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds,
                 hierarchy,
+                typescript_type_arguments: None,
                 allow_external,
             },
         )?;
@@ -8914,6 +8981,7 @@ impl<'source> DirectEvidenceState<'source> {
                     argument_types: Vec::new(),
                     allowed_target_kinds: vec!["file".to_owned(), "package".to_owned()],
                     hierarchy: None,
+                    typescript_type_arguments: None,
                     allow_external: true,
                 },
             )?;
@@ -9467,6 +9535,7 @@ impl<'source> DirectEvidenceState<'source> {
                     vec!["function".to_owned(), "method".to_owned()]
                 },
                 hierarchy: receiver_dispatch,
+                typescript_type_arguments: None,
                 allow_external: qualified_name.is_some() && python_super_receiver.is_none(),
             },
         )?;
@@ -10343,6 +10412,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: target_kinds_for_relation(relation),
                 hierarchy,
+                typescript_type_arguments: None,
                 allow_external: qualified_name.is_some(),
             },
         )?;
@@ -10679,6 +10749,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec![child.kind.clone()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: false,
             },
         )?;

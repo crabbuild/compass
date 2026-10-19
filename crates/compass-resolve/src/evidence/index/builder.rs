@@ -1,5 +1,6 @@
 //! Validated, phased construction of immutable resolution indexes.
 
+use super::super::budget::{AuxiliaryLimits, MAX_AGGREGATE_MERGE_DEPENDENCIES};
 use super::super::*;
 use super::{
     CSharpBinding, CSharpIndexes, HierarchyIndexes, JavaIndexes, MemberIndexes, NameIndexes,
@@ -52,6 +53,7 @@ struct IndexBuilder<'a> {
     limits: UniversalResolutionLimits,
     validate_batches: bool,
     admission: ResolutionAdmission,
+    auxiliary_limits: AuxiliaryLimits,
 }
 
 impl<'a> IndexBuilder<'a> {
@@ -72,11 +74,337 @@ impl<'a> IndexBuilder<'a> {
             limits,
             validate_batches,
             admission,
+            auxiliary_limits: AuxiliaryLimits::default(),
         }
+    }
+
+    fn with_auxiliary_limits(mut self, limits: AuxiliaryLimits) -> Self {
+        self.auxiliary_limits = limits;
+        self
     }
 }
 
 const MAX_AGGREGATE_DOCUMENTATION_BYTES: usize = 128 * 1024 * 1024;
+
+fn typescript_inventory_sources_are_present(
+    batches: &[SemanticEvidenceBatch],
+    inventory_nodes: &[NodeRecord],
+    root: &Path,
+    limit: usize,
+    lookup_limit: usize,
+    project_edges: &[EdgeRecord],
+) -> Result<bool, String> {
+    use compass_languages::TypeScriptMergeDependencyKind as Kind;
+    if inventory_nodes.len() > limit || project_edges.len() > limit {
+        return Err(format!(
+            "universal source-load inventory node or edge count exceeds limit {limit}"
+        ));
+    }
+    let mut sources = BTreeSet::new();
+    for batch in batches
+        .iter()
+        .filter(|batch| batch.pipeline.language == "typescript")
+    {
+        let mut file_present = false;
+        for declaration in batch.declarations.iter().filter(|fact| {
+            matches!(fact.kind.as_str(), "file" | "module") && fact.scope_id.is_none()
+        }) {
+            let Some(source) =
+                typescript_project_importer_key(&declaration.range.source_file, root)
+            else {
+                return Ok(false);
+            };
+            sources.insert(source);
+            file_present = true;
+        }
+        if !file_present {
+            return Ok(false);
+        }
+    }
+    // Borrow inventory strings. Duplicate graph IDs with different sources are
+    // explicitly unknown; they cannot be rescued with an edge spelling.
+    let mut node_sources = BTreeMap::<&str, Option<&str>>::new();
+    for node in inventory_nodes {
+        let source = node
+            .attributes
+            .get("universal_evidence_source_file")
+            .and_then(Value::as_str)
+            .filter(|source| !source.is_empty())
+            .or_else(|| node.attributes.get("source_file").and_then(Value::as_str));
+        if let Some(source) = source.filter(|source| !source.is_empty()) {
+            node_sources
+                .entry(&node.id)
+                .and_modify(|previous| {
+                    if *previous != Some(source) {
+                        *previous = None;
+                    }
+                })
+                .or_insert(Some(source));
+        }
+        let typescript = node
+            .attributes
+            .get("language")
+            .and_then(Value::as_str)
+            .is_some_and(|language| matches!(language, "typescript" | "tsx" | "typescriptreact"))
+            || source.is_some_and(|source| {
+                [".ts", ".tsx", ".mts", ".cts"]
+                    .iter()
+                    .any(|suffix| source.ends_with(suffix))
+            });
+        if typescript
+            && source
+                .and_then(|source| typescript_project_importer_key(source, root))
+                .is_none_or(|source| !sources.contains(&source))
+        {
+            return Ok(false);
+        }
+    }
+    let dependencies = batches
+        .iter()
+        .flat_map(|batch| &batch.typescript_merge_dependencies)
+        .collect::<Vec<_>>();
+    let mut needed = BTreeMap::<
+        String,
+        BTreeMap<&str, Vec<(usize, &compass_languages::TypeScriptMergeDependency)>>,
+    >::new();
+    for (slot, dependency) in dependencies
+        .iter()
+        .enumerate()
+        .filter(|(_, dependency)| dependency.kind != Kind::ReferencePath)
+    {
+        let Some(source) = typescript_project_importer_key(&dependency.range.source_file, root)
+        else {
+            return Ok(false);
+        };
+        let obligations = needed
+            .entry(source)
+            .or_default()
+            .entry(&dependency.specifier)
+            .or_default();
+        if obligations.len() >= lookup_limit {
+            return Err(format!(
+                "TypeScript observed source-load obligations exceed limit {lookup_limit}"
+            ));
+        }
+        obligations.push((slot, dependency));
+    }
+    // This dedicated census consumes original owning project evidence. The
+    // ordinary module lookup intentionally omits unavailable targets and is
+    // therefore insufficient for an absence proof. Every context participates.
+    let mut mapped = vec![None::<(usize, bool)>; dependencies.len()];
+    let mut project_seen = BTreeSet::new();
+    let mut proof_work = MAX_AGGREGATE_MERGE_DEPENDENCIES * 16;
+    for edge in project_edges {
+        if edge.attributes.get("relation").and_then(Value::as_str) != Some("imports_from") {
+            continue;
+        }
+        let Some(module) = edge.attributes.get("module").and_then(Value::as_str) else {
+            return Ok(false);
+        };
+        let direct_source = edge
+            .attributes
+            .get("universal_evidence_source_file")
+            .and_then(Value::as_str)
+            .filter(|source| !source.is_empty())
+            .or_else(|| {
+                edge.attributes
+                    .get("source_file")
+                    .and_then(Value::as_str)
+                    .filter(|source| !source.is_empty())
+            });
+        let source =
+            direct_source.or_else(|| node_sources.get(edge.source.as_str()).copied().flatten());
+        let Some(source) = source
+            .filter(|source| source.len() <= 4_096)
+            .and_then(|source| typescript_project_importer_key(source, root))
+        else {
+            return Ok(false);
+        };
+        let Some(obligations) = needed.get(&source).and_then(|modules| modules.get(module)) else {
+            continue;
+        };
+        project_seen.insert((source, module.to_owned()));
+        let proof = edge
+            .attributes
+            .get(TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE)
+            .map(typescript_source_load_proof_payload)
+            .transpose()?;
+        let module_count = obligations
+            .iter()
+            .filter(|(_, dependency)| dependency.kind == Kind::Module)
+            .count();
+        let target = match node_sources.get(edge.target.as_str()) {
+            Some(target) => *target,
+            None => edge
+                .attributes
+                .get("target_file")
+                .and_then(Value::as_str)
+                .filter(|source| !source.is_empty()),
+        };
+        let target_present = target
+            .filter(|target| target.len() <= 4_096)
+            .and_then(|target| typescript_project_importer_key(target, root))
+            .is_some_and(|target| sources.contains(&target));
+        let mut matched = false;
+        for (slot, dependency) in obligations {
+            charge_source_load_proof_work(&mut proof_work)?;
+            let (applies, unambiguous) = if let Some(proof) = proof {
+                (
+                    typescript_source_load_proof_matches(proof, dependency),
+                    true,
+                )
+            } else {
+                // An unanchored legacy module mapping cannot certify a types
+                // directive or distinguish import/require occurrences. For one
+                // observed module load its existing meaning is preserved.
+                (dependency.kind == Kind::Module, module_count == 1)
+            };
+            if !applies {
+                continue;
+            }
+            matched = true;
+            let entry = mapped[*slot].get_or_insert((0, true));
+            entry.0 = entry.0.saturating_add(1);
+            if entry.0 > lookup_limit {
+                return Err(format!(
+                    "TypeScript source-load alternatives exceed limit {lookup_limit}"
+                ));
+            }
+            entry.1 &= target_present && unambiguous;
+        }
+        if !matched {
+            return Ok(false);
+        }
+    }
+    for (slot, dependency) in dependencies.iter().enumerate() {
+        let Some(source) = typescript_project_importer_key(&dependency.range.source_file, root)
+        else {
+            return Ok(false);
+        };
+        match dependency.kind {
+            Kind::ReferencePath => {
+                let base = Path::new(&source).parent().unwrap_or_else(|| Path::new(""));
+                let Some(target) =
+                    normalize_relative_module_path(&base.join(&dependency.specifier))
+                        .and_then(|path| path.to_str().map(str::to_owned))
+                else {
+                    return Ok(false);
+                };
+                if !sources.contains(&target) {
+                    return Ok(false);
+                }
+            }
+            Kind::Module | Kind::ReferenceTypes => {
+                if let Some((_, complete)) = mapped[slot] {
+                    if !complete {
+                        return Ok(false);
+                    }
+                } else if project_seen.contains(&(source.clone(), dependency.specifier.clone())) {
+                    // A mapping for another occurrence/kind is not a license
+                    // to fall back for an observed but unproved obligation.
+                    return Ok(false);
+                } else if dependency.kind == Kind::Module && dependency.specifier.starts_with('.') {
+                    if !typescript_relative_load_is_covered(
+                        &source,
+                        &dependency.specifier,
+                        &sources,
+                    ) {
+                        return Ok(false);
+                    }
+                } else {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn charge_source_load_proof_work(remaining: &mut usize) -> Result<(), String> {
+    *remaining = remaining
+        .checked_sub(1)
+        .ok_or_else(|| "TypeScript source-load proof work limit exceeded".to_owned())?;
+    Ok(())
+}
+
+fn typescript_source_load_proof_matches(
+    proof: &Map<String, Value>,
+    dependency: &compass_languages::TypeScriptMergeDependency,
+) -> bool {
+    use compass_languages::TypeScriptMergeDependencyKind as Kind;
+    let kind = match dependency.kind {
+        Kind::Module => "module",
+        Kind::ReferencePath => "reference_path",
+        Kind::ReferenceTypes => "reference_types",
+    };
+    let Some(range) = proof.get("range").and_then(Value::as_object) else {
+        return false;
+    };
+    proof.get("kind").and_then(Value::as_str) == Some(kind)
+        && proof.get("specifier").and_then(Value::as_str) == Some(dependency.specifier.as_str())
+        && range.get("sourceFile").and_then(Value::as_str)
+            == Some(dependency.range.source_file.as_str())
+        && [
+            ("startByte", dependency.range.start_byte),
+            ("endByte", dependency.range.end_byte),
+            ("startLine", u64::from(dependency.range.start_line)),
+            ("endLine", u64::from(dependency.range.end_line)),
+            ("startColumn", u64::from(dependency.range.start_column)),
+            ("endColumn", u64::from(dependency.range.end_column)),
+        ]
+        .iter()
+        .all(|(field, expected)| range.get(*field).and_then(Value::as_u64) == Some(*expected))
+}
+
+fn typescript_relative_load_is_covered(
+    source: &str,
+    specifier: &str,
+    sources: &BTreeSet<String>,
+) -> bool {
+    let base = Path::new(source).parent().unwrap_or_else(|| Path::new(""));
+    let Some(path) = normalize_relative_module_path(&base.join(specifier)) else {
+        return false;
+    };
+    let Some(path) = path.to_str().filter(|path| path.len() <= 4_096) else {
+        return false;
+    };
+    // Preserve the actual extension families rather than coalescing every
+    // suffix to one module stem. TypeScript permits source/declaration
+    // substitution within a family, including explicit TS extensions.
+    // See TypeScript v5.9.3 moduleNameResolver.ts::tryAddingExtensions.
+    for (suffix, replacements) in [
+        (".d.mts", &[".mts", ".d.mts"][..]),
+        (".mts", &[".mts", ".d.mts"][..]),
+        (".mjs", &[".mts", ".d.mts"][..]),
+        (".d.cts", &[".cts", ".d.cts"][..]),
+        (".cts", &[".cts", ".d.cts"][..]),
+        (".cjs", &[".cts", ".d.cts"][..]),
+        (".d.ts", &[".ts", ".tsx", ".d.ts"][..]),
+        (".tsx", &[".tsx", ".ts", ".d.ts"][..]),
+        (".ts", &[".ts", ".tsx", ".d.ts"][..]),
+        (".jsx", &[".tsx", ".ts", ".d.ts"][..]),
+        (".js", &[".ts", ".tsx", ".d.ts"][..]),
+    ] {
+        if let Some(stem) = path.strip_suffix(suffix) {
+            return replacements
+                .iter()
+                .any(|extension| sources.contains(&format!("{stem}{extension}")));
+        }
+    }
+    if Path::new(path).extension().is_some() {
+        return false;
+    }
+    [
+        ".ts",
+        ".tsx",
+        ".d.ts",
+        "/index.ts",
+        "/index.tsx",
+        "/index.d.ts",
+    ]
+    .iter()
+    .any(|extension| sources.contains(&format!("{path}{extension}")))
+}
 
 fn checked_documentation_bytes(
     batches: &[SemanticEvidenceBatch],
@@ -114,18 +442,28 @@ impl UniversalResolutionIndex {
         root: &Path,
         limits: UniversalResolutionLimits,
     ) -> Result<Self, String> {
-        checked_documentation_bytes(batches, MAX_AGGREGATE_DOCUMENTATION_BYTES)?;
-        Self::new_with_inventory_owned(batches.to_vec(), inventory_nodes, root, limits)
+        Self::new_with_inventory_and_auxiliary_limits(
+            batches,
+            inventory_nodes,
+            root,
+            limits,
+            AuxiliaryLimits::default(),
+        )
     }
 
-    pub(crate) fn new_with_inventory_owned(
-        batches: Vec<SemanticEvidenceBatch>,
+    fn new_with_inventory_and_auxiliary_limits(
+        batches: &[SemanticEvidenceBatch],
         inventory_nodes: &[NodeRecord],
         root: &Path,
         limits: UniversalResolutionLimits,
+        auxiliary_limits: AuxiliaryLimits,
     ) -> Result<Self, String> {
+        checked_documentation_bytes(batches, MAX_AGGREGATE_DOCUMENTATION_BYTES)?;
+        auxiliary_limits
+            .check(batches)
+            .map_err(|error| error.to_string())?;
         IndexBuilder::new(
-            batches,
+            batches.to_vec(),
             inventory_nodes,
             &[],
             root,
@@ -133,6 +471,7 @@ impl UniversalResolutionIndex {
             true,
             ResolutionAdmission::Max,
         )
+        .with_auxiliary_limits(auxiliary_limits)
         .build()
     }
 
@@ -186,9 +525,24 @@ impl IndexBuilder<'_> {
             limits,
             validate_batches,
             admission,
+            auxiliary_limits,
         } = self;
         checked_documentation_bytes(&batches, MAX_AGGREGATE_DOCUMENTATION_BYTES)?;
+        auxiliary_limits
+            .check(&batches)
+            .map_err(|error| error.to_string())?;
         let languages = LanguagePresence::detect(&batches, inventory_nodes);
+        let typescript_merge_inventory_complete = batches
+            .iter()
+            .any(|batch| batch.pipeline.language == "typescript")
+            && batches
+                .iter()
+                .filter(|batch| batch.pipeline.language == "typescript")
+                .all(|batch| {
+                    batch.typescript_merge_inventory_complete == Some(true)
+                        && batch.typescript_merge_inventory_version
+                            == Some(compass_languages::TYPESCRIPT_MERGE_INVENTORY_VERSION)
+                });
         let mut profile_started = Instant::now();
         if validate_batches {
             batches.par_iter().try_for_each(|batch| {
@@ -239,6 +593,16 @@ impl IndexBuilder<'_> {
             }
         }
 
+        let typescript_merge_inventory_complete = typescript_merge_inventory_complete
+            && typescript_inventory_sources_are_present(
+                &batches,
+                inventory_nodes,
+                root,
+                limits.candidates,
+                limits.candidates_per_lookup,
+                project_edges,
+            )?;
+
         let low_test_aliases = if admission == ResolutionAdmission::Low {
             let aliases = compact_low_test_candidates(&mut batches);
             capacities[3] = batches.iter().map(|batch| batch.candidates.len()).sum();
@@ -255,6 +619,13 @@ impl IndexBuilder<'_> {
         };
 
         let go_module_path = languages.go.then(|| read_go_module_path(root)).flatten();
+        // The typed export index has stricter source-closure requirements.
+        // Do not impose them on legacy/untyped JavaScript or inventories that
+        // cannot enter the typed receiver consumer at all.
+        let has_typed_imports = batches
+            .iter()
+            .flat_map(|batch| &batch.candidates)
+            .any(|candidate| candidate.constraints.typescript_type_arguments.is_some());
         // Reserve the checked aggregate fact counts before consuming the
         // batches. Moving facts into one allocation per sorted primary table
         // avoids repeated vector growth while the per-file batch containers
@@ -365,6 +736,20 @@ impl IndexBuilder<'_> {
                 .collect::<AHashSet<_>>()
         } else {
             AHashSet::new()
+        };
+        let typescript_typed_exports = if languages.typescript && has_typed_imports {
+            typescript_typed_export_indices(
+                &declarations,
+                &declaration_ids,
+                &bindings,
+                &scopes,
+                inventory_nodes,
+                project_edges,
+                root,
+                limits,
+            )?
+        } else {
+            Default::default()
         };
         profile_internal("universal language module indices", &mut profile_started);
         for (name, count, limit) in [
@@ -1080,6 +1465,56 @@ impl IndexBuilder<'_> {
                 )
             })
             .collect();
+        let mut typescript_type_bindings = AHashMap::<(String, String, String), Vec<String>>::new();
+        let mut typescript_definition_scopes = AHashMap::<DeclarationSlot, Option<String>>::new();
+        if languages.typescript {
+            for binding in bindings.values().filter(|binding| {
+                matches!(binding.language.as_str(), "typescript" | "javascript")
+                    && matches!(
+                        binding.kind,
+                        compass_languages::BindingKind::Import
+                            | compass_languages::BindingKind::ImportAlias
+                    )
+            }) {
+                if let Some(scope) = &binding.scope_id {
+                    let slots = typescript_type_bindings
+                        .entry((
+                            binding.language.clone(),
+                            scope.clone(),
+                            binding.spelling.clone(),
+                        ))
+                        .or_default();
+                    if slots.len() < candidate_storage_limit(limits.candidates_per_lookup) {
+                        slots.push(binding.id.clone());
+                    }
+                }
+            }
+            for scope in scopes.values() {
+                let Some(owner) = scope
+                    .owner_declaration_id
+                    .as_deref()
+                    .and_then(|id| declarations.get(id))
+                else {
+                    continue;
+                };
+                if !matches!(owner.language.as_str(), "typescript" | "javascript")
+                    || scope.parent_scope_id != owner.scope_id
+                {
+                    continue;
+                }
+                let Some(slot) = declaration_slot(&declaration_ids, &owner.id) else {
+                    continue;
+                };
+                match typescript_definition_scopes.entry(slot) {
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(Some(scope.id.clone()));
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        entry.insert(None);
+                    }
+                }
+            }
+        }
         profile_internal("universal member index", &mut profile_started);
         Ok(UniversalResolutionIndex {
             facts: FactStore {
@@ -1116,10 +1551,18 @@ impl IndexBuilder<'_> {
                     reexports_by_module: wildcard_reexports_by_module,
                 },
                 typescript: TypeScriptIndexes {
+                    merge_inventory_complete: typescript_merge_inventory_complete,
+                    type_bindings_by_scope: typescript_type_bindings,
+                    definition_scopes: typescript_definition_scopes,
                     modules: typescript_modules,
                     exported_declarations: typescript_exported_declarations,
                     export_aliases: typescript_export_aliases,
                     reexport_targets: typescript_reexport_targets,
+                    reexport_bindings: typescript_typed_exports.reexport_bindings,
+                    binding_sources: typescript_typed_exports.binding_sources,
+                    source_files: typescript_typed_exports.source_files,
+                    complete_export_sources: typescript_typed_exports.complete_sources,
+                    direct_exports: typescript_typed_exports.direct_exports,
                     member_aliases: typescript_member_aliases,
                 },
                 rust: RustIndexes {
@@ -1313,6 +1756,370 @@ mod documentation_limit_tests {
         assert_eq!(checked_documentation_bytes(&batches, size * 2)?, size * 2);
         assert!(checked_documentation_bytes(&batches, size * 2 - 1).is_err());
         assert_eq!(checked_documentation_bytes(&[], 0)?, 0);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod merge_dependency_tests {
+    use super::*;
+    #[test]
+    fn repeated_module_loads_require_exact_occurrence_proofs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut batches = Vec::new();
+        for (file, source) in [
+            (
+                "main.ts",
+                "import 'augment'; export const value = require('augment');",
+            ),
+            ("first.ts", "export {};"),
+            ("second.ts", "export {};"),
+        ] {
+            let batch = compass_languages::Engine::default().extract_source_universal_evidence(
+                Path::new(file),
+                file,
+                source.as_bytes(),
+            )?;
+            assert_eq!(batch.typescript_merge_inventory_complete, Some(true));
+            batches.push(batch);
+        }
+        let loads = &batches[0].typescript_merge_dependencies;
+        assert_eq!(loads.len(), 2);
+        let mut complete = Vec::new();
+        for (dependency, target) in loads.iter().zip(["first.ts", "second.ts"]) {
+            complete.push(EdgeRecord {
+                source: "main".to_owned(),
+                target: target.to_owned(),
+                attributes: Map::from_iter([
+                    (
+                        "relation".to_owned(),
+                        Value::String("imports_from".to_owned()),
+                    ),
+                    (
+                        "source_file".to_owned(),
+                        Value::String("main.ts".to_owned()),
+                    ),
+                    ("module".to_owned(), Value::String("augment".to_owned())),
+                    ("target_file".to_owned(), Value::String(target.to_owned())),
+                    (
+                        TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE.to_owned(),
+                        serde_json::to_value(TypeScriptSourceLoadProof {
+                            version: 1,
+                            dependency: dependency.clone(),
+                        })?,
+                    ),
+                ]),
+            });
+        }
+        let mut legacy = complete[0].clone();
+        legacy
+            .attributes
+            .remove(TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE);
+        let mut wrong_occurrence = complete[1].clone();
+        wrong_occurrence.attributes.insert(
+            TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE.to_owned(),
+            complete[0].attributes[TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE].clone(),
+        );
+        for (mut edges, expected) in [
+            (vec![legacy], false),
+            (vec![complete[0].clone()], false),
+            (complete.clone(), true),
+            (vec![complete[0].clone(), wrong_occurrence], false),
+        ] {
+            for reverse in [false, true] {
+                let mut inputs = batches.clone();
+                if reverse {
+                    inputs.reverse();
+                    edges.reverse();
+                }
+                assert_eq!(
+                    typescript_inventory_sources_are_present(
+                        &inputs,
+                        &[],
+                        Path::new("."),
+                        100,
+                        256,
+                        &edges
+                    )?,
+                    expected
+                );
+            }
+        }
+        let mut future = complete;
+        future[0].attributes[TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE]["version"] = Value::from(2);
+        assert!(
+            matches!(typescript_inventory_sources_are_present(&batches, &[], Path::new("."), 100, 256, &future), Err(reason) if reason.contains("unsupported"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ordinary_project_modules_do_not_consume_reference_types_proofs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = b"/// <reference types=\"augment\" />\nimport 'augment'; export {};";
+        let batch = compass_languages::Engine::default().extract_source_universal_evidence(
+            Path::new("main.ts"),
+            "main.ts",
+            source,
+        )?;
+        let mut edges = Vec::new();
+        for (kind, target) in [
+            (
+                compass_languages::TypeScriptMergeDependencyKind::Module,
+                "module.ts",
+            ),
+            (
+                compass_languages::TypeScriptMergeDependencyKind::ReferenceTypes,
+                "types.d.ts",
+            ),
+        ] {
+            let dependency = batch
+                .typescript_merge_dependencies
+                .iter()
+                .find(|dependency| dependency.kind == kind)
+                .ok_or("missing observed load")?;
+            edges.push(EdgeRecord {
+                source: "main".to_owned(),
+                target: target.to_owned(),
+                attributes: Map::from_iter([
+                    (
+                        "relation".to_owned(),
+                        Value::String("imports_from".to_owned()),
+                    ),
+                    ("module".to_owned(), Value::String("augment".to_owned())),
+                    (
+                        "source_file".to_owned(),
+                        Value::String("main.ts".to_owned()),
+                    ),
+                    ("target_file".to_owned(), Value::String(target.to_owned())),
+                    (
+                        TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE.to_owned(),
+                        serde_json::to_value(TypeScriptSourceLoadProof {
+                            version: 1,
+                            dependency: dependency.clone(),
+                        })?,
+                    ),
+                ]),
+            });
+        }
+        for reverse in [false, true] {
+            if reverse {
+                edges.reverse();
+            }
+            let (modules, _) =
+                typescript_project_module_index(&edges, &[], Path::new("."), 10, 10)?;
+            assert_eq!(
+                modules.get(&("main.ts".to_owned(), "augment".to_owned(), String::new())),
+                Some(&vec!["module".to_owned()])
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn source_load_proof_reader_rejects_unknown_versions_and_bounds_work()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut remaining = 1;
+        charge_source_load_proof_work(&mut remaining)?;
+        assert_eq!(remaining, 0);
+        assert!(charge_source_load_proof_work(&mut remaining).is_err());
+        let source = b"import './a';";
+        let batch = compass_languages::Engine::default().extract_source_universal_evidence(
+            Path::new("main.ts"),
+            "main.ts",
+            source,
+        )?;
+        let dependency = batch
+            .typescript_merge_dependencies
+            .first()
+            .ok_or("missing source load")?;
+        let proof = TypeScriptSourceLoadProof {
+            version: 1,
+            dependency: dependency.clone(),
+        };
+        let mut value = serde_json::to_value(proof)?;
+        assert!(typescript_source_load_proof_matches(
+            typescript_source_load_proof_payload(&value)?,
+            dependency
+        ));
+        value["version"] = Value::from(2);
+        assert!(
+            matches!(typescript_source_load_proof_payload(&value), Err(reason) if reason.contains("unsupported"))
+        );
+        value["version"] = Value::from(1);
+        value["dependency"]["specifier"] = Value::String("a".repeat(1025));
+        assert!(typescript_source_load_proof_payload(&value).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn relative_load_extension_families_preserve_valid_source_substitution() {
+        let families = [
+            (
+                &[".ts", ".tsx", ".d.ts", ".js", ".jsx"][..],
+                &[".ts", ".tsx", ".d.ts"][..],
+            ),
+            (&[".mts", ".d.mts", ".mjs"][..], &[".mts", ".d.mts"][..]),
+            (&[".cts", ".d.cts", ".cjs"][..], &[".cts", ".d.cts"][..]),
+        ];
+        for (specifiers, accepted) in families {
+            for specifier in specifiers {
+                for target in [".ts", ".tsx", ".d.ts", ".mts", ".d.mts", ".cts", ".d.cts"] {
+                    let sources = BTreeSet::from([format!("provider{target}")]);
+                    assert_eq!(
+                        typescript_relative_load_is_covered(
+                            "main.ts",
+                            &format!("./provider{specifier}"),
+                            &sources
+                        ),
+                        accepted.contains(&target),
+                        "{specifier} -> {target}"
+                    );
+                }
+            }
+        }
+        for (target, expected) in [
+            ("provider.ts", true),
+            ("provider/index.d.ts", true),
+            ("provider.mts", false),
+            ("provider.cts", false),
+        ] {
+            assert_eq!(
+                typescript_relative_load_is_covered(
+                    "main.ts",
+                    "./provider",
+                    &BTreeSet::from([target.to_owned()])
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn aggregate_typed_proof_caps_apply_to_borrowed_owned_and_prevalidated_inputs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let batch = compass_languages::Engine::default().extract_source_universal_evidence(
+            Path::new("main.ts"), "main.ts",
+            b"import type { Holder } from './provider'; class Good { lookup() {} } function read(value: Holder<Good>) { value.field.lookup(); }",
+        )?;
+        let usage = compass_languages::TypeScriptArgumentUsage::for_batch(&batch)?;
+        assert!(usage.nodes > 0 && usage.bytes > 0);
+        let exact = AuxiliaryLimits {
+            type_nodes: usage.nodes,
+            type_bytes: usage.bytes,
+            ..AuxiliaryLimits::default()
+        };
+        AuxiliaryLimits {
+            type_nodes: 0,
+            type_bytes: 0,
+            ..exact
+        }
+        .check(&[])?;
+        exact.check(std::slice::from_ref(&batch))?;
+        for quota in [
+            exact,
+            AuxiliaryLimits {
+                type_nodes: usage.nodes - 1,
+                ..exact
+            },
+            AuxiliaryLimits {
+                type_bytes: usage.bytes - 1,
+                ..exact
+            },
+        ] {
+            let expected_ok = quota.type_nodes == usage.nodes && quota.type_bytes == usage.bytes;
+            let borrowed = UniversalResolutionIndex::new_with_inventory_and_auxiliary_limits(
+                std::slice::from_ref(&batch),
+                &[],
+                Path::new("."),
+                UniversalResolutionLimits::default(),
+                quota,
+            );
+            assert_eq!(
+                borrowed.is_ok(),
+                expected_ok,
+                "borrowed: {:?}",
+                borrowed.err()
+            );
+            for validate in [false, true] {
+                let owned = IndexBuilder::new(
+                    vec![batch.clone()],
+                    &[],
+                    &[],
+                    Path::new("."),
+                    UniversalResolutionLimits::default(),
+                    validate,
+                    ResolutionAdmission::Max,
+                )
+                .with_auxiliary_limits(quota)
+                .build();
+                assert_eq!(
+                    owned.is_ok(),
+                    expected_ok,
+                    "owned validate={validate}: {:?}",
+                    owned.err()
+                );
+            }
+        }
+        let repeated = exact.check(&[batch.clone(), batch.clone()]);
+        assert!(matches!(
+            repeated,
+            Err(super::super::super::budget::AuxiliaryLimitError::Aggregate { .. })
+        ));
+        let mut invalid = batch.clone();
+        let proof = invalid
+            .candidates
+            .iter_mut()
+            .find_map(|candidate| candidate.constraints.typescript_type_arguments.as_mut())
+            .ok_or("missing proof")?;
+        proof.owner_binding_id = "x".repeat(1_025);
+        let invalid_after_overflow = AuxiliaryLimits {
+            type_nodes: 0,
+            ..exact
+        }
+        .check(&[batch, invalid]);
+        assert!(matches!(
+            invalid_after_overflow,
+            Err(super::super::super::budget::AuxiliaryLimitError::InvalidBatch(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_merge_dependencies_check_exact_and_overflow_before_indexing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = b"import './a'; import './b'; export {};";
+        let batch = compass_languages::Engine::default().extract_source_universal_evidence(
+            Path::new("main.ts"),
+            "main.ts",
+            source,
+        )?;
+        let usage = compass_languages::TypeScriptMergeDependencyUsage::for_dependencies(
+            &batch.typescript_merge_dependencies,
+        )?;
+        assert_eq!(usage.count, 2);
+        let limits = |count, bytes| AuxiliaryLimits {
+            merge_dependencies: count,
+            merge_bytes: bytes,
+            ..AuxiliaryLimits::default()
+        };
+        limits(0, 0).check(&[])?;
+        limits(usage.count, usage.text_bytes).check(std::slice::from_ref(&batch))?;
+        assert!(
+            limits(usage.count - 1, usage.text_bytes)
+                .check(std::slice::from_ref(&batch))
+                .is_err()
+        );
+        assert!(
+            limits(usage.count, usage.text_bytes - 1)
+                .check(std::slice::from_ref(&batch))
+                .is_err()
+        );
+        assert!(
+            limits(usage.count, usage.text_bytes)
+                .check(&[batch.clone(), batch])
+                .is_err()
+        );
         Ok(())
     }
 }

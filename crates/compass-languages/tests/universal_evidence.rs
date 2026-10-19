@@ -25,6 +25,9 @@ fn valid_batch() -> SemanticEvidenceBatch {
     // Synthetic lifecycle fixture: production registry entries are all
     // Qualified, but validation must continue to accept a candidate batch.
     SemanticEvidenceBatch {
+        typescript_merge_inventory_complete: None,
+        typescript_merge_inventory_version: None,
+        typescript_merge_dependencies: Vec::new(),
         pipeline: UniversalEvidenceIdentity {
             id: "compass.python".to_owned(),
             language: "python".to_owned(),
@@ -57,6 +60,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
             parameter_types: Vec::new(),
             direct_bases_complete: false,
             member_inventory_complete: None,
+            ecmascript_export_inventory: None,
             variadic: false,
             signature_hash: None,
             implementation_hash: None,
@@ -118,6 +122,7 @@ fn valid_batch() -> SemanticEvidenceBatch {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["function".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         }],
@@ -764,12 +769,12 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((3, UniversalEvidenceQualification::Qualifying))
+        Some((4, UniversalEvidenceQualification::Qualifying))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("typescript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((4, UniversalEvidenceQualification::Qualifying))
+        Some((5, UniversalEvidenceQualification::Qualifying))
     );
 }
 

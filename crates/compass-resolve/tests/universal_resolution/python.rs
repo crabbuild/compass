@@ -391,7 +391,8 @@ fn python_possible_dispatch_fails_closed_when_descendants_exceed_the_lookup_boun
     let index = UniversalResolutionIndex::new(&evidence, limits).expect("bounded index");
     let mut nodes = extracted.nodes.clone();
     let mut edges = extracted.edges.clone();
-    index.materialize(&mut nodes, &mut edges);
+    let report = index.materialize(&mut nodes, &mut edges);
+    assert_eq!(report.omitted_candidates, 0);
 
     assert!(edges.iter().all(|edge| {
         !matches!(

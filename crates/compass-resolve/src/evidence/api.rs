@@ -8,6 +8,20 @@ use serde::{Deserialize, Serialize};
 /// contract is the graph diagnostic emitted for degraded resolution.
 pub const UNIVERSAL_RESOLUTION_REPORT_EXTENSION: &str = "_compass_universal_resolution_report";
 
+/// Optional owning `imports_from` edge attribute binding a source-load
+/// resolution to its exact observed kind, spelling and occurrence.
+pub const TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE: &str = "typescript_source_load";
+
+/// Version 1 source-load proof. This records an owning project's resolution,
+/// not a guessed mapping derived from a same-spelled symbol import. The target
+/// source is retained on the edge's existing inventory/target_file interface.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypeScriptSourceLoadProof {
+    pub version: u32,
+    pub dependency: compass_languages::TypeScriptMergeDependency,
+}
+
 /// Aggregate fact cardinalities used to select a bounded resolution strategy.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,6 +62,19 @@ pub struct UniversalResolutionReport {
     pub retained: UniversalResolutionCounts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Outcome of projecting an already constructed universal resolution index.
+///
+/// Ambiguous or unsupported source semantics remain ordinary unresolved
+/// decisions. `omitted_candidates` instead counts explicit resource-limit
+/// decisions: those relationships were not projected and the resulting graph
+/// must be treated as degraded. A zero count does not certify compiler-grade
+/// completeness or the absence of unresolved source semantics.
+#[must_use = "inspect omitted_candidates before treating materialized relationships as complete"]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UniversalMaterializationReport {
+    pub omitted_candidates: usize,
 }
 
 /// Aggregate and per-lookup limits for the universal evidence resolver.
@@ -124,6 +151,11 @@ pub enum ResolutionDecision {
     },
     Ambiguous {
         candidate_count: usize,
+    },
+    /// A bounded lookup stopped without selecting a partial target set.
+    ResourceLimit {
+        resource: &'static str,
+        limit: usize,
     },
     Unresolved,
 }
