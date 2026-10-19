@@ -12,6 +12,17 @@ cost accounting and report checking are documented in
 does not establish comparative superiority. The older broad-query commands and
 the suites below retain their original protocols.
 
+The proposed joint graph-and-query claim additionally needs a paired graph
+comparison; the existing query checker only requires a Compass production
+graph audit. `broad_graph_statistics.paired_graph_coverage` provides bounded
+diagnostic arithmetic for paired source-fact recall, retaining unknown rows,
+declared clusters and language/relation strata. It distinguishes micro recall
+from the equal-repository/cluster-weighted difference. It always reports
+`qualificationEstablished=false`: it does not verify source-fact digests,
+artifact provenance, independent judgments, emitted-edge precision, power or
+the final joint decision rule. Run its synthetic controls with
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_statistics`.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
