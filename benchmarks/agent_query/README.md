@@ -23,6 +23,19 @@ artifact provenance, independent judgments, emitted-edge precision, power or
 the final joint decision rule. Run its synthetic controls with
 `python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_statistics`.
 
+`broad_graph_evidence.assess_graph_coverage` connects those diagnostics to a
+versioned frozen source-fact registration, both tools' graph/build artifacts,
+and a digest-bound observation ledger. It verifies source-byte spans, source
+inventories, recorded tool/profile bytes, raw build streams and cited graph
+record hashes; it rechecks containment and input bytes after scoring. Missing
+reviews and failed builds remain unknown. A graph without a directed contract
+cannot certify one; contract unavailability is reported separately from a
+missing relationship. Hashes and record references do not establish semantic
+agreement, runtime authenticity or independent review. This layer also always
+reports `qualificationEstablished=false`; precision, power and final joint
+eligibility are still required. Its controls use synthetic files only:
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_evidence`.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting
