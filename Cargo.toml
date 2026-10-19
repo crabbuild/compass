@@ -95,7 +95,7 @@ flate2 = "1.1.9"
 glob = "0.3.3"
 url = "2.5.8"
 roxmltree = "0.21.1"
-rustls = { version = "0.23.42", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.6.2"
 rustc-hash = "1.1.0"
 serde_yaml_ng = "0.10.0"

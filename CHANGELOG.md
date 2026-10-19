@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Raise the Rustls minimum and locked dependency to 0.23.46 for upstream fixes
+  RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349.
+  Other dependency advisories remain tracked separately.
+
 - Recover bounded helper candidates for eligible broad questions about one or
   more operations through exact native calls, with Low/unverified navigation
   paths. Preserve
