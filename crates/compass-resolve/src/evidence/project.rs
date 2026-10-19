@@ -229,7 +229,10 @@ pub(in crate::evidence) fn typescript_project_importer_key(
     root: &Path,
 ) -> Option<String> {
     let relative = typescript_relative_path(source_file, root)?;
-    let key = relative.to_str()?.to_owned();
+    // Source inventories use portable separators even when normalization builds
+    // a native Windows PathBuf. Replace only the host separator so a literal
+    // backslash in a Unix filename cannot alias a directory boundary.
+    let key = relative.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
     (!key.is_empty() && key.len() <= 4_096).then_some(key)
 }
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Normalize native path separators in TypeScript source lookup keys, preserving
+  nested relative imports and directory-index selection on Windows. Keep exact
+  file identity, extension priority and source-root containment checks.
+
 - Preserve unresolved local export names before target resolution and require a
   version1 source export census for typed imports and known-empty star branches.
   Keep recovered, unsupported and legacy export surfaces unknown. Validate the

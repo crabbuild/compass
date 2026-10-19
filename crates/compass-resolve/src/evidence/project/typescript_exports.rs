@@ -252,9 +252,9 @@ fn relative_binding_source(
     }
     let importer = typescript_relative_path(importer, root)?;
     let base = importer.parent()?;
-    let path = normalize_relative_module_path(&base.join(module))?;
-    let path = path.to_str().filter(|path| path.len() <= 4_096)?;
-    let mut stem = path;
+    let joined = base.join(module);
+    let path = typescript_project_importer_key(joined.to_str()?, Path::new("."))?;
+    let mut stem = path.as_str();
     let mut explicit = false;
     let mut extensions: &[&str] = &[".ts", ".tsx", ".d.ts", ".js", ".jsx"];
     for suffix in [
@@ -295,6 +295,84 @@ fn relative_binding_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_source_keys_and_relative_targets_preserve_portable_identity()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let native_importer = Path::new("src").join("app").join("main.ts");
+        let native_provider = Path::new("src").join("providers").join("index.ts");
+        for source in [native_importer.as_path(), native_provider.as_path()] {
+            let expected = if source == native_importer {
+                "src/app/main.ts"
+            } else {
+                "src/providers/index.ts"
+            };
+            assert_eq!(
+                source_key(source.to_str().ok_or("non-UTF-8 fixture")?, root).as_deref(),
+                Some(expected)
+            );
+            assert_eq!(
+                source_key(
+                    root.join(source).to_str().ok_or("non-UTF-8 fixture root")?,
+                    root
+                )
+                .as_deref(),
+                Some(expected)
+            );
+        }
+        let sources = BTreeSet::from([
+            "src/providers/index.ts".to_owned(),
+            "src/providers/client.ts".to_owned(),
+            "src/providers/Client.ts".to_owned(),
+            "src/shared.ts".to_owned(),
+        ]);
+        let absolute_importer = root.join(&native_importer);
+        for importer in [native_importer.as_path(), absolute_importer.as_path()] {
+            let importer = importer.to_str().ok_or("non-UTF-8 fixture importer")?;
+            for (module, expected) in [
+                ("../providers", "src/providers/index.ts"),
+                ("../providers/index", "src/providers/index.ts"),
+                ("../providers/client.js", "src/providers/client.ts"),
+                ("../providers/Client.js", "src/providers/Client.ts"),
+                ("../providers/../shared", "src/shared.ts"),
+            ] {
+                assert_eq!(
+                    relative_binding_source(importer, module, root, &sources).as_deref(),
+                    Some(expected),
+                    "{module}"
+                );
+            }
+            for module in [
+                "../../../outside",
+                "../missing",
+                "../providers/client.custom",
+                "../providers/CLIENT.js",
+            ] {
+                assert_eq!(
+                    relative_binding_source(importer, module, root, &sources),
+                    None,
+                    "{module}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_literal_backslashes_do_not_alias_source_directories() {
+        assert_eq!(
+            source_key(r"src/literal\name.ts", Path::new(".")).as_deref(),
+            Some(r"src/literal\name.ts")
+        );
+        assert_ne!(
+            source_key(r"src/literal\name.ts", Path::new(".")),
+            source_key("src/literal/name.ts", Path::new("."))
+        );
+    }
+
     #[test]
     fn relative_sources_preserve_extension_priority_and_file_identity() {
         let sources = [
