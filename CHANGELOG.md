@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-- Recover bounded helper candidates for eligible broad multi-operation questions
-  through exact native calls, with Low/unverified navigation paths. Preserve
+- Recover bounded helper candidates for eligible broad questions about one or
+  more operations through exact native calls, with Low/unverified navigation
+  paths. Preserve
   requested depth and ambiguity; expose separate indexed/helper lookup budgets
   in raw discovery2 and ranked-view7, including after presentation pruning.
+  Single-operation questions retain distinct reachable alternatives using bounded
+  lexical operation hints; hints do not establish intent or behavior.
 - Show a retained, source-owned helper preview when no question-matching excerpt
   exists. Label it behavior unverified, keep matching terms/ranking unchanged,
   and refresh disposable quotation responses. Unmetered ranked-view4 remains.

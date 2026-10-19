@@ -21,6 +21,7 @@ class PrintedEvidenceTests(unittest.TestCase):
     def test_helper_navigation_and_preview_text_do_not_supply_behavior_claims(self):
         raw = (b"Call-linked lookups: 2/40; indexed recall probes: 17/291.\n"
                b"1. Store::save @ store.py:2 [relevance=low]\n"
+               b"   Requested operation-name leads are reachable through exact AST call paths. Alternatives are bounded inspection candidates, not a unique interpretation or proof of requested behavior\n"
                b"2. Store::flush @ store.py:4 [relevance=low]\n"
                b"   Call path (execution unverified): save -> flush; navigation hint publish -> flush\n"
                b"   Helper code preview (behavior unverified) @ other.py:99: return value\n")
@@ -30,8 +31,8 @@ class PrintedEvidenceTests(unittest.TestCase):
         self.assertEqual(len(result["claims"]), 2)
         self.assertTrue(all(c["assertionKind"] == "declaration_identity_only" for c in result["claims"]))
         self.assertFalse(result["normalizationComplete"])
-        self.assertEqual(len(result["reviewQueue"]), 5)
-        self.assertEqual(sum(entry["kind"] == "unparsed_printed_text" for entry in result["reviewQueue"]), 3)
+        self.assertEqual(len(result["reviewQueue"]), 6)
+        self.assertEqual(sum(entry["kind"] == "unparsed_printed_text" for entry in result["reviewQueue"]), 4)
 
     def test_compact_seed_citations_are_printed_declarations_not_behavior(self):
         for confidence in ("exact", "approximate", "auto-picked"):

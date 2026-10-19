@@ -30,6 +30,7 @@ class Version2NormalizerTests(unittest.TestCase):
     def test_helper_navigation_and_preview_lines_remain_pending_source_review(self):
         raw = (b"Call-linked lookups: 2/40; indexed recall probes: 17/291.\n"
                b"1. Store::save @ store.py:2 [relevance=low]\n"
+               b"   Requested operation-name leads are reachable through exact AST call paths. Alternatives are bounded inspection candidates, not a unique interpretation or proof of requested behavior\n"
                b"2. Store::flush @ store.py:4 [relevance=low]\n"
                b"   Call path (execution unverified): save -> flush; navigation hint publish -> flush\n"
                b"   Helper code preview (behavior unverified) @ other.py:99: return value\n")
@@ -41,13 +42,15 @@ class Version2NormalizerTests(unittest.TestCase):
         self.assertTrue(all(c["assertionKind"] == "declaration_identity_only" for c in claims))
         self.assertFalse(result["normalizationComplete"])
         self.assertFalse(result["semanticCoverageComplete"])
-        self.assertEqual(len(result["lineLedger"]), 5)
+        self.assertEqual(len(result["lineLedger"]), 6)
         pending = [entry for entry in result["reviewQueue"] if entry["kind"] == "unparsed_printed_text"]
-        self.assertEqual(len(pending), 3)
+        self.assertEqual(len(pending), 4)
         for entry in pending:
             span = entry["span"]
             self.assertTrue(raw[span["startByte"]:span["endByte"]])
         self.assertFalse(any("relation" in c for c in claims))
+
+        self.assertEqual(result["normalizationStatus"], "pending_review")
 
     def test_resolved_ownerless_and_conflicting_groups_summarize_once_for_both_endpoints(self):
         for case in ("ownerless_same","ownerless_distinct","conflicting","resolved_same","resolved_distinct"):

@@ -10,6 +10,7 @@ const MAX_EXPANSIONS_PER_ROOT: usize = 16;
 const MAX_FANOUT: usize = 8;
 const MAX_FRONTIER: usize = 32;
 const MAX_DEFERRED: usize = 128;
+const MAX_SINGLE_CHOICES: usize = 8;
 const GROUP_PREFERENCE: f64 = 40_000.0;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,10 +142,18 @@ fn endpoint(node: &NodeRecord) -> Option<RankedCallEndpoint> {
 #[derive(Default)]
 pub(super) struct Plan {
     operations: BTreeMap<String, BTreeSet<String>>,
+    // All action-looking groups remain ineligible as independent topic credit,
+    // even when surface-form navigation hints select fewer requested heads.
+    predicates: BTreeSet<String>,
 }
 
 impl Plan {
-    pub fn new(groups: &[(String, Vec<String>, f64, u64)], allowed: bool) -> Self {
+    pub fn new(
+        groups: &[(String, Vec<String>, f64, u64)],
+        action_terms: &BTreeSet<String>,
+        question: &str,
+        allowed: bool,
+    ) -> Self {
         if !allowed {
             return Self::default();
         }
@@ -156,7 +165,7 @@ impl Plan {
                 "detect" => &["detect", "check", "validate", "validation"],
                 "rebuilt" | "rebuild" => &["rebuild", "build"],
                 "publish" => &["publish"],
-                _ if is_retrieval_action(term) => &[],
+                _ if action_terms.contains(term) => &[],
                 _ => continue,
             };
             operations.insert(
@@ -168,10 +177,72 @@ impl Plan {
                     .collect(),
             );
         }
-        if operations.len() < 2 {
-            return Self::default();
+        let predicates = operations.keys().cloned().collect();
+        // The owning request bounds bytes and groups before this call. These
+        // are surface-form lexical navigation hints, not an English parse or a
+        // rewrite of the complete query/ranking groups. Unknown forms retain
+        // the previous action-looking set rather than inventing a unique role.
+        let words = compass_model::identifier_tokens(question);
+        let canonical = words
+            .iter()
+            .cloned()
+            .map(compass_model::canonical_code_token)
+            .collect::<Vec<_>>();
+        let mut requested = words
+            .iter()
+            .zip(&canonical)
+            .filter(|(raw, key)| {
+                operations.contains_key(*key)
+                    && ((raw.len() > 4 && raw.ends_with("ed"))
+                        || matches!(raw.as_str(), "rebuilt" | "written" | "sent"))
+            })
+            .map(|(_, key)| key.clone())
+            .collect::<BTreeSet<_>>();
+        if requested.is_empty() {
+            for (index, word) in words.iter().enumerate() {
+                let head = canonical.get(index + 1);
+                if matches!(
+                    word.as_str(),
+                    "to" | "we"
+                        | "you"
+                        | "i"
+                        | "they"
+                        | "can"
+                        | "could"
+                        | "should"
+                        | "would"
+                        | "will"
+                        | "must"
+                        | "do"
+                        | "does"
+                ) && let Some(head) = head.filter(|head| operations.contains_key(*head))
+                {
+                    requested.insert(head.clone());
+                }
+            }
+            if let Some(head) = canonical
+                .first()
+                .filter(|head| operations.contains_key(*head))
+            {
+                requested.insert(head.clone());
+            }
         }
-        Self { operations }
+        for (raw, keys) in words.windows(3).zip(canonical.windows(3)) {
+            if matches!(raw[1].as_str(), "and" | "or")
+                && operations.contains_key(&keys[0])
+                && operations.contains_key(&keys[2])
+            {
+                requested.insert(keys[0].clone());
+                requested.insert(keys[2].clone());
+            }
+        }
+        if !requested.is_empty() {
+            operations.retain(|term, _| requested.contains(term));
+        }
+        Self {
+            operations,
+            predicates,
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -215,7 +286,7 @@ impl Plan {
         let subjects = groups
             .iter()
             .filter(|(term, variants, _, _)| {
-                !self.operations.contains_key(term)
+                !self.predicates.contains(term)
                     && !is_decision_predicate(term)
                     && !matches!(term.as_str(), "all" | "only" | "new" | "made")
                     && variants.iter().any(|variant| own.contains(variant))
@@ -312,25 +383,57 @@ struct Choice {
     diversity: usize,
 }
 
+fn choice_order(candidate: &Choice, old: &Choice) -> std::cmp::Ordering {
+    old.diversity
+        .cmp(&candidate.diversity)
+        .then_with(|| candidate.link.hops.len().cmp(&old.link.hops.len()))
+        .then_with(|| {
+            candidate
+                .link
+                .hops
+                .iter()
+                .map(|hop| &hop.edge_id)
+                .cmp(old.link.hops.iter().map(|hop| &hop.edge_id))
+        })
+}
+
 fn better(candidate: &Choice, old: &Choice) -> bool {
-    candidate.diversity > old.diversity
-        || (candidate.diversity == old.diversity
-            && (
-                candidate.link.hops.len(),
-                candidate
-                    .link
-                    .hops
-                    .iter()
-                    .map(|hop| hop.edge_id.as_str())
-                    .collect::<Vec<_>>(),
-            ) < (
-                old.link.hops.len(),
-                old.link
-                    .hops
-                    .iter()
-                    .map(|hop| hop.edge_id.as_str())
-                    .collect::<Vec<_>>(),
-            ))
+    choice_order(candidate, old).is_lt()
+}
+
+// Single-operation alternatives are distinct known call targets, not a unique
+// semantic interpretation. Retain a bounded best set, never the first target.
+// Every endpoint/path has already passed the native scalar/vector bounds.
+fn retain_single_choice(
+    choices: &mut BTreeMap<String, Choice>,
+    target: &str,
+    candidate: Choice,
+    bounded: &mut bool,
+) {
+    if let Some(old) = choices.get_mut(target) {
+        if better(&candidate, old) {
+            *old = candidate;
+        }
+        return;
+    }
+    if choices.len() >= MAX_SINGLE_CHOICES {
+        *bounded = true;
+        let Some((weakest_key, weakest)) =
+            choices
+                .iter()
+                .max_by(|(left_key, left), (right_key, right)| {
+                    choice_order(left, right).then_with(|| left_key.cmp(right_key))
+                })
+        else {
+            return;
+        };
+        if !better(&candidate, weakest) {
+            return;
+        }
+        let key = weakest_key.clone();
+        choices.remove(&key);
+    }
+    choices.insert(target.to_owned(), candidate);
 }
 
 fn witness(owner: &NodeRecord, target: &NodeRecord, edge: &EdgeRecord) -> Option<RankedCallHop> {
@@ -434,7 +537,7 @@ fn selected_edge_projection(
     Ok(projected)
 }
 
-/// A two-operation group is navigation evidence. Only the originally weak
+/// An operation group is navigation evidence. Only the originally weak
 /// answer is reordered; strong/literal answers never enter this path.
 pub(super) struct Context<'a, 'b> {
     pub backend: &'a PinnedDiscoveryBackend<'b>,
@@ -467,6 +570,8 @@ impl Context<'_, '_> {
         {
             return Ok(Witness::default());
         }
+        let single_operation = plan.operations.len() == 1;
+        let minimum_helpers = if single_operation { 1 } else { 2 };
         // Internal path enumeration is BFS even when later context presentation
         // requests DFS. Both are bounded by the caller's validated depth.
         let max_depth = (work.max_depth as usize).min(MAX_DEPTH);
@@ -586,7 +691,14 @@ impl Context<'_, '_> {
                                 },
                                 diversity: *diversity,
                             };
-                            if choices
+                            if single_operation {
+                                retain_single_choice(
+                                    &mut choices,
+                                    &target.id,
+                                    choice,
+                                    work.bounded,
+                                );
+                            } else if choices
                                 .get(requested)
                                 .is_none_or(|old| better(&choice, old))
                             {
@@ -603,10 +715,19 @@ impl Context<'_, '_> {
                     }
                 }
             }
-            if choices.len() < 2 {
+            if choices.len() < minimum_helpers {
                 continue;
             }
-            let diversity = choices.values().map(|choice| choice.diversity).sum();
+            // More same-operation callees must not by themselves promote a root.
+            let diversity = if single_operation {
+                choices
+                    .values()
+                    .map(|choice| choice.diversity)
+                    .max()
+                    .unwrap_or(0)
+            } else {
+                choices.values().map(|choice| choice.diversity).sum()
+            };
             if best.as_ref().is_none_or(|(subjects, hints, rank, _)| {
                 (
                     root_signal.subjects,
@@ -627,7 +748,11 @@ impl Context<'_, '_> {
         let mut root = ranked.remove(root_rank);
         let mut helpers = Vec::new();
         let mut used = BTreeSet::new();
-        for choice in choices.into_values() {
+        let mut choices = choices.into_values().collect::<Vec<_>>();
+        if single_operation {
+            choices.sort_by(choice_order);
+        }
+        for choice in choices {
             let Some(id) = choice.link.hops.last().map(|hop| hop.target.id.clone()) else {
                 continue;
             };
@@ -646,7 +771,7 @@ impl Context<'_, '_> {
             helper.call_link = Some(choice.link);
             helpers.push(helper);
         }
-        if helpers.len() < 2 {
+        if helpers.len() < minimum_helpers {
             ranked.insert(root_rank, root);
             return Ok(Witness {
                 expanded,
@@ -702,7 +827,12 @@ impl Context<'_, '_> {
         }
         witness.expanded = expanded;
         witness.work = Some(probes.finish());
-        root.reasons.insert(0, "Two requested operation-name leads are reachable through exact AST call paths. This receives an inspection preference; path reachability and lexical hints do not establish the requested behavior".to_owned());
+        let reason = if single_operation {
+            "Requested operation-name leads are reachable through exact AST call paths. Alternatives are bounded inspection candidates, not a unique interpretation or proof of requested behavior"
+        } else {
+            "Two requested operation-name leads are reachable through exact AST call paths. This receives an inspection preference; path reachability and lexical hints do not establish the requested behavior"
+        };
+        root.reasons.insert(0, reason.to_owned());
         root.score += GROUP_PREFERENCE;
         for (position, helper) in helpers.iter_mut().enumerate() {
             helper.score = root.score - (position + 1) as f64;
@@ -714,5 +844,300 @@ impl Context<'_, '_> {
         // Every retained path is one witness, never an exhaustive call census.
         *work.bounded = true;
         Ok(witness)
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use std::error::Error;
+
+    fn groups(question: &str) -> Vec<(String, Vec<String>, f64, u64)> {
+        super::super::terms(question)
+            .into_iter()
+            .map(|term| {
+                let mut variants = vec![term.clone()];
+                if term == "acquir" {
+                    variants.push("acquire".to_owned());
+                }
+                if term == "rebuilt" {
+                    variants.push("rebuild".to_owned());
+                }
+                (term, variants, 1.0, 1)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn surface_hints_keep_noun_modifiers_and_explicit_conjoined_operations_separate() {
+        for (question, expected) in [
+            ("Where are record caches checked?", vec!["check"]),
+            ("Where do we check record caches?", vec!["check"]),
+            ("Check record caches", vec!["check"]),
+            (
+                "Where are record caches checked and published?",
+                vec!["check", "publish"],
+            ),
+            (
+                "Where do we check and publish record caches?",
+                vec!["check", "publish"],
+            ),
+            (
+                "Where do we record and check caches?",
+                vec!["check", "record"],
+            ),
+            (
+                "Where are record caches detected and rebuild?",
+                vec!["detect", "rebuild"],
+            ),
+            ("Where are record caches acquired?", vec!["acquir"]),
+            // No recognized surface head: preserve the prior classified set.
+            ("About record caches check", vec!["check", "record"]),
+        ] {
+            let groups = groups(question);
+            let actions = groups
+                .iter()
+                .filter(|(term, _, _, _)| is_retrieval_action(term) || term == "acquir")
+                .map(|(term, _, _, _)| term.clone())
+                .collect();
+            let plan = Plan::new(&groups, &actions, question, true);
+            assert_eq!(
+                plan.operations
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{question}"
+            );
+            assert!(!Plan::new(&groups, &actions, question, false).enabled());
+        }
+        assert_eq!(
+            crate::ranking::canonical_predicate_token("record"),
+            Some("persist")
+        );
+    }
+
+    #[test]
+    fn filtering_a_navigation_head_never_creates_new_topic_credit() -> Result<(), Box<dyn Error>> {
+        let question = "Where are record caches checked?";
+        let groups = groups(question);
+        let actions = BTreeSet::from(["check".to_owned(), "record".to_owned()]);
+        let plan = Plan::new(&groups, &actions, question, true);
+        assert!(!plan.operations.contains_key("record"));
+        assert!(plan.predicates.contains("record"));
+        let node =
+            crate::test_support::node("root", NodeKind::Function, "opaque", "fixture.opaque");
+        let document = SearchDocument {
+            fields: BTreeMap::from([(
+                "body_comment",
+                BTreeSet::from(["record".to_owned(), "cach".to_owned()]),
+            )]),
+            truncated: false,
+        };
+        let mut budget = RecordBudget::new();
+        assert_eq!(
+            plan.signals(&node, &document, &groups, &mut budget)?
+                .subjects,
+            1
+        );
+        Ok(())
+    }
+
+    // Synthetic compact records exercise bounded selection, not source truth.
+    fn choice(index: usize, diversity: usize) -> Choice {
+        let source = SourceAnchor {
+            file: "fixture.py".to_owned(),
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            end_line: 1,
+            start_column: 0,
+            end_column: 1,
+        };
+        let root = RankedCallEndpoint {
+            id: "root".to_owned(),
+            name: "root".to_owned(),
+            source: source.clone(),
+        };
+        let target = RankedCallEndpoint {
+            id: format!("helper-{index}"),
+            name: format!("check_{index}"),
+            source: source.clone(),
+        };
+        Choice {
+            link: RankedCallLink {
+                schema: "compass.query.call-link/1".to_owned(),
+                root,
+                hops: vec![RankedCallHop {
+                    edge_id: format!("edge-{index}"),
+                    source_id: "root".to_owned(),
+                    target,
+                    site: source,
+                    occurrence_rule: None,
+                    extractor: "authored-selector-fixture".to_owned(),
+                    rule: None,
+                }],
+                hint: RankedCallHint {
+                    requested: "check".to_owned(),
+                    spelling: "check".to_owned(),
+                },
+            },
+            diversity,
+        }
+    }
+
+    #[test]
+    fn single_alternatives_keep_eight_best_not_the_first_eight() {
+        let mut choices = BTreeMap::new();
+        let mut bounded = false;
+        for index in 0..MAX_SINGLE_CHOICES {
+            retain_single_choice(
+                &mut choices,
+                &format!("helper-{index}"),
+                choice(index, index),
+                &mut bounded,
+            );
+        }
+        assert_eq!(choices.len(), MAX_SINGLE_CHOICES);
+        assert!(!bounded);
+        retain_single_choice(&mut choices, "helper-8", choice(8, 8), &mut bounded);
+        assert!(bounded);
+        assert_eq!(choices.len(), MAX_SINGLE_CHOICES);
+        assert!(!choices.contains_key("helper-0"));
+        let mut reversed = BTreeMap::new();
+        let mut reversed_bound = false;
+        for index in (0..=MAX_SINGLE_CHOICES).rev() {
+            retain_single_choice(
+                &mut reversed,
+                &format!("helper-{index}"),
+                choice(index, index),
+                &mut reversed_bound,
+            );
+        }
+        assert!(reversed_bound);
+        assert_eq!(
+            choices
+                .values()
+                .map(|choice| &choice.link)
+                .collect::<Vec<_>>(),
+            reversed
+                .values()
+                .map(|choice| &choice.link)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn same_target_paths_do_not_erase_distinct_alternatives() {
+        let mut choices = BTreeMap::new();
+        let mut bounded = false;
+        retain_single_choice(&mut choices, "helper-1", choice(1, 1), &mut bounded);
+        retain_single_choice(&mut choices, "helper-2", choice(2, 1), &mut bounded);
+        retain_single_choice(&mut choices, "helper-1", choice(1, 3), &mut bounded);
+        assert_eq!(choices.len(), 2);
+        assert_eq!(
+            choices.get("helper-1").map(|choice| choice.diversity),
+            Some(3)
+        );
+        assert!(choices.contains_key("helper-2"));
+        assert!(!bounded);
+    }
+
+    #[test]
+    fn equal_diversity_prefers_shorter_paths_then_occurrence_ids() -> Result<(), Box<dyn Error>> {
+        let copy_choice = |value: &Choice| Choice {
+            link: value.link.clone(),
+            diversity: value.diversity,
+        };
+        let mut short = choice(0, 1);
+        let mut long = choice(0, 1);
+        let hop = long.link.hops.first().ok_or("fixture hop missing")?.clone();
+        long.link.hops.push(hop);
+        short.link.hops[0].edge_id = "z-short".to_owned();
+        long.link.hops[0].edge_id = "a-long".to_owned();
+        assert!(better(&short, &long));
+        let mut earlier = copy_choice(&short);
+        earlier.link.hops[0].edge_id = "a-short".to_owned();
+        assert!(better(&earlier, &short));
+        for reverse in [false, true] {
+            let mut choices = BTreeMap::new();
+            let mut bounded = false;
+            let mut inputs = vec![
+                copy_choice(&long),
+                copy_choice(&short),
+                copy_choice(&earlier),
+            ];
+            if reverse {
+                inputs.reverse();
+            }
+            for input in inputs {
+                retain_single_choice(&mut choices, "helper-0", input, &mut bounded);
+            }
+            assert_eq!(
+                choices.get("helper-0").map(|value| &value.link),
+                Some(&earlier.link)
+            );
+            assert!(!bounded);
+        }
+        let mut choices = BTreeMap::new();
+        let mut bounded = false;
+        for index in 1..=MAX_SINGLE_CHOICES {
+            retain_single_choice(
+                &mut choices,
+                &format!("helper-{index}"),
+                choice(index, 1),
+                &mut bounded,
+            );
+        }
+        retain_single_choice(
+            &mut choices,
+            "helper-0",
+            copy_choice(&earlier),
+            &mut bounded,
+        );
+        assert!(bounded);
+        assert_eq!(choices.len(), MAX_SINGLE_CHOICES);
+        assert_eq!(
+            choices.get("helper-0").map(|value| &value.link),
+            Some(&earlier.link)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_action_alias_cannot_erase_independent_noun_topic_credit() -> Result<(), Box<dyn Error>> {
+        let groups = vec![
+            (
+                "database".to_owned(),
+                vec!["database".to_owned(), "store".to_owned()],
+                1.0,
+                1_u64,
+            ),
+            ("error".to_owned(), vec!["error".to_owned()], 1.0, 1_u64),
+            ("check".to_owned(), vec!["check".to_owned()], 1.0, 1_u64),
+        ];
+        let actions = BTreeSet::from(["check".to_owned()]);
+        let plan = Plan::new(
+            &groups,
+            &actions,
+            "Where are database errors checked?",
+            true,
+        );
+        let node =
+            crate::test_support::node("root", NodeKind::Function, "opaque", "fixture.opaque");
+        let document = SearchDocument {
+            fields: BTreeMap::from([(
+                "body_comment",
+                BTreeSet::from(["database".to_owned(), "error".to_owned()]),
+            )]),
+            truncated: false,
+        };
+        let mut budget = RecordBudget::new();
+        assert_eq!(
+            plan.signals(&node, &document, &groups, &mut budget)?
+                .subjects,
+            2
+        );
+        Ok(())
     }
 }

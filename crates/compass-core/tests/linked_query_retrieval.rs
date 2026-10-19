@@ -691,3 +691,237 @@ fn branching_navigation_reaches_deeper_helpers_within_requested_depth() -> Resul
     }
     Ok(())
 }
+
+#[test]
+fn single_operation_helpers_keep_native_paths_without_borrowing_topics()
+-> Result<(), Box<dyn Error>> {
+    const SOURCE: &str = "def maintain(records):\n    # Check and publish stale or broken record caches.\n    if check_piece(records):\n        return\n    publish_piece(records)\n\ndef check_piece(value):\n    return value is not None\n\ndef publish_piece(value):\n    return value\n\ndef check_shadow(value):\n    return value is None\n\nclass Unrelated:\n    def check_piece(self, value):\n        return value\n";
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    fs::create_dir(&root)?;
+    fs::write(root.join("sample.py"), SOURCE)?;
+    let mut options = BuildOptions::new(&root);
+    options.output_root = Some(directory.path().join("artifacts"));
+    options.graph_storage = GraphStorage::Sqlite;
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(1);
+    let built = build_local_graph(&options)?;
+    let path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&path)?;
+    let caller = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "sample.maintain")
+        .ok_or("native caller missing")?;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &path,
+            None,
+            &directory.path().join(format!("query-{mode:?}")),
+            mode,
+        )?;
+        let mut control = request("Where are stale or broken record caches checked and published?");
+        control.limits.max_depth = 1;
+        let control = engine.discover_ranked(control)?;
+        let mut no_record_modifier = request("Where are stale or broken caches checked?");
+        no_record_modifier.limits.max_depth = 1;
+        let no_record_modifier = engine.discover_ranked(no_record_modifier)?;
+        assert!(
+            no_record_modifier
+                .candidates
+                .iter()
+                .take(5)
+                .any(|candidate| { candidate.node.qualified_name == "sample.check_piece" }),
+            "single-operation control without the noun modifier must first pass"
+        );
+        for (question, helper) in [
+            (
+                "Where are stale or broken record caches checked?",
+                "check_piece",
+            ),
+            (
+                "Where are stale or broken record caches published?",
+                "publish_piece",
+            ),
+        ] {
+            let target = graph
+                .nodes
+                .iter()
+                .find(|node| node.qualified_name == format!("sample.{helper}"))
+                .ok_or("native helper missing")?;
+            let native_call = graph
+                .links
+                .iter()
+                .find(|edge| {
+                    edge.source == caller.id
+                        && edge.target == target.id
+                        && edge.kind == EdgeKind::Calls
+                })
+                .ok_or("native call missing; cannot diagnose retrieval")?;
+            assert!(native_call.relationship_site.is_some());
+            assert!(native_call.evidence.iter().any(|proof| {
+                proof.origin == EvidenceOrigin::Ast && proof.confidence == EvidenceConfidence::Exact
+            }));
+            assert!(
+                control
+                    .candidates
+                    .iter()
+                    .take(5)
+                    .any(|candidate| candidate.node.id == target.id),
+                "two-operation control must first establish existing retrieval on this exact graph"
+            );
+            let mut input = request(question);
+            input.limits.max_depth = 1;
+            let answer = engine.discover_ranked(input)?;
+            let candidate = answer.candidates.iter().take(5).find(|candidate| candidate.node.id == target.id)
+                .ok_or("single-operation helper absent despite the same witnessed call and topic owner")?;
+            assert_eq!(candidate.relevance, RelevanceBand::Low);
+            let link = candidate
+                .call_link
+                .as_ref()
+                .ok_or("missing single-operation call path")?;
+            assert!(link.is_coherent_for(&target.id));
+            assert_eq!(link.root.id, caller.id);
+            assert_eq!(link.hops.len(), 1);
+            assert_eq!(link.hops[0].edge_id, native_call.id);
+            assert!(
+                candidate.matched_terms.iter().all(|term| {
+                    !matches!(term.as_str(), "stale" | "broken" | "record" | "cach")
+                }),
+                "caller topics must not become helper matches"
+            );
+            assert!(answer.candidates.iter().all(|candidate| {
+                !matches!(
+                    candidate.node.qualified_name.as_str(),
+                    "sample.check_shadow" | "sample.Unrelated.check_piece"
+                )
+            }));
+        }
+        for question in [
+            "Where are OrbitalPlasmid caches checked?",
+            "Where are record caches checked?",
+            "Where is sample.check_piece checked?",
+            "Where are stale or broken record caches never checked?",
+            "Where are stale or broken record caches checked before publishing?",
+        ] {
+            let answer = engine.discover_ranked(request(question))?;
+            assert!(
+                answer
+                    .candidates
+                    .iter()
+                    .all(|candidate| candidate.call_link.is_none()),
+                "guarded question must not gain helper navigation: {question}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn single_operation_alternatives_keep_distinct_targets_and_shortest_native_paths()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    fs::create_dir(&root)?;
+    fs::write(
+        root.join("sample.py"),
+        "def maintain(records):\n    # Check stale or broken caches.\n    check_beta(records)\n    check_alpha(records)\n    bridge(records)\n    check_alpha(records)\n\ndef bridge(value):\n    check_alpha(value)\n\ndef check_alpha(value):\n    return value is not None\n\ndef check_beta(value):\n    return bool(value)\n\ndef check_shadow(value):\n    return value is None\n",
+    )?;
+    let mut options = BuildOptions::new(&root);
+    options.output_root = Some(directory.path().join("artifacts"));
+    options.graph_storage = GraphStorage::Sqlite;
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(1);
+    let built = build_local_graph(&options)?;
+    let path = built.output_dir.join("graph.json");
+    let graph = GraphDocument::load(&path)?;
+    let caller = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "sample.maintain")
+        .ok_or("native caller missing")?;
+    let mut previous = None;
+    for mode in [EngineSelection::Json, EngineSelection::Store] {
+        let engine = open_with_engine(
+            &path,
+            None,
+            &directory.path().join(format!("query-{mode:?}")),
+            mode,
+        )?;
+        let mut input = request("Where are stale or broken caches checked?");
+        input.limits.max_depth = 2;
+        let answer = engine.discover_ranked(input)?;
+        let helpers = answer
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.call_link.is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(helpers.len(), 2, "{mode:?}");
+        let mut identities = std::collections::BTreeSet::new();
+        for helper in helpers {
+            assert!(matches!(
+                helper.node.qualified_name.as_str(),
+                "sample.check_alpha" | "sample.check_beta"
+            ));
+            assert!(identities.insert(helper.node.id.clone()));
+            assert_eq!(helper.relevance, RelevanceBand::Low);
+            assert!(
+                helper
+                    .matched_terms
+                    .iter()
+                    .all(|term| { !matches!(term.as_str(), "stale" | "broken" | "cach") })
+            );
+            let link = helper.call_link.as_ref().ok_or("helper path missing")?;
+            assert!(link.is_coherent_for(&helper.node.id));
+            assert_eq!(link.root.id, caller.id);
+            assert_eq!(link.hops.len(), 1, "prefer a direct call over bridge");
+            let mut native = graph
+                .links
+                .iter()
+                .filter(|edge| {
+                    edge.kind == EdgeKind::Calls
+                        && edge.source == caller.id
+                        && edge.target == helper.node.id
+                })
+                .collect::<Vec<_>>();
+            native.sort_by(|a, b| a.id.cmp(&b.id));
+            assert_eq!(
+                native.len(),
+                if helper.node.qualified_name == "sample.check_alpha" {
+                    2
+                } else {
+                    1
+                }
+            );
+            let selected = native.first().ok_or("native call missing")?;
+            assert_eq!(link.hops[0].edge_id, selected.id);
+            assert_eq!(
+                Some(&link.hops[0].site),
+                selected.relationship_site.as_ref()
+            );
+        }
+        let raw = &answer.discovery;
+        assert!(raw.has_valid_work_contract());
+        let work = raw.stats.call_link_work.as_ref().ok_or("work missing")?;
+        assert!(work.is_coherent());
+        assert!(work.candidate_probes > 0 && work.candidate_probes <= 40);
+        assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
+        let view = compass_output::build_ranked_query_view(&answer, "graph", "digest")?;
+        compass_output::RankedQueryView::from_json(&serde_json::to_vec(&view)?)?;
+        // Indexed recall performs backend-specific logical lookups. Compare
+        // the semantic candidates and the additional native Calls allowance;
+        // each backend must separately report its truthful indexed work.
+        let signature = (view.candidates, work.candidate_probes);
+        if let Some(previous) = &previous {
+            assert_eq!(
+                previous, &signature,
+                "backend order/proof/native-work parity"
+            );
+        } else {
+            previous = Some(signature);
+        }
+    }
+    Ok(())
+}

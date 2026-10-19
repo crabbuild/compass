@@ -14,8 +14,12 @@ It is not matching-query evidence or proof of behavior. The default depth stays
 two; request `--max-depth 4` to inspect up to four helper hops when available.
 Use `--view ranked` for paths and previews. No graph rebuild is required solely
 for this query change; missing source/call evidence still needs `compass update`.
-Disposable responses refresh automatically. Historical realizations and native
-graph/source ownership remain unchanged. See COMPATIBILITY.md for exact bounds.
+Single-operation questions now use the same metered contracts when eligible.
+Their operation-name hints and alternatives are inspection aids, not verified
+intent or behavioral answers. No new schema upgrade is required beyond those
+above; disposable ranker responses refresh automatically.
+Historical realizations and native graph/source ownership remain unchanged.
+See COMPATIBILITY.md for exact bounds.
 
 Current builds use `source-query/8-callable-comments` and AST cache 33. Run
 `compass update <root>` with the new binary to retain up to 64 callable comments

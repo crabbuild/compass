@@ -329,13 +329,16 @@ retain the existing cursor protocol; new majors require updated strict consumers
 Do not combine ranked view with discovery cursors, result envelopes, evidence,
 `agent-json`, or legacy traversal controls.
 
-For eligible broad questions about multiple operations, exact native calls may
+For eligible broad questions about one or more operations, exact native calls may
 surface Low-relevance helper leads. Call paths show navigation, not execution or
 proof of requested behavior. If a helper has no question-matching excerpt,
 `linked_callable_preview` shows retained code labeled behavior unverified.
 Previews do not change ranking or matched terms. Navigation follows requested
 depth up to four hops; the default remains two. Use `--max-depth 4` to inspect
 deeper helpers. Missing relationships/source windows cannot be invented.
+Single-operation questions may show up to two distinct reachable helpers. A
+bounded lexical heuristic separates common operation spellings from noun modifiers; it
+does not parse English or prove which alternative implements the behavior.
 
 Metered raw stats and ranked JSON retain `callLinkWork`: indexed recall remains
 at most291 logical probes; additional helper lookups share a separate40-probe

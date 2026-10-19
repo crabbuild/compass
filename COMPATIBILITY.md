@@ -2903,12 +2903,24 @@ The existing ranked-view4 enum/schema is unchanged.
 
 ## Metered helper navigation and retained previews
 
-Eligible broad questions asking about multiple operations can add Low-relevance
+Eligible broad questions asking about one or more operations can add Low-relevance
 helper candidates through exact native outgoing call occurrences. This channel
 requires separately supported topic evidence, preserves ambiguity and identity,
 and does not infer requested behavior from a caller or a call path. Explicit
 identities, guarded contexts and stronger answers retain their existing routing.
 Navigation follows the requested depth, capped at four; the default remains two.
+
+Operation-head selection is a bounded lexical navigation heuristic over the
+existing classified query groups, not an English parser or proof of intent.
+Filtering a noun-like modifier from the operation hints never supplies new root
+topic credit. A single operation requires one source-witnessed target; multiple
+operations still require two distinct helpers. Single-operation navigation keeps
+at most eight best exact target alternatives per root and displays at most two;
+multiple paths to one target retain one best path. Current-root and best-root
+maps can coexist, so eight is not a global allocation/RSS bound. Diversity,
+shortest path and stable occurrence IDs determine alternative order. More
+same-operation targets do not by themselves improve root rank. Full-question
+matching and Low/Approximate confidence remain.
 
 Metered responses use `compass.query.discovery/2` with
 `stats.callLinkWork.schema = "compass.query.call-link-work/1"`. The new
@@ -2929,7 +2941,8 @@ helper survives; unmetered ranked output remains major4. `callLink` uses
 endpoints, selected source sites, attribution and the disclosed spelling hint.
 It is approximate/Low navigation evidence. Prior unpublished experimental
 linked majors5/6 are unsupported. Metered retrieval traces use major2; otherwise
-trace major1 remains. Ranker27 and a new disposable response epoch separate the
+trace major1 remains. `query-ranker/28-single-operation-navigation` and disposable
+response epoch `ranked-call-link/7-classified-operation-heads` separate the
 retrieval policy. Historical graphs/source profiles and graph identities do not
 change solely because of this reader/query work.
 

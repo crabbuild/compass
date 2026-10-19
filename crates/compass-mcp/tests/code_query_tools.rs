@@ -1265,77 +1265,88 @@ fn linked_helper_work_and_previews_survive_native_mcp_projection() -> Result<(),
         options.max_workers = Some(1);
         let built = compass_core::build_local_graph(&options)?;
         let server = CompassMcp::new(built.output_dir.join("graph.json"));
-        for (cap, seeds) in [(256, 3), (1, 1)] {
-            let args = json!({
-                "question": "Where are stale or broken record caches checked and published?",
-                "max_depth": 1, "max_candidates": cap, "max_seeds": seeds,
-            });
-            let output =
-                server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
-            let envelope: Value = serde_json::from_str(&output)?;
-            assert_eq!(envelope["schema"], "compass.mcp.tool-result/1", "{output}");
-            let raw: compass_model::query_contract::DiscoveryQueryResponse =
-                serde_json::from_value(envelope["result"].clone())?;
-            assert_eq!(raw.schema, "compass.query.discovery/2");
-            assert!(raw.has_valid_work_contract());
-            let work = raw
-                .stats
-                .call_link_work
-                .as_ref()
-                .ok_or("missing MCP work ledger")?;
-            assert!(work.is_coherent() && work.candidate_probes > 0);
-            assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
-            let mut args = args;
-            args["view"] = json!("ranked");
-            let mut previous = None;
-            for _ in 0..2 {
+        for (question, expected_helpers) in [
+            (
+                "Where are stale or broken record caches checked and published?",
+                2,
+            ),
+            ("Where are stale or broken record caches checked?", 1),
+            ("Where are stale or broken record caches published?", 1),
+        ] {
+            for (cap, seeds) in [(256, 3), (1, 1)] {
+                let args = json!({
+                    "question": question,
+                    "max_depth": 1, "max_candidates": cap, "max_seeds": seeds,
+                });
                 let output =
                     server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
                 let envelope: Value = serde_json::from_str(&output)?;
-                let ranked_raw: compass_model::query_contract::DiscoveryQueryResponse =
+                assert_eq!(envelope["schema"], "compass.mcp.tool-result/1", "{output}");
+                let raw: compass_model::query_contract::DiscoveryQueryResponse =
                     serde_json::from_value(envelope["result"].clone())?;
-                assert!(ranked_raw.has_valid_work_contract());
-                assert_eq!(ranked_raw.stats.call_link_work.as_ref(), Some(work));
-                let view = compass_output::RankedQueryView::from_json(&serde_json::to_vec(
-                    &envelope["rankedView"],
-                )?)?;
-                assert_eq!(view.schema, "compass.query.ranked-view/7");
-                assert_eq!(view.call_link_work.as_ref(), Some(work));
-                if cap == 1 {
-                    assert_eq!(view.candidates.len(), 1);
-                    assert!(view.candidates[0].call_link.is_none());
-                } else {
-                    let helpers = view
-                        .candidates
-                        .iter()
-                        .filter(|candidate| candidate.call_link.is_some())
-                        .collect::<Vec<_>>();
-                    assert_eq!(helpers.len(), 2);
-                    for helper in helpers {
-                        assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
-                        let quote = helper
-                            .excerpts
+                assert_eq!(raw.schema, "compass.query.discovery/2");
+                assert!(raw.has_valid_work_contract());
+                let work = raw
+                    .stats
+                    .call_link_work
+                    .as_ref()
+                    .ok_or("missing MCP work ledger")?;
+                assert!(work.is_coherent() && work.candidate_probes > 0);
+                assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
+                let mut args = args;
+                args["view"] = json!("ranked");
+                let mut previous = None;
+                for _ in 0..2 {
+                    let output =
+                        server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
+                    let envelope: Value = serde_json::from_str(&output)?;
+                    let ranked_raw: compass_model::query_contract::DiscoveryQueryResponse =
+                        serde_json::from_value(envelope["result"].clone())?;
+                    assert!(ranked_raw.has_valid_work_contract());
+                    assert_eq!(ranked_raw.stats.call_link_work.as_ref(), Some(work));
+                    let view = compass_output::RankedQueryView::from_json(&serde_json::to_vec(
+                        &envelope["rankedView"],
+                    )?)?;
+                    assert_eq!(view.schema, "compass.query.ranked-view/7");
+                    assert_eq!(view.call_link_work.as_ref(), Some(work));
+                    if cap == 1 {
+                        assert_eq!(view.candidates.len(), 1);
+                        assert!(view.candidates[0].call_link.is_none());
+                    } else {
+                        let helpers = view
+                            .candidates
                             .iter()
-                            .find(|quote| {
-                                serde_json::to_value(quote)
-                                    .is_ok_and(|value| value["kind"] == "linked_callable_preview")
-                            })
-                            .ok_or("missing MCP helper preview")?;
-                        assert!(quote.is_coherent());
-                        assert_eq!(quote.source.file, "sample.py");
-                        assert_eq!(
-                            LINKED_HELPER_SOURCE.get(
-                                quote.source.start_byte as usize..quote.source.end_byte as usize
-                            ),
-                            Some(quote.text.as_str())
-                        );
-                        assert!(quote.text.contains("return value"));
+                            .filter(|candidate| candidate.call_link.is_some())
+                            .collect::<Vec<_>>();
+                        assert_eq!(helpers.len(), expected_helpers, "{question}");
+                        for helper in helpers {
+                            assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
+                            let quote = helper
+                                .excerpts
+                                .iter()
+                                .find(|quote| {
+                                    serde_json::to_value(quote).is_ok_and(|value| {
+                                        value["kind"] == "linked_callable_preview"
+                                    })
+                                })
+                                .ok_or("missing MCP helper preview")?;
+                            assert!(quote.is_coherent());
+                            assert_eq!(quote.source.file, "sample.py");
+                            assert_eq!(
+                                LINKED_HELPER_SOURCE.get(
+                                    quote.source.start_byte as usize
+                                        ..quote.source.end_byte as usize
+                                ),
+                                Some(quote.text.as_str())
+                            );
+                            assert!(quote.text.contains("return value"));
+                        }
                     }
-                }
-                if let Some(previous) = &previous {
-                    assert_eq!(previous, &view);
-                } else {
-                    previous = Some(view);
+                    if let Some(previous) = &previous {
+                        assert_eq!(previous, &view);
+                    } else {
+                        previous = Some(view);
+                    }
                 }
             }
         }

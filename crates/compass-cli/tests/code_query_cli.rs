@@ -4231,93 +4231,104 @@ fn linked_helper_work_and_previews_survive_native_cli_projection() -> Result<(),
             "{}",
             String::from_utf8_lossy(&update.stderr)
         );
-        for (cap, seeds) in [("256", "3"), ("1", "1")] {
-            let query = || {
-                let mut command = support::compass_command();
-                command.current_dir(directory.path()).args([
-                    "query",
-                    "Where are stale or broken record caches checked and published?",
-                    "--max-depth",
-                    "1",
-                    "--max-candidates",
-                    cap,
-                    "--max-seeds",
-                    seeds,
-                ]);
-                command
-            };
-            let raw = query().args(["--format", "json"]).output()?;
-            assert!(
-                raw.status.success(),
-                "{}",
-                String::from_utf8_lossy(&raw.stderr)
-            );
-            let raw: compass_model::query_contract::DiscoveryQueryResponse =
-                serde_json::from_slice(&raw.stdout)?;
-            assert_eq!(raw.schema, "compass.query.discovery/2");
-            assert!(raw.has_valid_work_contract());
-            let work = raw
-                .stats
-                .call_link_work
-                .as_ref()
-                .ok_or("missing CLI work ledger")?;
-            assert!(work.is_coherent() && work.candidate_probes > 0);
-            assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
-            let text = query().output()?;
-            assert!(
-                text.status.success(),
-                "{}",
-                String::from_utf8_lossy(&text.stderr)
-            );
-            assert!(String::from_utf8_lossy(&text.stdout).contains("Call-linked lookups:"));
-            let mut previous = None;
-            for _ in 0..2 {
-                let output = query()
-                    .args(["--view", "ranked", "--format", "json"])
-                    .output()?;
+        for (question, expected_helpers) in [
+            (
+                "Where are stale or broken record caches checked and published?",
+                2,
+            ),
+            ("Where are stale or broken record caches checked?", 1),
+            ("Where are stale or broken record caches published?", 1),
+        ] {
+            for (cap, seeds) in [("256", "3"), ("1", "1")] {
+                let query = || {
+                    let mut command = support::compass_command();
+                    command.current_dir(directory.path()).args([
+                        "query",
+                        question,
+                        "--max-depth",
+                        "1",
+                        "--max-candidates",
+                        cap,
+                        "--max-seeds",
+                        seeds,
+                    ]);
+                    command
+                };
+                let raw = query().args(["--format", "json"]).output()?;
                 assert!(
-                    output.status.success(),
+                    raw.status.success(),
                     "{}",
-                    String::from_utf8_lossy(&output.stderr)
+                    String::from_utf8_lossy(&raw.stderr)
                 );
-                let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
-                assert_eq!(view.schema, "compass.query.ranked-view/7");
-                assert_eq!(view.call_link_work.as_ref(), Some(work));
-                if cap == "1" {
-                    assert_eq!(view.candidates.len(), 1);
-                    assert!(view.candidates[0].call_link.is_none());
-                } else {
-                    let helpers = view
-                        .candidates
-                        .iter()
-                        .filter(|candidate| candidate.call_link.is_some())
-                        .collect::<Vec<_>>();
-                    assert_eq!(helpers.len(), 2);
-                    for helper in helpers {
-                        assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
-                        let quote = helper
-                            .excerpts
+                let raw: compass_model::query_contract::DiscoveryQueryResponse =
+                    serde_json::from_slice(&raw.stdout)?;
+                assert_eq!(raw.schema, "compass.query.discovery/2");
+                assert!(raw.has_valid_work_contract());
+                let work = raw
+                    .stats
+                    .call_link_work
+                    .as_ref()
+                    .ok_or("missing CLI work ledger")?;
+                assert!(work.is_coherent() && work.candidate_probes > 0);
+                assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
+                let text = query().output()?;
+                assert!(
+                    text.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&text.stderr)
+                );
+                assert!(String::from_utf8_lossy(&text.stdout).contains("Call-linked lookups:"));
+                let mut previous = None;
+                for _ in 0..2 {
+                    let output = query()
+                        .args(["--view", "ranked", "--format", "json"])
+                        .output()?;
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
+                    assert_eq!(view.schema, "compass.query.ranked-view/7");
+                    assert_eq!(view.call_link_work.as_ref(), Some(work));
+                    if cap == "1" {
+                        assert_eq!(view.candidates.len(), 1);
+                        assert!(view.candidates[0].call_link.is_none());
+                    } else {
+                        let helpers = view
+                            .candidates
                             .iter()
-                            .find(|quote| {
-                                serde_json::to_value(quote)
-                                    .is_ok_and(|value| value["kind"] == "linked_callable_preview")
-                            })
-                            .ok_or("missing CLI helper preview")?;
-                        assert!(quote.is_coherent());
-                        assert_eq!(quote.source.file, "sample.py");
-                        assert_eq!(
-                            LINKED_HELPER_SOURCE.get(
-                                quote.source.start_byte as usize..quote.source.end_byte as usize
-                            ),
-                            Some(quote.text.as_str())
-                        );
-                        assert!(quote.text.contains("return value"));
+                            .filter(|candidate| candidate.call_link.is_some())
+                            .collect::<Vec<_>>();
+                        assert_eq!(helpers.len(), expected_helpers, "{question}");
+                        for helper in helpers {
+                            assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
+                            let quote = helper
+                                .excerpts
+                                .iter()
+                                .find(|quote| {
+                                    serde_json::to_value(quote).is_ok_and(|value| {
+                                        value["kind"] == "linked_callable_preview"
+                                    })
+                                })
+                                .ok_or("missing CLI helper preview")?;
+                            assert!(quote.is_coherent());
+                            assert_eq!(quote.source.file, "sample.py");
+                            assert_eq!(
+                                LINKED_HELPER_SOURCE.get(
+                                    quote.source.start_byte as usize
+                                        ..quote.source.end_byte as usize
+                                ),
+                                Some(quote.text.as_str())
+                            );
+                            assert!(quote.text.contains("return value"));
+                        }
                     }
-                }
-                if let Some(previous) = &previous {
-                    assert_eq!(previous, &output.stdout);
-                } else {
-                    previous = Some(output.stdout);
+                    if let Some(previous) = &previous {
+                        assert_eq!(previous, &output.stdout);
+                    } else {
+                        previous = Some(output.stdout);
+                    }
                 }
             }
         }

@@ -956,6 +956,8 @@ impl CodeQueryEngine {
         groups.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| a.0.cmp(&b.0)));
         let link_plan = linked::Plan::new(
             &groups,
+            &action_terms,
+            &request.query,
             matches!(mode, RetrievalMode::Discovery { .. })
                 && named_contexts.is_empty()
                 && explicit_identifiers.is_empty()
