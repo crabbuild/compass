@@ -1,0 +1,720 @@
+{
+  "schema": "compass.broad-query-power-expansion-proposal/1",
+  "frozenAt": "2026-10-16T15:56:05Z",
+  "status": "design_only_not_an_executable_task_registration",
+  "qualificationEligible": false,
+  "sourceSupportSha256": {
+    "broad_query_power.py": "28b39b4e9e84e503afcbb23cfb0d06d706b43d282be2657ee9976d2733e2ffb1",
+    "broad_query_expansion_sources.json": "9cb157513206d139a0ac4682b90c9daedc081cd692ec6b1e30d9a1015b9164ba",
+    "broad_query_review.py": "73c080047fdafdf3da1d6c40a51f032b01f857433333bb4c3a3927d2773feaf5"
+  },
+  "preservedGates": {
+    "nonInferiorityMargin": -0.02,
+    "confidence": 0.95,
+    "firstPageImprovement": 0.1,
+    "improvementLowerBoundMustExceed": 0,
+    "graphAcceptedJudgments": 2000,
+    "graphPrecision": 0.995,
+    "graphWilsonLower": 0.99
+  },
+  "finiteBound": {
+    "method": "exact_paired_task_cluster_risk_bonferroni/1",
+    "adverseUpperFormula": "1 - alpha ** (1/n) for zero adverse clusters",
+    "alphaPerRisk": 0.025,
+    "zeroAdverseStrictNIMinimum": 183,
+    "oneSided95TheoreticalMinimum": 149,
+    "balancedEightRepositoryMinimum": 184,
+    "note": "149 uses alpha=.05 and is NOT the implemented joint-bound requirement. 183 is only the optimistic no-loss feasibility floor, not a power guarantee."
+  },
+  "scenarioAssumptions": [
+    "independent, equally weighted source-task clusters conditional on the fixed repository panel",
+    "scenario grid credits no definite wins; partial gains are ignored and any negative within-cluster score counts as an adverse cluster",
+    "equal independent-cluster quotas per repository for the implemented finite bound",
+    "the hierarchical repository bootstrap may widen intervals beyond this bound",
+    "scenario probabilities are assumptions, not inferred from measurements"
+  ],
+  "finiteScenarios": [
+    {
+      "independentUnits": 16,
+      "zeroAdverseJointUpper": 0.20590721420782274,
+      "maximumAdverseForStrictTwoPointNI": -1,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0
+        }
+      ]
+    },
+    {
+      "independentUnits": 32,
+      "zeroAdverseJointUpper": 0.1088811606793529,
+      "maximumAdverseForStrictTwoPointNI": -1,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0
+        }
+      ]
+    },
+    {
+      "independentUnits": 106,
+      "zeroAdverseJointUpper": 0.034202167276350295,
+      "maximumAdverseForStrictTwoPointNI": -1,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0
+        }
+      ]
+    },
+    {
+      "independentUnits": 107,
+      "zeroAdverseJointUpper": 0.03388799947401149,
+      "maximumAdverseForStrictTwoPointNI": -1,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0
+        }
+      ]
+    },
+    {
+      "independentUnits": 149,
+      "zeroAdverseJointUpper": 0.02445362490559001,
+      "maximumAdverseForStrictTwoPointNI": -1,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.0
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0
+        }
+      ]
+    },
+    {
+      "independentUnits": 183,
+      "zeroAdverseJointUpper": 0.019956000841316168,
+      "maximumAdverseForStrictTwoPointNI": 0,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.632501409505538
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.3995984329713269
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.15894270919978773
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.06292600798615154
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.0247954418492247
+        }
+      ]
+    },
+    {
+      "independentUnits": 184,
+      "zeroAdverseJointUpper": 0.019848627884201775,
+      "maximumAdverseForStrictTwoPointNI": 0,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.6309201559817741
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.3976004408064703
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.15735328210778987
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.06198211786635926
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.024299533012240204
+        }
+      ]
+    },
+    {
+      "independentUnits": 192,
+      "zeroAdverseJointUpper": 0.019029522168779824,
+      "maximumAdverseForStrictTwoPointNI": 0,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.6184116135560253
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.38197197760530327
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.14519690621578288
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.05492325347770194
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.02067314415281936
+        }
+      ]
+    },
+    {
+      "independentUnits": 200,
+      "zeroAdverseJointUpper": 0.018275340355136248,
+      "maximumAdverseForStrictTwoPointNI": 0,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.6061510638947067
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.36695782172616737
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.13397967485796192
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.048668291378490255
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.017587946605721567
+        }
+      ]
+    },
+    {
+      "independentUnits": 208,
+      "zeroAdverseJointUpper": 0.017578657900630727,
+      "maximumAdverseForStrictTwoPointNI": 0,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.5941335903249468
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.3525338266179244
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.12362903413636216
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.04312567875577961
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.014963174615290729
+        }
+      ]
+    },
+    {
+      "independentUnits": 400,
+      "zeroAdverseJointUpper": 0.009179804583665263,
+      "maximumAdverseForStrictTwoPointNI": 2,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.9199290555096512
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.6766769829123699
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.2366319185479495
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.060630037518580315
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.013115660339391148
+        }
+      ]
+    },
+    {
+      "independentUnits": 512,
+      "zeroAdverseJointUpper": 0.007178950026259455,
+      "maximumAdverseForStrictTwoPointNI": 4,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.9900778733676253
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.8835189617093757
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.41873213088727
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.11762264116617031
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.024010490067369227
+        }
+      ]
+    },
+    {
+      "independentUnits": 560,
+      "zeroAdverseJointUpper": 0.006565636140613791,
+      "maximumAdverseForStrictTwoPointNI": 4,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.9858749486298176
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.8481452793823449
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.3409312364858825
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.07736634134391177
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.012552220804593981
+        }
+      ]
+    },
+    {
+      "independentUnits": 600,
+      "zeroAdverseJointUpper": 0.00612927133066926,
+      "maximumAdverseForStrictTwoPointNI": 5,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.9956056485988479
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.9165876960025954
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.44487203016764415
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.11386200195752692
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.019455150411663402
+        }
+      ]
+    },
+    {
+      "independentUnits": 640,
+      "zeroAdverseJointUpper": 0.005747294893332909,
+      "maximumAdverseForStrictTwoPointNI": 5,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.994034550694253
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.8951065726159044
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.382697053118465
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.08222382125382519
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.011611653024901906
+        }
+      ]
+    },
+    {
+      "independentUnits": 800,
+      "zeroAdverseJointUpper": 0.004600484520745441,
+      "maximumAdverseForStrictTwoPointNI": 8,
+      "powerIfNoDefiniteWins": [
+        {
+          "adverseProbability": 0.0,
+          "probabilityOfPassingFiniteBound": 1.0
+        },
+        {
+          "adverseProbability": 0.0025,
+          "probabilityOfPassingFiniteBound": 0.9997689427011456
+        },
+        {
+          "adverseProbability": 0.005,
+          "probabilityOfPassingFiniteBound": 0.9789341392274001
+        },
+        {
+          "adverseProbability": 0.01,
+          "probabilityOfPassingFiniteBound": 0.5925485164007097
+        },
+        {
+          "adverseProbability": 0.015,
+          "probabilityOfPassingFiniteBound": 0.15305138028157056
+        },
+        {
+          "adverseProbability": 0.02,
+          "probabilityOfPassingFiniteBound": 0.021034153389454663
+        }
+      ]
+    }
+  ],
+  "initialPanel": {
+    "tasks": 160,
+    "broadTasks": 80,
+    "exactTasks": 16,
+    "directedTasks": 16,
+    "sourceTaskClusters": 106,
+    "diagnosticOnlyForTwoPointNI": true,
+    "note": "Exact plus directed labels are at most32 nominal controls; shared identities reduce independent units further. Even107 independent all-tie units would fail the joint two-point bound."
+  },
+  "expansion": {
+    "candidateRepositories": [
+      {
+        "language": "python",
+        "url": "https://github.com/psf/requests",
+        "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+        "commitUrl": "https://github.com/psf/requests/commit/611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "python",
+        "url": "https://github.com/urllib3/urllib3",
+        "commit": "a37bc93b65d6bcf00d3dc43d966bab6bd130ecd8",
+        "commitUrl": "https://github.com/urllib3/urllib3/commit/a37bc93b65d6bcf00d3dc43d966bab6bd130ecd8",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "python",
+        "url": "https://github.com/pytest-dev/pluggy",
+        "commit": "78e3f45d6c18a6efe6c46a2a79b63073f45a44bd",
+        "commitUrl": "https://github.com/pytest-dev/pluggy/commit/78e3f45d6c18a6efe6c46a2a79b63073f45a44bd",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "python",
+        "url": "https://github.com/python-attrs/attrs",
+        "commit": "ee66e7274852438cc23d4240a1a9cd632fda8b52",
+        "commitUrl": "https://github.com/python-attrs/attrs/commit/ee66e7274852438cc23d4240a1a9cd632fda8b52",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "go",
+        "url": "https://github.com/spf13/viper",
+        "commit": "528f7416c4b56a4948673984b190bf8713f0c3c4",
+        "commitUrl": "https://github.com/spf13/viper/commit/528f7416c4b56a4948673984b190bf8713f0c3c4",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "go",
+        "url": "https://github.com/spf13/pflag",
+        "commit": "c966cfef47379dcb01e7929504d66d94b540945b",
+        "commitUrl": "https://github.com/spf13/pflag/commit/c966cfef47379dcb01e7929504d66d94b540945b",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "go",
+        "url": "https://github.com/golang-jwt/jwt",
+        "commit": "d2cffb184933cab5b685db7e9eea56326f0acc0d",
+        "commitUrl": "https://github.com/golang-jwt/jwt/commit/d2cffb184933cab5b685db7e9eea56326f0acc0d",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "go",
+        "url": "https://github.com/go-playground/validator",
+        "commit": "3b54840be2c8bda33a270f068f3d781981dfa662",
+        "commitUrl": "https://github.com/go-playground/validator/commit/3b54840be2c8bda33a270f068f3d781981dfa662",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "rust",
+        "url": "https://github.com/tokio-rs/mio",
+        "commit": "a88e5e119172e4fb1638926faf65a4fe889e05b1",
+        "commitUrl": "https://github.com/tokio-rs/mio/commit/a88e5e119172e4fb1638926faf65a4fe889e05b1",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "rust",
+        "url": "https://github.com/rust-cli/env_logger",
+        "commit": "f80dca81223bb7cd50fc81f484e20eaef22be0aa",
+        "commitUrl": "https://github.com/rust-cli/env_logger/commit/f80dca81223bb7cd50fc81f484e20eaef22be0aa",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "rust",
+        "url": "https://github.com/seanmonstar/reqwest",
+        "commit": "2230ed3945fb2908692b88dad1dcd06db9fb2ca6",
+        "commitUrl": "https://github.com/seanmonstar/reqwest/commit/2230ed3945fb2908692b88dad1dcd06db9fb2ca6",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "rust",
+        "url": "https://github.com/petgraph/petgraph",
+        "commit": "b3eaf3a73f3ac7347b17bec3ba009f01eb8d2495",
+        "commitUrl": "https://github.com/petgraph/petgraph/commit/b3eaf3a73f3ac7347b17bec3ba009f01eb8d2495",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "typescript",
+        "url": "https://github.com/TanStack/query",
+        "commit": "ee47993724e5b71e65d9f38ae416367d2dd18395",
+        "commitUrl": "https://github.com/TanStack/query/commit/ee47993724e5b71e65d9f38ae416367d2dd18395",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "typescript",
+        "url": "https://github.com/vuejs/pinia",
+        "commit": "01121f840a0f6816c04df91b2a80c91c87089832",
+        "commitUrl": "https://github.com/vuejs/pinia/commit/01121f840a0f6816c04df91b2a80c91c87089832",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "typescript",
+        "url": "https://github.com/reduxjs/reselect",
+        "commit": "8911ef76eece985ba425c3234ac0bdc903b9b0e5",
+        "commitUrl": "https://github.com/reduxjs/reselect/commit/8911ef76eece985ba425c3234ac0bdc903b9b0e5",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      },
+      {
+        "language": "typescript",
+        "url": "https://github.com/immerjs/immer",
+        "commit": "8848a5b16938e5681a890d73de7bda24b5080498",
+        "commitUrl": "https://github.com/immerjs/immer/commit/8848a5b16938e5681a890d73de7bda24b5080498",
+        "sourceReviewed": false,
+        "tasksFrozen": false
+      }
+    ],
+    "languages": 4,
+    "repositoriesPerLanguage": 4,
+    "minimumIndependentExactDirectedControlClusters": 192,
+    "desiredQuotaPerRepository": {
+      "exactControlClusters": 9,
+      "directedControlClusters": 3
+    },
+    "plannedAdditionalControlLabels": 192,
+    "additionalTaskOraclesFrozen": false,
+    "independentReviewCompleted": false,
+    "equalityAlternative": {
+      "status": "conditional_requires_pre_output_source_evidence",
+      "rationale": "Strict exact/directed command paths may prospectively have zero discordance if unchanged owning functions and source/contract regression evidence support equivalence; graph/extraction or output adapter changes can invalidate this premise.",
+      "requiredEvidence": [
+        "baseline and candidate function/source fingerprints for exact/directed paths",
+        "native regression/contract evidence for unchanged behavior",
+        "documented public comparator exact/directed workflow",
+        "independent reviewer acceptance before outputs"
+      ]
+    },
+    "developmentPlanningRule": {
+      "status": "pending_development_evidence",
+      "targetPower": 0.9,
+      "evidence": "Only already declared development repositories/tasks or unchanged-function source evidence; the160 held-out outputs may not set assumptions.",
+      "requiredControls": "At least192 disjoint source-task clusters, increased to the equal16-repository multiple of the sample size implied by frozen development discordance/design effect and exact finite bound.",
+      "requiredBroad": "Plan broad success and broad source-claim precision separately from development paired distributions and the unchanged quality gates;800 is an illustrative scenario only, not a required universal sample size.",
+      "positiveLift": "Positive paired precision lift may establish broad source-claim NI at smaller N; do not impose the all-tie control floor on that metric."
+    },
+    "sourceOnlyAdaptationRule": "Before any expansion output, inspect candidate sources. If12 independent control responsibility clusters per repository cannot be defended or development planning needs more, expand the untouched candidate pool in a linked pre-output revision; never manufacture independence with paraphrases, overloads, aliases, duplicate bodies or test-name templates.",
+    "samplingRule": "Choose distinct source declarations and receiver/import-bound calls across API/data/errors/lifecycle/ownership boundaries. Exact controls intentionally name identities but require distinct runtime bodies. No body/endpoint is reused across control clusters; collapse shared mechanisms conservatively.",
+    "allocationRule": "Keep equal source-task-cluster counts per repository and language for each metric; preserve initial160tasks and failures, and report exact and directed strata alongside the combined predeclared control metric.",
+    "stoppingRule": "Freeze all expanded questions, source facts, grades, exclusions, clusters, arms, budgets and planning evidence before that panel is captured. Complete the planned panel or report incomplete; no optional stopping after a favorable subset.",
+    "distinction": "Combined exact/directed-control NI and broad source-claim precision NI remain separate. Passing one cannot substitute for the other."
+  },
+  "graphEvidenceReuse": {
+    "allowedOnlyIf": "Existing source qualification is bound to the exact current graph relationship-content digest and the same pinned source/profile, source judgments and occurrence/provenance contract.",
+    "currentNewPanelReusableEvidence": "none demonstrated",
+    "prohibited": "A prior tool version, different graph hash, source pin, profile or line-only witness panel is not2000 accepted current graph judgments."
+  },
+  "unresolved": [
+    "candidate source inventories and actual task/fact oracles not authored or independently reviewed",
+    "source-only behavior independence/capacity not established for candidate repositories",
+    "the800-unit97.89% scenario is illustrative only; the prospective equality alternative and actual source capacity remain unproven",
+    "claim precision is not generally binary; actual score distribution and hierarchical uncertainty can remain inconclusive",
+    "no expanded tool outputs, graph judgments, costs or empirical power have been collected"
+  ]
+}

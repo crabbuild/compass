@@ -1,0 +1,38 @@
+{
+  "schema": "compass.broad-query-source-revision-lineage/1",
+  "allRevisionsPreOutput": true,
+  "stages": [
+    {
+      "artifact": "registration-scope-attempt.json",
+      "sha256": "2ab42d58d8cd3e18afdb8fb8113d971db58460a73c353132c40b7923a74fdf44",
+      "role": "Retained draft reviewed against source; static signing chain later corrected before final source freeze."
+    },
+    {
+      "artifact": "broad_query_registration.json",
+      "sha256": "e9aae3d899a831c2adb91f147c3a448fa84044c4fd1690e299a3041cf69534fb",
+      "role": "Initial reviewed-candidate freeze with conservative declaration-overlap clusters; source support archived externally."
+    },
+    {
+      "artifact": "broad_query_registration_v2.json",
+      "sha256": "544ee60b5060e26cd5fc767461e75b9cce62df0c0955c5e379ad2cbdc62e0728",
+      "role": "Independent-review corrections expand6Go/Rust alternate implementation judgments; original candidate retained."
+    },
+    {
+      "artifact": "broad_query_registration_candidate_v3.json",
+      "sha256": "951bf99273e7d44a4bfca6f252654bbac70260ca99b9feeb6269f3812f6f035c",
+      "role": "Frozen question rubric requires exact identity/kind/direction for paths; sites remain explicit line-level diagnostics."
+    },
+    {
+      "artifact": "broad_query_registration_reviewed.json",
+      "sha256": "9c5859dcb23b7aa29fdc0aa5e4610b48217da59c737ad81de746beb19f807d5c",
+      "role": "Final source envelope bound after both independent AI reviews accepted160task judgments."
+    }
+  ],
+  "sourceCorrections": [
+    "Replace branch-infeasible signing route with feasible signature-encoding route before outputs.",
+    "Include alternate cache setters/readers, LevelFilter clamping, thread-unsafe maximum-level setter, builder level setters and exact fractional conversion rejection.",
+    "Source call witnesses skip documentation examples and preserve distinct call lines; same-line multiplicity recorded separately.",
+    "Conservatively cluster overlapping source declarations; nominal task counts are not independent sample sizes."
+  ],
+  "qualificationStatus": "Source labels/connectivity rubric reviewed; no graph/multiplicity/quality/power qualification asserted."
+}

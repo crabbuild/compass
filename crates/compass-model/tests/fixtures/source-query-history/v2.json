@@ -1,0 +1,69 @@
+{
+  "additionalDocumentFrequencies": {
+    "alpha": 1,
+    "note": 1
+  },
+  "aggregateTruncated": false,
+  "files": [
+    {
+      "byteSize": 80,
+      "file": "sample.py",
+      "language": "python",
+      "omittedOwners": 0,
+      "sourceDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "syntaxRecovery": false,
+      "truncated": false
+    }
+  ],
+  "graphDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "omittedFiles": 0,
+  "omittedOwners": 0,
+  "owners": [
+    {
+      "comments": [
+        {
+          "source": {
+            "endByte": 14,
+            "endColumn": 14,
+            "endLine": 1,
+            "file": "sample.py",
+            "startByte": 10,
+            "startColumn": 10,
+            "startLine": 1
+          },
+          "text": "note"
+        }
+      ],
+      "identifiers": [
+        {
+          "source": {
+            "endByte": 8,
+            "endColumn": 8,
+            "endLine": 1,
+            "file": "sample.py",
+            "startByte": 3,
+            "startColumn": 3,
+            "startLine": 1
+          },
+          "text": "alpha"
+        }
+      ],
+      "nodeId": "owner",
+      "omittedSites": 0,
+      "source": {
+        "endByte": 80,
+        "endColumn": 80,
+        "endLine": 1,
+        "file": "sample.py",
+        "startByte": 0,
+        "startColumn": 0,
+        "startLine": 1
+      },
+      "sourceDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "syntaxRecovery": false,
+      "truncated": false
+    }
+  ],
+  "profile": "source-query/2-callable-definition-envelopes",
+  "schema": "compass.source-query/1"
+}

@@ -26,7 +26,11 @@ impl ResolutionDb<'_> {
                 *strategy,
                 candidate,
             )),
-            Some(HierarchyConstraint::RustAssociatedType { .. }) | None => None,
+            Some(
+                HierarchyConstraint::RustAssociatedType { .. }
+                | HierarchyConstraint::RustGenericBounds { .. },
+            )
+            | None => None,
         }
     }
 
@@ -68,6 +72,7 @@ impl ResolutionDb<'_> {
                 ResolutionDecision::Ambiguous { candidate_count } => {
                     ambiguous_count = ambiguous_count.saturating_add(candidate_count);
                 }
+                limit @ ResolutionDecision::ResourceLimit { .. } => return limit,
                 ResolutionDecision::Unresolved
                 | ResolutionDecision::QualifiedExternal { .. }
                 | ResolutionDecision::ResolvedInventory { .. }

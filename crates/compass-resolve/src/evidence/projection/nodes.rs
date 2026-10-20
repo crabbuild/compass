@@ -170,10 +170,11 @@ pub(super) fn declaration_node(
     if declaration.language == "python" && declaration.range.source_file.ends_with(".pyi") {
         attributes.insert("source_kind".to_owned(), Value::String("stub".to_owned()));
     }
-    if let Some(definition_range) = definition_range.filter(|range| *range != &declaration.range) {
+    let published_range = published_declaration_source_range(declaration, definition_range);
+    if published_range != &declaration.range {
         attributes.insert(
             "source_anchor".to_owned(),
-            source_anchor_value(definition_range),
+            source_anchor_value(published_range),
         );
         attributes.insert(
             NODE_PROVENANCE_ANCHOR_ATTRIBUTE.to_owned(),
@@ -184,6 +185,13 @@ pub(super) fn declaration_node(
         id: graph_node_id.to_owned(),
         attributes,
     }
+}
+
+pub(super) fn published_declaration_source_range<'a>(
+    declaration: &'a DeclarationFact,
+    definition_range: Option<&'a EvidenceRange>,
+) -> &'a EvidenceRange {
+    definition_range.unwrap_or(&declaration.range)
 }
 
 /// Preserve the public callable spelling emitted by pre-universal extractors.

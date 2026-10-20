@@ -15,6 +15,45 @@ const CALLER_ID: &str = "decl:caller";
 const CALLER_SCOPE_ID: &str = "scope:caller";
 const CANDIDATE_ID: &str = "candidate:target";
 
+#[test]
+fn non_typescript_inventory_does_not_use_the_typescript_coverage_limit()
+-> Result<(), Box<dyn Error>> {
+    let nodes = (0..2)
+        .map(|index| compass_languages::RawNodeRecord {
+            id: format!("inventory:{index}"),
+            attributes: serde_json::Map::new(),
+        })
+        .collect::<Vec<_>>();
+    let limits = UniversalResolutionLimits {
+        candidates: 1,
+        ..UniversalResolutionLimits::default()
+    };
+    for language in ["python", "javascript"] {
+        let mut input = batch();
+        input.pipeline.language = language.to_owned();
+        for fact in &mut input.declarations {
+            fact.language = language.to_owned();
+        }
+        for fact in &mut input.scopes {
+            fact.language = language.to_owned();
+        }
+        for fact in &mut input.occurrences {
+            fact.language = language.to_owned();
+        }
+        for fact in &mut input.candidates {
+            fact.language = language.to_owned();
+            fact.constraints.exact_language = Some(language.to_owned());
+        }
+        UniversalResolutionIndex::new_with_inventory(
+            &[input],
+            &nodes,
+            std::path::Path::new("."),
+            limits,
+        )?;
+    }
+    Ok(())
+}
+
 fn range(start: u64, end: u64) -> EvidenceRange {
     EvidenceRange {
         source_file: "src/example.py".to_owned(),
@@ -49,10 +88,13 @@ fn declaration(
         parameter_count: None,
         parameter_types: Vec::new(),
         direct_bases_complete: false,
+        member_inventory_complete: None,
+        ecmascript_export_inventory: None,
         variadic: false,
         signature_hash: None,
         implementation_hash: None,
         source_hash: None,
+        documentation: None,
         definition_start_byte: None,
         range: range(start, start.saturating_add(6)),
     }
@@ -79,6 +121,9 @@ fn binding(id: &str, target: &str, target_declaration_id: Option<&str>) -> Bindi
 
 fn batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
+        typescript_merge_inventory_complete: None,
+        typescript_merge_inventory_version: None,
+        typescript_merge_dependencies: Vec::new(),
         pipeline: UniversalEvidenceIdentity {
             id: "compass.python.contract-test".to_owned(),
             language: LANGUAGE.to_owned(),
@@ -142,6 +187,7 @@ fn batch() -> SemanticEvidenceBatch {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["function".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: false,
             },
         }],
@@ -375,7 +421,8 @@ fn materialization_preserves_the_decision_rule_and_occurrence_anchor() -> Result
     let resolver = index(&evidence, UniversalResolutionLimits::default())?;
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
-    resolver.materialize(&mut nodes, &mut edges);
+    let report = resolver.materialize(&mut nodes, &mut edges);
+    assert_eq!(report.omitted_candidates, 0);
 
     assert_resolved(
         resolver.resolve(CANDIDATE_ID),

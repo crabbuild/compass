@@ -1,0 +1,42 @@
+[
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "export const opaque = (payload) => { return payload; };\n",
+    "definition": "opaque = (payload) => { return payload; }"
+  },
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "const opaque = function internal(payload) { return payload; };\n",
+    "definition": "opaque = function internal(payload) { return payload; }"
+  },
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "const opaque = function* (payload) { yield payload; };\n",
+    "definition": "opaque = function* (payload) { yield payload; }"
+  },
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "const opaque = (payload) => { const nested = () => payload; return [payload].map(item => nested(item)); };\n",
+    "definition": "opaque = (payload) => { const nested = () => payload; return [payload].map(item => nested(item)); }"
+  },
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "export const earlier = () => 0, opaque = (payload) => payload;\n",
+    "definition": "opaque = (payload) => payload"
+  },
+  {
+    "extensions": ["ts", "tsx", "js", "jsx"],
+    "source": "// λ has two UTF-8 bytes.\nconst opaque = (payload) => payload;\n",
+    "definition": "opaque = (payload) => payload"
+  },
+  {
+    "extensions": ["ts", "tsx"],
+    "source": "const opaque: (value: unknown) => unknown = (payload: unknown) => payload;\n",
+    "definition": "opaque: (value: unknown) => unknown = (payload: unknown) => payload"
+  },
+  {
+    "extensions": ["tsx"],
+    "source": "export const opaque = (payload: unknown) => <div>{payload}</div>;\n",
+    "definition": "opaque = (payload: unknown) => <div>{payload}</div>"
+  }
+]

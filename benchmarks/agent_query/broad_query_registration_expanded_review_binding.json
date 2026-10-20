@@ -1,0 +1,27 @@
+{
+  "schema": "compass.broad-query-combined-source-binding-index/1",
+  "recordedAt": "2026-10-16T16:43:12.267609+00:00",
+  "registration": {
+    "artifact": "broad_query_registration_expanded.json",
+    "sha256": "598a5e40c06c62cec66c85878020afb7b00132967297ef27bfa38f17fbbe13d4"
+  },
+  "records": [
+    {
+      "artifact": "combined366-go-rust-independent-review.json",
+      "sha256": "7a0c50fab987f7b47c8cf12d8faa280f7f725029776ba36e0e97817af224094b",
+      "tasks": 182,
+      "reviewerType": "ai",
+      "outputExposure": "none"
+    },
+    {
+      "artifact": "independent-python-typescript-expanded-binding.json",
+      "sha256": "f9b57ad19d3365f5a1843426abec840e94e09b22571404a4c32e9cbe785fa19f",
+      "tasks": 184,
+      "reviewerType": "ai",
+      "outputExposure": "none"
+    }
+  ],
+  "acceptedTasks": 366,
+  "qualificationEligible": false,
+  "scope": "Source payloads, owners, pins and source inventories only. AI review independent of source author and heldout outputs; Compass implementation knowledge disclosed. Graph precision, complete multiplicity, stochastic independence, prospective power and output/cost gates remain separate."
+}

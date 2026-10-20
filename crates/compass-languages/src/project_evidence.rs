@@ -103,11 +103,93 @@ pub struct ProjectEvidence {
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: Vec<ComposerAutoloadRoot>,
     python_import_roots: Vec<PythonImportRoot>,
+    python_root_layout: PythonRootLayout,
     input_digests: BTreeMap<String, String>,
     typescript_extends: BTreeSet<String>,
     typescript_project_references: BTreeSet<String>,
     diagnostics: Vec<ProjectEvidenceDiagnostic>,
     fingerprint: String,
+}
+
+/// Default source-module context, not a claim about the runtime import path.
+/// Only two fixed entries are inspected; links/errors cannot prove absence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PythonRootLayout {
+    Bare,
+    Package(String),
+    Unknown,
+}
+
+impl PythonRootLayout {
+    fn inspect(root: &Path) -> Self {
+        let mut package = false;
+        let mut unknown = false;
+        for name in ["__init__.py", "__init__.pyi"] {
+            match fs::symlink_metadata(root.join(name)) {
+                Ok(metadata) if metadata.file_type().is_file() => package = true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(_) | Err(_) => unknown = true,
+            }
+        }
+        if unknown {
+            return Self::Unknown;
+        }
+        if !package {
+            return Self::Bare;
+        }
+        Self::for_package(root)
+    }
+
+    fn for_package(root: &Path) -> Self {
+        match root.file_name().and_then(|name| name.to_str()) {
+            Some(name)
+                if name.len() <= MAX_PYTHON_PACKAGE_PREFIX_BYTES
+                    && valid_python_identifier(name) =>
+            {
+                Self::Package(name.to_owned())
+            }
+            _ => Self::Unknown,
+        }
+    }
+
+    fn module_key(&self, source_file: &str) -> Option<String> {
+        let stem = source_file
+            .strip_suffix(".pyi")
+            .or_else(|| source_file.strip_suffix(".py"))?;
+        let suffix = if stem == "__init__" {
+            ""
+        } else {
+            stem.strip_suffix("/__init__").unwrap_or(stem)
+        };
+        // Source roots may contain scripts or grouping directories that are
+        // not importable Python identifiers. Retain their source identity;
+        // do not borrow a checkout name or pretend a literal dot is a module
+        // separator. Escaping '%' first keeps this representation injective.
+        let suffix = suffix
+            .split('/')
+            .map(|part| part.replace('%', "%25").replace('.', "%2E"))
+            .collect::<Vec<_>>()
+            .join(".");
+        match (self, suffix.is_empty()) {
+            (Self::Bare, false) => Some(suffix),
+            (Self::Package(prefix), true) => Some(prefix.clone()),
+            (Self::Package(prefix), false) => Some(format!("{prefix}.{suffix}")),
+            _ => None,
+        }
+    }
+
+    fn fingerprint(&self, digest: &mut Sha256) {
+        digest.update(b"python-root-layout/2\0");
+        match self {
+            Self::Bare => digest.update([0]),
+            Self::Package(prefix) => {
+                digest.update([1]);
+                digest.update(prefix.as_bytes());
+                digest.update([0]);
+            }
+            Self::Unknown => digest.update([2]),
+        }
+    }
 }
 
 /// One repository-contained Composer PSR-4 mapping.
@@ -283,10 +365,18 @@ impl ProjectEvidence {
         &self.python_import_roots
     }
 
+    pub(crate) fn python_default_layout_unavailable(&self) -> bool {
+        self.python_import_roots.is_empty()
+            && matches!(self.python_root_layout, PythonRootLayout::Unknown)
+    }
+
     /// Return every admissible source-only Python module key for a repository-
     /// relative source path. Explicit or inferred roots take precedence over
     /// the conventional project root when they contain the source. Distinct
-    /// results are retained so callers can fail closed on ambiguity.
+    /// results are retained so callers can fail closed on ambiguity. Without
+    /// configured roots, verified source-root layout supplies a source identity,
+    /// including non-importable script/group names. Literal dots and percent
+    /// signs inside components are escaped, not interpreted as import syntax.
     #[must_use]
     pub fn python_module_keys(&self, source_file: &str) -> Vec<String> {
         let source_file = source_file.replace('\\', "/");
@@ -294,9 +384,20 @@ impl ProjectEvidence {
             || source_file.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
             || source_file.starts_with('/')
             || source_file.contains('\0')
-            || source_file.split('/').any(|component| component == "..")
+            || source_file
+                .split('/')
+                .any(|component| matches!(component, "" | "." | ".."))
+            || (source_file.as_bytes().get(1) == Some(&b':')
+                && source_file.as_bytes()[0].is_ascii_alphabetic())
         {
             return Vec::new();
+        }
+        if self.python_import_roots.is_empty() {
+            return self
+                .python_root_layout
+                .module_key(&source_file)
+                .into_iter()
+                .collect();
         }
         let explicit = self
             .python_import_roots
@@ -440,6 +541,7 @@ impl ProjectEvidenceIndex {
     #[must_use]
     pub fn build(repository_root: &Path, sources: &[PathBuf]) -> Self {
         let repository_root = absolute_path(repository_root, repository_root);
+        let python_root_layout = PythonRootLayout::inspect(&repository_root);
         let mut directories = BTreeSet::new();
         let mut project_files = BTreeSet::new();
         directories.insert(repository_root.clone());
@@ -692,7 +794,12 @@ impl ProjectEvidenceIndex {
         let projects = builders
             .into_iter()
             .map(|(project_root, builder)| {
-                let evidence = finish_project(&repository_root, project_root.clone(), builder);
+                let evidence = finish_project(
+                    &repository_root,
+                    project_root.clone(),
+                    builder,
+                    &python_root_layout,
+                );
                 (project_root, evidence)
             })
             .collect();
@@ -700,6 +807,7 @@ impl ProjectEvidenceIndex {
             &repository_root,
             repository_root.clone(),
             ProjectBuilder::default(),
+            &python_root_layout,
         );
         Self {
             repository_root,
@@ -810,6 +918,7 @@ fn finish_project(
     repository_root: &Path,
     project_root: PathBuf,
     builder: ProjectBuilder,
+    python_root_layout: &PythonRootLayout,
 ) -> ProjectEvidence {
     let manifests = builder.manifests.into_iter().collect::<Vec<_>>();
     let ecosystems = builder.ecosystems.into_iter().collect::<Vec<_>>();
@@ -829,6 +938,13 @@ fn finish_project(
         .into_iter()
         .collect::<Vec<_>>();
     let python_import_roots = builder.python_import_roots.into_iter().collect::<Vec<_>>();
+    // An explicit configuration owns module identity. Unused checkout layout
+    // must not enter its fingerprint or make equivalent checkouts differ.
+    let python_root_layout = if python_import_roots.is_empty() {
+        python_root_layout.clone()
+    } else {
+        PythonRootLayout::Unknown
+    };
     let input_digests = builder.input_digests;
     let typescript_extends = builder.typescript_extends;
     let typescript_project_references = builder.typescript_project_references;
@@ -843,6 +959,7 @@ fn finish_project(
     digest.update([0]);
     digest.update(relative_root.as_bytes());
     digest.update([0]);
+    python_root_layout.fingerprint(&mut digest);
     for manifest in &manifests {
         digest.update(manifest.as_bytes());
         digest.update([0]);
@@ -972,6 +1089,7 @@ fn finish_project(
         route_roots,
         composer_autoload_roots,
         python_import_roots,
+        python_root_layout,
         input_digests,
         typescript_extends,
         typescript_project_references,
@@ -3198,6 +3316,270 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{ProjectEvidenceIndex, ProjectViteAliasKind, PythonImportRootKind};
+
+    #[test]
+    fn default_python_root_layout_is_bounded_and_enters_cache_identity()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path().join("package_one");
+        fs::create_dir(&root)?;
+        let source = root.join("worker.py");
+        fs::write(&source, "def work(): return 1\n")?;
+        let bare = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+        let evidence = bare.evidence_for(&source);
+        assert_eq!(evidence.python_module_keys("worker.py"), ["worker"]);
+        assert_eq!(
+            evidence.python_module_keys("pkg/worker.pyi"),
+            ["pkg.worker"]
+        );
+        assert_eq!(evidence.python_module_keys("bad-name.py"), ["bad-name"]);
+        assert_eq!(evidence.python_module_keys("foo.bar.py"), ["foo%2Ebar"]);
+        assert_eq!(evidence.python_module_keys("foo%2Ebar.py"), ["foo%252Ebar"]);
+        assert_eq!(evidence.python_module_keys("foo/bar.py"), ["foo.bar"]);
+        for unsafe_path in [
+            "../worker.py",
+            "/worker.py",
+            "a/./worker.py",
+            "a//worker.py",
+            "C:/worker.py",
+            "worker.rs",
+        ] {
+            assert!(evidence.python_module_keys(unsafe_path).is_empty());
+        }
+        assert!(evidence.python_module_keys(&"x".repeat(4097)).is_empty());
+        let fingerprint = evidence.fingerprint().to_owned();
+        fs::write(root.join("__init__.pyi"), "")?;
+        let package = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+        let evidence = package.evidence_for(&source);
+        assert_eq!(
+            evidence.python_module_keys("worker.py"),
+            ["package_one.worker"]
+        );
+        assert_eq!(evidence.python_module_keys("__init__.pyi"), ["package_one"]);
+        assert_eq!(
+            evidence.python_module_keys("nested/__init__.py"),
+            ["package_one.nested"]
+        );
+        assert_ne!(evidence.fingerprint(), fingerprint);
+        fs::remove_file(root.join("__init__.pyi"))?;
+        fs::create_dir(root.join("__init__.py"))?;
+        fs::write(root.join("__init__.pyi"), "")?;
+        let unknown = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+        assert!(
+            unknown
+                .evidence_for(&source)
+                .python_module_keys("worker.py")
+                .is_empty()
+        );
+        assert_ne!(unknown.evidence_for(&source).fingerprint(), fingerprint);
+        let mut engine = crate::Engine::with_project_evidence(std::sync::Arc::new(unknown));
+        let extraction =
+            engine.extract_source_combined(&source, "worker.py", b"def work(): return 1\n")?;
+        assert!(extraction.graph.semantic_evidence.is_none());
+        let error = extraction
+            .graph
+            .error
+            .ok_or("unknown root layout silently succeeded")?;
+        assert!(error.contains("Python source-root package layout is unavailable"));
+        Ok(())
+    }
+
+    #[test]
+    fn configured_python_roots_ignore_unused_checkout_package_layout() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let mut previous = None;
+        for name in ["repo", "package_one"] {
+            let root = directory.path().join(name);
+            fs::create_dir(&root)?;
+            fs::write(root.join("__init__.py"), "")?;
+            fs::write(
+                root.join("pyproject.toml"),
+                "[project]\nname = 'example'\nversion = '0.0.0'\n",
+            )?;
+            let source = root.join("worker.py");
+            fs::write(&source, "def work(): return 1\n")?;
+            let index = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+            let evidence = index.evidence_for(&source);
+            assert_eq!(evidence.python_module_keys("worker.py"), ["worker"]);
+            if let Some(previous) = &previous {
+                assert_eq!(previous, evidence.fingerprint());
+            } else {
+                previous = Some(evidence.fingerprint().to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn python_default_layout_does_not_follow_package_entry_links() -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir()?;
+        let root = directory.path().join("package_one");
+        fs::create_dir(&root)?;
+        let source = root.join("worker.py");
+        fs::write(&source, "def work(): return 1\n")?;
+        let external_entry = directory.path().join("external.py");
+        fs::write(&external_entry, "")?;
+        symlink(&external_entry, root.join("__init__.py"))?;
+        for dangling in [false, true] {
+            if dangling {
+                fs::remove_file(&external_entry)?;
+            }
+            let index = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+            let evidence = index.evidence_for(&source);
+            assert!(evidence.python_default_layout_unavailable());
+            assert!(evidence.python_module_keys("worker.py").is_empty());
+        }
+        // An explicit import-root policy does not depend on this unused default.
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = 'example'\n[tool.setuptools.package-dir]\n'' = '.'\n",
+        )?;
+        let index = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(!evidence.python_default_layout_unavailable());
+        assert_eq!(evidence.python_module_keys("worker.py"), ["worker"]);
+        Ok(())
+    }
+
+    #[test]
+    fn python_default_package_names_require_lossless_identifiers() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        for name in ["invalid-name", "123package"] {
+            let root = directory.path().join(name);
+            fs::create_dir(&root)?;
+            let source = root.join("worker.py");
+            fs::write(&source, "def work(): return 1\n")?;
+            let bare = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+            assert_eq!(
+                bare.evidence_for(&source).python_module_keys("worker.py"),
+                ["worker"]
+            );
+            fs::write(root.join("__init__.py"), "")?;
+            let package = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+            assert!(
+                package
+                    .evidence_for(&source)
+                    .python_default_layout_unavailable()
+            );
+            assert!(
+                package
+                    .evidence_for(&source)
+                    .python_module_keys("worker.py")
+                    .is_empty()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn python_default_package_prefix_bound_is_inclusive() {
+        let valid = "x".repeat(super::MAX_PYTHON_PACKAGE_PREFIX_BYTES);
+        assert_eq!(
+            super::PythonRootLayout::for_package(std::path::Path::new(&valid)),
+            super::PythonRootLayout::Package(valid.clone())
+        );
+        assert_eq!(
+            super::PythonRootLayout::for_package(std::path::Path::new(&(valid + "x"))),
+            super::PythonRootLayout::Unknown
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn python_default_package_prefix_rejects_non_utf8_without_lossy_conversion() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = std::path::PathBuf::from(OsString::from_vec(vec![b'p', 255]));
+        assert_eq!(
+            super::PythonRootLayout::for_package(&root),
+            super::PythonRootLayout::Unknown
+        );
+    }
+
+    #[test]
+    fn project_python_default_source_identity_preserves_non_identifier_paths_without_checkout_fallback()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let mut previous = None;
+        for name in ["repo", "checkout", "alternate-checkout"] {
+            let root = directory.path().join(name);
+            fs::create_dir(&root)?;
+            let relative = "apps/billing-service/test-helper.py";
+            let source = root.join(relative);
+            fs::create_dir_all(source.parent().ok_or("missing parent")?)?;
+            let text = b"def inner(): return 1\n\ndef outer(): return inner()\n";
+            fs::write(&source, text)?;
+            let index = ProjectEvidenceIndex::build(&root, std::slice::from_ref(&source));
+            assert_eq!(
+                index.evidence_for(&source).python_module_keys(relative),
+                ["apps.billing-service.test-helper"]
+            );
+            assert_eq!(
+                index
+                    .evidence_for(&source)
+                    .python_module_keys("test-helper.py"),
+                ["test-helper"]
+            );
+            let mut engine = crate::Engine::with_project_evidence(std::sync::Arc::new(index));
+            let extraction = engine.extract_source_combined(&source, relative, text)?;
+            assert!(
+                extraction.graph.error.is_none(),
+                "{:?}",
+                extraction.graph.error
+            );
+            let batch = extraction
+                .graph
+                .semantic_evidence
+                .ok_or("source identity was discarded")?;
+            let declarations = batch
+                .declarations
+                .iter()
+                .filter(|d| matches!(d.name.as_str(), "inner" | "outer"))
+                .map(|d| (d.name.clone(), d.qualified_name.clone()))
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                declarations,
+                BTreeSet::from([
+                    (
+                        "inner".to_owned(),
+                        "apps.billing-service.test-helper.inner".to_owned()
+                    ),
+                    (
+                        "outer".to_owned(),
+                        "apps.billing-service.test-helper.outer".to_owned()
+                    ),
+                ])
+            );
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &declarations);
+            } else {
+                previous = Some(declarations);
+            }
+        }
+        // Explicitly absent project context keeps its documented legacy path.
+        let mut engine = crate::Engine::default();
+        let extraction = engine.extract_source_combined(
+            std::path::Path::new("/checkout/test-helper.py"),
+            "test-helper.py",
+            b"def inner(): return 1\n",
+        )?;
+        let batch = extraction
+            .graph
+            .semantic_evidence
+            .ok_or("missing standalone evidence")?;
+        assert!(
+            batch
+                .declarations
+                .iter()
+                .any(|d| d.name == "inner" && d.qualified_name == "checkout.test-helper.inner")
+        );
+        Ok(())
+    }
 
     #[test]
     fn nearest_project_merges_manifests_and_is_deterministic() -> Result<(), Box<dyn Error>> {

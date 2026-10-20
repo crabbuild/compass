@@ -1,6 +1,6 @@
 use compass_resolve::evidence::{ResolutionDecision, ResolutionEvidence, ResolutionRule};
 
-const ALL_RULES: [ResolutionRule; 16] = [
+const ALL_RULES: [ResolutionRule; 17] = [
     ResolutionRule::ExactSourceDeclaration,
     ResolutionRule::ExactLexicalDeclaration,
     ResolutionRule::ExplicitBinding,
@@ -15,6 +15,7 @@ const ALL_RULES: [ResolutionRule; 16] = [
     ResolutionRule::ClosedWorldReceiverDispatch,
     ResolutionRule::IncompleteHierarchyReceiverDispatch,
     ResolutionRule::RustAssociatedType,
+    ResolutionRule::RustGenericBoundDispatch,
     ResolutionRule::ExactSourceInventory,
     ResolutionRule::QualifiedExternal,
 ];

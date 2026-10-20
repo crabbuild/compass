@@ -1,5 +1,116 @@
 # Compass performance qualification
 
+## In-progress comment-passage normalization bounds
+
+Query-local comment lengths inspect only already retained exact-owner data,
+with no extra backend, posting or statistics reads. The optional normalizer
+accepts at most64 comment sites,32 groups,8192 total bytes and512 unique terms;
+sites at4096 bytes or any field overflow retain the prior normalizer. Each
+comment is tokenized once and cancellation is checked per site. These bounds
+are not a measured latency/RSS or independently qualified query-quality claim.
+
+## In-progress forward-spelling bounds
+
+At most32 canonical broad-query concepts generate two forward spellings each,
+with at most64 additional bounded statistics lookups. Only supported spellings
+enter existing posting and candidate quotas. These lookups are separate from
+candidate-record counters; this is not a measured latency, precision or RSS
+claim. Global source/index formats and their bounds are unchanged.
+
+## In-progress quotation window bounds
+
+Window selection tokenizes each already retained site of at most4096 bytes
+once, then visits at most two candidate starts per matching token using sliding
+term counters. Complete matching tokens count once per distinct canonical query
+term; known owned comment ranges are excluded from code-window matching.
+Cross-quotation salience reuses at most32 existing query groups with no added
+statistics reads. Known positive group frequencies rank distinctive passages
+after action coverage; unknown/zero frequencies supply no rarity preference.
+Output remains at most512 bytes/quote and two quotes/displayed owner. These
+finite source bounds are not a measured latency/RSS or query-quality claim;
+fresh real-repository qualification is still required.
+
+## In-progress broad call-context bounds
+
+Raw broad automatic discovery retains first-hop neighbors, then may continue
+exact outgoing Calls within requested max_depth for non-incoming questions.
+Automatic continuation is restricted to High-relevance selected roots. Explicit
+context inspection can continue every selected root; candidate order and bands
+are unchanged. This avoids automatically amplifying partial lexical roots.
+Continuation expands at most32 callable states, decodes at most16 outgoing
+records plus one lookahead per state, and retains at most64 queued states.
+It performs at most32 owner fetches and512 target fetches in that phase;
+node/edge response limits can stop it earlier. BFS/DFS retain bounded best-depth
+state so cycles cannot grow depth, while a shorter path may revisit a state.
+
+Raw examined records, including heuristic/rejected records and lookahead,
+consume the same max_expanded_relationships allowance as first-hop context.
+This meter counts full edge records; bounded per-kind index-key scans and
+bucket-head comparisons can exceed it. It is not a physical I/O ceiling.
+Scope checks, cancellation and deadlines remain active. Candidate recall keeps
+its separate existing indexed-probe/read ceilings; continuation cannot promote
+context nodes into candidates or improve their relevance labels. Ranker21 and
+ranked-view4 are unchanged; a context epoch invalidates disposable responses.
+
+These limits and synthetic controls do not establish real-corpus latency/RSS,
+query-quality gains, non-regression or a win over another tool. The original
+fresh frozen independent graph/query and cost/performance qualification remains
+required. Earlier one-hop measurements do not qualify this continuation.
+
+
+## In-progress typed export traversal bounds
+
+Typed TypeScript receiver analysis shares its16384 work units with export
+traversal. Every binding/presence/index probe, raw candidate and frontier
+retention spends work. Each walk discovers at most the configured per-lookup
+candidate count (default256) of distinct(language,source-file,export) states;
+export depth is bounded at64. Duplicate DAG/cycle states do not expand again,
+but reaching an existing state still spends the edge/probe work. Bounded
+fixed-point passes and slot propagation also spend this meter before each
+retention; per-state results are checked before any owning alternative is
+discarded. An unfinished
+walk returns an explicit resource decision before target selection. Complete
+per-binding source alternatives are prepared during index construction; queries
+consume them without scanning the entire project module map.
+
+These are development resource contracts. Focused synthetic boundary controls
+and prior native baselines do not establish current real-corpus latency/RSS or
+comparative performance; the original fresh qualification remains required.
+
+## Literal-seeded evidence bounds
+
+Profile7 considers a literal's whole subtree and at most eight ancestors.
+Each scan considers at most128 nodes within the existing200000 code visits per
+file. Windows remain at most512 bytes,16 per owner,256 KiB per file and
+8 MiB/32768 windows per artifact. Covered seeds do not spend a second slot.
+Within each file, producer AST preorder can displace a later identifier-derived
+code window. Aggregate collection accounts whole files, and publication accounts
+owners with nested contexts afterward. Original identifier/comment/parameter
+retention has separate accounting.
+
+Native boundary tests establish limits, not latency or RSS. No performance
+non-regression or comparative speed is claimed without a new frozen real-corpus
+run. Earlier profile6 and older measurements do not qualify profile7.
+
+
+## Parameter-evidence update paths
+
+Source-query profile7 preserves the existing per-file and aggregate text/site
+caps introduced before profile6. A fact-neutral mixed update can reuse prior
+evidence only when bounded
+accounting rules out shared text/site pruning. Each unchanged evidence file is
+charged its full 1 MiB native text allowance in this conservative eligibility
+check, including zero-owner files. A possible limit transition, or previously
+aggregate-clipped roles, uses the existing complete cached/fresh extraction
+path. Current profile7 additionally charges each unchanged file8192 possible
+code windows and256 KiB, counts actual fresh code from every raw scope, and
+rejects prior/fresh code omissions. More than four unchanged evidence files
+therefore exceed the conservative code-site allowance even if actual code is
+small. Unchanged cache entries remain reusable on the full path. This can forgo
+the narrow fact-neutral fast path; no latency improvement or non-regression is
+claimed for this guard. Prior measurements do not qualify the new path without a fresh
+source-frozen performance run.
+
 Compass performance is measured against Compass-owned baselines. Qualification
 must never trade away graph correctness, deterministic output, resource bounds,
 or complete error reporting.
@@ -25,6 +136,44 @@ the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
 ## Natural-language answer cost qualification
+
+JSON query-index validation uses a two-second original-file probe and a shared
+30-second validation budget. Only eligible rollback-mode indexes from 16 MiB to
+768 MiB may use a byte-verified in-memory inspection image after that probe.
+Warm file checks normally avoid the image allocation. The image can temporarily
+add up to 768 MiB plus SQLite working memory; eligibility is not a memory-use or
+end-to-end latency qualification. Graph loading and missing-index construction
+are outside this validation-stage deadline.
+
+An operation-local interrupt timer complements SQLite progress callbacks during
+metadata and integrity SQL. It is cancelled and joined before the next operation;
+if the thread cannot start, progress checks use an interval of one. This avoids
+waiting for a coarse callback interval in long integrity walks. Interruption is
+cooperative inside SQLite and cannot cancel a blocked filesystem call. No memory
+mapping hint is added to validation.
+
+The 2026-10-17 bundled-SQLite stage diagnostics in Plan 029 used an exposed
+537,133,056-byte Compass index. Two file checks on fresh APFS clone inodes hit a
+60-second diagnostic deadline; two image checks completed in 3.883/3.518 seconds.
+On the already warm inode, file checks took 0.643/0.647 seconds and image checks
+0.773/0.751 seconds, with peak RSS about 5.8 MB and 545.7 MB respectively. These are
+small stage diagnostics affected by hashing, shared extents and prior cache
+state. They motivated the adaptive candidate; they are neither certified cold
+measurements nor a production performance baseline or Graphify comparison.
+Native end-to-end and platform qualification of the candidate remain required.
+
+Fielded broad retrieval retains the shared hard ceilings of 12,801 indexed
+candidate records and 291 candidate probes, including reserved routing work.
+Its search-stage counters cover posting, documentation-ownership and alias
+reads; bounded intent-routing checks are reserved separately. Optional local
+LSA has its own limits (32,768 nodes and 64 MiB of corpus data), uses the same
+absolute query deadline, and is not included in those indexed-read counters.
+Compare complete process wall time and peak RSS when measuring its cost.
+
+The new broad-query qualification workflow is described in
+[`BROAD_QUERY_REVIEW.md`](benchmarks/agent_query/BROAD_QUERY_REVIEW.md).
+Development traces and native regression tests establish individual fixes;
+they do not establish a current-release superiority or performance claim.
 
 The developer-side [agent query harness](benchmarks/agent_query/README.md)
 qualifies answer recall and output cost separately from runtime performance.
@@ -1554,3 +1703,31 @@ final verdicts.
 contains source and artifact pins, suite and binary hashes, the registration and
 amendment, every oracle observation and every cold/warm timing. These focused
 query measurements do not replace release-wide performance qualification.
+
+## Nested callable quotation bounds
+
+Source profile4 adds lexical context to already retrieved owners without adding
+lexical postings, document-frequency contributions or node-score work. Native
+preorder parent indexes allow a linear bounded ownership pass. Direct windows
+receive publication capacity first; nested code uses the same 16-window owner,
+32,768-window and 8 MiB totals, with at most eight nested scopes per owner. The
+ranked shortlist keeps two512-byte quotes per candidate. Incomplete nested
+context disables reuse of that auxiliary projection on a fact-neutral update;
+it is regenerated through the existing build path. This can increase update
+cost and must be included in end-to-end qualification. No latency, memory or
+Graphify superiority claim follows from these limits.
+
+Python auxiliary scope extraction now requires a named AST node: the unnamed
+`lambda` keyword token is not another callable. This corrects scope counts and
+can recover later source owners when the per-file scope quota was previously
+spent on keyword tokens. The change can affect source-field coverage and
+retrieval scores in quota-limited files; it does not change semantic graph
+records. AST cache24 rebuilds the affected disposable evidence.
+
+
+The in-progress ECMAScript export census checks top-level syntax and retained
+root bindings on the shared200000-step source-work budget. Its optional root
+certificate has fixed size; no new export-name vector is cloned or retained.
+Typed resolution requires a current complete census per visited source, and
+aggregate fallback discards certificates when it discards binding evidence.
+This is a resource contract, not measured real-repository cost or quality.

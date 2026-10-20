@@ -561,6 +561,7 @@ impl ResolutionDb<'_> {
                 Ok(Some(qualified_name))
             }
             ResolutionDecision::Ambiguous { candidate_count } => Err(candidate_count),
+            ResolutionDecision::ResourceLimit { limit, .. } => Err(limit.saturating_add(1)),
             ResolutionDecision::ResolvedInventory { .. }
             | ResolutionDecision::DeferredReceiver { .. }
             | ResolutionDecision::Unresolved => Ok(None),
@@ -711,6 +712,9 @@ impl ResolutionDb<'_> {
                     }
                     ResolutionDecision::Ambiguous { candidate_count } => {
                         return Err(candidate_count);
+                    }
+                    ResolutionDecision::ResourceLimit { limit, .. } => {
+                        return Err(limit.saturating_add(1));
                     }
                     ResolutionDecision::QualifiedExternal { .. }
                     | ResolutionDecision::DeferredReceiver { .. }

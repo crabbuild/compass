@@ -3,6 +3,97 @@
 use super::super::*;
 
 impl ResolutionDb<'_> {
+    pub(in crate::evidence) fn resolve_rust_generic_bounds(
+        &self,
+        language: &str,
+        parameter_declaration_id: &str,
+        trait_qualified_names: &[String],
+        bounds_complete: bool,
+        candidate: &RelationshipCandidate,
+    ) -> ResolutionDecision {
+        if language != "rust"
+            || !bounds_complete
+            || trait_qualified_names.is_empty()
+            || self
+                .facts
+                .declarations
+                .get(parameter_declaration_id)
+                .is_none_or(|parameter| {
+                    parameter.language != "rust"
+                        || parameter.kind != "parameter"
+                        || parameter.namespace != Some(compass_languages::SymbolNamespace::Type)
+                })
+        {
+            return ResolutionDecision::Unresolved;
+        }
+        if trait_qualified_names.len() > self.budget.candidates_per_lookup() {
+            return ResolutionDecision::Ambiguous {
+                candidate_count: trait_qualified_names.len(),
+            };
+        }
+        let mut lineage = BTreeSet::new();
+        for bound in trait_qualified_names {
+            match self.rust_trait_lineage(bound) {
+                Ok(ancestors) => lineage.extend(ancestors),
+                Err(0) => return ResolutionDecision::Unresolved,
+                Err(candidate_count) => return ResolutionDecision::Ambiguous { candidate_count },
+            }
+            if lineage.len() > self.budget.candidates_per_lookup() {
+                return ResolutionDecision::Ambiguous {
+                    candidate_count: lineage.len(),
+                };
+            }
+        }
+        // Rust bounds form an unordered union. A missing, duplicate or
+        // incomplete member inventory cannot disappear in favor of a sibling.
+        let mut targets = BTreeSet::new();
+        for owner in lineage {
+            let Ok(declaration) = self.exact_rust_declaration(&owner, &["trait"]) else {
+                return ResolutionDecision::Unresolved;
+            };
+            if declaration.member_inventory_complete != Some(true) {
+                return ResolutionDecision::Unresolved;
+            }
+            let key = ("rust".to_owned(), owner, candidate.target_spelling.clone());
+            let Some(members) = self.indexes.members.members_by_owner.get(&key) else {
+                continue;
+            };
+            if members.len() > self.budget.candidates_per_lookup() {
+                return ResolutionDecision::Ambiguous {
+                    candidate_count: members.len(),
+                };
+            }
+            for slot in members {
+                if self
+                    .declaration(*slot)
+                    .is_some_and(|declaration| declaration.kind == "method")
+                    && self.declaration_allowed_slot(*slot, candidate)
+                {
+                    targets.insert(*slot);
+                }
+            }
+            if targets.len() > self.budget.candidates_per_lookup() {
+                return ResolutionDecision::Ambiguous {
+                    candidate_count: targets.len(),
+                };
+            }
+        }
+        match targets.len() {
+            0 => ResolutionDecision::Unresolved,
+            1 => match targets.first().and_then(|slot| self.declaration_id(*slot)) {
+                Some(id) => ResolutionDecision::Resolved {
+                    declaration_id: id.to_owned(),
+                    evidence: ResolutionEvidence {
+                        rule: ResolutionRule::RustGenericBoundDispatch,
+                        candidate_count: 1,
+                    },
+                },
+                None => ResolutionDecision::Unresolved,
+            },
+            candidate_count => ResolutionDecision::Ambiguous { candidate_count },
+        }
+    }
+
     pub(in crate::evidence) fn resolve_rust_associated_type(
         &self,
         language: &str,

@@ -22,6 +22,9 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 
 fn external_call_batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
+        typescript_merge_inventory_complete: None,
+        typescript_merge_inventory_version: None,
+        typescript_merge_dependencies: Vec::new(),
         pipeline: UniversalEvidenceIdentity {
             id: "compass.python.inference-admission-test".to_owned(),
             language: "python".to_owned(),
@@ -51,10 +54,13 @@ fn external_call_batch() -> SemanticEvidenceBatch {
             parameter_count: None,
             parameter_types: Vec::new(),
             direct_bases_complete: false,
+            member_inventory_complete: None,
+            ecmascript_export_inventory: None,
             variadic: false,
             signature_hash: None,
             implementation_hash: None,
             source_hash: None,
+            documentation: None,
             definition_start_byte: None,
             range: range(0, 10),
         }],
@@ -96,6 +102,7 @@ fn external_call_batch() -> SemanticEvidenceBatch {
                 argument_types: Vec::new(),
                 allowed_target_kinds: vec!["function".to_owned(), "method".to_owned()],
                 hierarchy: None,
+                typescript_type_arguments: None,
                 allow_external: true,
             },
         }],

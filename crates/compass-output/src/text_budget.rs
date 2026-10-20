@@ -67,7 +67,7 @@ mod tests {
         while start < input.len() {
             let page =
                 render_budgeted_text(&input, start, 64, |end| format!("More: --offset {end}"))?;
-            assert!(page.text.len() + 1 <= 256);
+            assert!(page.text.len() < 256);
             assert!(page.end > start);
             restored.push_str(&input[start..page.end]);
             start = page.end;

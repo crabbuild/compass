@@ -37,11 +37,19 @@ pub(super) struct WildcardIndexes {
 
 #[derive(Default)]
 pub(super) struct TypeScriptIndexes {
+    pub(super) merge_inventory_complete: bool,
+    pub(super) type_bindings_by_scope: AHashMap<(String, String, String), Vec<String>>,
+    pub(super) definition_scopes: AHashMap<DeclarationSlot, Option<String>>,
     /// Repository-relative source module paths, never terminal basenames.
     pub(super) modules: TypeScriptModuleIndex,
     pub(super) exported_declarations: AHashSet<DeclarationSlot>,
     pub(super) export_aliases: TypeScriptModuleIndex,
     pub(super) reexport_targets: TypeScriptReexportIndex,
+    pub(super) reexport_bindings: TypeScriptReexportBindings,
+    pub(super) binding_sources: AHashMap<String, std::sync::Arc<TypeScriptBindingSources>>,
+    pub(super) complete_export_sources: BTreeSet<(String, String)>,
+    pub(super) source_files: BTreeSet<(String, String)>,
+    pub(super) direct_exports: TypeScriptModuleIndex,
     pub(super) member_aliases: AHashMap<(String, String), Vec<TypeScriptMemberAlias>>,
 }
 

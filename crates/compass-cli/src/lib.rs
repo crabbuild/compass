@@ -5738,10 +5738,33 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     }
     .to_owned();
     let mut discovery_result_envelope = false;
+    let mut ranked_view = false;
+    let mut ranked_context = false;
     let mut seen_discovery_options = HashSet::new();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
+            "--include-context" => {
+                ranked_context = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            "--view" => {
+                if args.get(index + 1).map(String::as_str) != Some("ranked") {
+                    return Outcome::failure("error: --view requires ranked".to_owned());
+                }
+                ranked_view = true;
+                discovery_requested = true;
+                index += 2;
+            }
+            value if value.starts_with("--view=") => {
+                if value != "--view=ranked" {
+                    return Outcome::failure("error: --view requires ranked".to_owned());
+                }
+                ranked_view = true;
+                discovery_requested = true;
+                index += 1;
+            }
             "--traverse" => {
                 legacy_requested = true;
                 index += 1;
@@ -5950,6 +5973,19 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                 .to_owned(),
         );
     }
+    if ranked_context && !ranked_view {
+        return Outcome::failure("error: --include-context requires --view ranked".to_owned());
+    }
+    if ranked_view
+        && (discovery_cursor.is_some()
+            || discovery_result_envelope
+            || discovery_format == "agent-json"
+            || discovery_evidence)
+    {
+        return Outcome::failure(
+            "error: --view ranked supports text or json; omit --cursor, --result-envelope, --evidence, and --format agent-json".to_owned(),
+        );
+    }
     if !legacy_requested {
         if matches!(discovery_format.as_str(), "json" | "agent-json")
             && (discovery_text_pagination_requested || discovery_evidence)
@@ -5974,11 +6010,15 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
         let outcome = command_discovery_query(
             &selection,
             request,
-            &discovery_format,
-            discovery_text_budget,
-            discovery_cursor.as_deref(),
-            discovery_result_envelope,
-            discovery_evidence,
+            DiscoveryPresentation {
+                format: &discovery_format,
+                text_budget: discovery_text_budget,
+                cursor: discovery_cursor.as_deref(),
+                result_envelope: discovery_result_envelope,
+                include_evidence: discovery_evidence,
+                ranked_view,
+                include_context: ranked_context,
+            },
         );
         if outcome.code == 0 {
             touch_selected_query_stamp(&selection);
@@ -6108,20 +6148,58 @@ fn apply_discovery_limit(
     Ok(())
 }
 
+struct DiscoveryPresentation<'a> {
+    format: &'a str,
+    text_budget: usize,
+    cursor: Option<&'a str>,
+    result_envelope: bool,
+    include_evidence: bool,
+    ranked_view: bool,
+    include_context: bool,
+}
+
 fn command_discovery_query(
     selection: &GraphSelection,
     request: DiscoveryQueryRequest,
-    format: &str,
-    text_budget: usize,
-    cursor: Option<&str>,
-    result_envelope: bool,
-    include_evidence: bool,
+    presentation: DiscoveryPresentation<'_>,
 ) -> Outcome {
+    let DiscoveryPresentation {
+        format,
+        text_budget,
+        cursor,
+        result_envelope,
+        include_evidence,
+        ranked_view,
+        include_context,
+    } = presentation;
     let include_heuristic = request.include_heuristic;
-    let execution = match discovery_query(selection, request) {
+    let execution = match discovery_query(selection, request, ranked_view, include_context) {
         Ok(response) => response,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
+    if let Some(ranked) = &execution.ranked {
+        let view = match compass_output::build_ranked_query_view_with_context(
+            ranked,
+            &execution.graph_identity,
+            &execution.graph_digest,
+            include_context,
+        ) {
+            Ok(view) => view,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        let rendered = if format == "json" {
+            serde_json::to_string(&view).map_err(compass_output::OutputError::from)
+        } else {
+            let remaining_bytes = text_budget
+                .saturating_mul(4)
+                .saturating_sub(freshness::pending_warning_bytes());
+            compass_output::render_ranked_query_text(&view, remaining_bytes / 4)
+        };
+        return match rendered {
+            Ok(output) => Outcome::success(output),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        };
+    }
     if format == "json" {
         let output = if result_envelope {
             let envelope = match compass_query::discovery_result_envelope(execution.response) {
@@ -6208,6 +6286,7 @@ fn command_discovery_query(
 
 struct DiscoveryExecution {
     response: DiscoveryQueryResponse,
+    ranked: Option<compass_query::RankedDiscoveryResponse>,
     graph_identity: String,
     graph_digest: String,
 }
@@ -6215,6 +6294,8 @@ struct DiscoveryExecution {
 fn discovery_query(
     selection: &GraphSelection,
     request: DiscoveryQueryRequest,
+    ranked_view: bool,
+    include_context: bool,
 ) -> Result<DiscoveryExecution, String> {
     match selection {
         GraphSelection::File(path) => {
@@ -6231,11 +6312,22 @@ fn discovery_query(
             let graph_digest = engine.graph_identity().to_owned();
             let engine = engine
                 .with_deadline(Instant::now() + Duration::from_millis(request.limits.timeout_ms));
-            let response = engine
-                .discover(request)
-                .map_err(|error| error.to_string())?;
+            let (response, ranked) = if ranked_view {
+                let ranked = engine
+                    .discover_ranked_with_context(request, include_context)
+                    .map_err(|error| error.to_string())?;
+                (ranked.discovery.clone(), Some(ranked))
+            } else {
+                (
+                    engine
+                        .discover(request)
+                        .map_err(|error| error.to_string())?,
+                    None,
+                )
+            };
             Ok(DiscoveryExecution {
                 response,
+                ranked,
                 graph_identity,
                 graph_digest,
             })
@@ -6266,11 +6358,22 @@ fn discovery_query(
             let graph_digest = engine.graph_identity().to_owned();
             let engine = engine
                 .with_deadline(Instant::now() + Duration::from_millis(request.limits.timeout_ms));
-            let response = engine
-                .discover(request)
-                .map_err(|error| error.to_string())?;
+            let (response, ranked) = if ranked_view {
+                let ranked = engine
+                    .discover_ranked_with_context(request, include_context)
+                    .map_err(|error| error.to_string())?;
+                (ranked.discovery.clone(), Some(ranked))
+            } else {
+                (
+                    engine
+                        .discover(request)
+                        .map_err(|error| error.to_string())?,
+                    None,
+                )
+            };
             Ok(DiscoveryExecution {
                 response,
+                ranked,
                 graph_identity,
                 graph_digest,
             })
@@ -7398,7 +7501,7 @@ fn query_help(frontend: Frontend) -> String {
             "default: 128; hard maximum: 1000",
         );
     format!(
-        "{help}\n  --result-envelope                 Wrap JSON with a query-owned semantic digest"
+        "{help}\n  --view ranked                     Opt-in top-five implementation shortlist (text or ranked-view/4 JSON; no discovery cursor)\n  --include-context                 Append bounded one-hop witnessed context (ranked only)\n  --result-envelope                 Wrap JSON with a query-owned semantic digest"
     )
 }
 

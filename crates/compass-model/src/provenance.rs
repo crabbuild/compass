@@ -11,6 +11,109 @@ pub const NODE_PROVENANCE_ANCHOR_ATTRIBUTE: &str = "_node_provenance_anchor";
 pub const TRUSTED_EDGE_RECORD_ATTRIBUTE: &str = "_compass_v1_edge_record";
 pub const TRUSTED_NODE_RECORD_ATTRIBUTE: &str = "_compass_v1_node_record";
 pub const SEMANTIC_LAYER_EXTRACTOR: &str = "compass.semantic";
+/// AST attachment rule for a bounded leading excerpt and its exact declaration.
+pub const LEADING_DOCUMENTATION_RULE: &str = "universal-leading-documentation-v1";
+/// Internal raw projection payload; publication retains it as a provenance anchor.
+pub const LEADING_DOCUMENTATION_OWNER_ANCHOR_ATTRIBUTE: &str =
+    "_compass_leading_documentation_owner_anchor";
+
+/// Verify the cross-record ownership proof used by leading-document retrieval.
+///
+/// Generic `documents` relationships and same-name/distant resources do not
+/// establish ownership. The producer must retain both exact source intervals
+/// together under the known AST attachment rule. Source auditing remains
+/// necessary to establish that a producer observed the syntax it claims.
+#[must_use]
+pub fn is_proven_leading_documentation(
+    document: &crate::code_graph::NodeRecord,
+    owner: &crate::code_graph::NodeRecord,
+    edge: &crate::code_graph::EdgeRecord,
+) -> bool {
+    use crate::code_graph::{EdgeKind, NodeDetails, NodeKind, ResourceKind};
+
+    if edge.kind != EdgeKind::Documents
+        || edge.source != document.id
+        || edge.target != owner.id
+        || document.kind != NodeKind::Resource
+        || !matches!(
+            owner.kind,
+            NodeKind::Function
+                | NodeKind::Method
+                | NodeKind::Module
+                | NodeKind::Class
+                | NodeKind::Struct
+                | NodeKind::Interface
+                | NodeKind::Trait
+                | NodeKind::Enum
+                | NodeKind::TypeAlias
+        )
+        || edge.occurrence_rule.as_ref().map(OccurrenceRule::as_str)
+            != Some(LEADING_DOCUMENTATION_RULE)
+    {
+        return false;
+    }
+    let Some(NodeDetails::Resource(details)) = &document.details else {
+        return false;
+    };
+    if details.resource_kind != ResourceKind::Rationale
+        || !details
+            .content
+            .as_ref()
+            .is_some_and(|content| !content.is_empty() && content.len() <= 4096)
+    {
+        return false;
+    }
+    let (Some(excerpt), Some(definition)) = (&document.source, &owner.source) else {
+        return false;
+    };
+    if edge.relationship_site.as_ref() != Some(excerpt)
+        || !excerpt.is_valid()
+        || !definition.is_valid()
+        || excerpt.file != definition.file
+        || excerpt.end_byte > definition.start_byte
+        || (excerpt.end_line, excerpt.end_column) > (definition.start_line, definition.start_column)
+        || details.content.as_ref().map(|content| content.len() as u64)
+            != excerpt.end_byte.checked_sub(excerpt.start_byte)
+    {
+        return false;
+    }
+    let exact_nonheuristic = |evidence: &Provenance| {
+        evidence.origin != EvidenceOrigin::Heuristic
+            && evidence.confidence == EvidenceConfidence::Exact
+            && evidence.validate().is_ok()
+    };
+    if !edge.evidence.iter().all(exact_nonheuristic)
+        || !document.evidence.iter().all(exact_nonheuristic)
+        || !document.evidence.iter().any(|evidence| {
+            evidence.origin == EvidenceOrigin::Ast && evidence.anchors.contains(excerpt)
+        })
+        || !owner.evidence.iter().any(|evidence| {
+            exact_nonheuristic(evidence)
+                && evidence.origin == EvidenceOrigin::Ast
+                && evidence.anchors.iter().any(|anchor| {
+                    anchor.file == definition.file
+                        && definition.start_byte <= anchor.start_byte
+                        && anchor.end_byte <= definition.end_byte
+                        && (definition.start_line, definition.start_column)
+                            <= (anchor.start_line, anchor.start_column)
+                        && (anchor.end_line, anchor.end_column)
+                            <= (definition.end_line, definition.end_column)
+                })
+        })
+    {
+        return false;
+    }
+    edge.evidence.iter().any(|proof| {
+        proof.origin == EvidenceOrigin::Ast
+            && proof.confidence == EvidenceConfidence::Exact
+            && proof.rule.as_deref() == Some(LEADING_DOCUMENTATION_RULE)
+            && proof.anchors.len() == 2
+            && proof.anchors.contains(excerpt)
+            && proof.anchors.contains(definition)
+            && proof.wiring_site.is_none()
+            && proof.validate().is_ok()
+    })
+}
 
 /// Immutable producer rule used to distinguish relationship occurrences.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

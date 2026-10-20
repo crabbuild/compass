@@ -17,7 +17,7 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/4";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/5";
 mod go;
 mod html;
 mod ids;
@@ -37,6 +37,7 @@ mod r;
 mod registry;
 mod scip;
 mod semantic;
+pub mod source_query;
 mod sql;
 mod templates;
 mod terraform;
@@ -47,12 +48,22 @@ mod zig;
 #[doc(hidden)]
 pub use builtins::{is_language_builtin_global, is_language_builtin_qualified_target};
 pub use evidence::{
-    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
+    BindingFact, BindingKind, CandidateRelation, DECLARATION_DOCUMENTATION_OMISSION_CODE,
+    DeclarationDocumentationFact, DeclarationDocumentationKind, DeclarationFact,
+    ECMASCRIPT_EXPORT_INVENTORY_VERSION, EcmaScriptExportInventory, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
-    HierarchyConstraint, LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy,
+    HierarchyConstraint, LanguageCapability, MAX_BATCH_DOCUMENTATION_BYTES,
+    MAX_BATCH_TYPESCRIPT_TYPE_ARGUMENT_BYTES, MAX_BATCH_TYPESCRIPT_TYPE_ARGUMENT_NODES,
+    MAX_DECLARATION_DOCUMENTATION_BYTES, MAX_TYPESCRIPT_MERGE_DEPENDENCIES,
+    MAX_TYPESCRIPT_MERGE_DEPENDENCY_SPECIFIER_BYTES, MAX_TYPESCRIPT_MERGE_DEPENDENCY_TEXT_BYTES,
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_ARITY, MAX_TYPESCRIPT_TYPE_ARGUMENT_BYTES,
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_DEPTH, MAX_TYPESCRIPT_TYPE_ARGUMENT_NODES,
+    MAX_TYPESCRIPT_TYPE_ARGUMENT_REFERENCE_BYTES, OccurrenceFact, ReceiverDispatchStrategy,
     RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
-    SymbolNamespace, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidenceIdentity, range_for_node,
-    validate_evidence,
+    SymbolNamespace, TYPESCRIPT_MERGE_INVENTORY_VERSION, TypeScriptArgumentUsage,
+    TypeScriptMergeDependency, TypeScriptMergeDependencyKind, TypeScriptMergeDependencyUsage,
+    TypeScriptTypeArgument, TypeScriptTypeArguments, UNIVERSAL_EVIDENCE_SCHEMA,
+    UniversalEvidenceIdentity, range_for_node, validate_evidence,
 };
 pub use evidence_pipeline::{
     UniversalEvidencePipeline, UniversalEvidenceProducer, UniversalEvidenceQualification,

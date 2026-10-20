@@ -5,6 +5,7 @@ use super::super::*;
 mod members;
 mod modules;
 mod overloads;
+mod typed_members;
 mod types;
 
 use overloads::*;

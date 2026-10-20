@@ -22,6 +22,7 @@ fn current_build_fingerprint() -> String {
         compass_languages::EXTRACTION_SEMANTICS_VERSION,
         compass_languages::FRAMEWORK_PACK_SEMANTICS_VERSION,
         compass_files::AST_CACHE_VERSION,
+        compass_model::source_query::SOURCE_QUERY_PROFILE,
     ] {
         digest.update(component.as_bytes());
         digest.update([0]);

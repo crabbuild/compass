@@ -16,6 +16,44 @@ const MAX_CONCEPT_POSTINGS: usize = 768;
 const MAX_DOCUMENT_ROOTS: usize = 8;
 const MAX_DOCUMENT_PROBES: usize = 64;
 
+/// Small, directional recall hints for ordinary words absent from the index.
+/// Broad retrieval checks literal context and keeps dependent matches tentative;
+/// these do not change strict names or the shared concept-equivalence table.
+pub(crate) fn unindexed_vocabulary_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "entry" => &["item", "element"],
+        "snapshot" => &["copy", "clone"],
+        _ => &[],
+    }
+}
+
+/// Directional spelling hints for common code abbreviations. Unlike conceptual
+/// paraphrases, an indexed long form does not rule out an abbreviated owner.
+/// The four recognized query terms require at most five extra frequency reads.
+/// Broad retrieval still requires separate literal owner context and labels
+/// dependent matches as tentative rather than asserting equivalence.
+pub(crate) fn code_abbreviation_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "parameter" => &["param"],
+        "dictionary" => &["dict"],
+        "second" => &["sec"],
+        "nanosecond" => &["nsec", "nano"],
+        _ => &[],
+    }
+}
+
+/// Ordinary operation wording can point at conventional method spellings.
+/// These four directional hints add at most four frequency reads. The broad
+/// retriever requires separate literal owner context, discloses each hint and
+/// keeps dependent candidates Low without an implementation preference.
+pub(crate) fn operation_vocabulary_alternatives(term: &str) -> &'static [&'static str] {
+    match term {
+        "read" | "lookup" | "getter" => &["get"],
+        "setter" => &["set"],
+        _ => &[],
+    }
+}
+
 // These are recall alternatives, never assertions of equivalent code meaning.
 const SYNONYMS: &[(&[&str], &[&str])] = &[
     (
@@ -397,6 +435,9 @@ impl CodeQueryEngine {
         request: SearchRequest,
         instrumentation: &mut QueryInstrumentation,
     ) -> Result<CodeQueryResponse, QueryError> {
+        if self.is_fielded_question(&request.query)? {
+            return self.broad_search(request, instrumentation, &|_| true);
+        }
         self.search_concepts_instrumented(request, instrumentation, &|_| true)
     }
 

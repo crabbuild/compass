@@ -994,6 +994,15 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v8/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v9/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v10/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v30/e1"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v30/e1/stale.msgpack"),
+        "TypeScript facts without versioned complete load census",
+    )?;
+    let historical = cache_root.join("history/published/graph.json");
+    fs::create_dir_all(historical.parent().ok_or("missing historical parent")?)?;
+    fs::write(&historical, "published immutable graph")?;
+
     fs::write(
         cache_root.join("compass-out/cache/ast/v10/e1/stale.msgpack"),
         "Rust facts without source-proven Result vector receiver flow",
@@ -1056,6 +1065,11 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(!cache_root.join("compass-out/cache/ast/v8").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v9").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v10").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v30").exists());
+    assert_eq!(
+        fs::read_to_string(&historical)?,
+        "published immutable graph"
+    );
     assert!(!cache_root.join("compass-out/cache/ast/v11").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v12").exists());
 

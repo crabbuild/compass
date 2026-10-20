@@ -5,6 +5,7 @@ use sha2::Digest as _;
 mod affected;
 mod benchmark;
 mod bm25;
+mod broad;
 mod code_query;
 mod concepts;
 mod cql;
@@ -14,6 +15,7 @@ mod explanation_members;
 mod export_binding;
 mod graph_engine;
 mod index;
+mod index_validation;
 mod intent;
 mod natural_answers;
 mod neighbors;
@@ -21,18 +23,29 @@ mod overview;
 mod program_join;
 mod ranking;
 mod recall;
+mod record_budget;
 mod relevance;
 mod response_cache;
 mod score;
 mod semantic_search;
 mod source;
+mod source_query;
 mod telemetry;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
 mod text;
 mod text_cursor;
 mod traversal;
 
 pub use affected::{DEFAULT_AFFECTED_RELATIONS, affected_nodes, format_affected, resolve_seed};
 pub use benchmark::{BenchmarkQuestion, BenchmarkResult, format_benchmark, run_benchmark};
+pub use broad::{
+    CALL_LINK_WORK_SCHEMA, MAX_CALL_LINK_CANDIDATE_PROBES, RankedCallEndpoint, RankedCallHint,
+    RankedCallHop, RankedCallLink, RankedCallWork, RankedCandidate, RankedDiscoveryResponse,
+    RankedExcerptKind, RankedFilterReason, RankedRetrievalTrace, RankedSourceExcerpt,
+    RankedTargetTrace, RankedTermTrace, RelevanceBand,
+};
 pub use code_query::{
     CodeQueryEngine, ExactSearchFilter, normalize_symbol as normalize_code_query_symbol,
 };
@@ -58,7 +71,7 @@ pub use index::{
     CachedQueryEngine, DEFAULT_QUERY_ENGINE_CACHE_CAPACITY, EngineSelection,
     MAX_QUERY_ENGINE_CACHE_CAPACITY, QueryEngineCache, QueryEngineKind, has_published_store, open,
     open_with_document, open_with_engine, open_with_store, open_with_store_selector,
-    open_with_verified_document,
+    open_with_verified_document, open_with_verified_publication,
 };
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
@@ -73,7 +86,17 @@ pub use overview::{
     MAX_OVERVIEW_NODES, OverviewError, OverviewScope, ScopeSelection, hotspots, scoped_document,
 };
 pub use program_join::join_program_evidence;
-pub use ranking::QUERY_RANKER_PROFILE_V1;
+pub use ranking::{
+    QUERY_RANKER_PROFILE_V1, QUERY_RANKER_PROFILE_V2, QUERY_RANKER_PROFILE_V3,
+    QUERY_RANKER_PROFILE_V4, QUERY_RANKER_PROFILE_V5, QUERY_RANKER_PROFILE_V6,
+    QUERY_RANKER_PROFILE_V7, QUERY_RANKER_PROFILE_V8, QUERY_RANKER_PROFILE_V9,
+    QUERY_RANKER_PROFILE_V10, QUERY_RANKER_PROFILE_V11, QUERY_RANKER_PROFILE_V12,
+    QUERY_RANKER_PROFILE_V13, QUERY_RANKER_PROFILE_V14, QUERY_RANKER_PROFILE_V15,
+    QUERY_RANKER_PROFILE_V16, QUERY_RANKER_PROFILE_V17, QUERY_RANKER_PROFILE_V18,
+    QUERY_RANKER_PROFILE_V21, QUERY_RANKER_PROFILE_V22, QUERY_RANKER_PROFILE_V23,
+    QUERY_RANKER_PROFILE_V24, QUERY_RANKER_PROFILE_V25, QUERY_RANKER_PROFILE_V26,
+    QUERY_RANKER_PROFILE_V27, QUERY_RANKER_PROFILE_V28, QUERY_RANKER_PROFILE_V29,
+};
 pub use relevance::{
     EdgeIdentity, EdgeJudgment, IdJudgment, IntentMetrics, JudgedQuery, JudgmentCorpus,
     MAX_JUDGMENTS_PER_QUERY, MAX_QUESTIONS, MAX_TEXT_BYTES, MetricValue, ObservedEdge,

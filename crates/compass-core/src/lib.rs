@@ -12,6 +12,7 @@ mod pipeline;
 mod program;
 mod raw_guard;
 mod review;
+mod source_query;
 mod task_context;
 mod watch;
 mod watch_scheduler;

@@ -1953,17 +1953,27 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     }
 
     /// Read the first graph diagnostic for a stable code through a point
-    /// projection. This avoids scanning large omission sets when a query only
-    /// needs the publication summary.
+    /// projection. Older snapshots without that projection use the bounded
+    /// diagnostic supplement; an incomplete scan cannot prove absence.
     pub fn graph_diagnostic_by_code(
         &self,
         code: &str,
     ) -> Result<Option<GraphDiagnostic>, SnapshotError> {
         let key =
             encode_graph_index_key(IndexKind::Metadata, &[b"diagnostic-code", code.as_bytes()])?;
-        self.lookup(IndexKind::Metadata, &key)?
-            .map(|value| decode_json::<GraphDiagnostic>(&value))
-            .transpose()
+        if let Some(value) = self.lookup(IndexKind::Metadata, &key)? {
+            return decode_json::<GraphDiagnostic>(&value).map(Some);
+        }
+        let (diagnostics, truncated) = self.graph_diagnostics(SnapshotReadLimits::default())?;
+        if let Some(diagnostic) = diagnostics.into_iter().find(|item| item.code == code) {
+            return Ok(Some(diagnostic));
+        }
+        if truncated {
+            return Err(SnapshotError::Limit(format!(
+                "diagnostic lookup for {code} has no point projection and reached its scan limit; rebuild with compass update --force or narrow the build scope"
+            )));
+        }
+        Ok(None)
     }
 
     pub fn get_node(&self, id: &str) -> Result<Option<NodeRecord>, SnapshotError> {
@@ -2278,12 +2288,28 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok((nodes, truncated, work))
     }
 
+    fn explicit_term_capability(&self, capability: &str) -> Result<bool, SnapshotError> {
+        let Some(value) = self.lookup(IndexKind::Terms, &term_capability_key(capability)?)? else {
+            return Ok(false);
+        };
+        let version = decode_json::<u64>(&value)?;
+        if version != 1 {
+            return Err(SnapshotError::Corrupt(format!(
+                "unsupported term capability version {version} for {capability}"
+            )));
+        }
+        Ok(true)
+    }
+
     /// Whether this snapshot includes raw identifier-subword term postings.
     ///
-    /// The sentinel is an ordinary empty posting so readers predating this
-    /// capability continue to accept the additive index entry.
+    /// Current snapshots use a separate capability record. Legacy empty
+    /// postings remain readable; a real source term is never replaced by one.
     pub fn supports_identifier_subwords(&self) -> Result<bool, SnapshotError> {
         let capability = IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1;
+        if self.explicit_term_capability(capability)? {
+            return Ok(true);
+        }
         let posting_prefix = capability.get(..3).unwrap_or(capability);
         let key = encode_graph_index_key(
             IndexKind::Terms,
@@ -2301,10 +2327,43 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok(posting.term == capability && posting.node_ids.is_empty())
     }
 
+    /// Source-owned field projection document frequencies. Absence identifies
+    /// an older immutable index; never rewrite historical snapshots to add it.
+    pub fn fielded_document_frequency(&self, term: &str) -> Result<Option<u64>, SnapshotError> {
+        let capability =
+            encode_graph_index_key(IndexKind::Terms, &[b"fielded_df_v1", b"capability"])?;
+        let Some(capability) = self.lookup(IndexKind::Terms, &capability)? else {
+            return Ok(None);
+        };
+        if decode_json::<u64>(&capability)? != 1 {
+            return Err(SnapshotError::Corrupt(
+                "unsupported fielded document-frequency capability".to_owned(),
+            ));
+        }
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"fielded_df_v1", b"term", term.as_bytes()],
+        )?;
+        let frequency = self
+            .lookup(IndexKind::Terms, &key)?
+            .map(|bytes| decode_json::<u64>(&bytes))
+            .transpose()?
+            .unwrap_or(0);
+        if frequency > self.manifest.node_count {
+            return Err(SnapshotError::Corrupt(
+                "fielded term frequency exceeds node count".to_owned(),
+            ));
+        }
+        Ok(Some(frequency))
+    }
+
     /// Whether this snapshot includes exact term postings restricted to
     /// source-backed operation-role declarations.
     pub fn supports_operation_role_terms(&self) -> Result<bool, SnapshotError> {
         let capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
+        if self.explicit_term_capability(capability)? {
+            return Ok(true);
+        }
         let key = encode_graph_index_key(
             IndexKind::Terms,
             &[b"operation_role", capability.as_bytes(), b"00000000"],
@@ -2320,6 +2379,9 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     /// source-backed type declarations.
     pub fn supports_declaration_terms(&self) -> Result<bool, SnapshotError> {
         let capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
+        if self.explicit_term_capability(capability)? {
+            return Ok(true);
+        }
         let key = encode_graph_index_key(
             IndexKind::Terms,
             &[b"declaration", capability.as_bytes(), b"00000000"],
@@ -2450,6 +2512,9 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     /// Whether this snapshot includes exact direct-caller concept postings.
     pub fn supports_relationship_terms(&self) -> Result<bool, SnapshotError> {
         let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V1;
+        if self.explicit_term_capability(capability)? {
+            return Ok(true);
+        }
         let posting_prefix = capability.get(..3).unwrap_or(capability);
         let key = encode_graph_index_key(
             IndexKind::Terms,
@@ -2472,6 +2537,9 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     /// direct-call postings in the query layer.
     pub fn supports_relationship_search_terms(&self) -> Result<bool, SnapshotError> {
         let capability = RELATIONSHIP_SEARCH_TERM_INDEX_CAPABILITY_V1;
+        if self.explicit_term_capability(capability)? {
+            return Ok(true);
+        }
         let posting_prefix = capability.get(..3).unwrap_or(capability);
         let key = encode_graph_index_key(
             IndexKind::Terms,
@@ -2790,6 +2858,21 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok((edges, truncated))
     }
 
+    /// Read occurrence identities before hydrating full edge payloads. This
+    /// shares the same directional-kind ordering, prefix bounds and capability
+    /// checks as adjacency_by_kinds; no edge records are decoded by this call.
+    pub fn adjacency_edge_ids_by_kinds(
+        &self,
+        node_id: &str,
+        incoming: bool,
+        kinds: &[EdgeKind],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
+        let (entries, truncated) =
+            self.directional_entries_by_kinds(node_id, incoming, kinds, limits)?;
+        Ok((entries.into_keys().collect(), truncated))
+    }
+
     /// Read one globally bounded directional adjacency prefix. Callers may
     /// filter kinds after this read without multiplying the limit per kind.
     pub fn directional_adjacency(
@@ -2827,6 +2910,20 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         node_id: &str,
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
+        let (ids, truncated) = self.incident_edge_ids(node_id, limits)?;
+        let edge_ids = ids.into_iter().collect::<BTreeSet<_>>();
+        let edges = self
+            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
+        Ok((edges, truncated))
+    }
+
+    /// Return the same bounded incoming/outgoing identity union as incident,
+    /// without decoding full occurrence records. Self-loops appear once.
+    pub fn incident_edge_ids(
+        &self,
+        node_id: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
         let limits = limits.validate()?;
         let (incoming, incoming_truncated) =
             self.directional_entries_by_kinds(node_id, true, ALL_EDGE_KINDS, limits)?;
@@ -2841,9 +2938,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 truncated = true;
             }
         }
-        let edges = self
-            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
-        Ok((edges, truncated))
+        Ok((edge_ids.into_iter().collect(), truncated))
     }
 
     fn directional_entries_by_kinds(
@@ -3289,13 +3384,13 @@ fn canonical_graph_document_with_generation(
     }
 }
 
-fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
+fn alias_names_by_target(graph: &GraphDocument) -> BTreeMap<&str, Vec<&str>> {
     let node_by_id = graph
         .nodes
         .iter()
         .map(|node| (node.id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
-    let mut aliases_by_target = BTreeMap::<&str, BTreeSet<&str>>::new();
+    let mut aliases_by_target = BTreeMap::<&str, Vec<&str>>::new();
     for edge in &graph.links {
         if edge.kind == compass_model::code_graph::EdgeKind::Aliases
             && let Some(alias) = node_by_id.get(edge.source.as_str())
@@ -3303,13 +3398,63 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
             aliases_by_target
                 .entry(edge.target.as_str())
                 .or_default()
-                .insert(alias.name.as_str());
+                .push(alias.name.as_str());
         }
     }
+    for aliases in aliases_by_target.values_mut() {
+        aliases.sort_unstable();
+    }
+    aliases_by_target
+}
 
+fn fielded_alias_names_by_target(graph: &GraphDocument) -> BTreeMap<&str, Vec<&str>> {
+    let node_by_id = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut aliases_by_target = BTreeMap::<&str, Vec<&str>>::new();
+    for edge in &graph.links {
+        if edge.kind != EdgeKind::Aliases {
+            continue;
+        }
+        // Preserve raw relationship multiplicity so filtering cannot reach a
+        // ninth exact alias beyond the bounded query-time read window.
+        let name = if !edge.evidence.is_empty()
+            && compass_model::search::is_exact_nonheuristic_relationship(edge)
+        {
+            node_by_id
+                .get(edge.source.as_str())
+                .map_or("", |alias| alias.name.as_str())
+        } else {
+            ""
+        };
+        aliases_by_target
+            .entry(edge.target.as_str())
+            .or_default()
+            .push(name);
+    }
+    for aliases in aliases_by_target.values_mut() {
+        aliases.sort_unstable();
+    }
+    aliases_by_target
+}
+
+fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
+    let aliases_by_target = alias_names_by_target(graph);
+    let fielded_aliases_by_target = fielded_alias_names_by_target(graph);
     let mut term_postings = BTreeMap::<String, Vec<String>>::new();
     for node in &graph.nodes {
         let mut terms = searchable_node_terms(node);
+        let document = compass_model::search::search_document_with_aliases(
+            node,
+            fielded_aliases_by_target
+                .get(node.id.as_str())
+                .into_iter()
+                .flat_map(|aliases| aliases.iter().copied()),
+        );
+        terms.extend(document.terms());
+        terms.extend(document.primary_terms(node.kind));
         for alias in aliases_by_target
             .get(node.id.as_str())
             .into_iter()
@@ -3331,6 +3476,8 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
 
 fn searchable_node_terms(node: &NodeRecord) -> BTreeSet<String> {
     let mut terms = compass_model::search::document_search_terms(node);
+    terms.extend(compass_model::search::search_document(node).terms());
+    terms.extend(compass_model::search::primary_evidence_terms(node));
     terms.extend(search_terms(&node.name));
     terms.extend(search_terms(&node.qualified_name));
     terms.extend(compass_model::search::identifier_search_terms(&node.name));
@@ -3428,14 +3575,12 @@ fn build_index(
                     )?,
                     diagnostic,
                 )?;
-                if diagnostic.code == "publication_omission_summary" {
-                    let key = encode_graph_index_key(
-                        IndexKind::Metadata,
-                        &[b"diagnostic-code", diagnostic.code.as_bytes()],
-                    )?;
-                    let value = encode_json(diagnostic)?;
-                    entries.entry(key).or_insert(value);
-                }
+                let key = encode_graph_index_key(
+                    IndexKind::Metadata,
+                    &[b"diagnostic-code", diagnostic.code.as_bytes()],
+                )?;
+                let value = encode_json(diagnostic)?;
+                entries.entry(key).or_insert(value);
             }
             insert_json(
                 &mut entries,
@@ -3476,6 +3621,36 @@ fn build_index(
         IndexKind::Terms => {
             let term_postings = term_postings
                 .ok_or_else(|| SnapshotError::Corrupt("term postings are missing".to_owned()))?;
+            let mut frequencies = BTreeMap::<String, u64>::new();
+            let fielded_aliases_by_target = fielded_alias_names_by_target(graph);
+            for node in &graph.nodes {
+                for term in compass_model::search::search_document_with_aliases(
+                    node,
+                    fielded_aliases_by_target
+                        .get(node.id.as_str())
+                        .into_iter()
+                        .flat_map(|aliases| aliases.iter().copied()),
+                )
+                .terms()
+                {
+                    *frequencies.entry(term).or_default() += 1;
+                }
+            }
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Terms, &[b"fielded_df_v1", b"capability"])?,
+                &1_u64,
+            )?;
+            for (term, frequency) in frequencies {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Terms,
+                        &[b"fielded_df_v1", b"term", term.as_bytes()],
+                    )?,
+                    &frequency,
+                )?;
+            }
             for (term, node_ids) in term_postings {
                 let prefix_length = term.len().min(3);
                 let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
@@ -3503,8 +3678,9 @@ fn build_index(
             }
             let capability = IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1;
             let prefix = capability.get(..3).unwrap_or(capability);
-            insert_json(
+            insert_term_capability(
                 &mut entries,
+                capability,
                 encode_graph_index_key(
                     IndexKind::Terms,
                     &[
@@ -3514,10 +3690,6 @@ fn build_index(
                         b"00000000",
                     ],
                 )?,
-                &TermPostingChunk {
-                    term: capability.to_owned(),
-                    node_ids: Vec::new(),
-                },
             )?;
             for (term, node_ids) in operation_role_term_postings(graph) {
                 for (chunk_index, chunk) in
@@ -3538,8 +3710,9 @@ fn build_index(
                 }
             }
             let operation_capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
-            insert_json(
+            insert_term_capability(
                 &mut entries,
+                operation_capability,
                 encode_graph_index_key(
                     IndexKind::Terms,
                     &[
@@ -3548,10 +3721,6 @@ fn build_index(
                         b"00000000",
                     ],
                 )?,
-                &TermPostingChunk {
-                    term: operation_capability.to_owned(),
-                    node_ids: Vec::new(),
-                },
             )?;
             for (term, node_ids) in declaration_term_postings(graph, term_postings) {
                 for (chunk_index, chunk) in
@@ -3572,8 +3741,9 @@ fn build_index(
                 }
             }
             let declaration_capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
-            insert_json(
+            insert_term_capability(
                 &mut entries,
+                declaration_capability,
                 encode_graph_index_key(
                     IndexKind::Terms,
                     &[
@@ -3582,10 +3752,6 @@ fn build_index(
                         b"00000000",
                     ],
                 )?,
-                &TermPostingChunk {
-                    term: declaration_capability.to_owned(),
-                    node_ids: Vec::new(),
-                },
             )?;
             let direct_relationship_postings =
                 compass_model::search::direct_call_source_identifier_postings(graph);
@@ -3645,8 +3811,9 @@ fn build_index(
             let relationship_prefix = relationship_capability
                 .get(..3)
                 .unwrap_or(relationship_capability);
-            insert_json(
+            insert_term_capability(
                 &mut entries,
+                relationship_capability,
                 encode_graph_index_key(
                     IndexKind::Terms,
                     &[
@@ -3656,10 +3823,6 @@ fn build_index(
                         b"00000000",
                     ],
                 )?,
-                &TermPostingChunk {
-                    term: relationship_capability.to_owned(),
-                    node_ids: Vec::new(),
-                },
             )?;
 
             let relationship_search_postings =
@@ -3724,8 +3887,9 @@ fn build_index(
             let relationship_search_prefix = relationship_search_capability
                 .get(..3)
                 .unwrap_or(relationship_search_capability);
-            insert_json(
+            insert_term_capability(
                 &mut entries,
+                relationship_search_capability,
                 encode_graph_index_key(
                     IndexKind::Terms,
                     &[
@@ -3735,10 +3899,6 @@ fn build_index(
                         b"00000000",
                     ],
                 )?,
-                &TermPostingChunk {
-                    term: relationship_search_capability.to_owned(),
-                    node_ids: Vec::new(),
-                },
             )?;
             for node in &graph.nodes {
                 for (kind, value, canonical) in
@@ -4173,6 +4333,38 @@ fn update_index_tree<S: Store + ?Sized>(
             )
         }
     }
+}
+
+// Capability metadata has a disjoint namespace from every source posting.
+fn term_capability_key(capability: &str) -> Result<Vec<u8>, SnapshotError> {
+    encode_graph_index_key(IndexKind::Terms, &[b"capability", capability.as_bytes()])
+}
+
+fn insert_term_capability(
+    entries: &mut BTreeMap<Vec<u8>, Vec<u8>>,
+    capability: &str,
+    legacy_key: Vec<u8>,
+) -> Result<(), SnapshotError> {
+    insert_json(entries, term_capability_key(capability)?, &1_u64)?;
+    if let Some(value) = entries.get(&legacy_key) {
+        let posting = decode_json::<TermPostingChunk>(value)?;
+        if posting.term != capability {
+            return Err(SnapshotError::Corrupt(
+                "legacy capability key contains a different source term".to_owned(),
+            ));
+        }
+        // Real source postings retain every ID and chunk. Older readers may
+        // report this capability unavailable; current readers use the record above.
+        return Ok(());
+    }
+    insert_json(
+        entries,
+        legacy_key,
+        &TermPostingChunk {
+            term: capability.to_owned(),
+            node_ids: Vec::new(),
+        },
+    )
 }
 
 fn insert_json<T: Serialize>(
@@ -4948,6 +5140,107 @@ mod tests {
     }
 
     #[test]
+    fn fielded_aliases_count_empty_provenance_without_promoting_legacy_names()
+    -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        let mut alias = graph
+            .nodes
+            .first()
+            .cloned()
+            .ok_or_else(|| SnapshotError::Corrupt("test declaration is missing".to_owned()))?;
+        alias.id = "alias".to_owned();
+        alias.kind = NodeKind::TypeAlias;
+        alias.name = "renewal".to_owned();
+        alias.qualified_name = "crate::renewal".to_owned();
+        let site = alias.source.clone();
+        graph.nodes.push(alias);
+        let id =
+            compass_model::identity::edge_id("alias", EdgeKind::Aliases, "a", site.as_ref(), None);
+        graph.links.push(EdgeRecord {
+            id: id.clone(),
+            key: id,
+            source: "alias".to_owned(),
+            target: "a".to_owned(),
+            kind: EdgeKind::Aliases,
+            occurrence_rule: None,
+            relationship_site: site,
+            details: None,
+            evidence: Vec::new(),
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+        // Exercise the projection directly: empty provenance cannot be newly
+        // published, but the legacy relationship predicate accepts it.
+        assert_eq!(alias_names_by_target(&graph)["a"], ["renewal"]);
+        assert_eq!(fielded_alias_names_by_target(&graph)["a"], [""]);
+        Ok(())
+    }
+
+    #[test]
+    fn fielded_frequency_rejects_malformed_capabilities_and_impossible_counts()
+    -> Result<(), SnapshotError> {
+        for (name, capability, frequency) in [
+            ("legacy", None, &b"1"[..]),
+            ("current", Some(&b"1"[..]), &b"1"[..]),
+            ("unknown-capability", Some(&b"2"[..]), &b"1"[..]),
+            ("malformed-capability", Some(&b"{}"[..]), &b"1"[..]),
+            ("impossible-frequency", Some(&b"1"[..]), &b"2"[..]),
+            ("negative-frequency", Some(&b"1"[..]), &b"-1"[..]),
+        ] {
+            let graph = cache_fixture_graph();
+            let store = MemoryStore::default();
+            let builder = GraphSnapshotBuilder::new();
+            let mut content = builder.prepare_content(&store, &graph)?;
+            let postings = build_term_postings(&graph);
+            let mut entries = build_index(&graph, IndexKind::Terms, Some(&postings))?;
+            let capability_key =
+                encode_graph_index_key(IndexKind::Terms, &[b"fielded_df_v1", b"capability"])?;
+            if let Some(value) = capability {
+                entries.insert(capability_key, value.to_vec());
+            } else {
+                entries.remove(&capability_key);
+            }
+            entries.insert(
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[b"fielded_df_v1", b"term", b"function"],
+                )?,
+                frequency.to_vec(),
+            );
+            let entry_count = entries.len() as u64;
+            let mut writer = ObjectWriter::new(&store)?;
+            let digest = build_index_tree(&mut writer, IndexKind::Terms, entries)?;
+            let _ = writer.finish()?;
+            let term_root = content
+                .roots
+                .iter_mut()
+                .find(|root| root.index == IndexKind::Terms)
+                .ok_or_else(|| SnapshotError::Corrupt("test term root missing".to_owned()))?;
+            term_root.digest = digest;
+            term_root.entry_count = entry_count;
+            let (graph_digest, graph_bytes) = digest_canonical_graph(&graph, false)?;
+            let prepared = builder.finish_content(&store, content, graph_digest, graph_bytes)?;
+            builder.activate(&store, &prepared)?;
+            let reader = GraphSnapshotReader::open_active(&store)?
+                .ok_or_else(|| SnapshotError::Corrupt("test active snapshot missing".to_owned()))?;
+            match name {
+                "legacy" => assert_eq!(reader.fielded_document_frequency("function")?, None),
+                "current" => assert_eq!(reader.fielded_document_frequency("function")?, Some(1)),
+                _ => assert!(
+                    matches!(
+                        reader.fielded_document_frequency("function"),
+                        Err(SnapshotError::Corrupt(_) | SnapshotError::Decode(_))
+                    ),
+                    "{name}"
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn canonical_digest_counter_has_no_two_gibibyte_cutoff() -> Result<(), std::io::Error> {
         let mut writer = DigestWriter::new();
         writer.bytes = (2_u64 * 1024 * 1024 * 1024) + 1;
@@ -5100,6 +5393,213 @@ mod tests {
             community: None,
         });
         graph
+    }
+
+    #[test]
+    fn adjacency_identity_prefix_does_not_hydrate_edge_payloads() -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        let node = graph
+            .nodes
+            .first()
+            .ok_or_else(|| SnapshotError::Corrupt("fixture node missing".to_owned()))?;
+        let site = node
+            .source
+            .clone()
+            .ok_or_else(|| SnapshotError::Corrupt("fixture source missing".to_owned()))?;
+        let id = compass_model::identity::edge_id("a", EdgeKind::Calls, "a", Some(&site), None);
+        graph.links.push(EdgeRecord {
+            id: id.clone(),
+            key: id.clone(),
+            source: "a".to_owned(),
+            target: "a".to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: Some(site),
+            details: None,
+            evidence: node.evidence.clone(),
+            weight: None,
+            context: Some("call".to_owned()),
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+        let store = MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("snapshot missing".to_owned()))?;
+        let root = reader
+            .manifest()
+            .roots
+            .iter()
+            .find(|root| root.index == IndexKind::Edges)
+            .ok_or_else(|| SnapshotError::Corrupt("edges root missing".to_owned()))?;
+        // A usable ID index must not need the full occurrence's payload tree.
+        store.put(
+            &NamespaceId::graph(),
+            &object_partition()?,
+            &object_key(&root.digest)?,
+            b"corrupt-edge-payload",
+            WriteCondition::Any,
+        )?;
+        let limits = SnapshotReadLimits {
+            max_items: 1,
+            ..SnapshotReadLimits::default()
+        };
+        let (ids, truncated) =
+            reader.adjacency_edge_ids_by_kinds("a", false, &[EdgeKind::Calls], limits)?;
+        assert_eq!(ids, vec![id.clone()]);
+        assert!(!truncated);
+        assert_eq!(
+            reader.incident_edge_ids("a", limits)?,
+            (vec![id.clone()], false)
+        );
+        assert_eq!(
+            reader.incident_edge_ids("missing", limits)?,
+            (Vec::new(), false)
+        );
+        assert!(reader.get_edge(&id).is_err());
+        assert_eq!(
+            reader.adjacency_edge_ids_by_kinds("missing", false, &[EdgeKind::Calls], limits)?,
+            (Vec::new(), false)
+        );
+        let invalid = SnapshotReadLimits {
+            max_items: 0,
+            ..limits
+        };
+        assert!(matches!(
+            reader.adjacency_edge_ids_by_kinds("a", false, &[EdgeKind::Calls], invalid),
+            Err(SnapshotError::Limit(_))
+        ));
+        Ok(())
+    }
+
+    fn diagnostic(code: &str, message: &str) -> GraphDiagnostic {
+        GraphDiagnostic {
+            severity: compass_model::code_graph::DiagnosticSeverity::Warning,
+            code: code.to_owned(),
+            message: message.to_owned(),
+            anchor: None,
+            related_ids: Vec::new(),
+        }
+    }
+
+    fn legacy_diagnostic_store(graph: &GraphDocument) -> Result<MemoryStore, SnapshotError> {
+        let store = MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(&store, graph)?;
+        let mut metadata_entries = build_index(graph, IndexKind::Metadata, None)?;
+        for diagnostic in &graph.graph.diagnostics {
+            metadata_entries.remove(&encode_graph_index_key(
+                IndexKind::Metadata,
+                &[b"diagnostic-code", diagnostic.code.as_bytes()],
+            )?);
+        }
+        let entry_count = metadata_entries.len() as u64;
+        let mut writer = ObjectWriter::new(&store)?;
+        let digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let _ = writer.finish()?;
+        let root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Metadata)
+            .ok_or_else(|| SnapshotError::Corrupt("metadata root is missing".to_owned()))?;
+        root.digest = digest;
+        root.entry_count = entry_count;
+        let (digest, bytes) = digest_canonical_graph(graph, false)?;
+        let prepared = builder.finish_content(&store, content, digest, bytes)?;
+        builder.activate(&store, &prepared)?;
+        Ok(store)
+    }
+
+    #[test]
+    fn diagnostic_code_projection_preserves_first_occurrence_and_export()
+    -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        graph.graph.diagnostics = vec![
+            diagnostic("leading_documentation_omission_summary", "first omission"),
+            diagnostic("leading_documentation_omission_summary", "second omission"),
+            diagnostic("other", "unrelated warning"),
+        ];
+        let store = MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("missing test snapshot".to_owned()))?;
+        let key = encode_graph_index_key(
+            IndexKind::Metadata,
+            &[
+                b"diagnostic-code",
+                b"leading_documentation_omission_summary",
+            ],
+        )?;
+        assert!(reader.lookup(IndexKind::Metadata, &key)?.is_some());
+        assert_eq!(
+            reader.graph_diagnostic_by_code("leading_documentation_omission_summary")?,
+            graph.graph.diagnostics.first().cloned()
+        );
+        assert!(reader.graph_diagnostic_by_code("absent")?.is_none());
+        assert_eq!(
+            reader.export_graph()?.graph.diagnostics,
+            graph.graph.diagnostics
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_diagnostic_lookup_reads_immutable_supplements_without_rewriting()
+    -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        graph.graph.diagnostics = vec![
+            diagnostic("other", "unrelated warning"),
+            diagnostic("leading_documentation_omission_summary", "first omission"),
+            diagnostic("leading_documentation_omission_summary", "second omission"),
+        ];
+        let store = legacy_diagnostic_store(&graph)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("missing test snapshot".to_owned()))?;
+        let selector = reader.selector().clone();
+        assert_eq!(
+            reader.graph_diagnostic_by_code("leading_documentation_omission_summary")?,
+            graph.graph.diagnostics.get(1).cloned()
+        );
+        assert!(reader.graph_diagnostic_by_code("absent")?.is_none());
+        assert_eq!(
+            reader.export_graph()?.graph.diagnostics,
+            graph.graph.diagnostics
+        );
+        assert_eq!(
+            GraphSnapshotReader::open_active(&store)?
+                .ok_or_else(|| SnapshotError::Corrupt("missing test snapshot".to_owned()))?
+                .selector(),
+            &selector
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_diagnostic_lookup_does_not_report_absence_after_a_scan_limit()
+    -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        graph.graph.diagnostics = (0..=MAX_SCAN_ITEMS)
+            .map(|_| diagnostic("early", "warning"))
+            .collect();
+        graph.graph.diagnostics.push(diagnostic("late", "omission"));
+        let store = legacy_diagnostic_store(&graph)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("missing test snapshot".to_owned()))?;
+        assert_eq!(
+            reader.graph_diagnostic_by_code("early")?,
+            graph.graph.diagnostics.first().cloned()
+        );
+        for code in ["late", "absent"] {
+            assert!(matches!(
+                reader.graph_diagnostic_by_code(code),
+                Err(SnapshotError::Limit(message)) if message.contains("scan limit")
+            ));
+        }
+        Ok(())
     }
 
     #[test]
@@ -5621,6 +6121,15 @@ mod tests {
                 b"00000000",
             ],
         )?);
+        for capability in [
+            IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1,
+            OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1,
+            DECLARATION_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_SEARCH_TERM_INDEX_CAPABILITY_V1,
+        ] {
+            term_entries.remove(&term_capability_key(capability)?);
+        }
         let term_entry_count = term_entries.len() as u64;
         let mut writer = ObjectWriter::new(&store)?;
         let term_digest = build_index_tree(&mut writer, IndexKind::Terms, term_entries)?;
@@ -5886,6 +6395,280 @@ mod tests {
         let encoded = encode_tree_object(&compressible)?;
         assert!(encoded.starts_with(TREE_ZSTD_MAGIC));
         assert_eq!(decode_tree_object(&encoded)?, compressible);
+        Ok(())
+    }
+
+    fn publish_test_term_entries<'a>(
+        store: &'a MemoryStore,
+        graph: &GraphDocument,
+        entries: BTreeMap<Vec<u8>, Vec<u8>>,
+    ) -> Result<GraphSnapshotReader<'a, MemoryStore>, SnapshotError> {
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(store, graph)?;
+        let count = entries.len() as u64;
+        let mut writer = ObjectWriter::new(store)?;
+        let digest = build_index_tree(&mut writer, IndexKind::Terms, entries)?;
+        let _ = writer.finish()?;
+        let root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Terms)
+            .ok_or_else(|| SnapshotError::Corrupt("test term root missing".to_owned()))?;
+        root.digest = digest;
+        root.entry_count = count;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(graph, false)?;
+        let prepared = builder.finish_content(store, content, graph_digest, graph_bytes)?;
+        builder.activate(store, &prepared)?;
+        GraphSnapshotReader::open_active(store)?
+            .ok_or_else(|| SnapshotError::Corrupt("test active snapshot missing".to_owned()))
+    }
+
+    #[test]
+    fn legacy_empty_capability_postings_remain_readable() -> Result<(), SnapshotError> {
+        let graph = cache_fixture_graph();
+        let postings = build_term_postings(&graph);
+        let mut entries = build_index(&graph, IndexKind::Terms, Some(&postings))?;
+        for capability in [
+            IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1,
+            OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1,
+            DECLARATION_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_SEARCH_TERM_INDEX_CAPABILITY_V1,
+        ] {
+            entries.remove(&term_capability_key(capability)?);
+        }
+        let store = MemoryStore::default();
+        let reader = publish_test_term_entries(&store, &graph, entries)?;
+        assert!(reader.supports_identifier_subwords()?);
+        assert!(reader.supports_operation_role_terms()?);
+        assert!(reader.supports_declaration_terms()?);
+        assert!(reader.supports_relationship_terms()?);
+        assert!(reader.supports_relationship_search_terms()?);
+        assert_eq!(reader.export_graph()?, graph);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_capability_records_do_not_fall_back_when_malformed() -> Result<(), SnapshotError> {
+        for capability in [
+            IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1,
+            OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1,
+            DECLARATION_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_TERM_INDEX_CAPABILITY_V1,
+            RELATIONSHIP_SEARCH_TERM_INDEX_CAPABILITY_V1,
+        ] {
+            for invalid in [b"2".as_slice(), b"{}", b"null"] {
+                let graph = cache_fixture_graph();
+                let postings = build_term_postings(&graph);
+                let mut entries = build_index(&graph, IndexKind::Terms, Some(&postings))?;
+                entries.insert(term_capability_key(capability)?, invalid.to_vec());
+                let store = MemoryStore::default();
+                let reader = publish_test_term_entries(&store, &graph, entries)?;
+                let result = match capability {
+                    IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1 => reader.supports_identifier_subwords(),
+                    OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1 => {
+                        reader.supports_operation_role_terms()
+                    }
+                    DECLARATION_TERM_INDEX_CAPABILITY_V1 => reader.supports_declaration_terms(),
+                    RELATIONSHIP_TERM_INDEX_CAPABILITY_V1 => reader.supports_relationship_terms(),
+                    _ => reader.supports_relationship_search_terms(),
+                };
+                assert!(
+                    matches!(
+                        result,
+                        Err(SnapshotError::Corrupt(_) | SnapshotError::Decode(_))
+                    ),
+                    "{capability}: {invalid:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn capability_named_source_terms_keep_all_posting_chunks() -> Result<(), SnapshotError> {
+        let mut graph = cache_fixture_graph();
+        let template = graph
+            .nodes
+            .pop()
+            .ok_or_else(|| SnapshotError::Corrupt("test node missing".to_owned()))?;
+        let count = GRAPH_TERM_POSTING_CHUNK_ITEMS * 2 + 1;
+        let capability = IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1;
+        for at in 0..count {
+            let mut node = template.clone();
+            node.id = format!("marker:{at:04}");
+            node.name = format!("record_{at:04}");
+            node.qualified_name = format!("crate::{capability}::record_{at:04}");
+            graph.nodes.push(node);
+        }
+        let store = MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("test active snapshot missing".to_owned()))?;
+        let limits = SnapshotReadLimits {
+            max_items: count + GRAPH_TERM_POSTING_CHUNK_ITEMS,
+            ..SnapshotReadLimits::default()
+        };
+        let (nodes, truncated) = reader.nodes_for_terms(&[capability.to_owned()], limits)?;
+        assert!(!truncated);
+        assert_eq!(nodes.len(), count);
+        assert_eq!(
+            nodes.iter().map(|node| &node.id).collect::<Vec<_>>(),
+            graph.nodes.iter().map(|node| &node.id).collect::<Vec<_>>()
+        );
+        assert!(reader.supports_identifier_subwords()?);
+        assert_eq!(reader.export_graph()?, graph);
+        Ok(())
+    }
+
+    #[test]
+    fn capability_markers_preserve_user_postings() -> Result<(), SnapshotError> {
+        for (capability, mode) in [
+            (IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1, 0),
+            (OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1, 1),
+            (DECLARATION_TERM_INDEX_CAPABILITY_V1, 2),
+            (RELATIONSHIP_TERM_INDEX_CAPABILITY_V1, 3),
+            (RELATIONSHIP_SEARCH_TERM_INDEX_CAPABILITY_V1, 4),
+        ] {
+            let mut graph = cache_fixture_graph();
+            let owner = graph
+                .nodes
+                .first_mut()
+                .ok_or_else(|| SnapshotError::Corrupt("test owner missing".to_owned()))?;
+            match mode {
+                0 => {
+                    owner.kind = NodeKind::Constant;
+                    owner.details = Some(NodeDetails::Symbol(
+                        compass_model::code_graph::SymbolNodeDetails {
+                            signature: Some(format!("const MARKER: &str = \"{capability}\";")),
+                            modifiers: Vec::new(),
+                            overload_discriminator: None,
+                            declaring_type: None,
+                            signature_digest: None,
+                            implementation_digest: None,
+                            source_digest: None,
+                            call_sites: None,
+                        },
+                    ));
+                }
+                1 => {
+                    owner.kind = NodeKind::Struct;
+                    owner.name = "Builder".to_owned();
+                    owner.qualified_name = format!("crate::{capability}::Builder");
+                }
+                2 => {
+                    owner.kind = NodeKind::Struct;
+                    owner.name = capability.to_owned();
+                    owner.qualified_name = format!("crate::{capability}");
+                }
+                _ => {
+                    let mut target = owner.clone();
+                    target.id = "b".to_owned();
+                    target.name = capability.to_owned();
+                    target.qualified_name = format!("crate::{capability}");
+                    let site = owner.source.clone();
+                    let evidence = owner.evidence.clone();
+                    graph.nodes.push(target);
+                    let id = compass_model::identity::edge_id(
+                        "a",
+                        EdgeKind::Calls,
+                        "b",
+                        site.as_ref(),
+                        None,
+                    );
+                    graph.links.push(EdgeRecord {
+                        id: id.clone(),
+                        key: id,
+                        source: "a".to_owned(),
+                        target: "b".to_owned(),
+                        kind: EdgeKind::Calls,
+                        occurrence_rule: None,
+                        relationship_site: site,
+                        details: None,
+                        evidence,
+                        weight: None,
+                        context: None,
+                        deferred: false,
+                        diagnostics: Vec::new(),
+                    });
+                }
+            }
+            let store = MemoryStore::default();
+            let builder = GraphSnapshotBuilder::new();
+            let prepared = builder.prepare(&store, &graph)?;
+            builder.activate(&store, &prepared)?;
+            let reader = GraphSnapshotReader::open_active(&store)?
+                .ok_or_else(|| SnapshotError::Corrupt("test active snapshot missing".to_owned()))?;
+            assert_eq!(reader.export_graph()?, graph, "{capability}");
+            assert!(reader.supports_identifier_subwords()?, "{capability}");
+            assert!(reader.supports_operation_role_terms()?, "{capability}");
+            assert!(reader.supports_declaration_terms()?, "{capability}");
+            assert!(reader.supports_relationship_terms()?, "{capability}");
+            assert!(reader.supports_relationship_search_terms()?, "{capability}");
+            let limits = SnapshotReadLimits {
+                max_items: 1024,
+                ..SnapshotReadLimits::default()
+            };
+            let (nodes, truncated) = reader.nodes_for_terms(&[capability.to_owned()], limits)?;
+            assert!(!truncated, "{capability}");
+            let expected = if mode >= 3 { "b" } else { "a" };
+            assert_eq!(
+                nodes
+                    .iter()
+                    .map(|node| node.id.as_str())
+                    .collect::<Vec<_>>(),
+                [expected],
+                "{capability}"
+            );
+            match mode {
+                1 => {
+                    let (nodes, truncated, _) = reader
+                        .operation_role_nodes_for_terms_bounded_work(
+                            &[capability.to_owned()],
+                            limits,
+                        )?;
+                    assert!(!truncated);
+                    assert_eq!(
+                        nodes
+                            .iter()
+                            .map(|node| node.id.as_str())
+                            .collect::<Vec<_>>(),
+                        ["a"]
+                    );
+                }
+                2 => {
+                    let (nodes, truncated, _) = reader.declaration_nodes_for_terms_bounded_work(
+                        &[capability.to_owned()],
+                        limits,
+                    )?;
+                    assert!(!truncated);
+                    assert_eq!(
+                        nodes
+                            .iter()
+                            .map(|node| node.id.as_str())
+                            .collect::<Vec<_>>(),
+                        ["a"]
+                    );
+                }
+                3 => {
+                    let (ids, truncated, _) = reader
+                        .source_ids_for_exact_relationship_term_bounded_work(capability, limits)?;
+                    assert!(!truncated);
+                    assert_eq!(ids, ["a"]);
+                }
+                4 => {
+                    let (ids, truncated, _) = reader
+                        .source_ids_for_exact_relationship_search_term_bounded_work(
+                            capability, limits,
+                        )?;
+                    assert!(!truncated);
+                    assert_eq!(ids, ["a"]);
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
 }

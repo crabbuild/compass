@@ -302,6 +302,86 @@ quality artifact are the same as `cluster-only`.
 
 ### `query`
 
+Current `compass update` builds also retain bounded callable-body identifiers
+and comments for Python, Rust, Go and TypeScript/TSX in `source-query.json`.
+Broad questions can use this evidence without naming a symbol exactly. Matches
+that depend on body terms remain Low inspection leads with source locations;
+a word occurring in a function does not prove the requested behavior. Keep this
+artifact with its matching graph snapshot. Missing older evidence is reported;
+present corrupt/mismatched artifacts fail explicitly and can be rebuilt with
+`compass update --force`. Historical realizations remain unchanged.
+
+For an implementation shortlist, opt into the ranked view:
+
+```bash
+compass query "where are request errors formatted?" --view ranked
+compass query "where are request errors formatted?" --view ranked --format json
+compass query "where are request errors formatted?" --view ranked --include-context
+```
+
+This view presents up to five implementation owners with source locations,
+reasons, ordinal relevance and separate identity/evidence labels. It reports
+known eligible counts or bounded recall and suggests a narrower scope.
+`--text-budget` bounds the whole text answer, including metadata. Ranked JSON
+uses `compass.query.ranked-view/4`, or major7 when bounded helper navigation
+is metered. Raw discovery similarly uses major1 or metered major2. Both paths
+retain the existing cursor protocol; new majors require updated strict consumers.
+Do not combine ranked view with discovery cursors, result envelopes, evidence,
+`agent-json`, or legacy traversal controls.
+
+For eligible broad questions about one or more operations, exact native calls may
+surface Low-relevance helper leads. Call paths show navigation, not execution or
+proof of requested behavior. If a helper has no question-matching excerpt,
+`linked_callable_preview` shows retained code labeled behavior unverified.
+Previews do not change ranking or matched terms. Navigation follows requested
+depth up to four hops; the default remains two. Use `--max-depth 4` to inspect
+deeper helpers. Missing relationships/source windows cannot be invented.
+Single-operation questions may show up to two distinct reachable helpers. A
+bounded lexical heuristic separates common operation spellings from noun modifiers; it
+does not parse English or prove which alternative implements the behavior.
+
+Metered raw stats and ranked JSON retain `callLinkWork`: indexed recall remains
+at most291 logical probes; additional helper lookups share a separate40-probe
+limit. These are API work counts, not confidence or physical I/O. They remain
+present even if a one-candidate cap removes all helper paths.
+An existing node ID supplied as the whole question selects that admitted seed
+alone for the shortlist. Optional structural context remains available.
+
+Broad lexical matches are inspection candidates. Unfamiliar ordinary wording
+can lower relevance without suppressing every result; missing indexed context
+is disclosed. Explicitly named, quoted or qualified subjects retain guards
+for absent indexed terms. Negative conditions such as “without” are unverified:
+the ranked candidates are Low and the response carries a qualification warning.
+Inspect source to establish the behavior. Default discovery and search also
+carry incomplete-coverage diagnostics for tentative candidates.
+
+When explanations would crowd out a ranked candidate, text tries a shorter
+explanation layout first and marks the abbreviation. Use `--format json` for
+more detail; relevance, uncertainty, citations and the total budget are retained.
+
+Broad method candidates may use exact AST call/reference sites inside their
+source ranges. The `code_reference` field matches the referenced identifier,
+with a supporting source citation. A result needing this evidence is a Low
+inspection lead, not proof of the requested behavior. Target namespaces, paths
+and prose cannot provide this field. Reached recall quotas remain visible.
+
+A generic kind or language match cannot satisfy an additional requested topic.
+For example, “which function owns annotations” requires evidence for annotations;
+the fact that an unrelated node is a function does not qualify it. Simple kind
+and language listings remain available.
+
+Broad queries can also find the unique enclosing function through an exact AST
+`contains` relationship to a matching local declaration. `owned_identifier`
+retains the declaration-site citation. Such evidence supplies a Low inspection
+lead; it does not establish the requested behavior. Ambiguous or truncated
+parent lists never select a parent.
+
+MCP `query_graph` accepts the typed equivalent `view: "ranked"` and an optional
+`text_budget` (default 800). Add `include_context: true` for bounded one-hop
+witnessed context after the shortlist; CLI uses `--include-context`. Context is
+disabled by default and keeps candidate order. Its `rankedView` field contains
+the shortlist while `result` retains the raw discovery shape.
+
 Natural-language graph discovery:
 
 ```text
@@ -1319,6 +1399,16 @@ Managed integration/update probe.
 - `COMPASS_OUT` can change the default output root for several compatible
   command families; explicit `--out` is clearer in automation.
 
+When a typed read uses a disposable JSON query index, its metadata and full
+integrity validation share a 30-second startup budget. A slow eligible file check
+can use a byte-identical, size-bounded inspection image; warm reads keep the
+original file path. `query_index_validation_timeout` is an error, leaves the
+index in place, and is not an empty result or a request to delete the cache.
+Retry, or rebuild a narrower source scope with `compass update <root>`. This
+budget covers index validation, not graph loading or a new index build.
+Metadata and integrity SQL use operation-local interruption in addition to
+progress callbacks. Blocking filesystem calls may delay timeout reporting.
+
 ## Store health and recovery
 
 ```text
@@ -1461,3 +1551,25 @@ test.
 
 Exact-only lookup and source-bearing exploration remain native indexed queries;
 the response cache does not promise acceleration for those paths.
+
+
+## Ranked implementation code windows (development)
+
+`compass query "where is payload normalized" --view ranked` can show a
+`Code @ path:line` quotation even when a retrieved implementation has no comment.
+The JSON form uses `compass.query.ranked-view/4` and excerpt kind `callable_code`.
+Quotes come from the graph's immutable source artifact, at most two512byte
+excerpts per displayed candidate within the whole-answer text budget. Code windows
+can omit surrounding logic; inspect the full implementation before making a
+behavioral claim. Omissions are counted independently of lexical search coverage.
+Relevance remains a heuristic band, separate from graph evidence confidence.
+
+### Nested lexical inspection in ranked queries
+
+An already retrieved implementation can include exact `nested_callable_code`
+quotations. The text label is “Nested lexical code (execution unverified)”; JSON
+also provides the full `nestedScope` anchor. These are retained anonymous-callable
+source windows linked by native AST ancestry. Named or separately published
+callables and class/type boundaries remain separate. No call or runtime behavior
+is inferred. Shared code-window and first-page limits can omit context, with an
+explicit omission reason. Rank and graph relationships are unchanged.

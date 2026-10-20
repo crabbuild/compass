@@ -12,6 +12,153 @@ fn extract(file: &str, source: &str) -> Result<Extraction, Box<dyn Error>> {
 }
 
 #[test]
+fn parameter_type_provenance_survives_a_body_import_with_the_same_name()
+-> Result<(), Box<dyn Error>> {
+    let source = "mod a { pub struct Item { pub value: usize } impl Item { pub fn get(&self) {} } } mod b { pub struct Item { pub value: usize } impl Item { pub fn get(&self) {} } } use crate::a::Item; fn make(item: &Item) { use crate::b::Item; let _ = item.value; item.get(); let _ = Item { value: 1 }; }";
+    let extraction = extract("src/lib.rs", source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing evidence")?;
+    let make = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "make")
+        .ok_or("missing make")?;
+    let field = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.source_declaration_id == make.id
+                && candidate.relation == compass_languages::CandidateRelation::AccessesMember
+        })
+        .ok_or("missing field candidate")?;
+    assert_eq!(
+        field.constraints.qualified_name.as_deref(),
+        Some("crate::a::Item::value")
+    );
+    let method = evidence
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.source_declaration_id == make.id
+                && candidate.relation == compass_languages::CandidateRelation::Calls
+        })
+        .ok_or("missing method candidate")?;
+    assert_eq!(
+        method.constraints.qualified_name.as_deref(),
+        Some("crate::a::Item::get")
+    );
+    let resolved = resolve(
+        &[extraction],
+        &HashMap::from([("src/lib.rs".into(), source.into())]),
+    );
+    assert!(resolved.error.is_none(), "{:?}", resolved.error);
+    let make = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "crate::make")
+        .ok_or("missing resolved make")?;
+    let mut contacts = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == make.id
+                && matches!(edge.string("relation").as_str(), "accesses" | "calls")
+        })
+        .map(|edge| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.target)
+                .map(|node| node.string("qualified_name"))
+                .ok_or("missing contact target")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    contacts.sort();
+    assert_eq!(contacts, ["crate::a::Item::get", "crate::a::Item::value"]);
+    Ok(())
+}
+
+#[test]
+fn retained_receiver_types_keep_their_origin_through_lets_fields_and_indexes()
+-> Result<(), Box<dyn Error>> {
+    let declarations = "mod a { pub struct Item { pub value: usize } impl Item { pub fn get(&self) {} } } mod b { pub struct Item { pub value: usize } impl Item { pub fn get(&self) {} } } use crate::a::Item; struct State { item: Item }";
+    for (parameters, body, mut expected) in [
+        (
+            "item: &Item",
+            "{ use crate::b::Item; let _ = item.value; item.get(); } let _ = item.value; item.get();",
+            vec![
+                "crate::a::Item::get",
+                "crate::a::Item::get",
+                "crate::a::Item::value",
+                "crate::a::Item::value",
+            ],
+        ),
+        (
+            "item: &Item, other: &crate::b::Item",
+            "let outer: &Item = item; { use crate::b::Item; let inner: &Item = other; let alias = outer; let _ = alias.value; alias.get(); let _ = inner.value; inner.get(); }",
+            vec![
+                "crate::a::Item::get",
+                "crate::a::Item::value",
+                "crate::b::Item::get",
+                "crate::b::Item::value",
+            ],
+        ),
+        (
+            "items: &[Item]",
+            "{ use crate::b::Item; let _ = items[0].value; items[0].get(); }",
+            vec!["crate::a::Item::get", "crate::a::Item::value"],
+        ),
+        (
+            "state: &State",
+            "use crate::b::Item; let _ = state.item.value; state.item.get();",
+            vec![
+                "crate::a::Item::get",
+                "crate::a::Item::value",
+                "crate::State::item",
+                "crate::State::item",
+            ],
+        ),
+    ] {
+        let source = format!("{declarations} fn make({parameters}) {{ {body} }}");
+        let extraction = extract("src/lib.rs", &source)?;
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing evidence")?;
+        let make = evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name == "make")
+            .ok_or("missing make")?;
+        let mut contacts = evidence
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.source_declaration_id == make.id
+                    && matches!(
+                        candidate.relation,
+                        compass_languages::CandidateRelation::AccessesMember
+                            | compass_languages::CandidateRelation::Calls
+                    )
+            })
+            .map(|candidate| {
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .ok_or("unproven member")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        contacts.sort();
+        expected.sort();
+        assert_eq!(contacts, expected, "{source}");
+    }
+    Ok(())
+}
+
+#[test]
 fn cross_file_field_accesses_publish_exact_occurrences_and_preserve_order()
 -> Result<(), Box<dyn Error>> {
     let model = "pub struct Item { pub value: usize }\n";

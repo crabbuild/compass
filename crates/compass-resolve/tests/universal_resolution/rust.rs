@@ -3389,3 +3389,149 @@ fn rust_indexed_parameter_fields_never_bind_the_container_method() {
     assert_eq!(calls[0].target, target.id);
     assert_eq!(calls[0].string("confidence"), "EXTRACTED");
 }
+
+#[test]
+fn rust_deferred_external_calls_preserve_source_occurrences_without_local_name_rewrites()
+-> Result<(), Box<dyn std::error::Error>> {
+    let actix_path = "fixtures/code-graph/routes/rust/actix.rs";
+    let near_path = "fixtures/code-graph/routes/rust/near_matches.rs";
+    let actix = include_str!("../../../../fixtures/code-graph/routes/rust/actix.rs");
+    let near = include_str!("../../../../fixtures/code-graph/routes/rust/near_matches.rs");
+    let inputs = [
+        extract(actix_path, actix.as_bytes()),
+        extract(near_path, near.as_bytes()),
+    ];
+    let sources = HashMap::from([
+        (actix_path.to_owned(), actix.to_owned()),
+        (near_path.to_owned(), near.to_owned()),
+    ]);
+    let directory = tempfile::tempdir()?;
+    for (file, source) in &sources {
+        let path = directory.path().join(file);
+        std::fs::create_dir_all(path.parent().ok_or("missing fixture parent")?)?;
+        std::fs::write(path, source)?;
+    }
+    let normalized = |inputs: &[_]| -> Result<_, Box<dyn std::error::Error>> {
+        let resolved = compass_resolve::resolve(inputs, &sources);
+        assert!(resolved.error.is_none(), "{:?}", resolved.error);
+        let external = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == "actix_web::web::get")
+            .ok_or("missing observed external callee")?;
+        assert_eq!(
+            external.attributes.get("deferred_receiver"),
+            Some(&serde_json::json!(true))
+        );
+        assert_eq!(
+            external.attributes.get("placeholder"),
+            Some(&serde_json::json!(true))
+        );
+        let build = compass_graph::BuildEvidence::from_extraction(
+            directory.path(),
+            &resolved,
+            "sha256:deferred-rust-callee",
+        )?;
+        Ok(compass_graph::normalize_v1(resolved, build)?)
+    };
+    let graph = normalized(&inputs)?;
+    let app = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "crate::actix::app")
+        .ok_or("missing app")?;
+    let local = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "crate::near_matches::get")
+        .ok_or("missing local get")?;
+    let configure = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "crate::near_matches::configure")
+        .ok_or("missing configure")?;
+    let external = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "actix_web::web::get")
+        .ok_or("missing callee")?;
+    assert!(external.source.is_none());
+    assert!(
+        !graph
+            .links
+            .iter()
+            .any(|edge| edge.source == app.id && edge.target == local.id)
+    );
+    let local_calls = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.source == configure.id
+                && edge.target == local.id
+                && edge.kind == compass_model::code_graph::EdgeKind::Calls
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(local_calls.len(), 1);
+    let local_site = local_calls[0]
+        .relationship_site
+        .as_ref()
+        .ok_or("missing local call anchor")?;
+    assert_eq!(local_site.file, near_path);
+    assert_eq!(
+        near.get(usize::try_from(local_site.start_byte)?..usize::try_from(local_site.end_byte)?),
+        Some("get")
+    );
+    assert!(local_calls[0].evidence.iter().any(|evidence| {
+        evidence.confidence == compass_model::provenance::EvidenceConfidence::Exact
+            && evidence.anchors.contains(local_site)
+    }));
+    assert!(
+        !graph
+            .links
+            .iter()
+            .filter(|edge| edge.source == external.id || edge.target == external.id)
+            .any(
+                |edge| edge.evidence.iter().any(|evidence| evidence.confidence
+                    == compass_model::provenance::EvidenceConfidence::Exact)
+            )
+    );
+    let calls = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.source == app.id
+                && edge.target == external.id
+                && edge.kind == compass_model::code_graph::EdgeKind::Calls
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    let call = calls[0];
+    let site = call
+        .relationship_site
+        .as_ref()
+        .ok_or("missing observed call anchor")?;
+    assert_eq!(site.file, actix_path);
+    assert_eq!(
+        actix.get(usize::try_from(site.start_byte)?..usize::try_from(site.end_byte)?),
+        Some("web::get")
+    );
+    assert!(
+        call.evidence
+            .iter()
+            .any(|evidence| evidence.anchors.contains(site))
+    );
+    assert!(
+        call.evidence.iter().all(|evidence| evidence.confidence
+            == compass_model::provenance::EvidenceConfidence::Inferred)
+    );
+    let reverse = normalized(&[inputs[1].clone(), inputs[0].clone()])?;
+    assert_eq!(
+        serde_json::to_value(&graph.nodes)?,
+        serde_json::to_value(&reverse.nodes)?
+    );
+    assert_eq!(
+        serde_json::to_value(&graph.links)?,
+        serde_json::to_value(&reverse.links)?
+    );
+    Ok(())
+}

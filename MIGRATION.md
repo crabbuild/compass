@@ -1,9 +1,340 @@
 # Migrate from Graphify to Compass
 
+Run `compass update <root>` with the new binary to rebuild current graphs under
+AST cache34. Inadmissible explicit exact source targets now remain unresolved;
+the resolver cannot substitute an unrelated same-named
+function for an injected parameter. Historical realizations retain their
+original meaning. No graph-schema or evidence-schema upgrade is required for
+this correction. Missing target IDs still fail evidence validation.
+
+Broad-query consumers must accept and validate raw `compass.query.discovery/2`
+and ranked `compass.query.ranked-view/7` when metered helper navigation is used.
+Unmetered responses retain discovery1/ranked4. Upgrade strict readers before
+enabling the new binary; do not strip unknown work fields or treat a limit as an
+empty answer. The `callLinkWork` record separates indexed recall (291 probes)
+from additional helper lookups (40); original `stats.candidateProbes` keeps its
+indexed-only meaning. Work is retained even when presentation shows only a root.
+
+The new ranked excerpt kind `linked_callable_preview` is an explicitly unverified
+retained helper-code preview, requiring a coherent call path and Low relevance.
+It is not matching-query evidence or proof of behavior. The default depth stays
+two; request `--max-depth 4` to inspect up to four helper hops when available.
+Use `--view ranked` for paths and previews. No graph rebuild is required solely
+for this query change; missing source/call evidence still needs `compass update`.
+Single-operation questions now use the same metered contracts when eligible.
+Their operation-name hints and alternatives are inspection aids, not verified
+intent or behavioral answers. No new schema upgrade is required beyond those
+above; disposable ranker responses refresh automatically.
+Historical realizations and native graph/source ownership remain unchanged.
+See COMPATIBILITY.md for exact bounds.
+
+Current builds use `source-query/8-callable-comments` and AST cache 34. Run
+`compass update <root>` with the new binary to retain up to 64 callable comments
+instead of eight. Upgrade readers for profile 8; profiles 1–7 retain their original
+meaning and limits. Per-field byte/term and per-file/artifact limits still apply,
+so large callables can remain partial. Comments are inspection pointers rather
+than behavioral proof. Subsequent cache 31 notes describe earlier development
+changes; cache 34 is the current disposable extraction identity.
+
+Python producer 2 also corrects source-root module identity when no import roots
+are configured. Bare roots use repository-relative modules, independent of the
+checkout directory name. A regular root `__init__.py` or `__init__.pyi` retains
+the package namespace, including nested modules. Existing configured import
+roots keep precedence and competing roots remain ambiguous. Graph IDs and edges
+can change after rebuilding affected current graphs; historical realizations
+remain immutable. The new producer remains `Qualifying`, pending promotion.
+
+Run `compass update <root>` to rebuild current evidence. If extraction reports
+unavailable source-root package layout, fix linked/non-regular/unreadable package
+entries or declare import roots in `pyproject.toml`; package directory names must
+be valid Python identifiers. Default source identities retain non-identifier
+script/group names such as `billing-service/test-helper.py`; they do not claim
+runtime importability. Literal dots and percent signs inside components use
+`%2E` and `%25`, preserving the distinction from actual directory/module
+separators. Invalid absolute/traversing/non-normalized source paths still fail
+explicitly. The layout participates in disposable cache
+identity, including package-entry additions/removals. Standalone extraction
+without project context retains its legacy path-based behavior.
+
+The new binary also extends raw broad-query discovery context through exact
+outgoing calls within the requested depth, automatically from High-relevance
+selected roots. Partial lexical roots keep first-hop context. Explicit native
+context inspection can inspect every selected root's witnessed paths; this
+changes neither ranking nor relevance. Source graph rebuilds are needed only
+when the required relationships are missing; querying cannot invent them.
+Callees remain context and keep the lexical shortlist unchanged. Ranked-view/4's
+optional presentation retains its first-hop context contract. Adjacency work
+limits now include filtered records and lookahead, so very small work budgets
+can return fewer edges with an explicit truncation diagnostic. Disposable
+responses refresh automatically; raw schemas and historical graphs are unchanged.
+
+The development export-proof repair adds `ecmascriptExportInventory` to root
+TypeScript/JavaScript file/module declarations under evidence/2. Upgrade strict
+readers for its explicit version1/complete contract; missing metadata stays
+unknown. Unresolved explicit exports must retain their names and cannot fall
+through to a star target. Run `compass update <root>` with the new binary:
+AST cache31 and fact-digest profile4 rebuild disposable current state without
+rewriting historical realizations. These certificates do not promote producers
+or qualify comparative quality.
+
+The in-progress TypeScript evidence patch adds optional
+`typescriptMergeDependencies` under evidence/2. Strict readers must upgrade.
+The vector distinguishes module, reference-path and reference-types loads and
+retains exact source ranges. Missing dependency coverage prevents merge-absence
+proof, while unsupported load syntax leaves the batch uncertified. Disposable
+fact-digest profile4 includes the census and its explicit version1 capability.
+TypeScript5 / JavaScript4 and AST cache31 refresh current extraction identities.
+Run `compass update <root>` with the new binary. Missing census-version metadata
+remains legacy/unknown even if an old complete boolean is true. Unknown present
+versions are errors; current readers must not infer capability from producer
+version alone.
+
+Owning project integrations can represent a precise load resolution with the
+optional `typescript_source_load` edge attribute (`TypeScriptSourceLoadProof`,
+version1). It contains the exact typed census dependency and source range;
+target source remains on the existing edge inventory/`target_file` interface.
+Upgrade readers before consuming these edges: reference-types evidence cannot
+be downgraded to an ordinary module import. Generic module mappings do not
+certify type-package directives or distinguish repeated load occurrences.
+Absent owning reference-types evidence remains unsupported; no new compiler or
+automatic type-package loader is required or claimed.
+
+
+Development evidence consumers must allow `memberInventoryComplete` on
+TypeScript class/interface facts as well as Rust traits, and understand the
+optional batch `typescriptMergeInventoryComplete` certificate. Missing/false
+certificates cannot establish member or augmentation absence. TypeScript
+`Awaited` terminal identity requires explicit bounded nominal/project proof;
+unsupported thenable or merged types can remain unresolved. Update strict
+readers/validators before consuming these facts. Fact-digest profile3 refreshes
+disposable digest state automatically and includes merge certificates and exact
+typed proof trees and the explicit census capability version. Producer/cache
+integration is TypeScript5 / JavaScript4 / AST cache31; this is not a promotion
+decision and does not rewrite historical realizations.
+
+Rust integrations calling `UniversalResolutionIndex::materialize` must now
+consume its `UniversalMaterializationReport` return value. Check
+`omitted_candidates` before publishing the mutated node/edge buffers: a nonzero
+count means resource limits prevented relationships from being projected and
+the output must be labeled degraded. The operation does not roll back those
+buffers. Update callbacks/function pointers previously expecting `()` as well.
+The normal Compass build path already propagates this state through its graph
+diagnostics. A zero count does not establish that all source semantics resolved.
+
+Rust development producer4 records nominal type references from struct literals,
+including concrete impl `Self` and struct-like enum variants. Run
+`compass update <root>` with the new binary to rebuild disposable AST cache31.
+Literal contacts are references, not constructor calls or field read/write
+claims. Ambiguous/unproven targets remain unresolved. Historical graphs are
+immutable, and Rust4 remains `Qualifying`; no release promotion is implied.
+Repeated same-named Rust declarations now use source spans to distinguish their
+current graph IDs. Resolve affected node IDs again after updating; historical
+realizations retain their original IDs. Block imports cannot escape their
+lexical scope or rebind parameter annotations used for receiver inference.
+Explicitly deferred receivers across languages now remain unresolved rather than
+being rewired by a unique terminal method name. Rebuild current graphs to remove
+those guessed targets; historical graphs retain their original contents.
+Generic Rust receiver calls now defer their complete trait-bound set to the
+project resolver. Ambiguous local/imported bounds no longer produce a guessed
+source call. Update evidence consumers to understand the additive evidence/2
+`rust_generic_bounds` constraint before reading newly extracted batches; older
+strict consumers reject it. Current generic type-parameter fact identities
+include the type namespace. Resolve affected identities again after updating.
+New Rust traits carry `memberInventoryComplete` separately from base coverage.
+Readers must preserve it; missing/false metadata cannot justify an empty member
+set. Trait-body macros and unsupported attributes keep generic dispatch
+unresolved. Current fact-digest profile4 refreshes automatically during update.
+
+Current updates use `source-query/7-literal-seeded-code`. Whole raw string
+literals can now seed bounded callable-owned code windows without another
+identifier. Parameter bindings remain separate from generic occurrences. Run
+`compass update <root>` with the new binary; AST cache31 refreshes automatically.
+If publication reports older retained extraction, run
+`compass update <root> --force`. Older binaries reject profile7 and must be
+upgraded. Readers preserve profiles1–6 with their original lexical/statistical
+meaning, including profiles5–6 code vocabulary and profile6 typed bindings.
+Parameter roles are never synthesized for profiles1–5.
+Historical realizations are not rewritten. Raw literal text is not a decoded
+runtime value. Shared per-file producer capacity follows AST preorder and may
+displace later code windows; deterministic aggregate clipping follows afterward;
+code omissions remain visible without altering original lexical/role coverage.
+Clipped code evidence and possible aggregate code-capacity transitions now use
+the complete cached/fresh extraction path during incremental update. This may
+reduce fast-path reuse; it does not rewrite historical artifacts or increase limits.
+
+Direct-owner code vocabulary remains searchable, with code-dependent matches
+kept Low and source-cited. Parameter metadata adds no retrieval weight or graph
+facts. Parameter-only omissions do not alter original lexical completeness.
+`query-ranker/21-typed-topic-roles` refreshes disposable response caches for
+broad noun/predicate admission. Run update for typed bindings when a role-sensitive
+question reports missing evidence; historical snapshots retain their limited
+meaning. Broad block/permit matches through typed parameters or exact class/struct
+names remain Low inspection pointers. Nominal pointers do not inherit into
+methods or establish behavior. Exact identities retain their contracts.
+
+The operation-vocabulary rollout introduced ordinary method translations.
+Ordinary read/lookup/getter and setter wording can inspect conventional get/set
+methods with explicit translations, separate literal context and Low relevance.
+Literal-hit groups retain their original field and source-enrichment provenance;
+hinted names cannot hide source-dependent Low relevance or silently promote an
+operation through namespace/prose mentions. The disposable repair epoch advances
+automatically; this needs no manual cache deletion or graph rebuild.
+Ordinary parameter/dictionary/time-unit words can recall tentative abbreviated
+code candidates with explicit translations and separate literal context. No
+manual cache deletion, graph rebuild or source/index schema migration is needed
+for this query-only change. Exact-symbol commands retain their contracts.
+
+Current updates rebuild AST cache31 and retain callable-body evidence for direct
+TypeScript/TSX variable initializers. Their source ranges now cover the complete
+definition; original binding identity and AST provenance stay distinct. Older
+`source-query/1-ast-callable-lexemes` artifacts remain readable and historical
+realizations are unchanged. New artifacts use profile7; older binaries must be
+upgraded to read that projection. JavaScript4 and TypeScript5 remain `Qualifying`
+pending source audit and release promotion.
+
 Compass uses its own executable, output directory, environment variable, and
 sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
+
+## Developer comparison registrations
+
+When recapturing native Compass graphs, declare any existing `source-query.json`
+sibling through the graph entry's hash-bound `sourceQueryArtifact` reference.
+Freeze new actor hashes before collection; the adapter now preserves each
+[coherent graph pair](benchmarks/agent_query/BROAD_QUERY_CAPTURE.md#coherent-compass-graph-inputs).
+Original graph-only captures remain immutable and cannot retrospectively claim
+implementation-body recall.
+
+For a new developer capture whose pinned native CLI intentionally uses a
+nonzero no-match exit, predeclare the optional typed
+[query exit contract](benchmarks/agent_query/BROAD_QUERY_CAPTURE.md#native-query-exit-outcomes).
+Verify its meaning from the pinned tool, freeze new capture/assessor hashes and
+collect a new experiment. Existing reports retain their original verifier and
+all-nonzero-fail interpretation; do not edit or silently regrade them.
+
+For recapturing already exposed development questions, use the explicit
+version-2 [development calibration profile](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#exposed-development-calibration).
+Disclose author exposure, retain the linked original registration/run, freeze
+the selected question mapping, and obtain new independent source review bound
+to the exact prospective definitions. Supply the two `calibrationEvidence`
+references and freeze new actor hashes. This is a new ineligible diagnostic run,
+not a migration or regrading of historical reports. Heldout captures continue
+to require source-first output-blind authoring and untouched-source lineage.
+
+For a new broad-question experiment requiring equivalent implementation
+witnesses, opt into `compass.broad-query-registration/2` and predeclare reviewed
+`essentialFactGroups` using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md#equivalent-implementation-witnesses).
+Keep separately anchored facts for each alternative; preserve flat essential
+facts and exact/directed controls. Freeze new source/assessor/capture bindings
+before collection. Version-1 registrations retain their original semantics and
+must not receive the new field. Preserve old captures, reports and required
+outcomes; this is not a post-output scoring migration or a native-product change.
+
+Before a new heldout comparison, freeze an independently reviewed exposure
+history, explicit task splits/mechanism IDs and hash-bound historical evidence
+using the [review protocol](benchmarks/agent_query/BROAD_QUERY_REVIEW.md).
+Previously used repositories remain development inputs even when their commit,
+task IDs or wording change. Legacy diagnostic registrations remain readable;
+they cannot establish an untouched confirmation split. Freeze current capture
+and assessor hashes; preserve existing reports with their original verifier.
+Native Compass commands and graphs require no migration for this protocol.
+
+## Opt into ranked implementation answers
+
+Upgrade ranked JSON consumers to `compass.query.ranked-view/4` before using new
+nested code quotations. `nested_callable_code` includes an exact `nestedScope`
+anchor; it means lexical inspection context, not execution. Consumers must not
+render it as direct-owner code or a graph call. New builds use source profile4
+and AST cache24; run `compass update <root>` to refresh disposable evidence.
+Readers retain old source/ranked versions with their original meanings.
+
+
+JSON query-index validation can now return `query_index_validation_timeout`.
+Treat it as a startup timeout and retry or narrow the build scope. The cache is
+preserved; no format migration or manual cache removal is required.
+
+Current updates retain one callable-local identifier site per spelling, counting
+omitted repeats separately. AST cache24 refreshes disposable evidence
+automatically; no manual cache removal is needed. Historical source artifacts
+retain their original sites. Code windows still inspect repeated identifiers
+independently of the lexical site budget.
+
+Use `compass query "where are request errors formatted?" --view ranked` for a
+top-five shortlist. Existing query formats and cursors require no migration.
+Request `--format json` with this view only when the consumer understands
+`compass.query.ranked-view/4`; it has its own typed fields and rejects unknown
+major versions. The shortlist has no discovery cursor: narrow with its suggested
+source scope to examine other implementations. Do not combine it with
+`--cursor`, `--result-envelope`, `--evidence`, `--format agent-json`, or legacy
+traversal controls.
+
+Optional `--include-context` appends bounded one-hop witnessed relationships
+after the shortlist; it is disabled by default.
+
+Run `compass update <root>` to publish fielded signature/prose/alias postings in
+an existing current graph. Older immutable stores remain readable with a
+limited-recall warning; historical realizations are not rewritten. Disposable
+JSON query indexes rebuild automatically to format 4, isolating their new
+operating-system lock from older presence-lock caches. Terminated builders no
+longer require manual lock-file removal. Retained lock files alone do not mean a
+builder is active. Broad questions with
+negative wording may return Low inspection candidates with a warning that the
+condition remains unverified. Inspect their source or use a structural query to
+verify it. Unquoted `before`, `after`, `during`, and `until` are also reported as
+unverified conditions rather than required lexical subjects. Quoted names and
+qualified identifiers remain literal. Unfamiliar ordinary words reduce relevance and appear as missing
+context; absent explicit names still guard retrieval. A Low partial candidate
+does not establish the requested behavior. Disposable response caches use the
+new `query-ranker/14-compound-identifier` profile automatically. Hyphenated
+compound inspection matches remain Low with explicit reasons; code-based
+preferences require a nonempty retained signature without native `…` clipping.
+Exact identities and graph facts retain their meaning. No manual cache deletion
+or graph rebuild is needed for this ranking-only change.
+
+Run `compass update <root>` to obtain the optional immutable `source-query.json`
+artifact for callable-body identifiers and comments on Python, Rust, Go and
+TypeScript/TSX. AST cache24 rebuilds disposable extraction entries automatically.
+Body-dependent matches carry exact source locations and Low inspection relevance.
+Old graphs keep their existing evidence with an explicit body-recall warning;
+historical realizations are not rewritten. Keep the auxiliary artifact with its
+matching graph snapshot. A present corrupt/mismatched artifact fails explicitly;
+`compass update --force` reconstructs current source evidence.
+
+MCP clients opt in with `view: "ranked"` (and `include_context: true` for context). Read its projection from `rankedView`
+and the raw discovery shape from `result`. Allow the new optional envelope field
+and keep relevance separate from exact identity and structural confidence.
+
+Broad implementation questions can also recall methods through verified local
+call/reference sites. A `code_reference` match is an inspection lead, with a
+source citation and Low relevance when it supplies otherwise missing context.
+It does not establish the requested behavior. No graph rebuild is required for
+this query-only channel when existing relationship postings are available.
+
+## ECMAScript primary member scopes
+
+Run `compass update <root>` to rebuild JavaScript/TypeScript current graphs with
+structurally selected member scopes. AST cache24 discards older disposable
+entries automatically. JavaScript4 and TypeScript5 remain development producers
+marked `Qualifying`; their updated identities do not alter the approved historical
+promotion record. Evidence/2, graph/1 and historical realizations retain their
+existing contracts.
+
+## Leading documentation evidence (development)
+
+Rust integrations constructing `DeclarationFact` values must initialize the new
+optional `documentation` field (normally `None`). Serialized absent fields remain
+readable.
+
+Run `compass update <root>` with the matching new binary to rebuild current
+Rust/Go/TypeScript graphs with leading AST documentation. Strict readers of
+`compass.languages.evidence/2` must allow the optional declaration
+`documentation` object. Graph/1 retains its existing resource, relationship and
+provenance fields; no historical realization is modified. Disposable extraction
+facts rebuild under extraction/5 and AST cache24. The changed producer versions
+remain `Qualifying` until a source audit and new promotion decision are complete.
+Treat ranked results as source inspection candidates, not a verified behavioral
+answer or a claim of superiority over another tool.
 
 ## Scoped views and freshness
 
@@ -671,3 +1002,29 @@ Discovery text cursors now use version 3 because compact pages show relationship
 before declarations. Restart a query if a saved version 2 cursor is rejected.
 Natural discovery pages default to 800 tokens. Increase `--text-budget` or
 follow the printed `--cursor` to retrieve more of the same bounded answer.
+
+
+## Consume ranked source quotations
+
+Clients of the opt-in ranked JSON projection must accept
+`compass.query.ranked-view/4` and its bounded `excerpts` per candidate. The native
+reader still accepts immutable version 1 results without quotations; unknown
+major versions fail explicitly. No graph/history migration is required. Older
+graphs can lack quotation evidence and retain their original retrieval scope.
+Quoted comments/docs support source inspection, not verified behavioral answers.
+
+
+## Ranked code excerpts (development)
+
+Consumers of opt-in ranked JSON must accept `compass.query.ranked-view/4`
+and the `callable_code` excerpt kind. Compass still reads immutable ranked views1/2
+and source-query profiles1/2. Run `compass update .` with the updated binary to
+retain code windows for current source; old historical artifacts remain unchanged.
+Code windows do not change candidate ranking or create graph relationships.
+
+Python auxiliary scope extraction now requires a named AST node: the unnamed
+`lambda` keyword token is not another callable. This corrects scope counts and
+can recover later source owners when the per-file scope quota was previously
+spent on keyword tokens. The change can affect source-field coverage and
+retrieval scores in quota-limited files; it does not change semantic graph
+records. AST cache24 rebuilds the affected disposable evidence.

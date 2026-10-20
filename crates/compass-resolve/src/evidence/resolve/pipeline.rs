@@ -96,7 +96,12 @@ impl ResolutionDb<'_> {
             return StageOutcome::Continue;
         };
         if !self.declaration_allowed(target, candidate) {
-            return StageOutcome::Continue;
+            // The producer has already identified this source binding. An
+            // inadmissible or unavailable target does not permit a different
+            // lexical, module, or external declaration with the same spelling.
+            // In particular, an injected callable parameter does not prove the
+            // implementation of an unrelated outer function.
+            return StageOutcome::Decided(ResolutionDecision::Unresolved);
         }
         StageOutcome::Decided(ResolutionDecision::Resolved {
             declaration_id: target.clone(),

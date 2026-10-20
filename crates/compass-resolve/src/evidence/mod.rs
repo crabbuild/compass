@@ -28,10 +28,13 @@ mod resolve;
 
 use projection::is_deferred_receiver;
 pub(crate) use projection::is_replaced_relation;
+pub(crate) use projection::leading_documentation_diagnostics;
 
 pub use api::{
-    ResolutionDecision, ResolutionEvidence, ResolutionRule, UNIVERSAL_RESOLUTION_REPORT_EXTENSION,
-    UniversalResolutionCounts, UniversalResolutionLimits, UniversalResolutionReport,
+    ResolutionDecision, ResolutionEvidence, ResolutionRule, TYPESCRIPT_SOURCE_LOAD_PROOF_ATTRIBUTE,
+    TypeScriptSourceLoadProof, UNIVERSAL_RESOLUTION_REPORT_EXTENSION,
+    UniversalMaterializationReport, UniversalResolutionCounts, UniversalResolutionLimits,
+    UniversalResolutionReport,
 };
 pub(crate) use partition::materialize_bounded_owned;
 
@@ -107,6 +110,16 @@ struct TypeScriptReexportTarget {
     module: String,
     exported: String,
 }
+
+/// Alternatives for one exact import/reexport binding. Independent export
+/// bindings remain separate obligations, including unavailable project targets.
+#[derive(Default)]
+struct TypeScriptBindingSources {
+    sources: Vec<String>,
+    unavailable: bool,
+}
+
+type TypeScriptReexportBindings = AHashMap<(String, String, String), Vec<String>>;
 
 #[derive(Clone, Debug)]
 struct TypeScriptMemberPath {
@@ -624,18 +637,56 @@ fn unique_definition_ranges(
         let Some(declaration) = declarations.get(owner_id) else {
             continue;
         };
-        if !range_contains(&scope.range, &declaration.range) || ambiguous.contains(owner_id) {
+        if ambiguous.contains(owner_id) {
             continue;
         }
-        if ranges
-            .insert(owner_id.clone(), scope.range.clone())
-            .is_some()
-        {
+        let Some(range) = definition_range_for_scope(declaration, scope) else {
+            continue;
+        };
+        if ranges.insert(owner_id.clone(), range).is_some() {
             ranges.remove(owner_id);
             ambiguous.insert(owner_id.clone());
         }
     }
     ranges
+}
+
+/// A directly owned ECMAScript initializer may begin after its binding name.
+/// The producer records both the declaration start and the function scope's
+/// exact owner/parent. Those facts establish the definition envelope without
+/// borrowing an inherited callback scope or selecting by spelling/proximity.
+fn definition_range_for_scope(
+    declaration: &DeclarationFact,
+    scope: &compass_languages::ScopeFact,
+) -> Option<EvidenceRange> {
+    if scope.owner_declaration_id.as_deref() != Some(declaration.id.as_str())
+        || scope.language != declaration.language
+    {
+        return None;
+    }
+    if range_contains(&scope.range, &declaration.range) {
+        return Some(scope.range.clone());
+    }
+    if !matches!(declaration.language.as_str(), "javascript" | "typescript")
+        || declaration.kind != "function"
+        || scope.kind != "function"
+        || declaration.scope_id.is_none()
+        || scope.parent_scope_id != declaration.scope_id
+        || declaration.definition_start_byte != Some(declaration.range.start_byte)
+        || scope.range.source_file != declaration.range.source_file
+        || declaration.range.start_byte >= declaration.range.end_byte
+        || declaration.range.end_byte > scope.range.start_byte
+        || scope.range.start_byte >= scope.range.end_byte
+        || (declaration.range.end_line, declaration.range.end_column)
+            > (scope.range.start_line, scope.range.start_column)
+    {
+        return None;
+    }
+    let mut range = declaration.range.clone();
+    range.end_byte = scope.range.end_byte;
+    range.end_line = scope.range.end_line;
+    range.end_column = scope.range.end_column;
+    Some(range)
 }
 
 fn range_contains(outer: &EvidenceRange, inner: &EvidenceRange) -> bool {
@@ -644,4 +695,68 @@ fn range_contains(outer: &EvidenceRange, inner: &EvidenceRange) -> bool {
         && inner.end_byte <= outer.end_byte
         && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
         && (inner.end_line, inner.end_column) <= (outer.end_line, outer.end_column)
+}
+
+#[cfg(test)]
+mod definition_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn initializer_envelopes_reject_borrowed_scopes_and_ambiguous_owners()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let range = |start, end| {
+            serde_json::json!({
+                "sourceFile":"sample.ts", "startByte":start, "endByte":end,
+                "startLine":1, "startColumn":start, "endLine":1, "endColumn":end
+            })
+        };
+        let declaration: DeclarationFact = serde_json::from_value(serde_json::json!({
+            "id":"declaration:opaque", "language":"typescript", "graphNodeId":"opaque",
+            "kind":"function", "name":"opaque", "qualifiedName":"sample.opaque",
+            "scopeId":"scope:module", "definitionStartByte":0, "range":range(0,6)
+        }))?;
+        let primary: compass_languages::ScopeFact = serde_json::from_value(serde_json::json!({
+            "id":"scope:primary", "language":"typescript", "kind":"function",
+            "ownerDeclarationId":declaration.id, "parentScopeId":"scope:module",
+            "range":range(9,40)
+        }))?;
+        let envelope = definition_range_for_scope(&declaration, &primary)
+            .ok_or("direct initializer lost its envelope")?;
+        assert_eq!((envelope.start_byte, envelope.end_byte), (0, 40));
+        for case in 0..8 {
+            let mut scope = primary.clone();
+            let mut owner = declaration.clone();
+            match case {
+                0 => scope.parent_scope_id = Some(primary.id.clone()),
+                1 => scope.owner_declaration_id = Some("declaration:other".to_owned()),
+                2 => scope.kind = "block".to_owned(),
+                3 => scope.range.source_file = "other.ts".to_owned(),
+                4 => owner.definition_start_byte = None,
+                5 => owner.scope_id = None,
+                6 => {
+                    scope.language = "go".to_owned();
+                    owner.language = "go".to_owned();
+                }
+                _ => owner.kind = "variable".to_owned(),
+            }
+            assert!(
+                definition_range_for_scope(&owner, &scope).is_none(),
+                "case {case}"
+            );
+        }
+        let declarations = FactTable::from_values(vec![declaration.clone()])?;
+        let mut callback = primary.clone();
+        callback.id = "scope:callback".to_owned();
+        callback.parent_scope_id = Some(primary.id.clone());
+        let scopes = FactTable::from_values(vec![callback, primary.clone()])?;
+        assert_eq!(
+            unique_definition_ranges(&declarations, &scopes).get(&declaration.id),
+            Some(&envelope)
+        );
+        let mut conflict = primary.clone();
+        conflict.id = "scope:conflict".to_owned();
+        let scopes = FactTable::from_values(vec![conflict, primary])?;
+        assert!(unique_definition_ranges(&declarations, &scopes).is_empty());
+        Ok(())
+    }
 }

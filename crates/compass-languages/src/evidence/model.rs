@@ -201,6 +201,45 @@ impl CandidateRelation {
     }
 }
 
+/// Maximum retained source text for one declaration's leading documentation.
+pub const MAX_DECLARATION_DOCUMENTATION_BYTES: usize = 4_096;
+/// Aggregate retained documentation ceiling for one per-file evidence batch.
+pub const MAX_BATCH_DOCUMENTATION_BYTES: usize = 1024 * 1024;
+/// One bounded per-file warning marks omitted leading documentation.
+pub const DECLARATION_DOCUMENTATION_OMISSION_CODE: &str = "leading_documentation_omitted";
+
+/// Syntax attachment established by a native language producer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclarationDocumentationKind {
+    RustOuter,
+    GoLeading,
+    #[serde(rename = "typescript_jsdoc")]
+    TypeScriptJsDoc,
+}
+
+/// One contiguous, byte-exact leading documentation group. Its owner is the
+/// enclosing declaration, never a separately resolved spelling or nearby name.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeclarationDocumentationFact {
+    pub kind: DeclarationDocumentationKind,
+    pub range: EvidenceRange,
+    pub content: String,
+}
+
+/// Version of the bounded ECMAScript source export census.
+pub const ECMASCRIPT_EXPORT_INVENTORY_VERSION: u32 = 1;
+
+/// Source-level export obligations are retained before target resolution.
+/// Complete certifies the supported syntax projection, not target availability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EcmaScriptExportInventory {
+    pub version: u32,
+    pub complete: bool,
+}
+
 /// One source declaration that may become a graph node.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -231,6 +270,16 @@ pub struct DeclarationFact {
     /// Whether all direct base types for this declaration were parsed and emitted.
     #[serde(default, skip_serializing_if = "is_false")]
     pub direct_bases_complete: bool,
+    /// Complete direct member inventory, independently of base-list coverage.
+    /// Rust traits with unexpanded member syntax cannot establish absence.
+    /// TypeScript class certificates require fully retained supported syntax;
+    /// consumers must separately establish lexical/merge and inherited scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_inventory_complete: Option<bool>,
+    /// Only root ECMAScript file/module declarations can carry this census.
+    /// Missing or incomplete metadata cannot establish an empty export surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ecmascript_export_inventory: Option<EcmaScriptExportInventory>,
     /// Whether the final source-level parameter accepts a variable arity.
     #[serde(default)]
     pub variadic: bool,
@@ -240,6 +289,10 @@ pub struct DeclarationFact {
     pub implementation_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
+    /// Optional AST-attached source documentation. Historical batches without
+    /// this additive metadata retain their original meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<DeclarationDocumentationFact>,
     /// Full syntax-node start for legacy callable identities. The canonical
     /// evidence range may intentionally begin at the identifier, while the
     /// public graph identity historically used the enclosing declaration
@@ -341,6 +394,10 @@ pub struct ResolutionConstraint {
     /// Canonical argument types when statically proven at the call site.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argument_types: Vec<Option<String>>,
+    /// Definition-bound arguments for an imported ECMAScript receiver. Absence
+    /// is legacy evidence, not proof that every argument is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typescript_type_arguments: Option<TypeScriptTypeArguments>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_target_kinds: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -349,10 +406,52 @@ pub struct ResolutionConstraint {
     pub allow_external: bool,
 }
 
+/// Versioned proof attached to the root import binding of a member path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypeScriptTypeArguments {
+    pub version: u32,
+    pub owner_binding_id: String,
+    pub arguments: Vec<TypeScriptTypeArgument>,
+}
+
+/// Nominal argument identity, independent of spelling at the provider site.
+/// Unsupported shapes and unconstrained parameters remain explicitly unknown.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TypeScriptTypeArgument {
+    Source {
+        declaration_id: String,
+        arguments: Vec<Self>,
+    },
+    Import {
+        binding_id: String,
+        member_path: Vec<String>,
+        arguments: Vec<Self>,
+    },
+    Unknown,
+}
+
+pub const MAX_TYPESCRIPT_TYPE_ARGUMENT_ARITY: usize = 64;
+pub const MAX_TYPESCRIPT_TYPE_ARGUMENT_DEPTH: usize = 16;
+pub const MAX_TYPESCRIPT_TYPE_ARGUMENT_NODES: usize = 256;
+pub const MAX_BATCH_TYPESCRIPT_TYPE_ARGUMENT_NODES: usize = 200_000;
+/// UTF-8 text capacities; repeated references count on every retained copy.
+pub const MAX_TYPESCRIPT_TYPE_ARGUMENT_REFERENCE_BYTES: usize = 1_024;
+pub const MAX_TYPESCRIPT_TYPE_ARGUMENT_BYTES: usize = 64 * 1_024;
+pub const MAX_BATCH_TYPESCRIPT_TYPE_ARGUMENT_BYTES: usize = 16 * 1_024 * 1_024;
+
 /// Typed hierarchy evidence used by shared receiver dispatch.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HierarchyConstraint {
+    /// Unordered Rust trait bounds for one exact generic parameter. Missing
+    /// bound evidence must not be treated as an empty competing method set.
+    RustGenericBounds {
+        parameter_declaration_id: String,
+        trait_qualified_names: Vec<String>,
+        bounds_complete: bool,
+    },
     /// One ordered direct-base occurrence. `base_set_complete` describes the
     /// complete source-level base list for the owning declaration.
     DirectBase { base_set_complete: bool },
@@ -407,11 +506,46 @@ pub struct EvidenceDiagnostic {
     pub message: String,
 }
 
+/// Observed source load that must be covered before TypeScript merge absence
+/// can be used. This does not claim that the loaded module exports a symbol.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeScriptMergeDependencyKind {
+    Module,
+    ReferencePath,
+    ReferenceTypes,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypeScriptMergeDependency {
+    pub kind: TypeScriptMergeDependencyKind,
+    pub specifier: String,
+    pub range: EvidenceRange,
+}
+
+pub const MAX_TYPESCRIPT_MERGE_DEPENDENCIES: usize = 4_096;
+pub const MAX_TYPESCRIPT_MERGE_DEPENDENCY_TEXT_BYTES: usize = 1024 * 1024;
+pub const MAX_TYPESCRIPT_MERGE_DEPENDENCY_SPECIFIER_BYTES: usize = 1_024;
+pub const TYPESCRIPT_MERGE_INVENTORY_VERSION: u32 = 1;
+
 /// Direct output of one universal semantic evidence pipeline.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SemanticEvidenceBatch {
     pub pipeline: UniversalEvidenceIdentity,
+    /// Version of the complete observed-load census contract. Absent metadata
+    /// is readable legacy evidence, but cannot certify dependency absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typescript_merge_inventory_version: Option<u32>,
+    /// Complete source syntax inventory for TypeScript declaration merging.
+    /// False/absent does not establish the absence of ambient augmentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typescript_merge_inventory_complete: Option<bool>,
+    /// Complete observed load census when the inventory certificate is true.
+    /// Unsupported load syntax prevents certification rather than disappearing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub typescript_merge_dependencies: Vec<TypeScriptMergeDependency>,
     pub declarations: Vec<DeclarationFact>,
     pub scopes: Vec<ScopeFact>,
     pub bindings: Vec<BindingFact>,

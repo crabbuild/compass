@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import sys
@@ -222,6 +223,41 @@ class PairedSummaryTests(unittest.TestCase):
 
 
 class ExecutionEvidenceTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups")
+    def test_group_permission_race_requires_reaped_child_and_absent_group(self) -> None:
+        from benchmarks.agent_query import runner as module
+        for group_state in ("gone", "live", "inaccessible"):
+            with self.subTest(group_state=group_state), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                children = []
+                real_popen = module.subprocess.Popen
+                def popen(*args, **kwargs):
+                    kwargs["stdin"] = module.subprocess.PIPE
+                    process = real_popen(*args, **kwargs)
+                    children.append(process)
+                    return process
+                denied = PermissionError("synthetic process-group permission race")
+                probe = {"gone": ProcessLookupError(), "live": None,
+                         "inaccessible": PermissionError("synthetic group probe denied")}[group_state]
+                outcomes = [denied, probe]
+                with patch.object(module, "MAX_OUTPUT_BYTES", 4096), \
+                        patch.object(module.subprocess, "Popen", side_effect=popen), \
+                        patch.object(module.os, "killpg", side_effect=outcomes) as group_signal:
+                    def execute():
+                        script = ("import sys\ntry:\n sys.stdout.write('x' * 100000); sys.stdout.flush()\n"
+                                  "except BrokenPipeError:\n pass\nsys.stdin.buffer.read(1)\n")
+                        return run_bounded((sys.executable, "-c", script),
+                            cwd=root, timeout_seconds=5, stdout_path=root / "stdout", stderr_path=root / "stderr")
+                    if group_state == "gone":
+                        result = execute()
+                        self.assertTrue(result.output_limited)
+                        self.assertLessEqual(result.stdout_bytes, 4096)
+                    else:
+                        with self.assertRaises(PermissionError): execute()
+                    self.assertIsNotNone(children[0].returncode)
+                    children[0].stdin.close()
+                    self.assertEqual([call.args[1] for call in group_signal.call_args_list], [module.signal.SIGKILL, 0])
+
     def test_source_root_must_contain_the_reviewed_anchor_files(self) -> None:
         repository = load_suite(ROOT / "suite.toml").repositories[0]
         with tempfile.TemporaryDirectory() as temporary:

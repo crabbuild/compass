@@ -1,0 +1,29 @@
+{
+  "schema": "compass.broad-query-source-occurrence-supplement/1",
+  "repository": "humantime",
+  "commit": "997ff566cc731e3ece5c792c8b83dd78e459f202",
+  "fileSha256": "ea15d975083b5ba6490292a7c72f524529e1e4d58f5761efad78c1a72ed269e9",
+  "task": "humantime.date-chain",
+  "sameLineCalls": [
+    {
+      "file": "src/date.rs",
+      "line": 121,
+      "startColumn": 16,
+      "endColumn": 26,
+      "callee": "two_digits",
+      "text": "let year = two_digits(b[0], b[1])? * 100 + two_digits(b[2], b[3])?;"
+    },
+    {
+      "file": "src/date.rs",
+      "line": 121,
+      "startColumn": 48,
+      "endColumn": 58,
+      "callee": "two_digits",
+      "text": "let year = two_digits(b[0], b[1])? * 100 + two_digits(b[2], b[3])?;"
+    }
+  ],
+  "calleeCallsWithinParser": 7,
+  "distinctWitnessLines": 6,
+  "columnUnit": "one-based UTF-8 byte (the inspected source line is ASCII)",
+  "scope": "Source-reviewed supplement; current scorer occurrence tuples are file+line witnesses and cannot alone establish full call multiplicity. Relation/path questions do not require rendering sites/counts; graph precision/multiplicity qualification remains separate."
+}

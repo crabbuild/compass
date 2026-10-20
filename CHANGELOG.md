@@ -2,6 +2,393 @@
 
 ## Unreleased
 
+- Recover broad behavioral questions beginning with `Why`: treat the
+  interrogative as question scaffolding while preserving quoted/qualified
+  subjects and literal symbol lookup. Refresh disposable query responses.
+
+- Keep inadmissible exact source targets unresolved instead of
+  falling back to unrelated same-named declarations, including JavaScript and
+  TypeScript callable parameters. Rebuild disposable current graphs with AST
+  cache34; historical graphs and language qualification remain unchanged.
+
+- Add opt-in prospective developer graph-precision diagnostics with exact
+  conditional finite-population bounds. Preserve legacy formats and all existing
+  qualification gates; arithmetic does not establish design acceptance or quality.
+
+- Raise the Rustls minimum and locked dependency to 0.23.46 for upstream fixes
+  RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349.
+  Other dependency advisories remain tracked separately.
+
+- Recover bounded helper candidates for eligible broad questions about one or
+  more operations through exact native calls, with Low/unverified navigation
+  paths. Preserve
+  requested depth and ambiguity; expose separate indexed/helper lookup budgets
+  in raw discovery2 and ranked-view7, including after presentation pruning.
+  Single-operation questions retain distinct reachable alternatives using bounded
+  lexical operation hints; hints do not establish intent or behavior.
+- Show a retained, source-owned helper preview when no question-matching excerpt
+  exists. Label it behavior unverified, keep matching terms/ranking unchanged,
+  and refresh disposable quotation responses. Unmetered ranked-view4 remains.
+
+- Preserve typed exact-name and ID matches when structural discovery becomes
+  a ranked answer. Keep identity labels separate from relevance and coverage;
+  refresh disposable ranked identity responses.
+
+- Recognize `rebuilt`/`rebuild` and `written`/`write` spellings in broad
+  questions while preserving literal identities, operation distinctions and
+  existing confidence guards. Refresh disposable ranker responses.
+
+- Normalize broad-query comment matches by their matching owned passage when
+  the retained comment field is complete, preventing unrelated comments from
+  diluting that evidence. Keep admission, uncertainty and exact-name tiers.
+
+- Prefer distinctive source quotations after requested-action coverage, using
+  existing corpus statistics while preserving exact anchors, ownership, token
+  boundaries and candidate relevance. Refresh disposable quotation responses.
+
+- Recognize bounded, corpus-supported forward spellings in broad questions,
+  retaining literal topic guards, explicit identity and Low/unverified mapping
+  disclosure. Keep canonical query groups separate and refresh ranker responses.
+
+- Prefer retained source-quotation windows covering more distinct requested
+  terms, so an early generic match does not hide later question evidence.
+  Preserve exact UTF-8 source bytes, coordinates and quotation limits. Known
+  owned comments cannot supply code-window selection evidence. Candidate
+  ranking and relevance are unchanged; refresh disposable excerpt responses.
+
+- Restrict automatic deeper call context to High-relevance selected roots;
+  partial matches keep first-hop context. Explicit context inspection retains
+  witnessed paths without promoting their relevance. Refresh context responses.
+
+- Continue broad-query raw discovery context along exact source-witnessed calls
+  within the requested depth, with explicit state, fan-out, frontier and output
+  bounds. Count rejected adjacency records and lookahead against relationship
+  work limits. Related callees remain inspection context; candidate ranking and
+  relevance are unchanged. Refresh disposable responses with a new context epoch.
+
+- Derive unconfigured Python module names from verified source-root layout:
+  bare roots use relative modules; package roots retain their package prefix.
+  Checkout names no longer hide valid imported calls in bare roots. Retain
+  configured import-root precedence, ambiguity and exact call occurrences.
+  Retain source identities for script/group paths such as `billing-service`;
+  escape literal dots and percent signs inside components so they cannot
+  impersonate import separators. Package-entry links, non-regular metadata and
+  invalid package names fail explicitly when no configured roots apply. Python producer 2 remains
+  `Qualifying`; AST cache 33 and layout-bound fingerprints refresh current
+  evidence without rewriting historical graphs.
+
+- Retain up to 64 source-anchored comments per callable, allowing broad queries
+  to find explanations beyond an eight-comment prefix. Keep independent field,
+  file and artifact limits and explicit partial coverage. Source-query profile 8
+  and AST cache 32 refresh current evidence; historical profiles remain unchanged.
+
+- Normalize native path separators in TypeScript source lookup keys, preserving
+  nested relative imports and directory-index selection on Windows. Keep exact
+  file identity, extension priority and source-root containment checks.
+
+- Preserve unresolved local export names before target resolution and require a
+  version1 source export census for typed imports and known-empty star branches.
+  Keep recovered, unsupported and legacy export surfaces unknown. Validate the
+  new optional root evidence and include it in fact-digest profile4; AST cache31
+  refreshes current disposable facts. Independent qualification is pending.
+
+- In development, make typed TypeScript receiver imports traverse export
+  obligations before selecting a target. Preserve exact target files and unknown
+  branches, enforce public export visibility and explicit-export precedence,
+  and charge bounded shared/cyclic export graphs to the receiver work budget.
+  Unsupported namespace transitions remain unresolved; qualification is pending.
+
+- Bound aggregate TypeScript argument proofs before cloning or index retention.
+  Count repeated nodes and UTF-8 text with shared per-file validation rules.
+  On valid aggregate overflow, preserve declarations and eligible exact
+  relationships through explicit degraded partitioning and omission counts;
+  reject invalid per-file payloads before projecting partial results.
+
+- Bind TypeScript merge-absence evidence to explicit census capability version1.
+  Missing legacy metadata cannot certify absence, even with an old true flag;
+  unknown present versions are errors. TypeScript5 / JavaScript4 and AST cache31
+  rebuild current disposable facts without changing historical realizations or
+  promoting development producers. Profile4 digests include the capability.
+
+- In development, require bounded observed TypeScript module/reference load
+  coverage before preserving nominal identity through `Awaited`; missing or
+  augmenting dependencies remain unresolved. Canonical fact digests include
+  the new typed source-load census. Bind optional owning load proofs to exact
+  kind and occurrence; keep type-package evidence out of ordinary module-symbol
+  lookup. Combined-patch review and gates are pending.
+
+- Preserve source/type identity through supported TypeScript `Awaited` wrappers
+  using explicit bounded nominal inventories and project merge certificates.
+  Keep unsupported thenables and incomplete/merged types unresolved. Extend
+  evidence/2 with TypeScript class/interface inventory metadata and optional
+  batch merge coverage; strict readers must upgrade. Fact-digest profile3
+  includes the new certificate and typed argument proofs. Combined TypeScript
+  producer/cache identities are TypeScript5 / JavaScript4 / AST cache31;
+  independent qualification remains pending.
+
+- Return a must-use omission report from the Rust universal materialization
+  API so analysis limits cannot silently discard their completeness status.
+  Rust integrations must consume the report and preserve degraded status for
+  partial output; node/edge buffer updates are not transactional.
+
+- Retain nominal type-reference occurrences for Rust struct and struct-like
+  enum-variant literals, with exact owners/source anchors and shared conservative
+  cross-file resolution. Support concrete impl `Self`, aliases and generic
+  nominal paths without inventing constructor calls or field access semantics.
+  Keep block-local imports, aliases and impl receivers in their actual lexical
+  scope, preserving distinct declarations for same-named block aliases.
+  Distinguish repeated same-line declarations by source span and retain receiver
+  type provenance across body imports, field/index access and local bindings.
+  Keep generic parameter identity and trait-bound declaration context through
+  local shadows; follow bounded simple receiver aliases without guessing.
+  Preserve explicitly deferred receiver nodes across languages instead of
+  rewriting them to a uniquely named but unproven source method.
+  Resolve complete generic trait-bound sets and supertraits project-wide,
+  preserving mixed local/imported ambiguity and exact source occurrences.
+  Add typed `rust_generic_bounds` evidence/2 constraints and
+  `rust-generic-bound-dispatch` provenance; older strict evidence readers must
+  upgrade. Bound substitution chains to16 steps and merged maps to64 entries.
+  Require explicit trait-member inventory completeness across the full bound
+  hierarchy; macros and unmodeled transformations cannot prove method absence.
+  Keep non-type generics out of type-receiver constraints. Incremental digest
+  profile2 includes completeness and namespace evidence.
+  Rust development producer4 remains `Qualifying`; AST cache29 refreshes
+  disposable facts; historical realizations and the graph v1 shape stay unchanged.
+
+- Reject mixed incremental source-evidence reuse when code was clipped or its aggregate capacity may be exhausted; recover through the complete cached/fresh path.
+- Retrieve bounded literal-only callable vocabulary in Python, Rust, Go and
+  TypeScript/TSX without an identifier seed. Preserve exact raw source slices,
+  callable ownership, code omissions, and independent lexical/parameter
+  coverage. Keep dependent matches Low. Source-query profile7 and AST cache27
+  distinguish the new AST-order evidence; immutable profiles1–6 keep their
+  original capabilities and statistical meaning. Graph facts are unchanged.
+
+- Require independent topic evidence for broad decision-predicate questions.
+  Retain ambiguous block/permit nouns through exact native parameter sites or
+  actual class/struct declaration names, with whole source anchors and Low
+  relevance. Disclose partial/legacy role evidence only for affected questions.
+  Preserve literal topic recall, exact identity, graph facts and existing
+  operation equivalence; ranker21 refreshes disposable response caches.
+
+
+- Retain separately bounded native parameter-binding source sites with explicit
+  complete, partial or unsupported coverage. Preserve exact callable ownership,
+  existing lexical priority and profiles1–5 semantics. Source-query profile6
+  and AST cache26 distinguish the new evidence; no graph facts or retrieval
+  scores change solely from these role annotations. Preserve refreshed source
+  digests when conservative update reuse falls back to the full extraction path,
+  including cached edits with an unrelated cache miss.
+
+- Retrieve broad questions whose vocabulary occurs only in bounded AST-owned
+  code text, including error strings and literal keys. Keep code-dependent
+  matches Low and source-cited, exclude nested callable context, and avoid
+  counting identifier/comment words again. Source-query profile5 preserves
+  profiles1–4 with their original retrieval/statistical meaning; AST cache26
+  and ranker18 refresh disposable current state. Preserve preferences supported
+  by complete identifier/comment fields when only code windows are clipped;
+  keep that clipping visible. Graph facts are unchanged.
+
+- Recall conventional `get`/`set` method spellings for broad read, lookup,
+  getter and setter questions. Require separate literal owner context, disclose
+  the translations and keep dependent candidates Low without an implementation
+  preference. Preserve exact identity and graph facts; ranker16 refreshes
+  disposable response caches. Preserve literal field provenance so namespace,
+  signature or prose words cannot silently promote a hinted operation. Keep
+  relationship, owned-identifier and source-body dependency attribution literal
+  so hinted names cannot raise source-dependent relevance.
+
+- Preserve declared native source-query evidence beside each developer-captured
+  Compass graph. Bind the sidecar to its graph and frozen input, reject omitted
+  or drifting sidecars, and isolate repositories' fixed filenames. Correct old
+  graph-only measurements with a new capture; native query behavior is unchanged.
+
+- Let developer query comparisons predeclare an exact native no-match exit
+  contract. Preserve raw status/output, budgets, genuine failures and legacy
+  scoring; distinguish valid abstention from execution failure only in new
+  frozen experiments. This does not establish a comparative quality result.
+
+- Add an explicit developer-only profile for recapturing exposed development
+  questions with linked historical metadata, exact question selection and newly
+  reviewed source definitions. Preserve old outcomes and heldout blinding;
+  calibration remains permanently ineligible for comparative superiority.
+  Recheck capture provenance after provisional scoring before completion.
+
+- Add opt-in version-2 developer query-evaluation registrations with predeclared
+  groups of equivalent implementation witnesses. Preserve exact fact ownership,
+  relationship evidence, legacy scoring and original/lookup panel bindings.
+  Group recovery is reported separately from per-witness graph/source recall;
+  no new comparative quality result is claimed.
+
+- Recall common code abbreviations for broad parameter, dictionary, seconds and
+  nanoseconds questions even when the unabbreviated word appears elsewhere in
+  the index. Require separate literal owner context, disclose translations and
+  keep dependent matches Low. Exact names, explicit identities and graph facts
+  retain their contracts; ranker15 refreshes disposable response caches.
+
+- Prefer cohesive compound identifiers over scattered word mentions for broad
+  questions such as `load-only` field setup. Require separate owner-topic
+  evidence, retain Low inspection relevance and bounded real source citations,
+  and preserve exact identities. Code-based inspection preferences now reject
+  missing, empty and native-ellipsis-clipped signatures. Ranker14 refreshes
+  disposable response caches; graph facts and recall postings are unchanged.
+
+- Require frozen, independently reviewed exposure lineage and verified history
+  artifacts for heldout developer comparison captures. Reject known source or
+  linked-mechanism reuse across renamed tasks, question rewrites and commits;
+  preserve legacy diagnostic inputs and the existing numeric quality gates.
+
+- Recall indexed `item`/`element` and `copy`/`clone` alternatives when ordinary
+  broad-query words `entry` or `snapshot` have no indexed literal match. Require
+  separate source-owned literal topic evidence for lexical-only candidates;
+  keep dependent matches Low and disclose each translation. Preserve exact
+  identities and existing literal candidate admission. Refresh disposable
+  response caches; graph facts are unchanged.
+
+- Prefer callable-local operation identifiers with separate topic evidence for
+  broad single-operation inspection. Exclude signature-overlapping identifiers,
+  compound/negative/temporal conditions and mismatched document/test intent from
+  this preference. Preserve uncertainty and exact identity; version disposable
+  response caches as ranking semantics change. Graph facts are unchanged.
+
+- Include retained source citations on compact discovery seed lines before
+  relationship context, keeping selected candidates inspectable on the first
+  page without changing retrieval order or cursor semantics.
+
+- Preserve documentation coverage warnings in local SQLite queries, matching
+  JSON queries. Recover older snapshots through bounded diagnostic reads and
+  invalidate cached answers that could omit these warnings. Retain graph
+  coverage warnings when discovery finds no matching seed.
+
+- Score ranked code quotations without borrowing terms from retained overlapping
+  comments. Preserve the precise comment when it supplies the matching evidence.
+  Under tight text budgets, shorten or omit lower-ranked quotes before clipping
+  the first candidate's inspection evidence. Candidate ranking is unchanged.
+
+- Exclude Python lambda keyword tokens from auxiliary callable scopes. This
+  corrects scope counts and can recover source evidence at the scope quota;
+  semantic graph records are unchanged.
+
+- Add separately labelled nested anonymous-callable inspection context to
+  already retrieved implementations. Native AST parent facts preserve ownership
+  barriers and actual syntax anchors; no graph calls or execution are inferred.
+  Direct windows keep priority within shared limits. Source profile4, ranked
+  view4 and AST cache24 version the change; readers retain older profiles.
+
+
+- Bound disposable JSON query-index validation. Retain the full integrity check;
+  slow eligible file checks can use a size-bounded, byte-identical inspection
+  image, while WAL and mismatched images keep original-file validation. Report
+  startup-budget exhaustion as a typed timeout without rebuilding the index.
+  Cancel and join operation-local SQLite interrupt timers before reusing the
+  connection, avoiding coarse progress-callback overruns in integrity walks.
+
+- Retain one exact callable-local identifier occurrence per spelling for body
+  retrieval, with explicit omitted-occurrence counts. This reduces repeated-site
+  pressure on bounded publication while preserving independently collected code
+  windows. AST cache24 rebuilds disposable source-query evidence.
+
+- Development ranked queries retain bounded AST-owned code windows for
+  comment-free implementations. Ranked JSON uses `compass.query.ranked-view/3`;
+  immutable legacy views and source-query profiles remain readable. Code windows
+  have independent quotas and do not change ranking or graph relationships.
+
+
+- Keep a bare existing node ID as the sole ranked inspection target, excluding
+  unrelated matches for identifier prefixes such as `sha256`. Raw discovery
+  and optional structural context retain their contracts.
+
+- Preserve real source postings when their terms equal store capability markers.
+  Store publication uses separate capability records and retains legacy reads;
+  indexing Compass's own capability constant signatures no longer conflicts with
+  empty markers. Graph records and relationship evidence are unchanged.
+
+- Add bounded source-owned comment/documentation quotations to opt-in ranked
+  answers. Ranked JSON uses version 2 and retains version 1 reader compatibility;
+  text shortens/omits quotes before candidate rows to honor the output budget.
+  Candidate ranking, graph relationships and structural confidence are unchanged.
+  Omit clipped quotation windows that no longer contain matching query terms.
+
+
+- Retain direct variable-initializer function definitions in source ranges and
+  TypeScript/TSX body-query evidence using exact AST owner/parent facts. Preserve
+  original binding provenance, stable identities and relationship occurrences;
+  reject ambiguous ownership. Source-query profile2 reads alongside immutable
+  profile1 artifacts. AST cache20 rebuilds disposable entries. JavaScript3 and
+  TypeScript4 remain `Qualifying` pending independent source audit and promotion.
+
+- Preserve non-file AST declaration/occurrence ranges during fact-neutral edits,
+  including declarations ending at EOF. Refresh existing file-node digest/size
+  metadata from file inventory. Refresh file-scoped container envelopes only
+  with current AST ownership and original declaration provenance; restore Kotlin
+  package updates after metadata-tail truncation while preserving explicit
+  namespace bounds and cold-build/edit-restore equivalence.
+  Reject non-callable body owners and report
+  unknown source-query schema/profile versions through typed error codes.
+
+- Apply broad implementation-search test preferences to colocated test/spec
+  files and typed test/fixture roles. Preserve explicit test intent and both
+  candidate sets; isolate cached answers with ranker/9.
+
+- Select ECMAScript member scopes by their structural parent instead of hashed
+  child IDs. Preserve accessor ambiguity and declared field/method targets across
+  filename changes, and recognize JavaScript class-field name anchors rather
+  than replacing them with constructor writes. JavaScript3 and TypeScript4 remain `Qualifying`; AST cache20
+  rebuilds disposable facts without rewriting historical graphs.
+
+- Add a native, graph-bound callable-body query index for Python, Rust, Go and
+  TypeScript/TSX. Retain bounded AST identifiers/comments with source citations,
+  shared JSON/store recall and statistics, and Low inspection relevance when
+  body evidence supplies missing context. Publish coherent immutable artifacts,
+  refresh both incremental paths, and invalidate caches by content/profile.
+  Comparative quality and release qualification remain under verification.
+
+- Require topic evidence beyond generic kind/language matches for broad
+  questions with additional subjects. Preserve simple listings, exact identity
+  and tentative candidates supported by real topic evidence.
+
+- Recall callable owners of matching local identifiers through bounded exact
+  AST containment. Preserve unique ownership, source citations and shared work
+  ceilings; label inferred query relevance as Low inspection evidence.
+
+- Retain more ranked candidates within the text budget by abbreviating lengthy
+  explanations before dropping an owner. Preserve uncertainty, citations and
+  the byte limit; the JSON projection and query ranking are unchanged.
+
+- Recall broad implementation candidates through bounded, verified outgoing
+  call/reference evidence and retain source citations. Mark matches that depend
+  on referenced identifiers as Low inspection leads. Fix plural acronyms such
+  as TTLs becoming missing symbol names; preserve explicit identity guards.
+
+- Add bounded AST leading documentation for development Rust3, Go2 and
+  TypeScript4 producers, retained as source-proven rationale resources. Require
+  the exact excerpt and full owner anchors before broad retrieval uses leading
+  prose. Preserve citation ranges, report omitted excerpts in graph/query
+  warnings, and invalidate extraction/publication/ranking caches. These producer
+  versions remain `Qualifying` pending source audit and release promotion.
+
+- Improve broad native retrieval with fielded names, signatures, aliases,
+  paths and source-owned prose, shared JSON/store term statistics and bounded
+  declaration recall. Mark partial candidates with missing owner-specific
+  context and retain exact lookup behavior. Unknown ordinary wording can return
+  Low candidates; absent explicitly named subjects remain guarded. Negative
+  qualifications return inspection candidates with an explicit unverified
+  condition warning rather than claiming that the condition holds.
+  Preserve temporal conditions as explicitly unverified while retrieving on
+  substantive terms; keep quoted and qualified names literal.
+  Disposable JSON indexes rebuild to format 4; older immutable stores give an
+  explicit update instruction rather than claiming full field coverage.
+- Recover query-index builds after a process is terminated by using persistent
+  operating-system locks. Recheck index validity and replace invalid indexes
+  only while holding the build lock; a live competing builder yields an
+  actionable bounded-wait error. Keep the new cache namespace separate from
+  older presence-lock builders.
+- Add opt-in `query --view ranked` and MCP `query_graph` with `view: "ranked"`.
+  Show up to five source-located candidates with relevance reasons,
+  separate identity/evidence labels, honest recall bounds and scope refinement.
+  Optional `--include-context` / `include_context` appends witnessed one-hop context.
+  Publish the additive `compass.query.ranked-view/2` projection; existing raw
+  formats and discovery cursor contracts retain their shapes.
+
 ## 0.4.2 - 2026-10-02
 
 - Add source-scoped architecture and community views, compact hotspot rankings,

@@ -3271,11 +3271,27 @@ def _collector_only_construct_parser(
     return None
 
 
+def _go_source_oracle_inventory(
+    root: Path,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    from .go_oracle import collect_go_inventory
+
+    return collect_go_inventory(root, include_globs, exclude_globs)
+
+
 DEFAULT_STATEMENT_PROVIDERS: Mapping[str, StatementProvider] = {
     ".py": _python_statement_spans,
 }
 
 DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
+    "go": ConstructProvider(
+        "go_stdlib_ast_types_v1",
+        (".go",),
+        _collector_only_construct_parser,
+        _go_source_oracle_inventory,
+    ),
     "python": ConstructProvider(
         "python_ast",
         (".py",),

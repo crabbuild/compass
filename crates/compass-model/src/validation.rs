@@ -517,6 +517,15 @@ fn validate_code_graph_edge(
             site
         ));
     }
+    if edge.occurrence_rule.as_ref().map(|rule| rule.as_str())
+        == Some(crate::provenance::LEADING_DOCUMENTATION_RULE)
+        && !crate::provenance::is_proven_leading_documentation(source, target, edge)
+    {
+        errors.push(format!(
+            "edge {} has an invalid leading documentation ownership proof",
+            edge.id
+        ));
+    }
     (!errors.is_empty()).then(|| RecordValidationErrors {
         id: edge.id.clone(),
         errors,

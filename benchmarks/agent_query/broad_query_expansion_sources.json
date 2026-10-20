@@ -1,0 +1,136 @@
+{
+  "schema": "compass.broad-query-expansion-candidates/1",
+  "status": "prospective_source_candidates_only",
+  "qualificationEligible": false,
+  "verifiedAgainst": "official GitHub repository commit API; HEAD resolved before any panel outputs",
+  "candidates": [
+    {
+      "language": "python",
+      "url": "https://github.com/psf/requests",
+      "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+      "commitUrl": "https://github.com/psf/requests/commit/611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "python",
+      "url": "https://github.com/urllib3/urllib3",
+      "commit": "a37bc93b65d6bcf00d3dc43d966bab6bd130ecd8",
+      "commitUrl": "https://github.com/urllib3/urllib3/commit/a37bc93b65d6bcf00d3dc43d966bab6bd130ecd8",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "python",
+      "url": "https://github.com/pytest-dev/pluggy",
+      "commit": "78e3f45d6c18a6efe6c46a2a79b63073f45a44bd",
+      "commitUrl": "https://github.com/pytest-dev/pluggy/commit/78e3f45d6c18a6efe6c46a2a79b63073f45a44bd",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "python",
+      "url": "https://github.com/python-attrs/attrs",
+      "commit": "ee66e7274852438cc23d4240a1a9cd632fda8b52",
+      "commitUrl": "https://github.com/python-attrs/attrs/commit/ee66e7274852438cc23d4240a1a9cd632fda8b52",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "go",
+      "url": "https://github.com/spf13/viper",
+      "commit": "528f7416c4b56a4948673984b190bf8713f0c3c4",
+      "commitUrl": "https://github.com/spf13/viper/commit/528f7416c4b56a4948673984b190bf8713f0c3c4",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "go",
+      "url": "https://github.com/spf13/pflag",
+      "commit": "c966cfef47379dcb01e7929504d66d94b540945b",
+      "commitUrl": "https://github.com/spf13/pflag/commit/c966cfef47379dcb01e7929504d66d94b540945b",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "go",
+      "url": "https://github.com/golang-jwt/jwt",
+      "commit": "d2cffb184933cab5b685db7e9eea56326f0acc0d",
+      "commitUrl": "https://github.com/golang-jwt/jwt/commit/d2cffb184933cab5b685db7e9eea56326f0acc0d",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "go",
+      "url": "https://github.com/go-playground/validator",
+      "commit": "3b54840be2c8bda33a270f068f3d781981dfa662",
+      "commitUrl": "https://github.com/go-playground/validator/commit/3b54840be2c8bda33a270f068f3d781981dfa662",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "rust",
+      "url": "https://github.com/tokio-rs/mio",
+      "commit": "a88e5e119172e4fb1638926faf65a4fe889e05b1",
+      "commitUrl": "https://github.com/tokio-rs/mio/commit/a88e5e119172e4fb1638926faf65a4fe889e05b1",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "rust",
+      "url": "https://github.com/rust-cli/env_logger",
+      "commit": "f80dca81223bb7cd50fc81f484e20eaef22be0aa",
+      "commitUrl": "https://github.com/rust-cli/env_logger/commit/f80dca81223bb7cd50fc81f484e20eaef22be0aa",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "rust",
+      "url": "https://github.com/seanmonstar/reqwest",
+      "commit": "2230ed3945fb2908692b88dad1dcd06db9fb2ca6",
+      "commitUrl": "https://github.com/seanmonstar/reqwest/commit/2230ed3945fb2908692b88dad1dcd06db9fb2ca6",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "rust",
+      "url": "https://github.com/petgraph/petgraph",
+      "commit": "b3eaf3a73f3ac7347b17bec3ba009f01eb8d2495",
+      "commitUrl": "https://github.com/petgraph/petgraph/commit/b3eaf3a73f3ac7347b17bec3ba009f01eb8d2495",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "typescript",
+      "url": "https://github.com/TanStack/query",
+      "commit": "ee47993724e5b71e65d9f38ae416367d2dd18395",
+      "commitUrl": "https://github.com/TanStack/query/commit/ee47993724e5b71e65d9f38ae416367d2dd18395",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "typescript",
+      "url": "https://github.com/vuejs/pinia",
+      "commit": "01121f840a0f6816c04df91b2a80c91c87089832",
+      "commitUrl": "https://github.com/vuejs/pinia/commit/01121f840a0f6816c04df91b2a80c91c87089832",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "typescript",
+      "url": "https://github.com/reduxjs/reselect",
+      "commit": "8911ef76eece985ba425c3234ac0bdc903b9b0e5",
+      "commitUrl": "https://github.com/reduxjs/reselect/commit/8911ef76eece985ba425c3234ac0bdc903b9b0e5",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    },
+    {
+      "language": "typescript",
+      "url": "https://github.com/immerjs/immer",
+      "commit": "8848a5b16938e5681a890d73de7bda24b5080498",
+      "commitUrl": "https://github.com/immerjs/immer/commit/8848a5b16938e5681a890d73de7bda24b5080498",
+      "sourceReviewed": false,
+      "tasksFrozen": false
+    }
+  ]
+}

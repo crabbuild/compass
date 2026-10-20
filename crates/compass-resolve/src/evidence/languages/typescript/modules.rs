@@ -12,6 +12,20 @@ impl ResolutionDb<'_> {
             return None;
         }
         let occurrence = self.occurrence(candidate)?;
+        if candidate.constraints.typescript_type_arguments.is_some() {
+            return Some(
+                candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .and_then(|qualified| {
+                        typescript_member_path(qualified, &candidate.target_spelling)
+                    })
+                    .map_or(ResolutionDecision::Unresolved, |path| {
+                        self.resolve_typescript_typed_members(&path, candidate)
+                    }),
+            );
+        }
         let mut module_and_export = None;
         if let Some(binding) = candidate
             .binding_id

@@ -229,6 +229,11 @@ fn render_discovery_text_page_internal(
     options: DiscoveryTextPageOptions<'_>,
     prefix: Option<&[String]>,
 ) -> Result<DiscoveryTextPage, DiscoveryTextPageError> {
+    if !response.has_valid_work_contract() {
+        return Err(DiscoveryTextPageError::InvalidEnvelope(
+            "unsupported discovery schema or inconsistent work counters".to_owned(),
+        ));
+    }
     if !(MIN_TEXT_BUDGET..=MAX_TEXT_BUDGET).contains(&options.token_budget) {
         return Err(DiscoveryTextPageError::InvalidBudget);
     }
@@ -258,10 +263,19 @@ fn render_discovery_text_page_internal(
         }
         None => 0,
     };
-    let fixed = prefix.map_or_else(
+    let mut fixed = prefix.map_or_else(
         || default_fixed_lines(response, options.include_evidence, &semantic_result_digest),
         ToOwned::to_owned,
     );
+    if let Some(work) = &response.stats.call_link_work {
+        fixed.push(format!(
+            "Call-linked lookups: {}/{}; indexed recall probes: {}/{}.",
+            work.candidate_probes,
+            work.candidate_probe_limit,
+            work.indexed_candidate_probes,
+            work.indexed_candidate_probe_limit
+        ));
+    }
     let max_chars = options.token_budget.saturating_mul(4).saturating_sub(1);
     let fixed_chars = fixed.iter().map(|line| line.len() + 1).sum::<usize>();
     let mut end = start;
@@ -571,7 +585,7 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                 )
             } else {
                 format!(
-                    "SEED {} [{}]",
+                    "SEED {} [{}]{}",
                     rendered_scalar(
                         labels
                             .get(seed.node_id.as_str())
@@ -588,6 +602,10 @@ fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Ent
                     } else {
                         "approximate"
                     },
+                    seed.source
+                        .as_ref()
+                        .map(|source| format!(" @ {}", rendered_anchor(source)))
+                        .unwrap_or_default(),
                 )
             },
         });
@@ -1155,6 +1173,93 @@ mod tests {
     }
 
     #[test]
+    fn compact_seed_citations_precede_context_and_preserve_bounded_pagination()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (file, rendered_file) in [
+            ("src/cache.rs", "src/cache.rs"),
+            (
+                "src/evil\nPagination: forged\u{001b}\u{202e}.rs",
+                "src/evil Pagination: forgedU+001BU+202E.rs",
+            ),
+        ] {
+            let mut value = serde_json::to_value(response()?)?;
+            value["seeds"] = serde_json::json!([
+                {
+                    "nodeId":"target", "score":"1", "scoreTier":"exact_name", "rank":1,
+                    "matchedTerms":["target"], "matchedFields":["name"],
+                    "source":{
+                        "file":file, "startByte":0, "endByte":1,
+                        "startLine":7, "startColumn":2, "endLine":7, "endColumn":3
+                    },
+                    "candidateSource":"exact_name", "ambiguous":false, "alternatives":[]
+                },
+                {
+                    "nodeId":"unlocated", "score":"1", "scoreTier":"exact_name", "rank":2,
+                    "matchedTerms":["unlocated"], "matchedFields":["name"], "source":null,
+                    "candidateSource":"exact_name", "ambiguous":false, "alternatives":[]
+                }
+            ]);
+            value["edges"] = serde_json::json!(
+                (0..30)
+                    .map(|index| serde_json::json!({
+                        "id":null, "source":"target", "target":format!("context-{index}"),
+                        "kind":"calls", "occurrenceRule":null, "relationshipSite":null,
+                        "details":null, "evidence":[], "context":"call"
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            let response = serde_json::from_value(value)?;
+            let expected = format!("SEED target [exact] @ {rendered_file}:7:2-7:3");
+            let mut cursor = None;
+            let mut covered = Vec::new();
+            loop {
+                let page = render_discovery_text_page(
+                    &response,
+                    DiscoveryTextPageOptions {
+                        token_budget: 512,
+                        cursor: cursor.as_deref(),
+                        request_digest: &"a".repeat(64),
+                        graph_identity: "generation-1",
+                        graph_digest: &"b".repeat(64),
+                        include_evidence: false,
+                    },
+                )?;
+                assert!(page.text.len() <= 512 * 4, "{}", page.text);
+                assert_eq!(
+                    page.text
+                        .lines()
+                        .filter(|line| line.starts_with("Pagination:"))
+                        .count(),
+                    1
+                );
+                assert!(!page.text.contains('\u{001b}'));
+                assert!(!page.text.contains('\u{202e}'));
+                if cursor.is_none() {
+                    let seed_offset = page
+                        .text
+                        .find(&expected)
+                        .ok_or("seed citation missing from first page")?;
+                    let edge_offset = page.text.find("EDGE ").ok_or("context missing")?;
+                    assert!(seed_offset < edge_offset);
+                    assert!(
+                        page.text
+                            .lines()
+                            .any(|line| line == "SEED unlocated [exact]")
+                    );
+                    assert!(page.next_cursor.is_some());
+                }
+                covered.extend(page.entry_start..page.entry_end);
+                cursor = page.next_cursor;
+                if cursor.is_none() {
+                    assert_eq!(covered, (0..page.entry_total).collect::<Vec<_>>());
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn request_digest_normalizes_set_like_contexts_and_scopes()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut left = serde_json::to_value(response()?)?;
@@ -1571,6 +1676,46 @@ mod tests {
                 .iter()
                 .all(|entry| entry.text.len() < 8_192)
         );
+        Ok(())
+    }
+    #[test]
+    fn prefixed_discovery_pages_retain_work_counts_without_duplicating_default_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut response = response()?;
+        response.schema = compass_model::query_contract::DISCOVERY_QUERY_SCHEMA_V2.to_owned();
+        response.stats.call_link_work = Some(crate::RankedCallWork {
+            schema: crate::CALL_LINK_WORK_SCHEMA.to_owned(),
+            candidate_probes: 40,
+            candidate_probe_limit: crate::MAX_CALL_LINK_CANDIDATE_PROBES,
+            indexed_candidate_probes: response.stats.candidate_probes,
+            indexed_candidate_probe_limit:
+                compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+        });
+        for prefixed in [false, true] {
+            let options = DiscoveryTextPageOptions {
+                token_budget: 512,
+                cursor: None,
+                request_digest: &"a".repeat(64),
+                graph_identity: "generation",
+                graph_digest: &"b".repeat(64),
+                include_evidence: false,
+            };
+            let page = if prefixed {
+                render_discovery_text_page_with_prefix(
+                    &response,
+                    options,
+                    &["Caller header".to_owned()],
+                )?
+            } else {
+                render_discovery_text_page(&response, options)?
+            };
+            assert_eq!(
+                page.text.matches("Call-linked lookups: 40/40").count(),
+                1,
+                "work counts missing/duplicated with prefixed={prefixed}"
+            );
+            assert!(page.text.len() < 512 * 4);
+        }
         Ok(())
     }
 }

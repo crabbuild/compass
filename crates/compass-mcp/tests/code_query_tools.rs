@@ -21,6 +21,125 @@ use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value, json};
 
+#[test]
+fn broad_partial_context_is_disclosed_in_default_and_ranked_tools() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let node = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == "Target")
+        .ok_or("missing fixture target")?;
+    node.name = "format_protocol_errors".into();
+    node.qualified_name = "Fixture.format_protocol_errors".into();
+    fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let server = CompassMcp::new(&path);
+    for question in [
+        "where are redis protocol errors formatted",
+        "where are protocol errors formatted without decoration",
+        "where are protocol errors formatted before decoration",
+        "where are protocol errors formatted after decoration",
+    ] {
+        for view in [None, Some("ranked")] {
+            let mut arguments = json!({"question":question});
+            if let Some(view) = view {
+                arguments["view"] = json!(view);
+            }
+            let output = server.invoke(
+                "query_graph",
+                arguments.as_object().cloned().ok_or("arguments")?,
+            );
+            let envelope: Value = serde_json::from_str(&output)?;
+            let diagnostics = envelope["result"]["diagnostics"].to_string();
+            assert!(diagnostics.contains("inspection candidates"), "{output}");
+            assert!(diagnostics.contains("not established"), "{output}");
+            if question.contains("before") || question.contains("after") {
+                assert_eq!(envelope["result"]["question"], question);
+                assert!(diagnostics.contains("Temporal qualification"), "{output}");
+                if view.is_some() {
+                    assert!(
+                        envelope["rankedView"]["candidates"][0]["reasons"]
+                            .to_string()
+                            .contains("Temporal qualification"),
+                        "{output}"
+                    );
+                }
+            }
+            if view.is_some() {
+                assert_eq!(envelope["rankedView"]["candidates"][0]["relevance"], "low");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn ranked_discovery_is_a_separate_typed_projection() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = write_typed_graph(directory.path())?;
+    let server = CompassMcp::new(&graph);
+    let arguments =
+        json!({"question":"where is Target defined?", "view":"ranked", "text_budget":800});
+    let output = server.invoke(
+        "query_graph",
+        arguments.as_object().cloned().ok_or("arguments")?,
+    );
+    let envelope: Value = serde_json::from_str(&output)?;
+    assert_eq!(envelope["schema"], "compass.mcp.tool-result/1");
+    assert_eq!(envelope["result"]["schema"], "compass.query.discovery/1");
+    assert_eq!(
+        envelope["rankedView"]["schema"],
+        "compass.query.ranked-view/4"
+    );
+    assert_eq!(
+        envelope["rankedView"]["candidates"][0]["name"],
+        "Fixture.Target"
+    );
+    assert!(envelope["rankedView"].get("context").is_none());
+    let context: Value = serde_json::from_str(
+        &server.invoke(
+            "query_graph",
+            json!({"question":"where is Target defined?", "view":"ranked", "include_context":true})
+                .as_object()
+                .cloned()
+                .ok_or("arguments")?,
+        ),
+    )?;
+    assert_eq!(
+        context["rankedView"]["candidates"],
+        envelope["rankedView"]["candidates"]
+    );
+    assert!(context["rankedView"]["context"]["edges"].is_array());
+    let plain = server.invoke(
+        "query_graph",
+        json!({"question":"where is Target defined?"})
+            .as_object()
+            .cloned()
+            .ok_or("arguments")?,
+    );
+    let plain: Value = serde_json::from_str(&plain)?;
+    assert!(plain.get("rankedView").is_none());
+    assert!(plain.get("agentView").is_some());
+    let invalid = CompassMcp::new(directory.path().join("missing.json"));
+    for arguments in [
+        json!({"question":"Target", "view":"other"}),
+        json!({"question":"Target", "view":"ranked", "mode":"bfs"}),
+        json!({"question":"Target", "view":"ranked", "text_budget":-1}),
+        json!({"question":"Target", "text_budget":800}),
+        json!({"question":"Target", "include_context":true}),
+        json!({"question":"Target", "view":"ranked", "include_context":"true"}),
+    ] {
+        let error = invalid.invoke(
+            "query_graph",
+            arguments.as_object().cloned().ok_or("arguments")?,
+        );
+        assert!(!error.contains("missing.json"), "{error}");
+        assert!(error.starts_with("Error executing"), "{error}");
+    }
+    Ok(())
+}
+
 fn write_typed_graph(root: &Path) -> Result<PathBuf, Box<dyn Error>> {
     let graph_path = root.join("graph.json");
     fs::create_dir_all(root.join("src"))?;
@@ -486,6 +605,11 @@ fn query_graph_schema_exposes_typed_discovery_controls() -> Result<(), Box<dyn E
         json!(["auto", "incoming", "outgoing", "both"])
     );
     assert_eq!(query.input_schema["additionalProperties"], false);
+    assert_eq!(properties["view"]["enum"], json!(["ranked"]));
+    assert_eq!(properties["include_context"]["type"], "boolean");
+    assert_eq!(properties["include_context"]["default"], false);
+    assert_eq!(properties["text_budget"]["maximum"], 65_536);
+    assert_eq!(properties["text_budget"]["default"], 800);
     assert_eq!(properties["question"]["maxLength"], 4096);
     assert_eq!(properties["relation_contexts"]["maxItems"], 32);
     assert_eq!(properties["scope"]["maxItems"], 32);
@@ -671,6 +795,26 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
     );
     assert!(text.len() < 400, "{text}");
     assert!(!text.contains("NEXT ACTIONS"));
+    let ranked = client.call_tool(CallToolRequestParams::new("query_graph").with_arguments(
+        json!({"question":"where is Target defined?", "view":"ranked", "include_context":true, "text_budget":800})
+            .as_object().cloned().ok_or("arguments")?
+    )).await?;
+    let ranked_text = ranked
+        .content
+        .iter()
+        .find_map(|content| content.as_text())
+        .ok_or("ranked text")?;
+    assert!(ranked_text.text.len() <= 800 * 4);
+    assert!(ranked_text.text.contains("relevance="));
+    assert!(ranked_text.text.contains("Context (one hop)"));
+    assert_eq!(
+        ranked.structured_content.as_ref().ok_or("ranked content")?["rankedView"]["schema"],
+        "compass.query.ranked-view/4"
+    );
+    assert!(client.call_tool(CallToolRequestParams::new("query_graph").with_arguments(
+        json!({"question":"where is Target defined?", "view":"ranked", "text_budget":1})
+            .as_object().cloned().ok_or("arguments")?
+    )).await.is_err());
     assert!(
         client
             .call_tool(CallToolRequestParams::new("search_symbols"))
@@ -1017,6 +1161,195 @@ fn concept_tools_accept_explicit_semantic_opt_in_and_label_synonyms() -> Result<
             args.as_object().cloned().unwrap_or_else(Map::new),
         );
         assert!(output.contains("semantic_search"), "{output}");
+    }
+    Ok(())
+}
+
+#[test]
+fn broad_body_evidence_survives_native_update_and_mcp_current_snapshot_caches()
+-> Result<(), Box<dyn Error>> {
+    for storage in [
+        compass_core::GraphStorage::Json,
+        compass_core::GraphStorage::Sqlite,
+    ] {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("repo");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("sample.rs"),
+            "fn opaque(value: &str) -> &str {\nlet returned = value;\n// Handle payload normalization here.\nreturned }\nfn decoy() {}\n",
+        )?;
+        let mut options = compass_core::BuildOptions::new(&root);
+        options.output_root = Some(directory.path().join("artifacts"));
+        options.graph_storage = storage;
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.max_workers = Some(1);
+        let built = compass_core::build_local_graph(&options)?;
+        let server = CompassMcp::new(built.output_dir.join("graph.json"));
+        for _ in 0..2 {
+            for view in [None, Some("ranked")] {
+                let mut args = json!({"question":"Where is payload handled?"});
+                if let Some(view) = view {
+                    args["view"] = json!(view);
+                }
+                let output =
+                    server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
+                let envelope: Value = serde_json::from_str(&output)?;
+                assert!(
+                    envelope["result"]["seeds"]
+                        .as_array()
+                        .is_some_and(|seeds| !seeds.is_empty()),
+                    "{output}"
+                );
+                if view.is_some() {
+                    let candidate = &envelope["rankedView"]["candidates"][0];
+                    assert!(
+                        candidate["name"]
+                            .as_str()
+                            .is_some_and(|name| name.contains("opaque")),
+                        "{output}"
+                    );
+                    assert_eq!(candidate["relevance"], "low");
+                    let view = compass_output::RankedQueryView::from_json(&serde_json::to_vec(
+                        &envelope["rankedView"],
+                    )?)?;
+                    let quote = view
+                        .candidates
+                        .first()
+                        .and_then(|candidate| candidate.excerpts.first())
+                        .ok_or("missing MCP callable quote")?;
+                    assert_eq!(
+                        quote.kind,
+                        compass_query::RankedExcerptKind::CallableComment
+                    );
+                    let source = fs::read_to_string(root.join("sample.rs"))?;
+                    assert_eq!(
+                        source
+                            .get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+                        Some(quote.text.as_str())
+                    );
+                    assert!(quote.text.contains("payload normalization"));
+                    assert!(
+                        candidate["matchedFields"]
+                            .as_array()
+                            .is_some_and(|fields| fields
+                                .iter()
+                                .any(|field| field == "body_comment")),
+                        "{output}"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+const LINKED_HELPER_SOURCE: &str = "def maintain(records):\n    # Check and publish stale or broken record caches.\n    if check_piece(records):\n        return\n    publish_piece(records)\n\ndef check_piece(value):\n    return value is not None\n\ndef publish_piece(value):\n    return value\n\ndef check_shadow(value):\n    return value is None\n\nclass Unrelated:\n    def check_piece(self, value):\n        return value\n";
+
+#[test]
+fn linked_helper_work_and_previews_survive_native_mcp_projection() -> Result<(), Box<dyn Error>> {
+    for storage in [
+        compass_core::GraphStorage::Json,
+        compass_core::GraphStorage::Sqlite,
+    ] {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir(&root)?;
+        fs::write(root.join("sample.py"), LINKED_HELPER_SOURCE)?;
+        let mut options = compass_core::BuildOptions::new(&root);
+        options.output_root = Some(directory.path().join("artifacts"));
+        options.graph_storage = storage;
+        options.no_cluster = true;
+        options.no_viz = true;
+        options.max_workers = Some(1);
+        let built = compass_core::build_local_graph(&options)?;
+        let server = CompassMcp::new(built.output_dir.join("graph.json"));
+        for (question, expected_helpers) in [
+            (
+                "Where are stale or broken record caches checked and published?",
+                2,
+            ),
+            ("Where are stale or broken record caches checked?", 1),
+            ("Where are stale or broken record caches published?", 1),
+        ] {
+            for (cap, seeds) in [(256, 3), (1, 1)] {
+                let args = json!({
+                    "question": question,
+                    "max_depth": 1, "max_candidates": cap, "max_seeds": seeds,
+                });
+                let output =
+                    server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
+                let envelope: Value = serde_json::from_str(&output)?;
+                assert_eq!(envelope["schema"], "compass.mcp.tool-result/1", "{output}");
+                let raw: compass_model::query_contract::DiscoveryQueryResponse =
+                    serde_json::from_value(envelope["result"].clone())?;
+                assert_eq!(raw.schema, "compass.query.discovery/2");
+                assert!(raw.has_valid_work_contract());
+                let work = raw
+                    .stats
+                    .call_link_work
+                    .as_ref()
+                    .ok_or("missing MCP work ledger")?;
+                assert!(work.is_coherent() && work.candidate_probes > 0);
+                assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
+                let mut args = args;
+                args["view"] = json!("ranked");
+                let mut previous = None;
+                for _ in 0..2 {
+                    let output =
+                        server.invoke("query_graph", args.as_object().cloned().ok_or("arguments")?);
+                    let envelope: Value = serde_json::from_str(&output)?;
+                    let ranked_raw: compass_model::query_contract::DiscoveryQueryResponse =
+                        serde_json::from_value(envelope["result"].clone())?;
+                    assert!(ranked_raw.has_valid_work_contract());
+                    assert_eq!(ranked_raw.stats.call_link_work.as_ref(), Some(work));
+                    let view = compass_output::RankedQueryView::from_json(&serde_json::to_vec(
+                        &envelope["rankedView"],
+                    )?)?;
+                    assert_eq!(view.schema, "compass.query.ranked-view/7");
+                    assert_eq!(view.call_link_work.as_ref(), Some(work));
+                    if cap == 1 {
+                        assert_eq!(view.candidates.len(), 1);
+                        assert!(view.candidates[0].call_link.is_none());
+                    } else {
+                        let helpers = view
+                            .candidates
+                            .iter()
+                            .filter(|candidate| candidate.call_link.is_some())
+                            .collect::<Vec<_>>();
+                        assert_eq!(helpers.len(), expected_helpers, "{question}");
+                        for helper in helpers {
+                            assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
+                            let quote = helper
+                                .excerpts
+                                .iter()
+                                .find(|quote| {
+                                    serde_json::to_value(quote).is_ok_and(|value| {
+                                        value["kind"] == "linked_callable_preview"
+                                    })
+                                })
+                                .ok_or("missing MCP helper preview")?;
+                            assert!(quote.is_coherent());
+                            assert_eq!(quote.source.file, "sample.py");
+                            assert_eq!(
+                                LINKED_HELPER_SOURCE.get(
+                                    quote.source.start_byte as usize
+                                        ..quote.source.end_byte as usize
+                                ),
+                                Some(quote.text.as_str())
+                            );
+                            assert!(quote.text.contains("return value"));
+                        }
+                    }
+                    if let Some(previous) = &previous {
+                        assert_eq!(previous, &view);
+                    } else {
+                        previous = Some(view);
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

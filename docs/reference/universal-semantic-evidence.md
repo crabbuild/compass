@@ -4,20 +4,206 @@ Compass resolves source relationships through a language-neutral evidence
 contract. Every hard-cut language uses the same production route. The release
 promotion decision in
 `tests/qualification/universal-evidence-promotion.json` records all 14
-registered pipelines as `Qualified`; they do not retain a second direct graph
-publisher. Swift, Dart, Scala, and Groovy have complete independent audit
+registered producer versions as `Qualified`; they do not retain a second direct
+graph publisher. New development versions below are not covered by that decision. Swift, Dart, Scala, and Groovy have complete independent audit
 artifacts captured in the mounted qualification target for that decision.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
+
+Python2 separately remains `Qualifying` for the project-aware default source-root
+identity repair described below. The historical promotion table retains Python1.
+
+## In-progress leading documentation
+
+The development registry now marks Go2, Rust4 and TypeScript5 as `Qualifying`.
+They emit optional `DeclarationFact.documentation` metadata under evidence/2:
+an AST attachment kind, exact source range and raw UTF-8 comment text. The first
+slice supports one contiguous leading group on supported named declarations;
+it does not infer owners from nearby names. Python's existing rationale/docstring
+path and JavaScript's documentation extraction remain unchanged. Publication/3 projects these
+as rationale resources with a `documents` edge under the versioned
+`universal-leading-documentation-v1` rule. The existing provenance vector
+retains both the excerpt and unique full declaration range. Graph validation
+rejects an inconsistent claimed proof; query ranker/4 uses the same verifier.
+No comparative recall or release qualification is claimed for this metadata.
+
+Each excerpt is at most 4KiB, with at most 1MiB retained per file. Omitted groups
+produce one bounded `leading_documentation_omitted` evidence diagnostic per file.
+The resolver publishes a bounded `leading_documentation_omission_summary`
+for extraction warnings or excerpts without a unique, non-overlapping full
+definition range. JSON and store queries expose that summary as incomplete
+coverage. Aggregate documentation is capped at 128MiB per resolver index.
+New readers accept old absent metadata. Older strict readers reject the new
+present field and must update; this is not transparent old-reader compatibility.
+Extraction/5 and AST-cache20 invalidate prior disposable facts. The existing
+release-promotion record and its strong matching test remain unchanged pending
+a new source audit and reviewed decision.
+
+## In-progress source export inventories
+
+Root TypeScript/JavaScript file/module facts optionally carry
+`ecmascriptExportInventory` with version1 and explicit completeness. The native
+producer checks original top-level export syntax against exact retained root
+bindings, including unresolved local-name obligations. A supplied file alone
+cannot prove an empty export surface. Parser recovery, non-module scripts,
+ambient/namespace exports, export assignment and unsupported export projections
+leave the census incomplete. Supported explicit local/named exports still take
+precedence over unrelated stars. Unsupported string export names and
+exported destructuring remain conservative unknowns. This certificate is
+independent of project merge absence and of target availability.
+
+The consumer requires the current complete certificate at every visited export
+source; missing legacy metadata or any incomplete duplicate source prevents a
+unique typed result. Invalid versions/owners fail evidence validation. No new
+unbounded text/vector payload is introduced; census indexing and AST probes use
+the source's shared200000-step work limit. Fact-digest profile4 includes the
+certificate and AST cache31 invalidates disposable old facts. Strict older
+readers must upgrade. Source review, native gates and qualification remain
+separate requirements.
+
+## In-progress primary ECMAScript member scopes
+
+The in-progress TypeScript receiver patch also emits optional
+`memberInventoryComplete` on class/interface facts. True certifies a supported,
+fully retained direct inventory in an explicit ECMAScript module, matched by
+exact declaration anchors and primary member scope. Recovery, heritage,
+constructors, computed/escaped names, decorators, ambient/namespace ancestors
+and unsupported syntax prevent certification. Accepted shapes have a complete
+empty direct-base set. Work shares the200000-step type-origin budget and fails
+the batch explicitly on exhaustion. Rust trait semantics remain unchanged.
+
+The optional `typescriptMergeInventoryVersion=1` capability binds the complete
+census contract independently of producer identity. Merge absence additionally
+requires this version in every TypeScript batch; missing legacy versions remain
+readable but unknown, including old true complete flags. Unknown present versions
+are explicit validation errors. TypeScript5 / JavaScript4 and AST cache31
+invalidate disposable current extraction state. Profile4 digests include the
+version; historical realizations and release qualification remain unchanged.
+
+A separate optional batch `typescriptMergeInventoryComplete` flag requires a
+bounded original-AST walk with no recovery, ambient declarations or namespaces.
+Nonempty scripts cannot certify it. Every TypeScript batch must explicitly
+certify this inventory before the project consumer relies on merge absence;
+missing metadata or an uncertified TypeScript source in the graph inventory is
+unknown. Syntax traversal charges visits/frontier retention
+and enforces depth512 within the shared work budget.
+
+The development batch also carries `typescriptMergeDependencies`: typed module,
+reference-path and reference-types loads with exact source anchors. The original
+AST census covers literal imports/re-exports/import-equals/require and dynamic
+imports, plus supported triple-slash references. Nonliteral, escaped or
+unsupported load syntax cannot certify completeness. Loaded sources must be
+supplied and certified; known missing or augmenting dependencies prevent merge
+absence. Reference paths match exact normalized sources. Module coverage consumes
+raw owning project edges, retaining unknown alternatives across contexts before
+ordinary lookup can filter them. Invalid/missing targets cannot fall back;
+relative source candidates retain extension families and literal quote identity.
+Bare modules and
+reference-types need explicit project resolution metadata. Optional
+`typescript_source_load` edge metadata uses `TypeScriptSourceLoadProof` version1,
+with an exact typed dependency and source range, to bind target resolution to
+one observed occurrence. A module mapping cannot satisfy a same-spelled
+reference-types directive. Legacy module edges cover only a single observed
+module load; repeated loads need exact occurrence proofs. Missing reference-types
+owning resolution remains unsupported; no automatic type-package loader or
+compiler-backed proof producer is claimed. Unknown versions are errors; the
+borrowed payload reader enforces shape/text limits, and cross-load matching
+shares1048576 proof steps. Direct members
+independent of `Awaited` remain available without this stronger proof.
+Pre-retention limits are4096 loads and1MiB copied text per batch,1024 bytes per
+specifier and4096 per source path; project limits are65536 loads and16MiB,
+checked before borrowed clone or owned indexing. Resource errors are explicit.
+Profile4 digests include the census in canonical field order. Independent
+closure review and complete combined-patch verification remain pending.
+
+The typed `Awaited` consumer checks every intrinsic Promise/PromiseLike wrapper
+in its definition scope. Terminal nominal preservation additionally requires
+exact actual/alias expansion to one TypeScript class/interface, complete project
+merge inventory, complete direct member inventory and empty base list, no
+lexical merge and no `then` member. Custom thenable result semantics and
+missing/unsupported proof remain unresolved. Older strict readers/validators
+must upgrade. Fact-digest profile4 includes the batch certificate and exact
+typed argument proof trees; raw proof identity changes may conservatively reduce
+fact-neutral reuse. Producer/cache integration is TypeScript5 / JavaScript4 /
+AST cache31; qualification for the combined development patch remains pending.
+
+JavaScript4 and TypeScript5 are `Qualifying` for a shared receiver-scope
+correction. A member scope must be the unique owned child directly below its
+declaration's binding scope. Nested blocks and callable-type scopes may share
+the owner but cannot be selected by the lexical order of their hashed IDs.
+Ambiguous accessors remain unresolved in the regression fixtures; direct fields,
+methods, nested calls and shadowing retain their exact occurrence proofs.
+JavaScript class-field names use the grammar's `property` child; their exact
+declaration anchors are retained instead of being lost before a constructor write.
+AST-cache20 rebuilds current disposable facts. The extraction/5 ID seed and
+evidence/2 wire shape are unchanged, and the approved historical promotion
+record below is not updated by these development checks.
+
+## In-progress Rust struct-literal references
+
+Rust4 emits a `TypeReference`/`References` candidate at each nominal literal
+path, using the enclosing declaration and existing bounded path/binding rules.
+Structs, struct-like enum variants and type aliases are eligible targets.
+Concrete impl `Self` uses the source-proven receiver; direct generic literals anchor the nominal
+name while qualified paths retain their exact source slice. Repeated literals
+retain separate occurrences. Literals do not establish constructor calls,
+field reads/writes or a runtime implementation. Parser recovery, nonconcrete
+trait `Self` and ambiguous targets cannot supply invented edges. Conflicting imports preserve an
+unresolved occurrence and `ambiguous-struct-literal-type` diagnostic; file-wide
+module/package fallback cannot select a type in an unrelated nested module.
+The producer uses a separate nominal scope index with distinct block scopes
+and exact local declaration identities. Block imports and aliases remain
+visible throughout their own block without leaking to sibling or outer blocks;
+impl receiver proof follows the same lexical chain. Block scopes retain the
+enclosing declaration owner and use the existing scope budget. Initializer
+blocks receive their own scopes during collection. Nominal sets retain exact
+declaration IDs; repeated same-named Rust graph nodes are disambiguated by
+source span, including on one line. Retained receiver types carry their original
+owner and source position through field/index access and derived bindings,
+rather than being requalified at a later use. Generic method inference checks
+parameter identity before inheriting bounds; local nominal/import shadows stop
+lookup. Bounds retain declaration scope and source position, including where
+clauses and impls, without copying container bounds by parameter spelling.
+Field inference instead maps the receiver's positional arguments onto exact
+defining parameter IDs, retaining separate field and argument origins through
+nested and indexed access. Maps admit at most64 entries/arguments and16
+substitution steps; incomplete/unsupported arguments retain the uninstantiated
+field origin and cannot inherit a caller's same-spelled parameter.
+Simple nominal receiver aliases follow exact declarations for at most16 steps;
+cycles and aliases requiring compound/generic substitution remain unresolved. Lookup stops at module boundaries,
+and leaves unproven nominal paths as `unresolved-struct-literal-type` occurrences
+with no guessed target. Generic impl parameters cannot supply an outer namesake
+as a concrete Self receiver. Literal recovery checks use the literal range, not
+the remainder of its source line. AST cache29
+refreshes disposable facts; graph v1's shape remains unchanged. Evidence/2 adds
+the typed generic-bound constraint described under Evidence contract. This
+producer remains `Qualifying`; the historical release decision below is unchanged.
+
+## In-progress callable initializer definition ranges
+
+JavaScript4 and TypeScript5 also retain the full definition range of a direct
+variable-bound function. The binding declaration keeps its original name anchor
+for identity and provenance. An extended definition requires one directly owned
+function scope whose parent is the binding scope; inherited callbacks and
+ambiguous scopes cannot supply that range. This changes source metadata without
+inventing call or reference edges.
+
+For TypeScript and TSX, source-query projection/2 uses the same exact declarator
+envelope while collecting lexical evidence from the callable body itself.
+Nested callback bodies keep their own ownership. JavaScript body-query evidence
+is not added by this change. Immutable projection/1 artifacts remain readable;
+AST-cache20 rebuilds disposable current extraction facts. These checks do not
+replace independent graph qualification or the promotion decision.
 
 ## Promotion decision (2026-09-15)
 
 The checked-in decision record is the machine-readable source of truth:
 [`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
 It pins the evidence schema, producer versions, canonical dialect aliases, and
-the release gate policy. The runtime registry and Rust conformance test must
-match it exactly.
+the release gate policy. Release-qualified registry versions must match it
+exactly. The current development versions above intentionally do not pass that
+promotion gate until a new audit and reviewed decision exist.
 
 | Canonical language | Producer | Version | Status |
 | --- | --- | ---: | --- |
@@ -57,8 +243,39 @@ invalidates older extraction facts.
 
 ## Evidence contract
 
+Rust4 generic receiver calls use the additive evidence/2 hierarchy constraint
+`rust_generic_bounds` (`parameter_declaration_id`, `trait_qualified_names`,
+`bounds_complete`). It names one exact Rust type-namespace parameter, retains
+its complete sorted/unique bound identities, and excludes a simultaneous exact
+target, qualified target or receiver binding. There are at most64 bound names,
+each limited by the evidence callable-type byte budget (1024 by default).
+Incomplete origin/syntax evidence cannot establish that a competing bound is
+absent. The project resolver unions all source-backed trait/supertrait methods
+within its lookup budget and resolves only one distinct declaration. Missing
+or non-trait inventories stay unresolved; multiple methods stay ambiguous,
+including duplicates and mixed local/imported bounds. Repeated occurrences keep
+separate anchors. The successful rule is `rust-generic-bound-dispatch`.
+Readers of new batches must support this closed variant; older strict readers
+reject it rather than silently discarding the constraint. Historical batches
+retain their original meaning and graph v1 retains its shape.
+
+Rust trait `DeclarationFact.memberInventoryComplete` is independent of
+`directBasesComplete`: only explicit `true` proves the emitted direct member
+set complete. Trait-body macros, unsupported member syntax and unmodeled
+attributes (including on enclosing declarations) keep it false. Missing legacy
+metadata is unknown. Builtin documentation/lint attributes are a finite allowed
+set; namespaced lookalikes are not builtin proof. Every trait in a generic
+receiver's lineage needs this coverage before absence can be used. Const and
+lifetime parameters remain shadow barriers without becoming type witnesses.
+Fact-digest profile2 binds completeness and declaration namespace so updates
+cannot reuse a graph under changed semantic evidence.
+Attribute coverage is memoized by AST node; each trait checks at most64
+ancestors using those summaries. The per-file inventory budget is200000
+visits. Exhaustion returns `ResourceLimit` rather than certifying an inspected
+prefix. AST cache29 excludes earlier development cache28 facts from reuse.
+
 The serialized evidence schema is `compass.languages.evidence/2`. The
-extraction cache identity is `compass.languages.extraction/4`; changing either
+extraction cache identity is `compass.languages.extraction/5`; changing either
 major version invalidates older artifacts instead of attempting an implicit
 translation.
 
@@ -402,6 +619,16 @@ resolver path. `UniversalEvidenceRegistry::validate()` must then pass.
 
 ## Resolution
 
+The Rust `UniversalResolutionIndex::materialize` method returns a must-use
+`UniversalMaterializationReport`. Its `omitted_candidates` counts resource-limit
+decisions that could not project relationships. Preserve degraded status when
+that count is nonzero; the method may already have changed both output buffers
+and does not roll them back. Ambiguity and unsupported source constructs remain
+unresolved independently of this count, so zero omissions is not a claim of
+complete semantic analysis. Application builds propagate these resource
+omissions through the existing resolution report and
+`universal_resolution_partial` graph diagnostic.
+
 `UniversalResolutionIndex` validates and merges batches, bounds every index,
 sorts candidate identities, and applies this order:
 
@@ -420,6 +647,16 @@ relationship. This compaction is deterministic and preserves every detail
 used as a relationship source, exact target, binding target, or hierarchy
 constraint.
 
+Project auxiliary quotas are2000000 TypeScript argument nodes and128MiB of
+owner/reference/path UTF-8 text, counting repeated copies and present empty
+proof owners, plus65536 observed loads and16MiB of their copied text. Shared
+per-batch accounting runs before borrowed batch cloning and owned index
+retention. Every batch must still satisfy its own hard limits even after an
+aggregate quota is exceeded. The bounded collection API routes valid aggregate
+overflow to the exact-only fallback below and discards unused proof/load
+payloads and merge certificates before partial indexing; direct index
+constructors return an explicit limit error.
+
 When aggregate evidence still exceeds one resolver envelope, Compass projects
 all retained source declarations before building resolution indexes, then
 packs source files into deterministic bounded partitions. Partitioned
@@ -436,6 +673,30 @@ diagnostic `universal_resolution_partial` with bounded counts and a reason.
 The build command reports the exact relationship omission count and exits
 nonzero so automation cannot mistake partial collection resolution for a
 complete graph. Low-profile compaction alone is informational and successful.
+
+For typed TypeScript receiver imports, the export proof retains each binding
+obligation and exact target source separately from the ordinary display/module
+index. Both root and nested actual imports use a shared fallible proof before
+uniqueness. Only top-level explicit export bindings populate public named
+exports; local/named exports take precedence over stars. An unavailable explicit
+or star obligation is unknown, while a supplied empty source can establish an
+empty branch. Physical sources such as `foo.ts` and `foo/index.ts` are distinct.
+The native relative fallback has a bounded source/declaration substitution
+profile; packages/custom suffixes need owning resolution metadata. Namespace
+reexports requiring an unmodeled visibility-preserving namespace transition
+remain unknown. This is not compiler/runtime parity or language promotion.
+
+Each export walk globally discovers bounded(source-file,language,export) states,
+with depth64 and the existing per-lookup cardinality cap. Work is charged on the
+same16384-unit meter as receiver transitions, before raw alternatives/frontier
+retention. Reaching a repeated state does not expand it again; the entire pending
+graph must finish before a slot set can authorize uniqueness. Fixed-point
+propagation computes per-state closures on the same meter, preserving cycles and
+required target alternatives. An empty/nonempty pair of physical targets within
+one binding is unknown; an independently empty star branch can be known absence.
+Unknown/Limit never
+falls back to legacy display-spelling lookup. The batch census and merge-absence
+rules remain separate from the ability to identify an explicit direct export.
 
 Explicit bindings precede lexical lookup because a source import is direct
 use-site evidence and must shadow a same-named enclosing declaration. A
@@ -514,6 +775,22 @@ narrowing remains unsupported. In `factory()()`, only the named inner factory
 call is eligible for resolution; the unnamed returned callback cannot borrow
 the factory receiver's type as its target. Receiver inference keeps its bounded
 depth and does not select methods solely because their terminal names match.
+
+Project-aware Python producer 2 uses configured import roots when available.
+Without configured roots, a bare source root uses relative module keys; a regular
+root `__init__.py` or `__init__.pyi` retains the source package prefix, including
+nested modules. Checkout names do not become bare-root package names. Two fixed
+metadata probes distinguish bare/package/unknown layout without following links;
+unknown layout or an invalid package name fails with recovery instructions.
+Non-identifier script/group components retain deterministic source identity,
+without a runtime importability claim. Literal dots/percent signs within
+components are escaped as `%2E`/`%25` so distinct source paths cannot impersonate
+module separators or each other. Absolute/traversing/non-normalized paths fail
+explicitly rather than using checkout-name inference.
+Layout enters the version2 project fingerprint component and AST cache 33 refreshes disposable
+facts. Standalone extraction without project context retains its legacy path
+fallback. The changed producer remains `Qualifying`; this does not prove runtime
+import-path or dynamic dispatch completeness.
 
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to

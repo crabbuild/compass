@@ -4,6 +4,85 @@
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
+Plan029 broad-question capture and qualification use the explicit
+`python3 -m benchmarks.agent_query.broad_query_v2` entry point. Its source-frozen
+original/lookup/union panels, exact printed-assertion review, immutable lineage,
+cost accounting and report checking are documented in
+[`BROAD_QUERY_CAPTURE.md`](BROAD_QUERY_CAPTURE.md). Diagnostic/self-test success
+does not establish comparative superiority. The older broad-query commands and
+the suites below retain their original protocols.
+
+The proposed joint graph-and-query claim additionally needs a paired graph
+comparison; the existing query checker only requires a Compass production
+graph audit. `broad_graph_statistics.paired_graph_coverage` provides bounded
+diagnostic arithmetic for paired source-fact recall, retaining unknown rows,
+declared clusters and language/relation strata. It distinguishes micro recall
+from the equal-repository/cluster-weighted difference. It always reports
+`qualificationEstablished=false`: it does not verify source-fact digests,
+artifact provenance, independent judgments, emitted-edge precision, power or
+the final joint decision rule. Run its synthetic controls with
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_statistics`.
+
+`broad_graph_evidence.assess_graph_coverage` connects those diagnostics to a
+versioned frozen source-fact registration, both tools' graph/build artifacts,
+and a digest-bound observation ledger. It verifies source-byte spans, source
+inventories, recorded tool/profile bytes, raw build streams and cited graph
+record hashes; it rechecks containment and input bytes after scoring. Missing
+reviews and failed builds remain unknown. A graph without a directed contract
+cannot certify one; contract unavailability is reported separately from a
+missing relationship. Hashes and record references do not establish semantic
+agreement, runtime authenticity or independent review. This layer also always
+reports `qualificationEstablished=false`; precision, power and final joint
+eligibility are still required. Its controls use synthetic files only:
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_evidence`.
+
+`broad_graph_precision.assess_graph_precision` adds both tools' emitted-edge
+sampling and precision diagnostics. A separate design freezes the quota, seed
+and versioned SHA-256-counter/Floyd sampling method before collection. The
+sample is recomputed from the exact graph bytes; labels cannot add records
+outside it. Unknown labels remain in the sample denominator, and unselected
+records remain in the identified population bounds. Empty populations have
+undefined precision. Sample precision, a population-size-weighted point
+estimate, and whole-population census precision are separate fields. Recorded
+relation strata remain visible even when unsampled. Source witnesses and exact
+record hashes bind judgments to evidence; they do not authenticate truth or
+independence. No population confidence interval, precision noninferiority
+decision or qualification is issued. Existing production precision/sample
+floors remain separate requirements. Run synthetic controls with
+`python3 -m unittest benchmarks.agent_query.tests.test_broad_graph_precision`.
+
+Prospective precision design2 additionally requires
+`populationBoundsProfile: "exact-hypergeometric-bonferroni/1"` and emits
+diagnostics2 with `conditionalSamplingBounds`. Design1 retains diagnostics1 and
+its original null interval fields. The new arithmetic inverts finite-population
+hypergeometric tails with integer counts, allocating a shared1/20 error allowance
+across the two tails of all nonempty tool/repository frames. It sums population-count bounds,
+then forms a simultaneous candidate-minus-comparator bound. Rational endpoints
+avoid floating-point rounding; unreviewed labels widen the bounds, and failed
+builds withhold a tool's entire interval. Empty populations remain undefined.
+This follows the test-inversion approach described in
+[A Note on Confidence Intervals for Proportions in Finite Populations](https://doi.org/10.1080/00031305.1987.10475484).
+
+These are conditional calculations under ideal uniform sampling without
+replacement and truthful labelled records. The hash sampler's reproducibility
+does not prove that randomization model, semantic correctness or reviewer
+independence. The design must be frozen before capture and bind the bounds
+module's hash; existing frozen experiments cannot be retrofitted. No new capture
+or evaluator is authorized by this feature. Design acceptance and qualification
+remain false, and `populationConfidenceInterval`/`precisionComparisonInterval`
+remain null: conditional arithmetic is not a certified inferential or joint
+decision. Per-recorded-relation confidence bounds are not issued. No original
+production, power or noninferiority threshold changes.
+
+The calculation retains the 64-frame/8-million-record/65,536-sampled-record
+limits and at most4096 sampled records per graph. It charges combination factors and
+summation terms before arithmetic against a shared8,192,000-work ceiling; this
+is a logical work count, not a CPU-time or RSS measurement. Limits reject the
+whole calculation. Run the exact small-population coverage and integration
+controls with `python3 -m unittest
+benchmarks.agent_query.tests.test_broad_graph_bounds
+benchmarks.agent_query.tests.test_broad_graph_precision`.
+
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
 The audit report distinguishes completed checks from surfaces still awaiting

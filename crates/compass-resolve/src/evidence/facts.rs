@@ -201,10 +201,16 @@ struct CompactConstraint {
     argument_types: Vec<Option<StringSlot>>,
     allowed_target_kinds: Vec<StringSlot>,
     hierarchy: Option<CompactHierarchy>,
+    typescript_type_arguments: Option<compass_languages::TypeScriptTypeArguments>,
     allow_external: bool,
 }
 
 enum CompactHierarchy {
+    RustGenericBounds {
+        parameter_declaration_id: StringSlot,
+        trait_qualified_names: Vec<StringSlot>,
+        bounds_complete: bool,
+    },
     DirectBase {
         base_set_complete: bool,
     },
@@ -385,6 +391,7 @@ impl CompactConstraint {
                 .hierarchy
                 .map(|hierarchy| CompactHierarchy::new(hierarchy, strings))
                 .transpose()?,
+            typescript_type_arguments: constraint.typescript_type_arguments,
             allow_external: constraint.allow_external,
         })
     }
@@ -419,6 +426,7 @@ impl CompactConstraint {
                 .hierarchy
                 .as_ref()
                 .map(|hierarchy| hierarchy.inflate(table)),
+            typescript_type_arguments: self.typescript_type_arguments.clone(),
             allow_external: self.allow_external,
         }
     }
@@ -430,6 +438,18 @@ impl CompactHierarchy {
         strings: &mut StringPoolBuilder,
     ) -> Result<Self, String> {
         Ok(match hierarchy {
+            HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id,
+                trait_qualified_names,
+                bounds_complete,
+            } => Self::RustGenericBounds {
+                parameter_declaration_id: strings.intern(parameter_declaration_id)?,
+                trait_qualified_names: trait_qualified_names
+                    .into_iter()
+                    .map(|name| strings.intern(name))
+                    .collect::<Result<_, _>>()?,
+                bounds_complete,
+            },
             HierarchyConstraint::DirectBase { base_set_complete } => {
                 Self::DirectBase { base_set_complete }
             }
@@ -454,6 +474,18 @@ impl CompactHierarchy {
 
     fn inflate(&self, table: &CandidateTable) -> HierarchyConstraint {
         match self {
+            Self::RustGenericBounds {
+                parameter_declaration_id,
+                trait_qualified_names,
+                bounds_complete,
+            } => HierarchyConstraint::RustGenericBounds {
+                parameter_declaration_id: table.string(*parameter_declaration_id).to_owned(),
+                trait_qualified_names: trait_qualified_names
+                    .iter()
+                    .map(|name| table.string(*name).to_owned())
+                    .collect(),
+                bounds_complete: *bounds_complete,
+            },
             Self::DirectBase { base_set_complete } => HierarchyConstraint::DirectBase {
                 base_set_complete: *base_set_complete,
             },
@@ -595,6 +627,29 @@ mod tests {
     }
 
     #[test]
+    fn candidate_table_preserves_absent_empty_and_unknown_argument_proofs() -> Result<(), String> {
+        let proof = compass_languages::TypeScriptTypeArguments {
+            version: 1,
+            owner_binding_id: "binding:root".to_owned(),
+            arguments: Vec::new(),
+        };
+        for arguments in [
+            None,
+            Some(proof.clone()),
+            Some(compass_languages::TypeScriptTypeArguments {
+                arguments: vec![compass_languages::TypeScriptTypeArgument::Unknown],
+                ..proof
+            }),
+        ] {
+            let mut candidate = candidate_with_id("candidate:proof-state");
+            candidate.constraints.typescript_type_arguments = arguments;
+            let table = CandidateTable::from_values(vec![candidate.clone()])?;
+            assert_eq!(table.get(&candidate.id), Some(candidate));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn candidate_table_round_trips_every_compacted_field() -> Result<(), String> {
         let candidate = RelationshipCandidate {
             id: "candidate:1".to_owned(),
@@ -616,6 +671,18 @@ mod tests {
                 hierarchy: Some(HierarchyConstraint::ReceiverDispatch {
                     receiver_qualified_name: "crate::Receiver".to_owned(),
                     strategy: ReceiverDispatchStrategy::C3AfterReceiver,
+                }),
+                typescript_type_arguments: Some(compass_languages::TypeScriptTypeArguments {
+                    version: 1,
+                    owner_binding_id: "binding:root".to_owned(),
+                    arguments: vec![compass_languages::TypeScriptTypeArgument::Import {
+                        binding_id: "binding:argument".to_owned(),
+                        member_path: vec!["Nested".to_owned()],
+                        arguments: vec![compass_languages::TypeScriptTypeArgument::Source {
+                            declaration_id: "declaration:argument".to_owned(),
+                            arguments: vec![compass_languages::TypeScriptTypeArgument::Unknown],
+                        }],
+                    }],
                 }),
                 allow_external: true,
             },

@@ -440,6 +440,13 @@ impl Engine {
         if pipeline.is_some() && extraction.semantic_evidence.is_some() {
             extraction.raw_calls = None;
         }
+        crate::source_query::attach(
+            &mut extraction,
+            evidence_source_file,
+            spec.name,
+            source,
+            root,
+        );
         if root.has_error() {
             extraction.extensions.insert(
                 EXTRACTION_QUALITY_EXTENSION.to_owned(),

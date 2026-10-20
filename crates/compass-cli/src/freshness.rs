@@ -63,6 +63,20 @@ pub(super) fn record_program(path: &Path) {
     record_with_mode(path, None, true);
 }
 
+/// Bytes that `finish` will append to stderr, including line terminators.
+pub(super) fn pending_warning_bytes() -> usize {
+    FRAMES.with(|frames| {
+        frames.borrow().last().map_or(0, |frame| {
+            frame
+                .values()
+                .flatten()
+                .filter_map(GraphFreshness::warning)
+                .map(|warning| warning.len().saturating_add(1))
+                .sum()
+        })
+    })
+}
+
 fn record_with_mode(path: &Path, commit: Option<&str>, program: bool) {
     let capture = FRAMES.with(|frames| {
         let mut frames = frames.borrow_mut();

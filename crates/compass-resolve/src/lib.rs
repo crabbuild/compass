@@ -1034,7 +1034,10 @@ fn finish_resolution(
     } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    let mut stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    stub_diagnostics.extend(evidence::leading_documentation_diagnostics(
+        &evidence_batches,
+    ));
     if !stub_diagnostics.is_empty() {
         let mut diagnostics = merged
             .extensions
@@ -4931,12 +4934,10 @@ fn is_type_like_definition(node: &NodeRecord) -> bool {
 // A deferred receiver records an observed invocation, not a nominal target.
 // A unique terminal name is never enough to resolve its runtime receiver.
 fn is_deferred_receiver_symbol(node: &NodeRecord) -> bool {
-    node.string("language") == "python"
-        && node
-            .attributes
-            .get("deferred_receiver")
-            .and_then(Value::as_bool)
-            == Some(true)
+    node.attributes
+        .get("deferred_receiver")
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
 fn is_canonical_external_symbol(node: &NodeRecord) -> bool {
@@ -6507,6 +6508,46 @@ mod tests {
                     .is_some_and(|entries| entries.iter().any(|entry| {
                         entry["rule"] == "unique-stub-endpoint-resolution" && entry["score"] == 0.8
                     }))
+            );
+        }
+    }
+
+    #[test]
+    fn deferred_receivers_are_never_rewired_by_a_unique_terminal_name() {
+        for (language, file) in [
+            ("rust", "src/lib.rs"),
+            ("python", "src/main.py"),
+            ("typescript", "src/main.ts"),
+            ("java", "src/Main.java"),
+        ] {
+            let mut deferred = node("unknown-receiver", "get", "", "method");
+            deferred
+                .attributes
+                .insert("language".into(), json!(language));
+            deferred
+                .attributes
+                .insert("deferred_receiver".into(), json!(true));
+            deferred
+                .attributes
+                .insert("placeholder".into(), json!(true));
+            let mut extraction = Extraction {
+                nodes: vec![node("known", ".get()", file, "method"), deferred],
+                edges: vec![edge("caller", "unknown-receiver", "calls", file)],
+                ..Extraction::default()
+            };
+            rewire_unique_family_stubs(&mut extraction);
+            rewire_unique_stub_nodes(&mut extraction);
+            assert_eq!(extraction.edges[0].target, "unknown-receiver", "{language}");
+            assert!(
+                extraction
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == "unknown-receiver")
+            );
+            assert!(
+                !extraction.edges[0]
+                    .attributes
+                    .contains_key("_endpoint_rewrite_rules")
             );
         }
     }

@@ -1312,6 +1312,50 @@ fn invoke_discovery_tool(
             })
         })?;
     engine.set_semantic_search(semantic);
+    if arguments.get("view").and_then(Value::as_str) == Some("ranked") {
+        let response = code_query::invoke_ranked_with_engine(arguments, &engine)?;
+        let include_context = arguments
+            .get("include_context")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let view = compass_output::build_ranked_query_view_with_context(
+            &response,
+            engine.build_generation_identity(),
+            engine.graph_identity(),
+            include_context,
+        )
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        let budget = arguments
+            .get("text_budget")
+            .and_then(Value::as_u64)
+            .unwrap_or(800);
+        let digest = compass_query::discovery_response_digest(&response.discovery)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        let mut envelope = transport_envelope_with_digest(
+            serde_json::to_value(&response.discovery)
+                .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&digest),
+        )?;
+        envelope["rankedView"] = serde_json::to_value(&view)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?;
+        let mut invocation = decorate_freshness(
+            ToolInvocation {
+                text: String::new(),
+                structured_content: Some(validate_transport_envelope(envelope)?),
+            },
+            engine.graph_path(),
+            engine.source_commit(),
+        )?;
+        // Freshness warnings share the whole-answer budget with the shortlist.
+        let remaining_bytes = usize::try_from(budget)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(4)
+            .saturating_sub(invocation.text.len());
+        let text = compass_output::render_ranked_query_text(&view, remaining_bytes / 4)
+            .map_err(|error| InvocationError::InvalidParams(error.to_string()))?;
+        invocation.text.push_str(&text);
+        return Ok(invocation);
+    }
     let response = code_query::invoke_discovery_with_engine(arguments, &engine)?;
     let question = arguments
         .get("question")
@@ -1514,6 +1558,9 @@ fn tool_specs() -> Vec<Tool> {
             "Run bounded structured discovery for natural-language questions; explicit legacy traversal fields preserve compatibility text context.",
             json!({"type":"object","additionalProperties":false,"properties":{
                 "question":{"type":"string","minLength":1,"maxLength":MAX_DISCOVERY_QUESTION_BYTES,"description":"Natural language question or keyword search"},
+                "view":{"type":"string","enum":["ranked"],"description":"Opt-in shortlist: ranked-view/4, or ranked-view/7 for metered helper navigation; raw result uses discovery/1 or /2. Helper previews and call paths do not establish behavior."},
+                "text_budget":{"type":"integer","minimum":1,"maximum":65536,"default":800,"description":"Whole ranked text budget (UTF-8 bytes divided by four); requires view=ranked."},
+                "include_context":{"type":"boolean","default":false,"description":"Append bounded witnessed relationship context after the ranked shortlist; requires view=ranked."},
                 "mode":{"type":"string","enum":["bfs","dfs"],"description":"Explicit legacy mode; selects compatibility traversal"},
                 "depth":{"type":"integer","minimum":0,"maximum":6,"description":"Explicit legacy traversal depth (1-6)"},
                 "token_budget":{"type":"integer","minimum":0,"description":"Explicit legacy text token budget"},

@@ -731,7 +731,8 @@ where
     assert_eq!(calls.len(), 2, "calls={calls:#?}");
     assert!(
         calls.iter().all(|candidate| {
-            candidate.constraints.qualified_name.as_deref() == Some("crate::Render::render")
+            candidate.constraints.qualified_name.is_none()
+                && matches!(&candidate.constraints.hierarchy, Some(compass_languages::HierarchyConstraint::RustGenericBounds { trait_qualified_names, bounds_complete: true, .. }) if trait_qualified_names == &["crate::Render".to_owned()])
                 && !candidate.constraints.allow_external
         }),
         "calls={calls:#?}"
@@ -740,7 +741,7 @@ where
 }
 
 #[test]
-fn rust_struct_generic_bounds_flow_into_inherent_impls() -> Result<(), Box<dyn Error>> {
+fn rust_struct_bounds_do_not_transfer_to_distinct_impl_parameters() -> Result<(), Box<dyn Error>> {
     let extraction = Engine::default().extract_source(
         Path::new("src/lib.rs"),
         br#"
@@ -766,7 +767,8 @@ impl<T> Wrapper<T> {
     assert_eq!(calls.len(), 2, "calls={calls:#?}");
     assert!(
         calls.iter().all(|candidate| {
-            candidate.constraints.qualified_name.as_deref() == Some("crate::Render::render")
+            candidate.constraints.qualified_name.is_none()
+                && matches!(&candidate.constraints.hierarchy, Some(compass_languages::HierarchyConstraint::RustGenericBounds { trait_qualified_names, bounds_complete: true, parameter_declaration_id }) if trait_qualified_names.is_empty() && evidence.declarations.iter().any(|parameter| parameter.id == *parameter_declaration_id && parameter.range.start_line == 4))
                 && !candidate.constraints.allow_external
         }),
         "calls={calls:#?}"

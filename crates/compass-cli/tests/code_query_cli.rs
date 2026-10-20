@@ -12,6 +12,827 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn why_behavior_questions_preserve_case_backend_and_text_parity() -> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("protocol.py"),
+            "def format_errors(protocol):\n    return str(protocol)\n",
+        )?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        let mut expected = None;
+        for opening in ["Where", "Why", "why", "WHY", "Why"] {
+            let question = format!("{opening} are protocol errors formatted?");
+            let query = support::compass_command()
+                .current_dir(directory.path())
+                .args(["query", &question, "--view", "ranked", "--format", "json"])
+                .output()?;
+            assert!(
+                query.status.success(),
+                "{}",
+                String::from_utf8_lossy(&query.stderr)
+            );
+            let view = compass_output::RankedQueryView::from_json(&query.stdout)?;
+            let first = view.candidates.first().ok_or("behavior owner missing")?;
+            assert!(first.name.ends_with(".format_errors"), "{first:?}");
+            if let Some(previous) = &expected {
+                assert_eq!(&view.candidates, previous, "{storage}/{question}");
+            } else {
+                expected = Some(view.candidates);
+            }
+        }
+        let text = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "query",
+                "Why are protocol errors formatted?",
+                "--view",
+                "ranked",
+                "--text-budget",
+                "800",
+            ])
+            .output()?;
+        assert!(
+            text.status.success(),
+            "{}",
+            String::from_utf8_lossy(&text.stderr)
+        );
+        let stdout = String::from_utf8(text.stdout)?;
+        assert!(stdout.contains("format_errors"));
+        assert!(stdout.contains("protocol.py:"));
+        assert!(stdout.len() <= 3200);
+    }
+    Ok(())
+}
+
+#[test]
+fn ranked_queries_find_literal_only_concepts_with_source_and_budget() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("policy.py"),
+        "def guard(value):\n    if value == 'retired':\n        raise ValueError('retired account access is rejected')\n    return value\n",
+    )?;
+    let output = directory.path().join("artifacts");
+    let built = run(
+        Frontend::Compass,
+        [
+            OsString::from("extract"),
+            root.as_os_str().to_owned(),
+            OsString::from("--code-only"),
+            OsString::from("--no-viz"),
+            OsString::from("--max-workers"),
+            OsString::from("1"),
+            OsString::from("--out"),
+            output.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(built.code, 0, "{}", built.stderr);
+    let graph = output.join("compass-out/graph.json");
+    for format in ["json", "text"] {
+        let mut arguments = vec![
+            OsString::from("query"),
+            OsString::from("Where are retired account access attempts rejected?"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+            OsString::from("--view"),
+            OsString::from("ranked"),
+            OsString::from("--format"),
+            OsString::from(format),
+        ];
+        if format == "text" {
+            arguments.extend([OsString::from("--text-budget"), OsString::from("800")]);
+        }
+        let answer = run(Frontend::Compass, arguments);
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        if format == "json" {
+            let value: Value = serde_json::from_str(&answer.stdout)?;
+            let candidate = value["candidates"]
+                .as_array()
+                .and_then(|rows| rows.first())
+                .ok_or("literal-only candidate missing")?;
+            assert_eq!(candidate["relevance"], "low");
+            assert!(
+                candidate["name"]
+                    .as_str()
+                    .is_some_and(|name| name.ends_with(".guard"))
+            );
+            assert!(
+                candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|f| f == "body_code"))
+            );
+        } else {
+            assert!(answer.stdout.len() < 3200, "{}", answer.stdout);
+            assert!(answer.stdout.contains("guard"));
+            assert!(answer.stdout.contains("policy.py:"));
+            assert!(answer.stdout.contains("relevance=low"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operation_hints_preserve_fresh_source_dependency_bands() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("session_values.py"),
+        "def get(session, values):\n    read = None\n    return None\n\ndef ordinary(session, values):\n    read = None\n    return None\n",
+    )?;
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let result = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from("Where are session values read?"),
+                OsString::from("--graph"),
+                output.join("compass-out/graph.json").into_os_string(),
+                OsString::from("--view"),
+                OsString::from("ranked"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(result.code, 0, "{}", result.stderr);
+        let answer: Value = serde_json::from_str(&result.stdout)?;
+        let candidates = answer["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?;
+        let mut fields = None;
+        for name in ["session_values.get", "session_values.ordinary"] {
+            let candidate = candidates
+                .iter()
+                .find(|row| row["name"] == name)
+                .ok_or_else(|| format!("missing source owner {name}: {answer}"))?;
+            assert_eq!(candidate["relevance"], "low", "{candidate}");
+            assert!(
+                candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|field| field == "body_identifier"))
+            );
+            assert!(
+                !candidate["matchedFields"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|field| field == "name"))
+            );
+            if let Some(fields) = &fields {
+                assert_eq!(&candidate["matchedFields"], fields);
+            } else {
+                fields = Some(candidate["matchedFields"].clone());
+            }
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&answer["candidates"], expected);
+        } else {
+            expected = Some(answer["candidates"].clone());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operation_words_recall_fresh_native_owners_with_json_store_parity() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    let mut source = "def get(session):\n    return session.values\n\ndef set(session, values):\n    session.values = values\n\ndef widget_get(widget):\n    return widget\n\n".to_owned();
+    for index in 0..7 {
+        source.push_str(&format!(
+            "def transform_session_values_{index}(session):\n    return session.values\n\n"
+        ));
+    }
+    std::fs::write(root.join("sample.py"), source)?;
+    std::fs::write(
+        root.join("read.py"),
+        "def get(session, values):\n    return None\n",
+    )?;
+    std::fs::write(
+        root.join("prose.py"),
+        "def get(session, values):\n    \"\"\"Read session values.\"\"\"\n    return None\n",
+    )?;
+
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let mut rows = Vec::new();
+        for (question, name, translation) in [
+            ("Where are session values read?", "get", "read -> get"),
+            (
+                "Which session lookup handles values?",
+                "get",
+                "lookup -> get",
+            ),
+            (
+                "Which session setter handles values?",
+                "set",
+                "setter -> set",
+            ),
+        ] {
+            let result = run(
+                Frontend::Compass,
+                [
+                    OsString::from("query"),
+                    OsString::from(question),
+                    OsString::from("--graph"),
+                    output.join("compass-out/graph.json").into_os_string(),
+                    OsString::from("--view"),
+                    OsString::from("ranked"),
+                    OsString::from("--format"),
+                    OsString::from("json"),
+                ],
+            );
+            assert_eq!(result.code, 0, "{}", result.stderr);
+            let answer: Value = serde_json::from_str(&result.stdout)?;
+            let candidates = answer["candidates"]
+                .as_array()
+                .ok_or("missing candidates")?;
+            let target = candidates
+                .iter()
+                .take(5)
+                .find(|row| {
+                    row["name"]
+                        .as_str()
+                        .is_some_and(|value| value == format!("sample.{name}"))
+                })
+                .ok_or_else(|| format!("missing {translation} owner in first five: {answer}"))?;
+            assert_eq!(target["relevance"], "low");
+            if question == "Where are session values read?" {
+                for row in candidates
+                    .iter()
+                    .filter(|row| matches!(row["name"].as_str(), Some("read.get" | "prose.get")))
+                {
+                    assert!(
+                        !row["reasons"].to_string().contains("inspection preference"),
+                        "mixed weak-literal operation promotion: {row}"
+                    );
+                    if row["matchedFields"]
+                        .as_array()
+                        .is_some_and(|fields| fields.iter().any(|field| field == "name"))
+                    {
+                        assert!(
+                            row["reasons"].to_string().contains("read -> get"),
+                            "undisclosed hinted name: {row}"
+                        );
+                        assert_eq!(row["relevance"], "low");
+                    }
+                }
+            }
+
+            assert!(
+                target["reasons"].to_string().contains(translation),
+                "{target}"
+            );
+            rows.push(answer["candidates"].clone());
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&rows, expected);
+        } else {
+            expected = Some(rows);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn code_abbreviations_recall_fresh_native_owners_with_json_store_parity()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    std::fs::write(
+        root.join("sample.py"),
+        "def lookup(params, name):\n    for param in params:\n        if param.key == name:\n            return param.value\n    return None\n\ndef retrieve_route_parameter():\n    return None\n",
+    )?;
+    let mut expected = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let answer = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from("Where is a route parameter retrieved by its name?"),
+                OsString::from("--graph"),
+                output.join("compass-out/graph.json").into_os_string(),
+                OsString::from("--view"),
+                OsString::from("ranked"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        let answer: Value = serde_json::from_str(&answer.stdout)?;
+        let candidates = answer["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?;
+        let candidate = candidates
+            .iter()
+            .find(|c| c["name"].as_str().is_some_and(|n| n.ends_with("lookup")))
+            .ok_or_else(|| format!("missing abbreviated owner: {answer}"))?;
+        assert_eq!(candidate["relevance"], "low");
+        assert!(
+            candidate["reasons"]
+                .to_string()
+                .contains("parameter -> param")
+        );
+        assert!(
+            candidate["supportingSources"]
+                .as_array()
+                .is_some_and(|sources| !sources.is_empty())
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(&answer["candidates"], expected);
+        } else {
+            expected = Some(answer["candidates"].clone());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn compound_words_prefer_owned_identifiers_over_scattered_mentions() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    let mut source = "def partition(fields):\n    result = {}\n    for field in fields:\n        if not field.load_only and not field.dump_only:\n            result[field.name] = field\n    return result\n\ndef parameter_fields(fields, load_only, dump_only):\n    return fields\n\ndef prose_fields(fields):\n    \"\"\"Prepare excluded field maps with load-only and dump-only options.\"\"\"\n    return fields\n\ndef widget_options(widget):\n    return widget.load_only, widget.dump_only\n\n".to_owned();
+    for index in 0..7 {
+        source.push_str(&format!(
+            "def load_maps_{index}(fields):\n    \"\"\"Load maps; excluded fields are omitted and only valid fields returned.\"\"\"\n    return fields.load()\n\n"
+        ));
+    }
+    source.push_str("def header_fields(fields, ");
+    for index in 0..48 {
+        source.push_str(&format!("padding_{index}=None, "));
+    }
+    source.push_str("load_only=False, dump_only=False):\n    return fields\n\n");
+    std::fs::write(root.join("sample.py"), source)?;
+    let mut candidates = None;
+    for storage in ["json", "sqlite"] {
+        let output = directory.path().join(storage);
+        let built = run(
+            Frontend::Compass,
+            [
+                OsString::from("extract"),
+                root.as_os_str().to_owned(),
+                OsString::from("--code-only"),
+                OsString::from("--no-viz"),
+                OsString::from("--store"),
+                OsString::from(storage),
+                OsString::from("--max-workers"),
+                OsString::from("1"),
+                OsString::from("--out"),
+                output.as_os_str().to_owned(),
+            ],
+        );
+        assert_eq!(built.code, 0, "{}", built.stderr);
+        let graph = output.join("compass-out/graph.json");
+        let query = |question: &str| {
+            run(
+                Frontend::Compass,
+                [
+                    OsString::from("query"),
+                    OsString::from(question),
+                    OsString::from("--graph"),
+                    graph.as_os_str().to_owned(),
+                    OsString::from("--view"),
+                    OsString::from("ranked"),
+                    OsString::from("--format"),
+                    OsString::from("json"),
+                ],
+            )
+        };
+        let answer =
+            query("Where are excluded fields and load-only or dump-only field maps prepared?");
+        assert_eq!(answer.code, 0, "{}", answer.stderr);
+        let answer: Value = serde_json::from_str(&answer.stdout)?;
+        assert!(
+            answer["candidates"][0]["name"]
+                .as_str()
+                .is_some_and(|name| name.ends_with("partition")),
+            "{answer}"
+        );
+        assert_eq!(answer["candidates"][0]["relevance"], "low");
+        assert!(
+            answer["candidates"][0]["reasons"]
+                .to_string()
+                .contains("Compound identifiers"),
+            "{answer}"
+        );
+        if let Some(expected) = &candidates {
+            assert_eq!(&answer["candidates"], expected);
+        } else {
+            candidates = Some(answer["candidates"].clone());
+        }
+        for candidate in answer["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?
+        {
+            if candidate["name"].as_str().is_some_and(|name| {
+                name.contains("parameter_fields")
+                    || name.contains("prose_fields")
+                    || name.contains("widget_options")
+                    || name.contains("header_fields")
+            }) {
+                assert!(
+                    !candidate["reasons"]
+                        .to_string()
+                        .contains("Compound identifiers")
+                );
+            }
+        }
+        for question in [
+            "Where are load-only field maps prepared without validation?",
+            "Where are load-only field maps prepared before validation?",
+        ] {
+            let answer = query(question);
+            assert_eq!(answer.code, 0, "{}", answer.stderr);
+            let answer: Value = serde_json::from_str(&answer.stdout)?;
+            assert!(
+                !answer["candidates"]
+                    .as_array()
+                    .ok_or("missing candidates")?
+                    .is_empty()
+            );
+            assert!(
+                answer["candidates"]
+                    .as_array()
+                    .ok_or("missing candidates")?
+                    .iter()
+                    .all(|candidate| !candidate["reasons"]
+                        .to_string()
+                        .contains("Compound identifiers"))
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn unindexed_snapshot_vocabulary_returns_tentative_native_source_candidates()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    let mut source = "def copy_items(cache):\n    \"\"\"Copies unexpired items into a new map.\"\"\"\n    return {key: item for key, item in cache.items() if not item.expired}\n\n".to_owned();
+    for index in 0..7 {
+        source.push_str(&format!(
+            "def new_cache_{index}(cache, only, containing):\n    return cache\n\n"
+        ));
+    }
+    std::fs::write(root.join("sample.py"), source)?;
+    let output = directory.path().join("artifacts");
+    let built = run(
+        Frontend::Compass,
+        [
+            OsString::from("extract"),
+            root.into_os_string(),
+            OsString::from("--code-only"),
+            OsString::from("--no-viz"),
+            OsString::from("--store"),
+            OsString::from("json"),
+            OsString::from("--max-workers"),
+            OsString::from("1"),
+            OsString::from("--out"),
+            output.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(built.code, 0, "{}", built.stderr);
+    let answer = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Where is a snapshot made containing only live cache entries?"),
+            OsString::from("--graph"),
+            output.join("compass-out/graph.json").into_os_string(),
+            OsString::from("--view"),
+            OsString::from("ranked"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(answer.code, 0, "{}", answer.stderr);
+    let answer: Value = serde_json::from_str(&answer.stdout)?;
+    assert!(
+        answer["candidates"][0]["name"]
+            .as_str()
+            .is_some_and(|name| name.ends_with("copy_items")),
+        "{answer}"
+    );
+    assert_eq!(answer["candidates"][0]["relevance"], "low");
+    assert!(
+        answer["candidates"][0]["reasons"]
+            .to_string()
+            .contains("Vocabulary fallback")
+    );
+    Ok(())
+}
+
+#[test]
+fn native_body_operation_preference_does_not_borrow_parameter_declarations()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("source");
+    std::fs::create_dir(&root)?;
+    let mut source = "def opaque(items):\n    return codec.encode(items)\n\n".to_owned();
+    for index in 0..7 {
+        source.push_str(&format!(
+            "def new_map_{index}(items, encode):\n    return items\n\n"
+        ));
+    }
+    std::fs::write(root.join("sample.py"), source)?;
+    let output = directory.path().join("artifacts");
+    let built = run(
+        Frontend::Compass,
+        [
+            OsString::from("extract"),
+            root.into_os_string(),
+            OsString::from("--code-only"),
+            OsString::from("--no-viz"),
+            OsString::from("--store"),
+            OsString::from("json"),
+            OsString::from("--max-workers"),
+            OsString::from("1"),
+            OsString::from("--out"),
+            output.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(built.code, 0, "{}", built.stderr);
+    let answer = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Where are items encoded into a map?"),
+            OsString::from("--graph"),
+            output.join("compass-out/graph.json").into_os_string(),
+            OsString::from("--view"),
+            OsString::from("ranked"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(answer.code, 0, "{}", answer.stderr);
+    let answer: Value = serde_json::from_str(&answer.stdout)?;
+    assert!(
+        answer["candidates"][0]["name"]
+            .as_str()
+            .is_some_and(|name| name.ends_with("opaque")),
+        "{answer}"
+    );
+    assert_eq!(answer["candidates"][0]["relevance"], "low");
+    for candidate in answer["candidates"]
+        .as_array()
+        .ok_or("missing candidates")?
+    {
+        if candidate["name"]
+            .as_str()
+            .is_some_and(|name| name.contains("new_map_"))
+        {
+            assert!(
+                !candidate["reasons"]
+                    .to_string()
+                    .contains("inspection preference")
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn broad_qualifications_return_candidates_without_claiming_the_condition()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let target = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == "Target")
+        .ok_or("missing fixture target")?;
+    target.name = "format_protocol_errors".into();
+    target.qualified_name = "Fixture.format_protocol_errors".into();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    for question in [
+        "where are protocol errors elegantly formatted",
+        "where are protocol errors formatted without decoration",
+        "where are redis protocol errors formatted",
+        "where are protocol errors formatted before decoration",
+        "where are protocol errors formatted after decoration",
+    ] {
+        let output = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from(question),
+                OsString::from("--graph"),
+                path.as_os_str().to_owned(),
+                OsString::from("--view"),
+                OsString::from("ranked"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let value: Value = serde_json::from_str(&output.stdout)?;
+        assert_eq!(
+            value["candidates"][0]["name"],
+            "Fixture.format_protocol_errors"
+        );
+        assert_eq!(value["candidates"][0]["relevance"], "low");
+        assert!(
+            value["candidates"][0]["reasons"]
+                .to_string()
+                .contains("not established")
+        );
+        if question.contains("without") {
+            assert!(
+                value["candidates"][0]["reasons"]
+                    .to_string()
+                    .contains("Negative qualification")
+            );
+        }
+        let temporal = question.contains("before") || question.contains("after");
+        if temporal {
+            assert_eq!(value["question"], question);
+            assert!(
+                value["candidates"][0]["reasons"]
+                    .to_string()
+                    .contains("Temporal qualification")
+            );
+            let text = run(
+                Frontend::Compass,
+                [
+                    OsString::from("query"),
+                    OsString::from(question),
+                    OsString::from("--graph"),
+                    path.as_os_str().to_owned(),
+                    OsString::from("--view"),
+                    OsString::from("ranked"),
+                    OsString::from("--text-budget"),
+                    OsString::from("800"),
+                ],
+            );
+            assert_eq!(text.code, 0, "{}", text.stderr);
+            assert!(text.stdout.contains("Temporal qualification"));
+            assert!(text.stdout.contains("not established"));
+            assert!(text.stdout.len() <= 3200);
+        }
+        let ordinary = run(
+            Frontend::Compass,
+            [
+                OsString::from("query"),
+                OsString::from(question),
+                OsString::from("--graph"),
+                path.as_os_str().to_owned(),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(ordinary.code, 0, "{}", ordinary.stderr);
+        let ordinary: Value = serde_json::from_str(&ordinary.stdout)?;
+        if temporal {
+            assert!(
+                ordinary["diagnostics"]
+                    .to_string()
+                    .contains("Temporal qualification")
+            );
+        }
+        assert!(
+            ordinary["diagnostics"]
+                .to_string()
+                .contains("inspection candidates")
+        );
+        assert!(
+            ordinary["diagnostics"]
+                .to_string()
+                .contains("not established")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn ranked_view_is_opt_in_and_preserves_default_raw_discovery() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let execute = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("query"),
+            OsString::from("where is Target defined?"),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let raw = execute(&["--format", "json"]);
+    assert_eq!(raw.code, 0, "{}", raw.stderr);
+    let raw: Value = serde_json::from_str(&raw.stdout)?;
+    assert_eq!(raw["schema"], "compass.query.discovery/1");
+    let ranked = execute(&["--view", "ranked", "--format", "json"]);
+    assert_eq!(ranked.code, 0, "{}", ranked.stderr);
+    let ranked: Value = serde_json::from_str(&ranked.stdout)?;
+    assert_eq!(ranked["schema"], "compass.query.ranked-view/4");
+    assert_eq!(
+        ranked["candidates"][0]["name"], "Fixture.Target",
+        "{ranked}"
+    );
+    assert!(ranked["candidates"][0]["reasons"].is_array());
+    assert!(ranked.get("context").is_none());
+    let context = execute(&["--view", "ranked", "--include-context", "--format", "json"]);
+    assert_eq!(context.code, 0, "{}", context.stderr);
+    let context: Value = serde_json::from_str(&context.stdout)?;
+    assert_eq!(context["candidates"], ranked["candidates"]);
+    assert!(context["context"]["edges"].is_array());
+    let text = execute(&["--view=ranked", "--text-budget", "800"]);
+    assert_eq!(text.code, 0, "{}", text.stderr);
+    assert!(text.stdout.contains("Fixture.Target"));
+    assert!(text.stdout.contains("relevance="));
+    assert!(text.stdout.len() <= 800 * 4);
+    assert!(text.stdout.len() + text.stderr.len() + 2 <= 800 * 4);
+    for extra in [
+        vec!["--view", "ranked", "--cursor", "old"],
+        vec!["--view", "ranked", "--format", "agent-json"],
+        vec!["--view", "ranked", "--traverse"],
+        vec!["--view", "unknown"],
+        vec!["--include-context"],
+        vec!["--view", "ranked", "--text-budget", "1"],
+    ] {
+        assert_ne!(execute(&extra).code, 0, "{extra:?}");
+    }
+    Ok(())
+}
+
+#[test]
 fn ask_preserves_typed_operands_in_agent_and_text_answers() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
@@ -1240,6 +2061,14 @@ fn natural_query_renders_typed_source_locations() -> Result<(), Box<dyn Error>> 
     assert!(
         outcome
             .stdout
+            .lines()
+            .any(|line| { line.starts_with("SEED Fixture.Target [exact] @ src/lib.rs:1:") }),
+        "{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
             .contains("NODE Fixture.Target [function] src/lib.rs:1")
     );
     Ok(())
@@ -1784,8 +2613,8 @@ fn typed_text_paging_continues_the_same_result_with_a_cursor() -> Result<(), Box
     assert_eq!(second.code, 0, "{}", second.stderr);
     assert!(second.stdout.contains("range="), "{}", second.stdout);
     assert_ne!(first.stdout, second.stdout);
-    assert!(first.stdout.len() + 1 <= 480);
-    assert!(second.stdout.len() + 1 <= 480);
+    assert!(first.stdout.len() < 480);
+    assert!(second.stdout.len() < 480);
 
     let rejected = run(
         Frontend::Compass,
@@ -2267,7 +3096,7 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(first.code, 0, "{command}: {}", first.stderr);
-        assert!(first.stdout.len() + 1 <= 240);
+        assert!(first.stdout.len() < 240);
         assert!(first.stdout.contains("compass output"));
 
         let second = run(
@@ -2284,7 +3113,7 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
             ],
         );
         assert_eq!(second.code, 0, "{command}: {}", second.stderr);
-        assert!(second.stdout.len() + 1 <= 240);
+        assert!(second.stdout.len() < 240);
         assert_ne!(first.stdout, second.stdout);
     }
 
@@ -3031,5 +3860,548 @@ fn budgeted_machine_answers_fail_intact_and_saved_records_are_readable()
     assert!(!interactive.status.success());
     assert!(interactive.stderr.len() <= 128);
     assert!(!root.path().join(".compass/project.json").exists());
+    Ok(())
+}
+
+#[test]
+fn broad_documentation_question_after_update_returns_source_owned_candidates()
+-> Result<(), Box<dyn Error>> {
+    for (file, source, declaration_line) in [
+        (
+            "sample.rs",
+            "struct Store;\nimpl Store {\n    /// Protocol diagnostics parsed here.\n    fn opaque(&self) {}\n}\n",
+            4,
+        ),
+        (
+            "sample.go",
+            "package sample\ntype Store struct{}\n// Protocol diagnostics parsed here.\nfunc (s Store) Opaque() {}\n",
+            4,
+        ),
+        (
+            "sample.ts",
+            "export class Store {\n    /** Protocol diagnostics parsed here. */\n    opaque() {}\n}\n",
+            3,
+        ),
+    ] {
+        for storage in ["json", "sqlite"] {
+            let directory = tempfile::tempdir()?;
+            std::fs::write(directory.path().join(file), source)?;
+            let update = support::compass_command()
+                .current_dir(directory.path())
+                .args([
+                    "update",
+                    ".",
+                    "--store",
+                    storage,
+                    "--code-only",
+                    "--no-cluster",
+                    "--no-viz",
+                ])
+                .output()?;
+            assert!(
+                update.status.success(),
+                "{file}/{storage}: {}",
+                String::from_utf8_lossy(&update.stderr)
+            );
+            let graph_path = directory.path().join("compass-out/graph.json");
+            let graph = GraphDocument::load(&graph_path)?;
+            let question = "where are protocol diagnostics parsed";
+            for _ in 0..2 {
+                let query = support::compass_command()
+                    .current_dir(directory.path())
+                    .args(["query", question, "--view", "ranked", "--format", "json"])
+                    .output()?;
+                assert!(
+                    query.status.success(),
+                    "{file}/{storage}: {}",
+                    String::from_utf8_lossy(&query.stderr)
+                );
+                let view = compass_output::RankedQueryView::from_json(&query.stdout)?;
+                let candidate = view
+                    .candidates
+                    .first()
+                    .ok_or("no broad candidate after update")?;
+                assert_eq!(candidate.kind, NodeKind::Method);
+                let anchor = candidate.source.as_ref().ok_or("missing owner citation")?;
+                assert_eq!(anchor.file, file);
+                assert_eq!(anchor.start_line, declaration_line);
+                assert!(
+                    candidate
+                        .matched_fields
+                        .iter()
+                        .any(|field| field == "owned_document")
+                );
+                let excerpt = candidate
+                    .supporting_sources
+                    .first()
+                    .ok_or("missing documentation citation")?;
+                assert_eq!(excerpt.file, file);
+                assert_eq!(excerpt.start_line, declaration_line - 1);
+                assert!(excerpt.end_byte <= anchor.start_byte);
+                let quote = candidate
+                    .excerpts
+                    .first()
+                    .ok_or("missing raw documentation quote")?;
+                assert_eq!(
+                    quote.kind,
+                    compass_query::RankedExcerptKind::AstDocumentation
+                );
+                assert_eq!(
+                    source.get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+                    Some(quote.text.as_str())
+                );
+                assert!(quote.text.contains("Protocol diagnostics"));
+                let owner = graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == candidate.id)
+                    .ok_or("query synthesized an owner")?;
+                let edge = graph
+                    .links
+                    .iter()
+                    .find(|edge| {
+                        edge.target == owner.id
+                            && edge.occurrence_rule.as_ref().map(|rule| rule.as_str())
+                                == Some(compass_model::provenance::LEADING_DOCUMENTATION_RULE)
+                    })
+                    .ok_or("no source ownership relationship")?;
+                let documentation = graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == edge.source)
+                    .ok_or("missing published documentation")?;
+                assert!(compass_model::provenance::is_proven_leading_documentation(
+                    documentation,
+                    owner,
+                    edge
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn broad_code_reference_and_plural_acronym_questions_work_after_update()
+-> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("sample.ts"),
+            "export class Queue {\n  #abortListeners = new Map<string, () => void>();\n  process() { this.#abortListeners.clear(); }\n  convert_ttl(ttl: number) { return ttl * 1000; }\n}\n",
+        )?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        for (question, expected, field) in [
+            (
+                "where are abort listeners removed",
+                ".process",
+                "code_reference",
+            ),
+            ("where are TTLs converted", ".convert_ttl", "name"),
+        ] {
+            for _ in 0..2 {
+                let output = support::compass_command()
+                    .current_dir(directory.path())
+                    .args(["query", question, "--view", "ranked", "--format", "json"])
+                    .output()?;
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
+                let candidate = view
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.name.ends_with(expected))
+                    .ok_or_else(|| {
+                        format!(
+                            "{storage}: missing {expected}: {}",
+                            String::from_utf8_lossy(&output.stdout)
+                        )
+                    })?;
+                assert!(
+                    candidate
+                        .matched_fields
+                        .iter()
+                        .any(|matched| matched == field)
+                );
+                assert_eq!(
+                    candidate.source.as_ref().map(|source| source.start_line),
+                    Some(if field == "code_reference" { 3 } else { 4 })
+                );
+                if field == "code_reference" {
+                    assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+                    assert!(
+                        candidate
+                            .supporting_sources
+                            .iter()
+                            .any(|source| source.start_line == 3)
+                    );
+                    assert!(
+                        candidate
+                            .reasons
+                            .iter()
+                            .any(|reason| reason.contains("not confirmation"))
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn broad_local_identifier_ownership_works_after_update() -> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        let mut source = "export function opaque() {\n  const annotations = {};\n}\n".to_owned();
+        for name in [
+            "iris", "maple", "cedar", "birch", "pine", "oak", "elm", "beech", "willow", "ash",
+            "yew", "palm",
+        ] {
+            source.push_str(&format!("export function {name}() {{}}\n"));
+        }
+        std::fs::write(directory.path().join("sample.ts"), source)?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        for question in [
+            "Which function owns annotations?",
+            "Where are annotations declared?",
+        ] {
+            let mut first = None;
+            for _ in 0..2 {
+                let output = support::compass_command()
+                    .current_dir(directory.path())
+                    .args(["query", question, "--view", "ranked", "--format", "json"])
+                    .output()?;
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
+                assert!(
+                    view.candidates
+                        .iter()
+                        .filter(|candidate| candidate.kind.is_callable())
+                        .all(|candidate| candidate.name.ends_with(".opaque")),
+                    "Generic functions displaced topic evidence: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                let candidate = view
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.name.ends_with(".opaque"))
+                    .ok_or_else(|| {
+                        format!(
+                            "{storage}: owner omitted: {}",
+                            String::from_utf8_lossy(&output.stdout)
+                        )
+                    })?;
+                assert!(
+                    candidate
+                        .matched_fields
+                        .iter()
+                        .any(|field| field == "owned_identifier")
+                );
+                assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+                assert_eq!(
+                    candidate.source.as_ref().map(|source| source.start_line),
+                    Some(1)
+                );
+                assert!(
+                    candidate
+                        .supporting_sources
+                        .iter()
+                        .any(|source| source.start_line == 2)
+                );
+                assert!(
+                    candidate
+                        .reasons
+                        .iter()
+                        .any(|reason| reason.contains("not confirmation"))
+                );
+                if let Some(previous) = &first {
+                    assert_eq!(previous, &output.stdout);
+                } else {
+                    first = Some(output.stdout);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn broad_body_comments_work_through_native_update_and_query() -> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("sample.py"),
+            "def opaque(value):\n    value = value\n    # Handle payload normalization here.\n    return value\ndef decoy(value):\n    return value\n",
+        )?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        let raw = support::compass_command()
+            .current_dir(directory.path())
+            .args(["query", "Where is payload handled?", "--format", "json"])
+            .output()?;
+        assert!(
+            raw.status.success(),
+            "{}",
+            String::from_utf8_lossy(&raw.stderr)
+        );
+        let value: Value = serde_json::from_slice(&raw.stdout)?;
+        assert_eq!(value["schema"], "compass.query.discovery/1");
+        assert!(
+            value["seeds"]
+                .as_array()
+                .is_some_and(|seeds| !seeds.is_empty()),
+            "{}",
+            String::from_utf8_lossy(&raw.stdout)
+        );
+        assert!(
+            value["seeds"].to_string().contains("body_comment"),
+            "{}",
+            String::from_utf8_lossy(&raw.stdout)
+        );
+        let mut previous = None;
+        for _ in 0..2 {
+            let output = support::compass_command()
+                .current_dir(directory.path())
+                .args([
+                    "query",
+                    "Where is payload handled?",
+                    "--view",
+                    "ranked",
+                    "--format",
+                    "json",
+                ])
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
+            let candidate = view
+                .candidates
+                .first()
+                .ok_or("missing body-only candidate")?;
+            assert!(
+                candidate.name.ends_with(".opaque"),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(candidate.relevance, compass_query::RelevanceBand::Low);
+            let quote = candidate
+                .excerpts
+                .first()
+                .ok_or("missing callable comment quote")?;
+            assert_eq!(
+                quote.kind,
+                compass_query::RankedExcerptKind::CallableComment
+            );
+            let source = std::fs::read_to_string(directory.path().join("sample.py"))?;
+            assert_eq!(
+                source.get(quote.source.start_byte as usize..quote.source.end_byte as usize),
+                Some(quote.text.as_str())
+            );
+            assert!(quote.text.contains("payload normalization"));
+            assert!(
+                candidate
+                    .matched_fields
+                    .iter()
+                    .any(|field| field == "body_comment")
+            );
+            assert!(
+                candidate
+                    .supporting_sources
+                    .iter()
+                    .any(|source| source.file == "sample.py" && source.start_line == 3)
+            );
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &output.stdout);
+            } else {
+                previous = Some(output.stdout);
+            }
+        }
+    }
+    Ok(())
+}
+
+const LINKED_HELPER_SOURCE: &str = "def maintain(records):\n    # Check and publish stale or broken record caches.\n    if check_piece(records):\n        return\n    publish_piece(records)\n\ndef check_piece(value):\n    return value is not None\n\ndef publish_piece(value):\n    return value\n\ndef check_shadow(value):\n    return value is None\n\nclass Unrelated:\n    def check_piece(self, value):\n        return value\n";
+
+#[test]
+fn linked_helper_work_and_previews_survive_native_cli_projection() -> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("sample.py"), LINKED_HELPER_SOURCE)?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        for (question, expected_helpers) in [
+            (
+                "Where are stale or broken record caches checked and published?",
+                2,
+            ),
+            ("Where are stale or broken record caches checked?", 1),
+            ("Where are stale or broken record caches published?", 1),
+        ] {
+            for (cap, seeds) in [("256", "3"), ("1", "1")] {
+                let query = || {
+                    let mut command = support::compass_command();
+                    command.current_dir(directory.path()).args([
+                        "query",
+                        question,
+                        "--max-depth",
+                        "1",
+                        "--max-candidates",
+                        cap,
+                        "--max-seeds",
+                        seeds,
+                    ]);
+                    command
+                };
+                let raw = query().args(["--format", "json"]).output()?;
+                assert!(
+                    raw.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&raw.stderr)
+                );
+                let raw: compass_model::query_contract::DiscoveryQueryResponse =
+                    serde_json::from_slice(&raw.stdout)?;
+                assert_eq!(raw.schema, "compass.query.discovery/2");
+                assert!(raw.has_valid_work_contract());
+                let work = raw
+                    .stats
+                    .call_link_work
+                    .as_ref()
+                    .ok_or("missing CLI work ledger")?;
+                assert!(work.is_coherent() && work.candidate_probes > 0);
+                assert_eq!(work.indexed_candidate_probes, raw.stats.candidate_probes);
+                let text = query().output()?;
+                assert!(
+                    text.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&text.stderr)
+                );
+                assert!(String::from_utf8_lossy(&text.stdout).contains("Call-linked lookups:"));
+                let mut previous = None;
+                for _ in 0..2 {
+                    let output = query()
+                        .args(["--view", "ranked", "--format", "json"])
+                        .output()?;
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    let view = compass_output::RankedQueryView::from_json(&output.stdout)?;
+                    assert_eq!(view.schema, "compass.query.ranked-view/7");
+                    assert_eq!(view.call_link_work.as_ref(), Some(work));
+                    if cap == "1" {
+                        assert_eq!(view.candidates.len(), 1);
+                        assert!(view.candidates[0].call_link.is_none());
+                    } else {
+                        let helpers = view
+                            .candidates
+                            .iter()
+                            .filter(|candidate| candidate.call_link.is_some())
+                            .collect::<Vec<_>>();
+                        assert_eq!(helpers.len(), expected_helpers, "{question}");
+                        for helper in helpers {
+                            assert_eq!(helper.relevance, compass_query::RelevanceBand::Low);
+                            let quote = helper
+                                .excerpts
+                                .iter()
+                                .find(|quote| {
+                                    serde_json::to_value(quote).is_ok_and(|value| {
+                                        value["kind"] == "linked_callable_preview"
+                                    })
+                                })
+                                .ok_or("missing CLI helper preview")?;
+                            assert!(quote.is_coherent());
+                            assert_eq!(quote.source.file, "sample.py");
+                            assert_eq!(
+                                LINKED_HELPER_SOURCE.get(
+                                    quote.source.start_byte as usize
+                                        ..quote.source.end_byte as usize
+                                ),
+                                Some(quote.text.as_str())
+                            );
+                            assert!(quote.text.contains("return value"));
+                        }
+                    }
+                    if let Some(previous) = &previous {
+                        assert_eq!(previous, &output.stdout);
+                    } else {
+                        previous = Some(output.stdout);
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
