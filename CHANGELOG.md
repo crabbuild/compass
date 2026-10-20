@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Recover broad behavioral questions beginning with `Why`: treat the
+  interrogative as question scaffolding while preserving quoted/qualified
+  subjects and literal symbol lookup. Refresh disposable query responses.
+
 - Keep inadmissible exact source targets unresolved instead of
   falling back to unrelated same-named declarations, including JavaScript and
   TypeScript callable parameters. Rebuild disposable current graphs with AST

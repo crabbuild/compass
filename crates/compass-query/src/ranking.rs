@@ -34,6 +34,7 @@ pub const QUERY_RANKER_PROFILE_V25: &str = "query-ranker/25-witnessed-operation-
 pub const QUERY_RANKER_PROFILE_V26: &str = "query-ranker/26-bounded-witnessed-groups";
 pub const QUERY_RANKER_PROFILE_V27: &str = "query-ranker/27-metered-call-navigation";
 pub const QUERY_RANKER_PROFILE_V28: &str = "query-ranker/28-single-operation-navigation";
+pub const QUERY_RANKER_PROFILE_V29: &str = "query-ranker/29-why-question-scaffolding";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {

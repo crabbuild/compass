@@ -168,6 +168,7 @@ fn is_query_scaffolding(word: &str) -> bool {
     matches!(
         word.to_ascii_lowercase().as_str(),
         "where"
+            | "why"
             | "what"
             | "which"
             | "when"
@@ -492,6 +493,7 @@ fn terms(question: &str) -> Vec<String> {
             !matches!(
                 term.as_str(),
                 "builtin"
+                    | "why"
                     | "built"
                     | "cli"
                     | "output"

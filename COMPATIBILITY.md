@@ -918,6 +918,15 @@ qualification.
 
 ## Ranked implementation view
 
+`query-ranker/29-why-question-scaffolding` treats the ordinary interrogative
+`why` as broad-question scaffolding, including sentence-initial `Why` and `WHY`.
+It cannot become a required missing symbol or dilute content coverage. Quoted
+and qualified identifiers retain their literal guards, and exact queries for
+symbols named `Why` remain available. Disposable response caches refresh
+automatically; graph/index formats, immutable artifacts and relevance meaning
+are unchanged. This correction does not establish causal explanations from
+lexical matches.
+
 `compass query QUESTION --view ranked` adds an opt-in implementation shortlist.
 Text shows up to five ranked owners and keeps the whole answer within
 `--text-budget`, including coverage, omission guidance and a narrowing action.

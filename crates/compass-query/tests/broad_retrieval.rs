@@ -51,6 +51,85 @@ fn fixture(path: &std::path::Path) -> Result<GraphDocument, Box<dyn std::error::
 }
 
 #[test]
+fn why_questions_do_not_treat_the_interrogative_as_a_missing_symbol()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    let mut graph = fixture(&path)?;
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let json = open(&path, None, &directory.path().join("json-cache"))?;
+    let store = SqliteStore::open(directory.path().join("store.sqlite3"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let stored = open_with_store(&store, &path, None, &directory.path().join("store-cache"))?;
+    let expected = json.discover_ranked(request("Where are protocol errors formatted?"))?;
+    assert!(!expected.candidates.is_empty());
+    for question in [
+        "Why are protocol errors formatted?",
+        "why are protocol errors formatted?",
+        "WHY are protocol errors formatted?",
+    ] {
+        let query = request(question);
+        let actual = json.discover_ranked(query.clone())?;
+        assert_eq!(actual.candidates, expected.candidates, "{question}");
+        assert_eq!(actual.candidates, stored.discover_ranked(query)?.candidates);
+    }
+    graph.nodes.reverse();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let reversed = open(&path, None, &directory.path().join("reversed-cache"))?;
+    assert_eq!(
+        expected.candidates,
+        reversed
+            .discover_ranked(request("Why are protocol errors formatted?"))?
+            .candidates
+    );
+    Ok(())
+}
+
+#[test]
+fn why_interrogative_preserves_literal_identity_guards() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    let mut graph = fixture(&path)?;
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let absent = open(&path, None, &directory.path().join("absent-cache"))?;
+    for question in [
+        "Where are `Why` protocol errors formatted?",
+        "Where are \"Why\" protocol errors formatted?",
+        "Where are fixture::Why protocol errors formatted?",
+        "Why are MissingProtocol errors formatted?",
+    ] {
+        assert!(
+            absent
+                .discover_ranked(request(question))?
+                .candidates
+                .is_empty(),
+            "{question} must preserve the explicit subject guard"
+        );
+    }
+    graph.nodes.push(support::node(
+        "literal-why",
+        NodeKind::Function,
+        "Why",
+        "fixture::Why",
+    ));
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    let present = open(&path, None, &directory.path().join("present-cache"))?;
+    for question in ["Why", "fixture::Why", "literal-why"] {
+        let answer = present.discover_ranked(request(question))?;
+        let first = answer.candidates.first().ok_or("literal Why missing")?;
+        assert_eq!(first.node.id, "literal-why", "{question}");
+        assert!(
+            first
+                .matched_fields
+                .iter()
+                .any(|field| { matches!(field.as_str(), "exact_name" | "exact_id") })
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn graph_and_alias_field_clipping_still_veto_compound_preferences()
 -> Result<(), Box<dyn std::error::Error>> {
     use compass_model::code_graph::EdgeKind;

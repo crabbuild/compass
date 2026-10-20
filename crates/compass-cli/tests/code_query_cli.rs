@@ -12,6 +12,76 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn why_behavior_questions_preserve_case_backend_and_text_parity() -> Result<(), Box<dyn Error>> {
+    for storage in ["json", "sqlite"] {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("protocol.py"),
+            "def format_errors(protocol):\n    return str(protocol)\n",
+        )?;
+        let update = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "update",
+                ".",
+                "--store",
+                storage,
+                "--code-only",
+                "--no-cluster",
+                "--no-viz",
+            ])
+            .output()?;
+        assert!(
+            update.status.success(),
+            "{}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+        let mut expected = None;
+        for opening in ["Where", "Why", "why", "WHY", "Why"] {
+            let question = format!("{opening} are protocol errors formatted?");
+            let query = support::compass_command()
+                .current_dir(directory.path())
+                .args(["query", &question, "--view", "ranked", "--format", "json"])
+                .output()?;
+            assert!(
+                query.status.success(),
+                "{}",
+                String::from_utf8_lossy(&query.stderr)
+            );
+            let view = compass_output::RankedQueryView::from_json(&query.stdout)?;
+            let first = view.candidates.first().ok_or("behavior owner missing")?;
+            assert!(first.name.ends_with(".format_errors"), "{first:?}");
+            if let Some(previous) = &expected {
+                assert_eq!(&view.candidates, previous, "{storage}/{question}");
+            } else {
+                expected = Some(view.candidates);
+            }
+        }
+        let text = support::compass_command()
+            .current_dir(directory.path())
+            .args([
+                "query",
+                "Why are protocol errors formatted?",
+                "--view",
+                "ranked",
+                "--text-budget",
+                "800",
+            ])
+            .output()?;
+        assert!(
+            text.status.success(),
+            "{}",
+            String::from_utf8_lossy(&text.stderr)
+        );
+        let stdout = String::from_utf8(text.stdout)?;
+        assert!(stdout.contains("format_errors"));
+        assert!(stdout.contains("protocol.py:"));
+        assert!(stdout.len() <= 3200);
+    }
+    Ok(())
+}
+
+#[test]
 fn ranked_queries_find_literal_only_concepts_with_source_and_budget() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
